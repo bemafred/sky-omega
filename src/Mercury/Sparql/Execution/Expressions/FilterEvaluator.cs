@@ -1110,7 +1110,30 @@ internal ref partial struct FilterEvaluator
         // DATATYPE - returns datatype IRI of a literal
         if (funcName.Equals("datatype", StringComparison.OrdinalIgnoreCase))
         {
-            // Return XSD datatype based on value type
+            // IRIs and blank nodes have no datatype.
+            if (arg1.Type == ValueType.Uri)
+                return new Value { Type = ValueType.Unbound };
+
+            // A numeric/boolean Value parsed from a typed literal preserves the original
+            // StringValue (e.g. "1.5"^^xsd:decimal -> Double keeps its lexical form). Recover the
+            // datatype from that suffix FIRST so decimal vs double vs integer stay distinct — the
+            // Type alone collapses them. Matches the conformant BindExpressionEvaluator.
+            if (!arg1.StringValue.IsEmpty)
+            {
+                var s = arg1.StringValue;
+                var caretIdx = s.LastIndexOf("^^".AsSpan());
+                if (caretIdx > 0)
+                {
+                    var dtPart = s.Slice(caretIdx + 2);
+                    if (dtPart.Length >= 2 && dtPart[0] == '<' && dtPart[^1] == '>')
+                        return new Value { Type = ValueType.Uri, StringValue = dtPart };
+                }
+                var atIdx = s.LastIndexOf('@');
+                if (atIdx > 0 && s[atIdx - 1] == '"')
+                    return new Value { Type = ValueType.Uri, StringValue = RdfLangStringBracketed.AsSpan() };
+            }
+
+            // Fall back to the XSD datatype implied by the value type.
             ReadOnlySpan<char> datatypeIri = arg1.Type switch
             {
                 ValueType.Integer => "<http://www.w3.org/2001/XMLSchema#integer>".AsSpan(),
@@ -1275,79 +1298,55 @@ internal ref partial struct FilterEvaluator
             return new Value { Type = ValueType.Unbound };
         }
 
-        // YEAR - extract year from xsd:dateTime
+        // YEAR/MONTH/DAY/HOURS/MINUTES/SECONDS — extract components DIRECTLY from the lexical
+        // form per SPARQL §17.4.5 (no timezone conversion; a DateTime parse would convert an
+        // offset like -08:00 to machine-local time, giving a wrong, non-deterministic component).
+        // Matches the conformant BindExpressionEvaluator.
         if (funcName.Equals("year", StringComparison.OrdinalIgnoreCase))
         {
-            if (arg1.Type == ValueType.String && TryParseDateTime(arg1.GetLexicalForm(), out var dt))
-            {
-                return new Value { Type = ValueType.Integer, IntegerValue = dt.Year };
-            }
+            if (arg1.Type == ValueType.String &&
+                TryParseDateTime(arg1.GetLexicalForm(), out var year, out _, out _, out _, out _, out _))
+                return new Value { Type = ValueType.Integer, IntegerValue = year };
             return new Value { Type = ValueType.Unbound };
         }
 
-        // MONTH - extract month from xsd:dateTime (1-12)
         if (funcName.Equals("month", StringComparison.OrdinalIgnoreCase))
         {
-            if (arg1.Type == ValueType.String && TryParseDateTime(arg1.GetLexicalForm(), out var dt))
-            {
-                return new Value { Type = ValueType.Integer, IntegerValue = dt.Month };
-            }
+            if (arg1.Type == ValueType.String &&
+                TryParseDateTime(arg1.GetLexicalForm(), out _, out var month, out _, out _, out _, out _))
+                return new Value { Type = ValueType.Integer, IntegerValue = month };
             return new Value { Type = ValueType.Unbound };
         }
 
-        // DAY - extract day from xsd:dateTime (1-31)
         if (funcName.Equals("day", StringComparison.OrdinalIgnoreCase))
         {
-            if (arg1.Type == ValueType.String && TryParseDateTime(arg1.GetLexicalForm(), out var dt))
-            {
-                return new Value { Type = ValueType.Integer, IntegerValue = dt.Day };
-            }
+            if (arg1.Type == ValueType.String &&
+                TryParseDateTime(arg1.GetLexicalForm(), out _, out _, out var day, out _, out _, out _))
+                return new Value { Type = ValueType.Integer, IntegerValue = day };
             return new Value { Type = ValueType.Unbound };
         }
 
-        // HOURS - extract hours from xsd:dateTime (0-23)
         if (funcName.Equals("hours", StringComparison.OrdinalIgnoreCase))
         {
-            if (arg1.Type == ValueType.String && TryParseDateTime(arg1.GetLexicalForm(), out var dt))
-            {
-                return new Value { Type = ValueType.Integer, IntegerValue = dt.Hour };
-            }
+            if (arg1.Type == ValueType.String &&
+                TryParseDateTime(arg1.GetLexicalForm(), out _, out _, out _, out var hour, out _, out _))
+                return new Value { Type = ValueType.Integer, IntegerValue = hour };
             return new Value { Type = ValueType.Unbound };
         }
 
-        // MINUTES - extract minutes from xsd:dateTime (0-59)
         if (funcName.Equals("minutes", StringComparison.OrdinalIgnoreCase))
         {
-            if (arg1.Type == ValueType.String && TryParseDateTime(arg1.GetLexicalForm(), out var dt))
-            {
-                return new Value { Type = ValueType.Integer, IntegerValue = dt.Minute };
-            }
+            if (arg1.Type == ValueType.String &&
+                TryParseDateTime(arg1.GetLexicalForm(), out _, out _, out _, out _, out var minute, out _))
+                return new Value { Type = ValueType.Integer, IntegerValue = minute };
             return new Value { Type = ValueType.Unbound };
         }
 
-        // SECONDS - extract seconds from xsd:dateTime (0-59, with fractional part)
         if (funcName.Equals("seconds", StringComparison.OrdinalIgnoreCase))
         {
-            // SPARQL preserves the fractional part; parse the seconds field directly from
-            // the lexical form (the DateTime path truncates to milliseconds). Matches the
-            // conformant BindExpressionEvaluator.
-            if (arg1.Type == ValueType.String)
-            {
-                var lexical = arg1.GetLexicalForm();
-                if (lexical.Length >= 19 && lexical[16] == ':')
-                {
-                    var secondsEnd = 19;
-                    for (int i = 19; i < lexical.Length; i++)
-                    {
-                        var c = lexical[i];
-                        if (c == '.' || IsDigit(c)) secondsEnd = i + 1;
-                        else break;
-                    }
-                    if (double.TryParse(lexical.Slice(17, secondsEnd - 17),
-                        NumberStyles.Float, CultureInfo.InvariantCulture, out var seconds))
-                        return new Value { Type = ValueType.Double, DoubleValue = seconds };
-                }
-            }
+            if (arg1.Type == ValueType.String &&
+                TryParseDateTime(arg1.GetLexicalForm(), out _, out _, out _, out _, out _, out var second))
+                return new Value { Type = ValueType.Double, DoubleValue = second };
             return new Value { Type = ValueType.Unbound };
         }
 
@@ -1590,21 +1589,50 @@ internal ref partial struct FilterEvaluator
     }
 
     /// <summary>
-    /// Try to parse an xsd:dateTime string
-    /// Supports formats: yyyy-MM-ddTHH:mm:ss, yyyy-MM-ddTHH:mm:ss.fff, with optional timezone
+    /// Parse an xsd:dateTime lexical form and extract its components directly (no timezone
+    /// conversion) per SPARQL §17.4.5. Accepts a bare lexical form or an RDF typed literal
+    /// ("…"^^…). Ported from BindExpressionEvaluator — the W3C-conformant implementation.
     /// </summary>
-    private static bool TryParseDateTime(ReadOnlySpan<char> str, out DateTime result)
+    private static bool TryParseDateTime(ReadOnlySpan<char> str, out int year, out int month, out int day,
+        out int hour, out int minute, out double second)
     {
-        result = default;
+        year = month = day = hour = minute = 0;
+        second = 0.0;
         if (str.IsEmpty)
             return false;
 
-        // Try parsing with various formats
-        var strValue = str.ToString();
-        if (DateTime.TryParse(strValue, null, System.Globalization.DateTimeStyles.RoundtripKind, out result))
-            return true;
+        // Strip a leading quote (an RDF typed literal); GetLexicalForm callers already pass bare.
+        var parseSpan = str;
+        if (str.Length > 2 && str[0] == '"')
+        {
+            var endQuote = str.Slice(1).IndexOf('"');
+            if (endQuote > 0)
+                parseSpan = str.Slice(1, endQuote);
+        }
 
-        return false;
+        // Format: yyyy-MM-ddTHH:mm:ss[.fff][Z|+HH:MM|-HH:MM] — minimum 19 chars.
+        if (parseSpan.Length < 19)
+            return false;
+        if (parseSpan[4] != '-' || parseSpan[7] != '-' || parseSpan[10] != 'T' ||
+            parseSpan[13] != ':' || parseSpan[16] != ':')
+            return false;
+
+        if (!int.TryParse(parseSpan.Slice(0, 4), NumberStyles.None, CultureInfo.InvariantCulture, out year)) return false;
+        if (!int.TryParse(parseSpan.Slice(5, 2), NumberStyles.None, CultureInfo.InvariantCulture, out month)) return false;
+        if (!int.TryParse(parseSpan.Slice(8, 2), NumberStyles.None, CultureInfo.InvariantCulture, out day)) return false;
+        if (!int.TryParse(parseSpan.Slice(11, 2), NumberStyles.None, CultureInfo.InvariantCulture, out hour)) return false;
+        if (!int.TryParse(parseSpan.Slice(14, 2), NumberStyles.None, CultureInfo.InvariantCulture, out minute)) return false;
+
+        // Seconds, including any fractional part.
+        var secondsEnd = 19;
+        for (int i = 19; i < parseSpan.Length; i++)
+        {
+            var c = parseSpan[i];
+            if (c == '.' || IsDigit(c)) secondsEnd = i + 1;
+            else break;
+        }
+        return double.TryParse(parseSpan.Slice(17, secondsEnd - 17),
+            NumberStyles.Float, CultureInfo.InvariantCulture, out second);
     }
 
     /// <summary>

@@ -512,7 +512,7 @@ internal ref partial struct QueryResults
 
             // Increment bnode row seed for this new row - ensures BNODE(str) produces
             // different bnodes for different rows (same string in same row → same bnode)
-            BindExpressionEvaluator.IncrementBnodeRowSeed();
+            FilterEvaluator.IncrementBnodeRowSeed();
 
             // Evaluate BIND expressions first (e.g., BIND(UUID() AS ?uuid))
             if (_hasBinds)
@@ -871,14 +871,14 @@ internal sealed class GroupedRow
                 if (expr != null)
                 {
                     // Evaluate the complex expression (e.g., IF(isNumeric(?p), ?p, COALESCE(...)))
-                    var evaluator = new BindExpressionEvaluator(
-                        expr.AsSpan(),
-                        bindings.GetBindings(),
-                        bindings.Count,
-                        bindings.GetStringBuffer());
+                    var evaluator = new FilterEvaluator(expr.AsSpan());
                     // UpdateAggregates has no buffer/prefixes in scope — the aggregate-inner-expression path keeps the
                     // hardcoded xsd/rdf/rdfs prefixes only (a prologue-prefixed constant inside an aggregate is rare).
-                    var value = evaluator.Evaluate();
+                    var value = evaluator.EvaluateToValue(
+                        bindings.GetBindings(),
+                        bindings.Count,
+                        bindings.GetStringBuffer(),
+                        null, ReadOnlySpan<char>.Empty);
 
                     // Convert the evaluated value to the format expected by aggregation
                     switch (value.Type)

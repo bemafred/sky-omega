@@ -737,12 +737,12 @@ internal partial class QueryExecutor : IDisposable
                 var expr = _source.AsSpan(bind.ExprStart, bind.ExprLength);
                 var varName = _source.AsSpan(bind.VarStart, bind.VarLength);
 
-                var evaluator = new BindExpressionEvaluator(expr,
+                var evaluator = new FilterEvaluator(expr);
+                var value = evaluator.EvaluateToValue(
                     bindings.AsSpan(0, bindingTable.Count),
                     bindingTable.Count,
                     _stringBuffer,
-                    baseIri);
-                var value = evaluator.Evaluate(_prefixMappings, _source);
+                    _prefixMappings, _source, baseIri);
 
                 // Bind the result using typed overloads
                 switch (value.Type)
@@ -780,12 +780,12 @@ internal partial class QueryExecutor : IDisposable
             var aliasName = _source.AsSpan(agg.AliasStart, agg.AliasLength);
 
             // Evaluate the expression
-            var evaluator = new BindExpressionEvaluator(expr,
+            var evaluator = new FilterEvaluator(expr);
+            var value = evaluator.EvaluateToValue(
                 bindings.AsSpan(0, bindingTable.Count),
                 bindingTable.Count,
                 _stringBuffer,
-                baseIri);
-            var value = evaluator.Evaluate(_prefixMappings, _source);
+                _prefixMappings, _source, baseIri);
 
             // Bind the result to the alias variable
             switch (value.Type)
@@ -998,12 +998,12 @@ internal partial class QueryExecutor : IDisposable
                     var expr = _source.AsSpan(bind.ExprStart, bind.ExprLength);
                     var varName = _source.AsSpan(bind.VarStart, bind.VarLength);
 
-                    var evaluator = new BindExpressionEvaluator(expr,
+                    var evaluator = new FilterEvaluator(expr);
+                    var value = evaluator.EvaluateToValue(
                         bindings.AsSpan(0, bindingTable.Count),
                         bindingTable.Count,
                         stringBuffer,
-                        baseIri);
-                    var value = evaluator.Evaluate(_prefixMappings, _source);
+                        _prefixMappings, _source, baseIri);
 
                     // Bind the result using typed overloads
                     switch (value.Type)

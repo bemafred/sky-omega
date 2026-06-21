@@ -52,7 +52,7 @@ internal ref partial struct QueryResults
             {
                 // Per-row bnode seed so BNODE(str) yields a fresh blank node per row (same str → same bnode WITHIN a row,
                 // different across rows), matching the streaming/collection path (W3C bnode01).
-                BindExpressionEvaluator.IncrementBnodeRowSeed();
+                FilterEvaluator.IncrementBnodeRowSeed();
                 EvaluateSelectExpressions();
             }
 
@@ -206,7 +206,7 @@ internal ref partial struct QueryResults
             }
 
             // Increment bnode row seed for this new row so BNODE(str) yields a fresh blank node per row.
-            BindExpressionEvaluator.IncrementBnodeRowSeed();
+            FilterEvaluator.IncrementBnodeRowSeed();
 
             if (_hasBinds)
             {
@@ -639,12 +639,12 @@ internal ref partial struct QueryResults
                 : ReadOnlySpan<char>.Empty;
 
             // Evaluate the expression using existing bindings
-            var evaluator = new BindExpressionEvaluator(expr,
+            var evaluator = new FilterEvaluator(expr);
+            var value = evaluator.EvaluateToValue(
                 _bindingTable.GetBindings(),
                 _bindingTable.Count,
                 _bindingTable.GetStringBuffer(),
-                baseIri);
-            var value = evaluator.Evaluate(_buffer?.Prefixes ?? _materializedPrefixes, _source);
+                _buffer?.Prefixes ?? _materializedPrefixes, _source, baseIri);
 
             // Bind the result to the alias variable
             // Prefer StringValue if available (preserves original datatype annotation)
@@ -714,13 +714,12 @@ internal ref partial struct QueryResults
                 continue;
 
             // Evaluate the expression
-            var evaluator = new BindExpressionEvaluator(
-                substitutedExpr.AsSpan(),
+            var evaluator = new FilterEvaluator(substitutedExpr.AsSpan());
+            var value = evaluator.EvaluateToValue(
                 _bindingTable.GetBindings(),
                 _bindingTable.Count,
                 _bindingTable.GetStringBuffer(),
-                ReadOnlySpan<char>.Empty);
-            var value = evaluator.Evaluate(_buffer?.Prefixes ?? _materializedPrefixes, _source);
+                _buffer?.Prefixes ?? _materializedPrefixes, _source);
 
             // Bind the result if valid
             switch (value.Type)

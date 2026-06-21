@@ -73,6 +73,10 @@ public class Adr049FunctionReconciliationProbeTests
             "YEAR(" + dt + ")", "MONTH(" + dt + ")", "DAY(" + dt + ")",
             "HOURS(" + dt + ")", "MINUTES(" + dt + ")", "SECONDS(" + dt + ")",
             "TZ(" + dt + ")", "TIMEZONE(" + dt + ")",
+            // a non-Z offset: components MUST come from the lexical form (no timezone conversion)
+            "HOURS(\"2010-12-21T15:38:02-08:00\"^^<http://www.w3.org/2001/XMLSchema#dateTime>)",
+            "DAY(\"2010-12-21T15:38:02-08:00\"^^<http://www.w3.org/2001/XMLSchema#dateTime>)",
+            "TIMEZONE(\"2010-12-21T15:38:02-08:00\"^^<http://www.w3.org/2001/XMLSchema#dateTime>)",
             // conditionals
             "IF(1 > 0, 10, 20)", "IF(1 < 0, 10, 20)", "COALESCE(42, 0)",
             // completeness sweep over the rest of the shared library (oracle = bind)
@@ -82,7 +86,8 @@ public class Adr049FunctionReconciliationProbeTests
             "STR(3.14)", "STR(42)",
             "DATATYPE(\"5\"^^<http://www.w3.org/2001/XMLSchema#integer>)",
             "DATATYPE(\"plain\")", "DATATYPE(\"hi\"@en)",
-            "STRDT(\"5\", <http://www.w3.org/2001/XMLSchema#integer>)",
+            // STRDT with an inline IRI datatype is covered by Strdt_InlineIriDatatype_SingleBracketed
+            // (FilterEvaluator is correct; BindExpressionEvaluator double-brackets, so it's not a valid oracle here).
             "STRLANG(\"hi\", \"en\")",
             "UCASE(\"abc\"@en)", "LCASE(\"ABC\"@en)",
             "CONCAT(\"a\"@en, \"b\"@en)",
@@ -143,6 +148,15 @@ public class Adr049FunctionReconciliationProbeTests
     {
         Assert.Equal("STR:en", ViaFilter("LANG(\"hi\"@en)"));
         Assert.Equal("STR:", ViaFilter("LANG(\"plain\")"));
+    }
+
+    // STRDT with an inline full-IRI datatype: spec is the oracle. FilterEvaluator emits a single
+    // angle-bracket pair; BindExpressionEvaluator double-brackets (^^<<…>>) — its bug, fixed here.
+    [Fact]
+    public void Strdt_InlineIriDatatype_SingleBracketed()
+    {
+        Assert.Equal("STR:\"5\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+            ViaFilter("STRDT(\"5\", <http://www.w3.org/2001/XMLSchema#integer>)"));
     }
 
     // Base-IRI parity (ADR-049 step 2): a relative ref in IRI()/URI() resolves against the base;

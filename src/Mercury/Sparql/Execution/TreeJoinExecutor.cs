@@ -348,7 +348,7 @@ internal sealed class TreeJoinExecutor
         }
     }
 
-    /// <summary>BIND: extend each row with the evaluated expression, via the real <see cref="BindExpressionEvaluator"/>.</summary>
+    /// <summary>BIND: extend each row with the evaluated expression, via the unified <see cref="FilterEvaluator.EvaluateToValue"/> ([110] Expression).</summary>
     private List<MaterializedRow> BindStep(ref PatternArray pa, int bindIndex, List<MaterializedRow> input)
     {
         var slot = pa[bindIndex];
@@ -365,11 +365,11 @@ internal sealed class TreeJoinExecutor
             {
                 table.TruncateTo(0);
                 row.RestoreBindings(ref table);
-                var evaluator = new BindExpressionEvaluator(exprText.AsSpan(), table.GetBindings(), table.Count, table.GetStringBuffer());
+                var evaluator = new FilterEvaluator(exprText.AsSpan());
                 // Bind via the typed overloads so the result carries its RDF datatype tag (Integer/Double/Boolean), which
                 // MaterializedRow now preserves. A numeric BIND result then reads back as its lexical form yet still
                 // matches a stored typed literal when it feeds a later pattern (W3C bind03).
-                var v = evaluator.Evaluate(_prefixes, _prefixSource.AsSpan());
+                var v = evaluator.EvaluateToValue(table.GetBindings(), table.Count, table.GetStringBuffer(), _prefixes, _prefixSource.AsSpan());
                 switch (v.Type)
                 {
                     case ExprValueType.Integer: table.Bind(varName.AsSpan(), v.IntegerValue); break;

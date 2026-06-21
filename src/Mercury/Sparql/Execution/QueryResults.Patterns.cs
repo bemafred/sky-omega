@@ -919,12 +919,12 @@ internal ref partial struct QueryResults
                 : ReadOnlySpan<char>.Empty;
 
             // Evaluate the expression
-            var evaluator = new BindExpressionEvaluator(expr,
+            var evaluator = new FilterEvaluator(expr);
+            var value = evaluator.EvaluateToValue(
                 _bindingTable.GetBindings(),
                 _bindingTable.Count,
                 _bindingTable.GetStringBuffer(),
-                baseIri);
-            var value = evaluator.Evaluate(_buffer!.Prefixes, _source);
+                _buffer!.Prefixes, _source, baseIri);
 
             // Bind the result to the target variable using typed overloads
             switch (value.Type)
@@ -977,14 +977,14 @@ internal ref partial struct QueryResults
                 ? _source.Slice(_buffer.BaseUriStart, _buffer.BaseUriLength)
                 : ReadOnlySpan<char>.Empty;
 
-            // Evaluate the expression using BindExpressionEvaluator. Prefixes come from the outer buffer (main path) or,
+            // Evaluate the expression via the unified EvaluateToValue. Prefixes come from the outer buffer (main path) or,
             // when there is none, from the materialized prefixes the sub-SELECT path lends (C2).
-            var evaluator = new BindExpressionEvaluator(expr,
+            var evaluator = new FilterEvaluator(expr);
+            var value = evaluator.EvaluateToValue(
                 _bindingTable.GetBindings(),
                 _bindingTable.Count,
                 _bindingTable.GetStringBuffer(),
-                baseIri);
-            var value = evaluator.Evaluate(_buffer?.Prefixes ?? _materializedPrefixes, _source);
+                _buffer?.Prefixes ?? _materializedPrefixes, _source, baseIri);
 
             // Bind the result to the alias variable
             switch (value.Type)

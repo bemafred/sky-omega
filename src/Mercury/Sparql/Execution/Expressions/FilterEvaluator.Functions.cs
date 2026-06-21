@@ -729,16 +729,29 @@ internal ref partial struct FilterEvaluator
         // Lexical form must be a simple literal (string without language tag)
         if (lexicalArg.Type != ValueType.String)
             return new Value { Type = ValueType.Unbound };
+        var existingTag = lexicalArg.GetLangTagOrDatatype();
+        if (!existingTag.IsEmpty && existingTag[0] == '@')
+            return new Value { Type = ValueType.Unbound }; // a language-tagged literal is not a simple literal
 
         // Datatype must be an IRI
         if (datatypeArg.Type != ValueType.Uri && datatypeArg.Type != ValueType.String)
             return new Value { Type = ValueType.Unbound };
 
-        var lexical = lexicalArg.StringValue;
-        var datatype = datatypeArg.StringValue;
+        var lexical = lexicalArg.GetLexicalForm();
+        var datatype = datatypeArg.GetLexicalForm();
+        if (datatype.Length >= 2 && datatype[0] == '<' && datatype[^1] == '>')
+            datatype = datatype.Slice(1, datatype.Length - 2); // bare IRI for the suffix
+
+        // RDF 1.1: an xsd:string typed literal IS a simple literal (no datatype suffix).
+        const string xsdString = "http://www.w3.org/2001/XMLSchema#string";
+        if (datatype.Equals(xsdString.AsSpan(), StringComparison.Ordinal))
+        {
+            _strdtResult = lexical.ToString();
+            return new Value { Type = ValueType.String, StringValue = _strdtResult.AsSpan() };
+        }
 
         // Construct typed literal: "lexical"^^<datatype>
-        _strdtResult = $"\"{lexical}\"^^<{datatype}>";
+        _strdtResult = $"\"{lexical.ToString()}\"^^<{datatype.ToString()}>";
         return new Value
         {
             Type = ValueType.String,
@@ -772,20 +785,23 @@ internal ref partial struct FilterEvaluator
         // Lexical form must be a simple literal (string without language tag)
         if (lexicalArg.Type != ValueType.String)
             return new Value { Type = ValueType.Unbound };
+        var existingTag = lexicalArg.GetLangTagOrDatatype();
+        if (!existingTag.IsEmpty && existingTag[0] == '@')
+            return new Value { Type = ValueType.Unbound }; // a language-tagged literal is not a simple literal
 
         // Language tag must be a string
         if (langArg.Type != ValueType.String)
             return new Value { Type = ValueType.Unbound };
 
-        var lexical = lexicalArg.StringValue;
-        var lang = langArg.StringValue;
+        var lexical = lexicalArg.GetLexicalForm();
+        var lang = langArg.GetLexicalForm();
 
         // Language tag must not be empty
         if (lang.IsEmpty)
             return new Value { Type = ValueType.Unbound };
 
         // Construct language-tagged literal: "lexical"@lang
-        _strlangResult = $"\"{lexical}\"@{lang}";
+        _strlangResult = $"\"{lexical.ToString()}\"@{lang.ToString()}";
         return new Value
         {
             Type = ValueType.String,
