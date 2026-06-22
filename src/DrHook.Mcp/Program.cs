@@ -87,6 +87,21 @@ builder.Services
                 .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
                 ?.InformationalVersion ?? "unknown"
         };
+        // Sent to the client during the initialization handshake and surfaced as an LLM system message:
+        // orient the agent to DrHook as the runtime-observation substrate and point to the canonical doc
+        // (the MCP-layer counterpart to CLAUDE.md -> DRHOOK.md).
+        options.ServerInstructions =
+            """
+            DrHook is Sky Omega's .NET runtime-observation substrate — ICorDebug interop via DrHook.Engine
+            (BCL + P/Invoke). Use it to observe what code actually does: set breakpoints at decision points,
+            step, and inspect locals/arguments — rather than changing code you have not watched run. Every
+            state-changing tool and every inspection that reads target state takes a `hypothesis` parameter:
+            state what you expect BEFORE you observe (Sky Omega epistemic discipline).
+
+            Full debugging workflow, the complete tool reference, how to run each test kind, and the probe
+            corpus: DRHOOK.md in the Sky Omega repo —
+            https://github.com/bemafred/sky-omega/blob/main/DRHOOK.md
+            """;
     })
     .WithStdioServerTransport()
     .WithTools<DrHookTools>();

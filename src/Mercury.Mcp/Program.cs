@@ -151,6 +151,21 @@ builder.Services
                 .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
                 ?.InformationalVersion ?? "unknown"
         };
+        // Sent to the client during the initialization handshake and surfaced as an LLM system message:
+        // orient the agent to Mercury as persistent semantic memory and point to the canonical discipline
+        // doc (the MCP-layer counterpart to CLAUDE.md -> MERCURY.md).
+        options.ServerInstructions =
+            """
+            Mercury is Sky Omega's RDF triple store and your persistent semantic memory across sessions
+            (SPARQL 1.1 SELECT/ASK/CONSTRUCT/DESCRIBE + UPDATE; for substring search use
+            FILTER(text:match(?v, "term")), which is trigram-accelerated). At session start, check what is
+            already in memory; then record observations, decisions, and findings as they happen —
+            reflexively, not only when asked. What you write persists for future sessions and other agents.
+
+            When, why, and how — EEE discipline, provenance conventions, the bootstrap procedure, and
+            consolidation patterns: MERCURY.md in the Sky Omega repo —
+            https://github.com/bemafred/sky-omega/blob/main/MERCURY.md
+            """;
     })
     .WithStdioServerTransport()
     .WithTools<MercuryTools>();
