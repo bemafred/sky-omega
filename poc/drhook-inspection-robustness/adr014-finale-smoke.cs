@@ -21,7 +21,7 @@ sealed class NullSink : IDebugEventSink { public void OnEvent(string name) { } }
 
 static class Finale
 {
-    const string ModuleHint = "Mercury.dll";  // unique to SkyOmega.Mercury.dll (not .Abstractions/.Runtime)
+    const string ModuleHint = "Mercury";  // resolves to SkyOmega.Mercury.dll via most-specific-match (ADR-014 FindModule fix)
     const string TypeName = "SkyOmega.Mercury.Sparql.Types.BindingTable";
     const string Method = "EnsureStringCapacity";
 

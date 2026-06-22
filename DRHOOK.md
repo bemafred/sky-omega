@@ -152,6 +152,40 @@ dotnet build path/to/Project.csproj -c Debug
 drhook_launch: program=dotnet, args=["exec", "path/to/bin/Debug/net10.0/Project.dll"], ...
 ```
 
+## Debugging targets: compiled apps and single-file harnesses
+
+Both target kinds must be **Debug-compiled** — a Release build optimizes away locals and sequence points. Launch mechanics are in [Launch Requirements](#launch-requirements) above; this section covers the two kinds and the friction each brings.
+
+### The two kinds
+
+- **Stand-alone compiled target** — a built `.dll`. Pre-build (`dotnet build … -c Debug`), then `drhook_launch` (own the process) or `drhook_attach` (borrow a running one).
+- **Single-file app / tool / harness** — a `.cs` file-based app (`#:project …`) that `dotnet run` builds. The probe corpus is this kind; a harness usually **spawns its target and attaches** (`poc/drhook-inspection-robustness/adr014-*`). Debug-compiled by default.
+
+### Manage the file-based-app cache when iterating
+
+File-based apps cache their compiled output. A stale cache silently serves an old build, so the running code and its **PDB line-map stop matching your source** — and `drhook_break_source` then binds to the wrong line or not at all (hit in ADR-014: a rebuilt multi-shape target left a stale PDB and the line breakpoint never bound). Defenses:
+
+```bash
+# iterate with --no-cache so the build matches your source:
+dotnet run --no-cache --file harness.cs -- <args>
+```
+
+If a harness **spawns** a target file-based app, spawn THAT with `--no-cache` too — otherwise the debugged target is stale even when the harness is fresh:
+
+```csharp
+new ProcessStartInfo("dotnet", $"run --no-cache --file \"{targetPath}\"")
+```
+
+### Breakpoints and module resolution
+
+- **Prefer function breakpoints for iterative work.** `drhook_break_function` / `DebugSession.SetBreakpoint(module, type, method)` resolve via **metadata tokens** — immune to stale PDB line-maps and unambiguous on multi-method files. `drhook_break_source` / `SetBreakpointAtLine` depend on the PDB line table, which a stale cache breaks. When a line breakpoint won't bind, switch to a function breakpoint and rebuild `--no-cache`.
+- **Type names are namespace-qualified** (`SkyOmega.Mercury.Sparql.Types.BindingTable`, not `BindingTable`), and **private methods resolve fine** — metadata ignores accessibility, so you can break in `EnsureStringCapacity`.
+- **The module hint is a substring, resolved most-specific-first** — `"Mercury"` resolves to `SkyOmega.Mercury.dll`, not `.Abstractions`/`.Runtime` (ADR-014 taught `FindModule` to prefer an exact assembly-name / trailing-namespace-segment match over the old first-substring-wins). A unique substring still resolves to its one match.
+
+### Check the flags first
+
+Before scripting around a tool, read its flags — `--help`, or `/?` on Windows. The MTP runner's real `--filter` / `--list-tests` / `--output` flags were found this way; guessing them wastes a cycle.
+
 ## Running the tests
 
 The repo has **two kinds** of test project, and on the .NET 10 SDK they run by **different commands**. Knowing which is which saves a confusing error.

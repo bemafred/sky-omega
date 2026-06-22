@@ -52,24 +52,63 @@ internal static unsafe class RuntimeNavigation
     /// Returns 0 if none match. All other enumerated pointers are released here.</summary>
     public static nint FindModule(nint pProcess, string nameSubstring)
     {
-        nint match = 0;
+        // Prefer the MOST SPECIFIC match. A substring hint like "Mercury" is contained in
+        // SkyOmega.Mercury.dll AND .Abstractions AND .Runtime; first-substring-wins picked one
+        // arbitrarily (ADR-014 friction — the BindingTable breakpoint resolved against the wrong
+        // assembly until the hint was made "Mercury.dll"). Among all containing modules, prefer an
+        // exact assembly-name match, then the hint as the last namespace segment, then the shortest
+        // (least-qualified) name. A unique-substring hint still resolves to its single match.
+        nint best = 0;
+        string bestName = "";
         foreach (nint appDomain in Drain(pProcess, ProcessEnumerateAppDomains))
         {
             foreach (nint assembly in Drain(appDomain, AppDomainEnumerateAssemblies))
             {
                 foreach (nint module in Drain(assembly, AssemblyEnumerateModules))
                 {
-                    if (match == 0 && ModuleName(module).Contains(nameSubstring, StringComparison.OrdinalIgnoreCase))
-                        match = module;  // keep — owned by the caller
+                    string name = ModuleName(module);
+                    if (name.Contains(nameSubstring, StringComparison.OrdinalIgnoreCase)
+                        && IsBetterModuleMatch(name, bestName, nameSubstring))
+                    {
+                        if (best != 0) Release(best);
+                        best = module;          // keep — owned by the caller (released if later superseded)
+                        bestName = name;
+                    }
                     else
+                    {
                         Release(module);
+                    }
                 }
                 Release(assembly);
             }
             Release(appDomain);
         }
-        return match;
+        return best;
     }
+
+    // True if `candidate` is a more specific match for `hint` than the current `best` (empty = none yet).
+    private static bool IsBetterModuleMatch(string candidate, string best, string hint)
+    {
+        if (best.Length == 0) return true;
+        int c = ModuleMatchScore(candidate, hint), b = ModuleMatchScore(best, hint);
+        return c != b ? c > b : candidate.Length < best.Length; // tie → the less-qualified (shorter) name
+    }
+
+    // 3 = exact assembly name (stem == hint); 2 = hint is the trailing namespace segment
+    // (SkyOmega.Mercury for hint "Mercury"); 1 = mere substring. ".dll"/".exe" stripped from both.
+    private static int ModuleMatchScore(string moduleName, string hint)
+    {
+        int slash = moduleName.LastIndexOfAny(['/', '\\']);
+        string stem = StripExt(slash >= 0 ? moduleName[(slash + 1)..] : moduleName);
+        string h = StripExt(hint);
+        if (stem.Equals(h, StringComparison.OrdinalIgnoreCase)) return 3;
+        if (stem.EndsWith("." + h, StringComparison.OrdinalIgnoreCase)) return 2;
+        return 1;
+    }
+
+    private static string StripExt(string s)
+        => s.EndsWith(".dll", StringComparison.OrdinalIgnoreCase) || s.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)
+            ? s[..^4] : s;
 
     /// <summary>Resolve <paramref name="typeName"/>.<paramref name="methodName"/> in the module
     /// matching <paramref name="moduleNameSubstring"/> to an <c>mdMethodDef</c> token (0 if not
