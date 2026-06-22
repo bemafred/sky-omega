@@ -65,4 +65,5 @@ The practice is the durable thing. Items get closed; the practice keeps closing 
 
 *For operational guidance when coding, see [CLAUDE.md](CLAUDE.md).*
 *For semantic memory discipline, see [MERCURY.md](MERCURY.md).*
+*For runtime observation with DrHook, see [DRHOOK.md](DRHOOK.md).*
 *For machine-readable metadata, see [.sky-omega-meta.yml](.sky-omega-meta.yml).*

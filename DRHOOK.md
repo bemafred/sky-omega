@@ -1,6 +1,6 @@
-# Debugging with DrHook
+# DRHOOK.md
 
-DrHook is Sky Omega's runtime observation substrate. Use it when you need to understand what code is actually doing — not what you think it's doing.
+DrHook is Sky Omega's runtime observation substrate — the debugging counterpart to Mercury's semantic memory ([MERCURY.md](MERCURY.md)). Use it when you need to understand what code is actually doing — not what you think it's doing.
 
 The substrate is `DrHook.Engine` — a BCL + P/Invoke + source-gen COM implementation of `ICorDebug` interop, with `libdbgshim` bundled per-RID via NuGet. `netcoredbg` was retired at 1.8.2; the previous DAP-over-stdio path no longer exists.
 

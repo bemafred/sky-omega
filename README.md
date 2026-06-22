@@ -112,6 +112,7 @@ Want to give Claude persistent memory? See **[Mercury MCP tutorial](docs/tutoria
 | [AI.md](AI.md)                        | **Start here if you're an AI assistant**         |
 | [CLAUDE.md](CLAUDE.md)                | Operational guidance for AI-assisted development |
 | [MERCURY.md](MERCURY.md)              | Semantic memory discipline — when, why, how      |
+| [DRHOOK.md](DRHOOK.md)                | Runtime observation with DrHook — debug workflow, MCP tools, running tests |
 | [STATISTICS.md](STATISTICS.md)        | Codebase metrics and conformance tracking        |
 | [Getting Started](docs/tutorials/getting-started.md) | 30-minute onboarding tutorial           |
 | [Mercury CLI](docs/tutorials/mercury-cli.md) | CLI REPL deep dive                        |

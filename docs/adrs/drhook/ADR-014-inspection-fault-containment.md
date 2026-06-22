@@ -57,7 +57,7 @@ Kept the ADR-013 lazy/bounded model. This ADR was robustness, not new expansion 
 - **Reads are checked operations** is now established discipline for the inspection surface (audit done), closing the class the two crashes (depth-2 SIGSEGV, complex-ref-struct SIGABRT) both belong to — both were AVs in the native walk.
 - An `EngineAnomaly` *inspection-fault kind* (surfacing a native fault instead of dying) belongs to the deferred out-of-process backstop, not here: prevention (D1) is the in-process answer; isolation (deferred (b)) is the backstop, evidence-gated on a recurrence.
 - DrHook is materially closer to the substrate promise ("safe to point at *any* frame"); the residual is unforeseen ICorDebug AVs.
-- Kept as regression artifacts: `poc/drhook-inspection-robustness/adr014-faultrepro-*` (synthetic repro/localizer) and `adr014-finale-*` (real-`BindingTable` dogfood); `DEBUGGING.md` documents how to run them.
+- Kept as regression artifacts: `poc/drhook-inspection-robustness/adr014-faultrepro-*` (synthetic repro/localizer) and `adr014-finale-*` (real-`BindingTable` dogfood); `DRHOOK.md` documents how to run them.
 
 ## References
 

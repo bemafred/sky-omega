@@ -1432,7 +1432,7 @@ DrHook validation — diagnosed netcoredbg func-eval deadlock, removed broken to
 - **`_sourceBreakpoints.Clear()` missing from `CleanupAsync`** — breakpoint registry was not fully reset between sessions.
 
 ### Changed
-- **DEBUGGING.md** — documents known limitations, conditional stopping workarounds, launch requirements.
+- **DRHOOK.md** — documents known limitations, conditional stopping workarounds, launch requirements.
 - **ADR-005** — status changed to Superseded. ADR-002 amended with eval hang findings.
 
 ## [1.7.1] - 2026-04-05
@@ -1483,7 +1483,7 @@ Wikidata-scale ingestion pipeline — Mercury can now load the full Wikidata dum
 - **100 KB IRI and 500 KB literal** — previously documented as parser buffer limitations. Eliminated by the sliding buffer fix.
 
 ### Added (Documentation)
-- **DEBUGGING.md** — DrHook debugging methodology: when to observe, how to set breakpoints, workflow examples.
+- **DRHOOK.md** — DrHook debugging methodology: when to observe, how to set breakpoints, workflow examples.
 
 ## [1.6.1] - 2026-03-30
 

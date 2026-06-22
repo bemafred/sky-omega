@@ -253,7 +253,7 @@ Each Tier 3 tool ships when its substrate dependency lands. Sequencing is not pr
 | 3 | `drhook_step_breakpoint_remove` by-ID canonical (collapsed three kind-specific methods into one `RemoveByIdAsync`) | `b86d991` |
 | 4 | `drhook_step_breakpoint` + `drhook_step_break_function` accept `condition` / `hitCount` / `suspend` parameters; stale "Roslyn walker lives in the probes" rejection error removed | `8720335` |
 | 5 | Probe 57 — target-defined exception hierarchy validation (`MyApp.OrderValidationException : MyApp.DomainException`; filter on base, throw derived, substrate's `MatchesChain` admits via cross-module `ICorDebugType.GetBase` walk) | `59be9ce` |
-| 6 | Tool description audit: `step_break_exception` cross-references to list/remove; DEBUGGING.md tool tables + "What's NOT yet shipped" section updated; workflow example expanded with policy parameters | `82471a0` |
+| 6 | Tool description audit: `step_break_exception` cross-references to list/remove; DRHOOK.md tool tables + "What's NOT yet shipped" section updated; workflow example expanded with policy parameters | `82471a0` |
 
 Pre-deliverable substrate verification — code-read of `Interop/ExceptionInspector.cs:60-92` confirmed the chain walk is runtime-driven via `ICorDebugType.GetBase` with no BCL-specific path; target-defined types fall out of the same mechanism that handles BCL types. Probe 57 then validated this empirically against a target-defined two-level hierarchy.
 
@@ -293,7 +293,7 @@ The same translator drives both consumers — `Compile` returns `Func<IEvalConte
 
 8. **Unit tests — 119/119 passing.** `CSharpConditionTests` extended with arithmetic operator coverage (Add / Subtract / Multiply / Divide / Modulo); the prior `Addition_ThrowsNotSupported` test is replaced by `Arithmetic_OperatorsProduceTypedResults` (six theory cases) and a new `ConditionalExpression_ThrowsNotSupported` covering the remaining unsupported syntactic form. `CSharpConditionTemplateTests` gains `ArithmeticFragment_RendersTypedResult` and `BooleanFragment_RendersTrueFalse`; the prior unsupported-syntax test now uses parenthesized conditional `(?:)`. `BreakpointPolicySpecTests.CompileWith_UnsupportedSyntaxInCondition_PropagatesAtEvaluation` updated to the same conditional-expression target.
 
-9. **DEBUGGING.md** — "What's NOT yet shipped" Logpoint LogMessage entry pruned; logpoint workflow promoted as a supported MCP capability.
+9. **DRHOOK.md** — "What's NOT yet shipped" Logpoint LogMessage entry pruned; logpoint workflow promoted as a supported MCP capability.
 
 #### Out of scope (deliberate)
 
