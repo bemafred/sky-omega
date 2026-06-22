@@ -152,6 +152,55 @@ dotnet build path/to/Project.csproj -c Debug
 drhook_launch: program=dotnet, args=["exec", "path/to/bin/Debug/net10.0/Project.dll"], ...
 ```
 
+## Running the tests
+
+The repo has **two kinds** of test project, and on the .NET 10 SDK they run by **different commands**. Knowing which is which saves a confusing error.
+
+### Standard test projects — `dotnet test`
+
+`Microsoft.NET.Test.Sdk` (xUnit/MSTest-over-VSTest) projects run the usual way:
+
+| Project | Command | Count |
+|---------|---------|-------|
+| Mercury (W3C conformance + unit) | `dotnet test tests/Mercury.Tests/Mercury.Tests.csproj` | ~4,700 |
+| DrHook.Engine (unit) | `dotnet test tests/DrHook.Engine.Tests/DrHook.Engine.Tests.csproj` | 119 |
+| Mercury.Solid | `dotnet test tests/Mercury.Solid.Tests/Mercury.Solid.Tests.csproj` | — |
+| SkyOmega.Bcl | `dotnet test tests/SkyOmega.Bcl.Tests/SkyOmega.Bcl.Tests.csproj` | — |
+
+Mercury's W3C suites need the test-data submodules first: `./tools/update-submodules.sh`. Run one test with `--filter "FullyQualifiedName~SomeName"`.
+
+### MTP integration tests — run the executable, **not** `dotnet test`
+
+`tests/DrHook.Engine.IntegrationTests` is a **Microsoft.Testing.Platform (MTP)** app (`MSTest.Sdk`). On the .NET 10 SDK, `dotnet test` over the legacy VSTest target is **no longer supported** and fails fast:
+
+> error : Testing with VSTest target is no longer supported by Microsoft.Testing.Platform on .NET 10 SDK and later.
+
+Build it, then run the produced **executable** directly — it spawns its own debuggee targets and attaches via `DrHook.Engine`:
+
+```bash
+dotnet build tests/DrHook.Engine.IntegrationTests/DrHook.Engine.IntegrationTests.csproj -c Debug
+./tests/DrHook.Engine.IntegrationTests/bin/Debug/net10.0/DrHook.Engine.IntegrationTests
+#   --list-tests                                 # enumerate without running
+#   --filter "FullyQualifiedName~AttachToMtpTarget"   # run one
+#   --output Detailed                            # verbose
+```
+
+These are the **12** substrate-correctness integration tests (ADR-007 Phase 8), macOS/arm64-only today (Phase 9 Open). `DrHook.Engine.IntegrationTargets.{Mtp,Vstest}` are their *targets*, not test projects — don't run them directly.
+
+> **Whole-solution caveat.** `dotnet test SkyOmega.sln` trips the same VSTest error on the MTP project (it is in the solution). Run the standard projects individually (above) and the integration suite via its executable.
+
+### Inspection-robustness fault probes (ADR-014)
+
+The ref-struct inspection fault closed by [ADR-014](docs/adrs/drhook/ADR-014-inspection-fault-containment.md) has a dedicated repro/localizer in `poc/drhook-inspection-robustness/` — separate from the numbered probe corpus below:
+
+```bash
+cd poc/drhook-inspection-robustness
+dotnet run --no-cache --file adr014-faultrepro-smoke.cs -- adr014-faultrepro-target.cs <Type> <step>
+#   <Type> = NormalBox | PlainRef | Mimic        <step> = args0 | args1 | expand_all | f:<field>
+```
+
+Each run attaches, breaks in `<Type>.Touch`, and inspects `this` (`Mimic` is a `BindingTable`-shaped ref struct). The dir README has the shape matrix and the size-law finding.
+
 ## PoC probes and findings
 
 The substrate is backed by a probe corpus in `poc/drhook-engine/` — `NN-name-smoke.cs` driver scripts plus optional `NN-name-target.cs` targets, each documenting one falsifiable epistemic act. Numbered ranges:
