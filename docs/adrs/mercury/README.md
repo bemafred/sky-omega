@@ -52,4 +52,4 @@
 | [ADR-047](ADR-047-default-path-cutover.md) | One Execution Path — Route the Default Query Path Through the Unified Tree Executor (complete the ADR-045 cutover) | Completed (2026-06-19) |
 | [ADR-048](ADR-048-service-federation-efficiency.md) | Efficient SERVICE Federation — Bound the Response, Don't Pull the Relation (VALUES bound-join + bounded acceptance; temp-store join-back rejected as a divergence) | Accepted (2026-06-19) |
 | [ADR-049](ADR-049-unified-expression-evaluator.md) | One SPARQL Expression Evaluator — FILTER and BIND share `[110] Expression` (spec-mandated unification; fixed FILTER-arithmetic and BIND-`\|\|` conformance gaps; BindExpressionEvaluator deleted, divergence S2 closed) | Completed (2026-06-21) |
-| [ADR-050](ADR-050-growable-result-binding-buffer.md) | Growable Result-Binding Buffer — Eliminate the Silent Overflow-Drop; Specify the Literal-Size Policy (= MaxAtomSize) | Accepted (2026-06-21) |
+| [ADR-050](ADR-050-growable-result-binding-buffer.md) | Growable Result-Binding Buffer — Eliminate the Silent Overflow-Drop; Specify the Literal-Size Policy (= MaxAtomSize) | Completed (2026-06-22) |

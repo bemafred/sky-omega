@@ -1,6 +1,8 @@
 # ADR-050: Growable result-binding buffer — eliminate the silent overflow-drop; specify the literal-size policy
 
-**Status:** Accepted — 2026-06-21
+**Status:** Completed — 2026-06-22
+
+**Validation outcome:** Implemented in `BindingTable` via `ArrayPool<char>.Shared` growth (default for every table; no per-site change). Verified: `tools/repro-literal.cs` every length 300–4000 round-trips (was a hard cliff at 1023); `LongLiteralRoundTripTests` 6/6 (500–100,000 chars); full Mercury/W3C suite 4699/0/6. **DrHook-validated live (2026-06-22):** a breakpoint at `EnsureStringCapacity` fired during a SELECT's result materialization (`BindWithHash` ← `MoveNextOrdered` ← `Query`) over a 1023-char literal — the buffer grows on the exact binding that used to silently drop. *Minor follow-up:* `ReturnGrownBuffer()` exists but is unwired at call sites; the rare final grown array is GC'd rather than pooled (steady state stays zero-GC; growth is pooled-rented). Commit `7c43ebf`.
 
 ## Context
 
