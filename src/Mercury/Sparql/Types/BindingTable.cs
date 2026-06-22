@@ -1,10 +1,12 @@
+using System.Buffers;
 using System.Globalization;
 
 namespace SkyOmega.Mercury.Sparql.Types;
 
 /// <summary>
 /// Binding table for variable bindings during query execution.
-/// Zero-allocation design using stackalloc buffers.
+/// Zero-allocation design over pooled buffers; the string buffer GROWS on demand (ADR-050) so a
+/// binding is never silently dropped — bounded only by the store's MaxAtomSize.
 /// </summary>
 internal ref struct BindingTable
 {
@@ -12,6 +14,7 @@ internal ref struct BindingTable
     private int _count;
     private Span<char> _stringBuffer;
     private int _stringOffset;
+    private char[]? _grownArray;   // ADR-050: a pooled char[] this table rented while growing the string buffer; returned by ReturnGrownBuffer()
 
     public BindingTable(Span<Binding> storage)
     {
@@ -19,6 +22,7 @@ internal ref struct BindingTable
         _count = 0;
         _stringBuffer = Span<char>.Empty;
         _stringOffset = 0;
+        _grownArray = null;
     }
 
     public BindingTable(Span<Binding> storage, Span<char> stringBuffer)
@@ -27,6 +31,40 @@ internal ref struct BindingTable
         _count = 0;
         _stringBuffer = stringBuffer;
         _stringOffset = 0;
+        _grownArray = null;
+    }
+
+    /// <summary>Ensure room for <paramref name="additional"/> more chars, GROWING the string buffer on
+    /// overflow rather than silently dropping the binding (ADR-050). Growth rents a larger array from
+    /// the shared pool and copies the live prefix, so existing binding offsets stay valid; the prior
+    /// grown array is returned. The initial (caller-owned) buffer is never returned here — only the
+    /// arrays this table rents (released by <see cref="ReturnGrownBuffer"/>). A single value is bounded
+    /// by the store's MaxAtomSize; the buffer grows to fit a row's bindings. Always succeeds.</summary>
+    private bool EnsureStringCapacity(int additional)
+    {
+        if (_stringOffset + additional <= _stringBuffer.Length) return true;
+
+        int target = System.Math.Max(_stringOffset + additional, _stringBuffer.Length == 0 ? 1024 : _stringBuffer.Length * 2);
+        char[] grown = ArrayPool<char>.Shared.Rent(target);
+        _stringBuffer.Slice(0, _stringOffset).CopyTo(grown);
+        if (_grownArray is not null) ArrayPool<char>.Shared.Return(_grownArray);
+        _grownArray = grown;
+        _stringBuffer = grown;
+        return true;
+    }
+
+    /// <summary>Return the pooled buffer this table rented while growing (ADR-050) — a no-op when it
+    /// never grew. Call once the bindings are no longer read (a result row's strings are copied out by
+    /// QueryResults' MaterializedRow before this point). Idempotent; if omitted, the rare grown array
+    /// is GC'd rather than pooled — correctness holds either way.</summary>
+    public void ReturnGrownBuffer()
+    {
+        if (_grownArray is not null)
+        {
+            ArrayPool<char>.Shared.Return(_grownArray);
+            _grownArray = null;
+            _stringBuffer = Span<char>.Empty;
+        }
     }
 
     /// <summary>
@@ -41,7 +79,7 @@ internal ref struct BindingTable
         if (!value.TryFormat(temp, out int written, default, CultureInfo.InvariantCulture))
             return;
 
-        if (_stringOffset + written > _stringBuffer.Length) return;
+        if (!EnsureStringCapacity(written)) return;
 
         temp.Slice(0, written).CopyTo(_stringBuffer.Slice(_stringOffset));
 
@@ -67,7 +105,7 @@ internal ref struct BindingTable
         if (!value.TryFormat(temp, out int written, default, CultureInfo.InvariantCulture))
             return;
 
-        if (_stringOffset + written > _stringBuffer.Length) return;
+        if (!EnsureStringCapacity(written)) return;
 
         temp.Slice(0, written).CopyTo(_stringBuffer.Slice(_stringOffset));
 
@@ -91,7 +129,7 @@ internal ref struct BindingTable
         // Store string representation
         var str = value ? "true" : "false";
         var len = str.Length;
-        if (_stringOffset + len > _stringBuffer.Length) return;
+        if (!EnsureStringCapacity(len)) return;
 
         str.AsSpan().CopyTo(_stringBuffer.Slice(_stringOffset));
 
@@ -112,7 +150,7 @@ internal ref struct BindingTable
     public void Bind(ReadOnlySpan<char> variableName, ReadOnlySpan<char> value)
     {
         if (_count >= _bindings.Length) return;
-        if (_stringOffset + value.Length > _stringBuffer.Length) return;
+        if (!EnsureStringCapacity(value.Length)) return;
 
         // Copy string to buffer
         value.CopyTo(_stringBuffer.Slice(_stringOffset));
@@ -134,7 +172,7 @@ internal ref struct BindingTable
     public void BindUri(ReadOnlySpan<char> variableName, ReadOnlySpan<char> value)
     {
         if (_count >= _bindings.Length) return;
-        if (_stringOffset + value.Length > _stringBuffer.Length) return;
+        if (!EnsureStringCapacity(value.Length)) return;
 
         // Copy string to buffer
         value.CopyTo(_stringBuffer.Slice(_stringOffset));
@@ -156,7 +194,7 @@ internal ref struct BindingTable
     public void BindWithHash(int variableNameHash, ReadOnlySpan<char> value)
     {
         if (_count >= _bindings.Length) return;
-        if (_stringOffset + value.Length > _stringBuffer.Length) return;
+        if (!EnsureStringCapacity(value.Length)) return;
 
         // Copy string to buffer
         value.CopyTo(_stringBuffer.Slice(_stringOffset));
@@ -179,7 +217,7 @@ internal ref struct BindingTable
     public void BindWithHash(int variableNameHash, ReadOnlySpan<char> value, BindingValueType type)
     {
         if (_count >= _bindings.Length) return;
-        if (_stringOffset + value.Length > _stringBuffer.Length) return;
+        if (!EnsureStringCapacity(value.Length)) return;
 
         value.CopyTo(_stringBuffer.Slice(_stringOffset));
 
