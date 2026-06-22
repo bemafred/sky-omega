@@ -17,12 +17,14 @@ internal static unsafe class Variables
     // value fails QI gracefully, but these are authoritative).
     private static readonly Guid IID_ICorDebugILFrame = new("03E26311-4F76-11D3-88C6-006097945418");
     private static readonly Guid IID_ICorDebugGenericValue = new("CC7BCAF8-8A68-11D2-983C-0000F808342D");
+    private static readonly Guid IID_ICorDebugReferenceValue = new("CC7BCAF9-8A68-11D2-983C-0000F808342D");
 
     private const int ThreadGetActiveFrame = 15; // ICorDebugThread
     private const int ILFrameGetLocalVariable = 14; // ICorDebugILFrame (GetIP11, SetIP12, EnumLocals13, GetLocalVariable14)
     private const int ILFrameGetArgument = 16;   // ICorDebugILFrame (ILFrame methods after ICorDebugFrame 3-10: GetIP11..GetArgument16)
     private const int ValueGetType = 3;          // ICorDebugValue
     private const int GenericValueGetValue = 7;  // ICorDebugGenericValue (after ICorDebugValue 3-6)
+    private const int ReferenceValueDereference = 10; // ICorDebugReferenceValue (Value 3-6, HeapValue 7-9, Dereference 10)
 
     private static nint Slot(nint pUnk, int index) => ((nint*)*(nint*)pUnk)[index];
 
@@ -121,7 +123,19 @@ internal static unsafe class Variables
     internal static IReadOnlyList<FieldValue>? GetChildren(nint pValue, int elementType, int depth)
     {
         if (pValue == 0 || depth <= 0) return null;
-        if (elementType == 0x12 /* CLASS */ || elementType == 0x1C /* OBJECT */)
+        // BYREF (a ref T — e.g. the receiver of a ref-struct instance method): deref one level to
+        // the target value and expand THAT. The byref is transparent to the caller (ADR-013).
+        if (elementType == 0x10 /* BYREF */)
+        {
+            nint target = DerefByRef(pValue);
+            if (target == 0) return null;
+            try { return GetChildren(target, ReadValue(target).ElementType, depth); }
+            finally { RuntimeNavigation.Release(target); }
+        }
+        // CLASS / OBJECT / VALUETYPE all enumerate instance fields. A value type's ICorDebugValue
+        // supports ICorDebugObjectValue directly (no deref), so GetFields handles structs + spans
+        // the same way it handles objects (ADR-013 adds VALUETYPE).
+        if (elementType == 0x12 /* CLASS */ || elementType == 0x1C /* OBJECT */ || elementType == 0x11 /* VALUETYPE */)
             return FieldEnumerator.GetFields(pValue, depth);
         if (elementType == 0x14 /* ARRAY */ || elementType == 0x1D /* SZARRAY */)
             return ArrayInspector.TryReadElements(pValue, depth);
@@ -132,7 +146,8 @@ internal static unsafe class Variables
     /// the cheap, no-walk basis for <c>HasChildren</c>. A null reference still reports true; an
     /// expand of it simply yields no children (graceful), avoiding an extra deref per node.</summary>
     internal static bool IsExpandable(int elementType)
-        => elementType is 0x12 /* CLASS */ or 0x1C /* OBJECT */ or 0x14 /* ARRAY */ or 0x1D /* SZARRAY */;
+        => elementType is 0x12 /* CLASS */ or 0x1C /* OBJECT */ or 0x14 /* ARRAY */ or 0x1D /* SZARRAY */
+                       or 0x11 /* VALUETYPE (struct/span) */ or 0x10 /* BYREF (ref T) */;
 
     /// <summary>The active frame's local at <paramref name="slot"/> as an OWNED value pointer the
     /// caller releases — for passing as a func-eval argument (e.g. <c>this</c>). 0 if unavailable.</summary>
@@ -216,10 +231,29 @@ internal static unsafe class Variables
     private static nint GetChildValueByName(nint pValue, string name)
     {
         if (pValue == 0 || string.IsNullOrEmpty(name)) return 0;
+        // A byref (ref T — e.g. `this` in a ref-struct method): deref to the target, then look up
+        // the named child on it (ADR-013). The deref'd target is owned here and released after.
+        if (ReadValue(pValue).ElementType == 0x10 /* BYREF */)
+        {
+            nint target = DerefByRef(pValue);
+            if (target == 0) return 0;
+            try { return GetChildValueByName(target, name); }
+            finally { RuntimeNavigation.Release(target); }
+        }
         if (name.Length >= 2 && name[0] == '[' && name[^1] == ']'
             && uint.TryParse(name.AsSpan(1, name.Length - 2), out uint index))
             return ArrayInspector.GetElementValueByIndex(pValue, index);
         return FieldEnumerator.GetFieldValueByName(pValue, name);
+    }
+
+    // Dereference a BYREF (ref T) one level to its target — an OWNED pointer the caller releases
+    // (0 if not a reference). ADR-013: makes a ref-struct method's `this` and other byrefs navigable.
+    private static nint DerefByRef(nint pValue)
+    {
+        nint refVal = QueryInterface(pValue, IID_ICorDebugReferenceValue);
+        if (refVal == 0) return 0;
+        try { return OutPtr(refVal, ReferenceValueDereference); }
+        finally { RuntimeNavigation.Release(refVal); }
     }
 
     // The immediate children (one level) of a value, dispatched by its element type. Reuses the
