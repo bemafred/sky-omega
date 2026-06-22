@@ -23,6 +23,7 @@ internal static unsafe class Variables
     private const int ILFrameGetLocalVariable = 14; // ICorDebugILFrame (GetIP11, SetIP12, EnumLocals13, GetLocalVariable14)
     private const int ILFrameGetArgument = 16;   // ICorDebugILFrame (ILFrame methods after ICorDebugFrame 3-10: GetIP11..GetArgument16)
     private const int ValueGetType = 3;          // ICorDebugValue
+    private const int ValueGetSize = 4;          // ICorDebugValue (GetType3, GetSize4, GetAddress5, CreateBreakpoint6)
     private const int GenericValueGetValue = 7;  // ICorDebugGenericValue (after ICorDebugValue 3-6)
     private const int ReferenceValueDereference = 10; // ICorDebugReferenceValue (Value 3-6, HeapValue 7-9, Dereference 10)
 
@@ -271,9 +272,21 @@ internal static unsafe class Variables
         {
             try
             {
-                long buffer = 0; // pre-zeroed: a 4-byte value lands in the low half on little-endian
-                var getValue = (delegate* unmanaged[Cdecl]<nint, void*, int>)Slot(generic, GenericValueGetValue);
-                if (getValue(generic, &buffer) >= 0) raw = ReifyPrimitive(elementType, buffer);
+                // CHECKED read (ADR-014). GenericValue.GetValue copies the WHOLE value's bytes into the
+                // buffer; a generic-value QI succeeds even for a multi-field VALUETYPE (a ref struct like
+                // Span<T> / BindingTable). The buffer is one 8-byte long, so a value larger than 8 bytes
+                // overflowed the stack — a layout-dependent corruption that crashed the engine (the
+                // BindingTable.EnsureStringCapacity inspection abort; ADR-014 / crash report 040558). So
+                // SIZE the value first (ICorDebugValue.GetSize is a metadata read — it does NOT copy) and
+                // only read when it fits the buffer. Primitives and enums (<= 8 bytes) still read; a large
+                // value type renders via its fields with a null raw — the read is checked, never a leap.
+                uint size = ValueSize(pValue);
+                if (size != 0 && size <= sizeof(long))
+                {
+                    long buffer = 0; // pre-zeroed: a 4-byte value lands in the low half on little-endian
+                    var getValue = (delegate* unmanaged[Cdecl]<nint, void*, int>)Slot(generic, GenericValueGetValue);
+                    if (getValue(generic, &buffer) >= 0) raw = ReifyPrimitive(elementType, buffer);
+                }
             }
             finally { RuntimeNavigation.Release(generic); }
         }
@@ -321,5 +334,14 @@ internal static unsafe class Variables
     {
         int value;
         return ((delegate* unmanaged[Cdecl]<nint, int*, int>)Slot(pUnk, slot))(pUnk, &value) < 0 ? 0 : value;
+    }
+
+    // ICorDebugValue.GetSize — the instance size in bytes of the value's type. A metadata read (no
+    // value copy), so it is safe to call on any value, including a large ref struct. 0 on failure,
+    // which the checked read in ReadValue treats as "don't copy".
+    private static uint ValueSize(nint pValue)
+    {
+        uint size;
+        return ((delegate* unmanaged[Cdecl]<nint, uint*, int>)Slot(pValue, ValueGetSize))(pValue, &size) < 0 ? 0 : size;
     }
 }
