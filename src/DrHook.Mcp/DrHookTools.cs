@@ -257,13 +257,14 @@ public sealed class DrHookTools
 
     [McpServerTool(Name = "drhook_expand"), Description(
         "Lazily expand ONE level of an object or array at the current stop — the navigable replacement " +
-        "for deep drhook_locals. Give the variable (a local name, 'this', or 'argN' like 'arg1') and an " +
+        "for deep drhook_locals. Give the variable by the name drhook_locals shows — a local name, 'this', " +
+        "or an argument's parameter name (e.g. 'box'); 'argN' still resolves for metadata-less frames — and an " +
         "optional '/'-separated path of child node names to walk into first (field names, or '[i]' for an " +
         "array index — exactly as drhook_locals shows them). Returns that node's immediate children, each " +
         "flagged hasChildren if it can be expanded further. Bounded per call, so an arbitrarily large or " +
         "deep object graph stays fully observable without the wide eager walk that faulted at scale.")]
     public async Task<string> Expand(
-        [Description("Variable to expand: a local name, 'this', or 'argN' (e.g. 'arg1').")] string target,
+        [Description("Variable to expand by the name drhook_locals shows: a local name, 'this', or an argument's parameter name (e.g. 'box'); 'argN' still resolves for metadata-less frames.")] string target,
         [Description("REQUIRED: what you expect to find at this node — state it before you look (epistemic discipline).")] string hypothesis,
         [Description("Optional '/'-separated child path to walk before expanding, e.g. '_indexes/[0]/_root'. Empty expands the variable itself.")] string path = "",
         CancellationToken ct = default)

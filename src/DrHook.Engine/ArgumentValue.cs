@@ -12,13 +12,18 @@ namespace SkyOmega.DrHook.Engine;
 /// the caller requested <c>depth &gt; 0</c> and this value is an object/array; null otherwise.
 /// <see cref="HasChildren"/> flags an object/array node as expandable — navigate deeper one bounded
 /// level at a time via <see cref="DebugSession.ExpandArgument"/> (lazy; the eager multi-level walk
-/// faulted in the runtime's unwinder at scale, ADR-007).</summary>
+/// faulted in the runtime's unwinder at scale, ADR-007). <see cref="Name"/> is the argument's source
+/// name — the declared parameter name from the method's metadata <c>Param</c> table, or <c>this</c>
+/// for an instance method's receiver (via <see cref="MethodMetadata.ArgumentNames"/>); empty when the
+/// value is a bare carrier (an eval result or a raw value read) or no metadata resolves, in which
+/// case a consumer supplies a positional <c>argN</c> fallback.</summary>
 public readonly record struct ArgumentValue(
     int ElementType,
     object? RawValue,
     string? StringValue = null,
     IReadOnlyList<FieldValue>? Fields = null,
-    bool HasChildren = false);
+    bool HasChildren = false,
+    string Name = "");
 
 /// <summary>A named local variable at a stop: its source name (from the PDB) plus the same
 /// CorElementType + CLR-typed boxed primitive + optional rendered string content + optional

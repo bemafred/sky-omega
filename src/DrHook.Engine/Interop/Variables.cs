@@ -36,11 +36,13 @@ internal static unsafe class Variables
         return qi(pUnk, &iid, &result) < 0 ? 0 : result;
     }
 
-    /// <summary>Read up to <paramref name="maxArgs"/> arguments of the stopped thread's active
-    /// frame (arg 0 is <c>this</c> for an instance method). When <paramref name="depth"/> &gt; 0,
-    /// object-typed args have their <see cref="ArgumentValue.Fields"/> populated by walking
-    /// instance fields (finding 48 / probe 39).</summary>
-    public static List<ArgumentValue> ReadActiveFrameArguments(nint pThread, int maxArgs, int depth = 0)
+    /// <summary>Read up to <paramref name="maxArgs"/> arguments of the stopped thread's active frame.
+    /// <paramref name="argNames"/> is the ordered source name per argument index (index 0 is
+    /// <c>this</c> for an instance method) from <see cref="MethodMetadata.ArgumentNames"/>; an index
+    /// past its end or with an empty name falls back to a positional <c>argN</c> so the value is never
+    /// nameless. When <paramref name="depth"/> &gt; 0, object-typed args have their
+    /// <see cref="ArgumentValue.Fields"/> populated by walking instance fields (finding 48 / probe 39).</summary>
+    public static List<ArgumentValue> ReadActiveFrameArguments(nint pThread, IReadOnlyList<string> argNames, int maxArgs, int depth = 0)
     {
         List<ArgumentValue> args = new();
         if (pThread == 0) return args;
@@ -62,7 +64,8 @@ internal static unsafe class Variables
                     {
                         ArgumentValue v = ReadValue(value);
                         IReadOnlyList<FieldValue>? children = GetChildren(value, v.ElementType, depth);
-                        args.Add(new ArgumentValue(v.ElementType, v.RawValue, v.StringValue, children, v.HasChildren));
+                        string name = ((int)i < argNames.Count && argNames[(int)i].Length > 0) ? argNames[(int)i] : $"arg{i}";
+                        args.Add(new ArgumentValue(v.ElementType, v.RawValue, v.StringValue, children, v.HasChildren, name));
                     }
                     finally { RuntimeNavigation.Release(value); }
                 }

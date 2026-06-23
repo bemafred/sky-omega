@@ -898,8 +898,8 @@ public sealed class EngineSteppingSession : IDisposable
             JsonArray vars = new();
             foreach (LocalValue l in locals)
                 vars.Add(LocalValueToJson(l));
-            for (int i = 0; i < args.Count; i++)
-                vars.Add(ArgumentValueToJson(args[i], i));
+            foreach (ArgumentValue a in args)
+                vars.Add(ArgumentValueToJson(a));
 
             JsonObject result = new()
             {
@@ -919,20 +919,30 @@ public sealed class EngineSteppingSession : IDisposable
     }
 
     /// <summary>Lazy-expand one level of a variable at the current stop (drhook_expand). <paramref name="target"/>
-    /// is a local name, "this", or "argN"; <paramref name="path"/> is the child node names to walk into
-    /// first (field names or "[i]"). Bounded per call — the navigable substitute for deep inspection.</summary>
+    /// is a local name, "this", or an argument's real name (the declared parameter name drhook_locals
+    /// shows; "argN" still resolves for frames whose metadata didn't resolve); <paramref name="path"/>
+    /// is the child node names to walk into first (field names or "[i]"). Bounded per call — the
+    /// navigable substitute for deep inspection.</summary>
     public Task<string> ExpandAsync(string target, IReadOnlyList<string> path, string? hypothesis, CancellationToken ct)
     {
         if (_session is null) return Task.FromResult(Error("No active stepping session."));
         try
         {
-            IReadOnlyList<FieldValue> children;
-            if (string.Equals(target, "this", StringComparison.Ordinal))
-                children = _session.ExpandArgument(0, path);
-            else if (target.StartsWith("arg", StringComparison.Ordinal) && int.TryParse(target.AsSpan(3), out int argIndex))
-                children = _session.ExpandArgument(argIndex, path);
-            else
-                children = _session.ExpandLocal(target, path);
+            // Resolve the target to an argument by its real name ("this" or a declared parameter name,
+            // as drhook_locals now shows), then by the positional argN fallback (frames with no
+            // resolvable metadata), else treat it as a local. Keeps drhook_expand consistent with the
+            // displayed names: expanding by the shown name routes to the right argument index.
+            IReadOnlyList<ArgumentValue> args = _session.GetArguments();
+            int argIndex = -1;
+            for (int i = 0; i < args.Count; i++)
+                if (string.Equals(args[i].Name, target, StringComparison.Ordinal)) { argIndex = i; break; }
+            if (argIndex < 0 && target.StartsWith("arg", StringComparison.Ordinal)
+                && int.TryParse(target.AsSpan(3), out int parsed) && parsed >= 0 && parsed < args.Count)
+                argIndex = parsed;
+
+            IReadOnlyList<FieldValue> children = argIndex >= 0
+                ? _session.ExpandArgument(argIndex, path)
+                : _session.ExpandLocal(target, path);
 
             JsonObject result = new()
             {
@@ -1038,12 +1048,12 @@ public sealed class EngineSteppingSession : IDisposable
         return node;
     }
 
-    private static JsonNode ArgumentValueToJson(ArgumentValue a, int index)
+    private static JsonNode ArgumentValueToJson(ArgumentValue a)
     {
         JsonObject node = new()
         {
             ["scope"] = "argument",
-            ["name"] = index == 0 ? "this" : $"arg{index}",
+            ["name"] = a.Name,
             ["elementType"] = $"0x{a.ElementType:X2}",
         };
         if (a.RawValue is { } raw) node["value"] = RawToJson(raw);

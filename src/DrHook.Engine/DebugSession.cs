@@ -732,7 +732,19 @@ public sealed class DebugSession : IDisposable, IMemberResolver
                 Context: new Dictionary<string, string> { ["requested"] = depth.ToString(System.Globalization.CultureInfo.InvariantCulture), ["clamped"] = MaxInspectionDepth.ToString(System.Globalization.CultureInfo.InvariantCulture) }));
             depth = MaxInspectionDepth;
         }
-        return Variables.ReadActiveFrameArguments(_pump.StopThread, 16, depth);
+        // Resolve the frame's argument names (this + declared parameters) from the method's PE
+        // metadata so arguments carry their real source names — mirrors how GetLocals resolves PDB
+        // local names. A static method correctly has no "this"; without a resolvable managed frame
+        // the list is empty and ReadActiveFrameArguments falls back to positional argN.
+        List<Interop.FrameInfo> frames = Frames.WalkManagedFrames(_pump.StopThread);
+        IReadOnlyList<string> argNames = Array.Empty<string>();
+        if (frames.Count > 0)
+        {
+            Interop.FrameInfo top = frames[0];
+            if (top.ModulePath.Length > 0 && (top.Token >> 24) == 0x06)
+                argNames = MethodMetadata.ArgumentNames(top.ModulePath, top.Token);
+        }
+        return Variables.ReadActiveFrameArguments(_pump.StopThread, argNames, 16, depth);
     }
 
     /// <summary>Named local variables of the active (top) frame at the current stop — PDB names
