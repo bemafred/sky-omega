@@ -31,9 +31,18 @@ Index the whole `<…>` lexical form, not just the local-name. `text:match` matc
 
 Today the candidate atom IDs gate only the object position. Extend `FilterAnalyzer` + `TreeJoinExecutor` (`_trigramCandidatesByVar`) + `TriplePatternScan` (`_trigramObjectCandidates`) so a `text:match` variable bound to a **subject** (and optionally predicate) position drives a candidate pre-filter there too. The `text:match` function stays the verification step — no correctness dependence on the pre-filter, only speed.
 
-### D4 — Profile scoping
+### D4 — Trigram scope is a per-profile policy
 
-Scope IRI indexing to the **Cognitive** profile (the recall workload). For **Reference** (Wikidata-scale: billions of IRI atoms — every Q-/P-id), trigram-over-IRIs would bloat the index with no recall consumer; keep Reference object-literal-only. Mechanism to resolve at Accepted: Cognitive-only by profile, or a `StorageOptions` index-scope flag (default-on for Cognitive, off for Reference). This also dovetails with the under-exercised Cognitive workload ([`cognitive-profile-validation-drought`](../../limits/cognitive-profile-validation-drought.md)).
+Trigram scope is not one global setting — it is another dimension of the per-profile usage/storage trade-off that already governs entry size, index set, and temporality ([ADR-029](ADR-029-store-profiles.md)). Each of the four profiles declares its trigram scope (overridable per store via `StorageOptions`). Crucially, the literals-only default was **not simply wrong** — it was *correct* for the profile that has been exercised (Reference/Wikidata) and wrong only for the under-exercised one (Cognitive), which is the [`cognitive-profile-validation-drought`](../../limits/cognitive-profile-validation-drought.md) surfacing again.
+
+| Profile | Purpose | Storage pressure | Trigram scope |
+|---------|---------|------------------|---------------|
+| **Cognitive** (88 B, bitemporal) | semantic memory / recall / provenance | low (working-set scale) | **literals + IRIs** — IRI handles are the recall targets (Lucy) |
+| **Graph** (64 B, versioned) | named-graph knowledge store, no valid-time | moderate | **literals + IRIs (default), configurable** — "Cognitive without time"; same index richness, recall-capable |
+| **Reference** (32 B, read-mostly dumps) | ad-hoc SPARQL over large static (Wikidata/DBpedia) | acute (billions of IRI atoms) | **literals only** — label/description full-text is useful; IRI trigrams (every Q-/P-id) would bloat with no recall consumer. The current default — correct for it. |
+| **Minimal** (24 B, single-graph LD endpoint) | lightweight endpoint, least overhead | footprint is the point | **off by default / literals opt-in** — `text:match` falls back to scan |
+
+IRI trigrams thus ride the same axis as the profile's other richness (entry size, index count): richest where recall is the purpose and storage is cheap, absent where the workload is ad-hoc query at scale or deliberately minimal. Mechanism: a trigram-scope value on the profile's index declaration (alongside its B+Tree index set), overridable per store via `StorageOptions`.
 
 ### Out of scope
 
