@@ -1677,49 +1677,17 @@ internal ref struct TriplePatternScan
 
         var termSpan = _source.Slice(term.Start, term.Length);
 
-        // Handle 'a' shorthand for rdf:type (SPARQL keyword)
-        if (termSpan.Length == 1 && termSpan[0] == 'a')
+        // 'a' keyword + prefixed-name expansion (shared PrefixExpander — THROWS on an undefined prefix per
+        // W3C SPARQL 1.1 §4.1.3 instead of silently returning the unexpanded token). Null = not a prefixed
+        // name; fall through to literal/numeric canonicalization. Position-specific scratch holds the IRI.
+        var expanded = PrefixExpander.TryExpand(termSpan, _prefixes, _source);
+        if (expanded != null)
         {
-            return SyntheticTermHelper.RdfType.AsSpan();
-        }
-
-        // Check if this is a prefixed name that needs expansion
-        if (_prefixes != null && termSpan.Length > 0 && termSpan[0] != '<' && termSpan[0] != '"')
-        {
-            var colonIdx = termSpan.IndexOf(':');
-            if (colonIdx >= 0)
+            switch (position)
             {
-                var prefix = termSpan.Slice(0, colonIdx + 1);
-                var localName = termSpan.Slice(colonIdx + 1);
-
-                for (int i = 0; i < _prefixes.Length; i++)
-                {
-                    var mapping = _prefixes[i];
-                    var mappedPrefix = _source.Slice(mapping.PrefixStart, mapping.PrefixLength);
-
-                    if (prefix.SequenceEqual(mappedPrefix))
-                    {
-                        var iriNs = _source.Slice(mapping.IriStart, mapping.IriLength);
-                        var nsWithoutClose = iriNs.Slice(0, iriNs.Length - 1);
-
-                        // Build expanded IRI and store as string
-                        var expanded = string.Concat(nsWithoutClose, localName, ">");
-
-                        // Store in position-specific field and return span over it
-                        switch (position)
-                        {
-                            case TermPosition.Subject:
-                                _expandedSubject = expanded;
-                                return _expandedSubject.AsSpan();
-                            case TermPosition.Predicate:
-                                _expandedPredicate = expanded;
-                                return _expandedPredicate.AsSpan();
-                            default:
-                                _expandedObject = expanded;
-                                return _expandedObject.AsSpan();
-                        }
-                    }
-                }
+                case TermPosition.Subject: _expandedSubject = expanded; return _expandedSubject.AsSpan();
+                case TermPosition.Predicate: _expandedPredicate = expanded; return _expandedPredicate.AsSpan();
+                default: _expandedObject = expanded; return _expandedObject.AsSpan();
             }
         }
 
@@ -1775,37 +1743,13 @@ internal ref struct TriplePatternScan
 
         var termSpan = _source.Slice(term.Start, term.Length);
 
-        // Handle 'a' shorthand for rdf:type (SPARQL keyword)
-        if (termSpan.Length == 1 && termSpan[0] == 'a')
+        // 'a' keyword + prefixed-name expansion (shared PrefixExpander — THROWS on an undefined prefix per
+        // W3C SPARQL 1.1 §4.1.3). Null = not a prefixed name; fall through to literal/numeric canonicalization.
+        var expanded = PrefixExpander.TryExpand(termSpan, _prefixes, _source);
+        if (expanded != null)
         {
-            return SyntheticTermHelper.RdfType.AsSpan();
-        }
-
-        // Check for prefix expansion
-        if (_prefixes != null && termSpan.Length > 0 && termSpan[0] != '<' && termSpan[0] != '"')
-        {
-            var colonIdx = termSpan.IndexOf(':');
-            if (colonIdx >= 0)
-            {
-                var prefix = termSpan.Slice(0, colonIdx + 1);
-                var localName = termSpan.Slice(colonIdx + 1);
-
-                for (int i = 0; i < _prefixes.Length; i++)
-                {
-                    var mapping = _prefixes[i];
-                    var mappedPrefix = _source.Slice(mapping.PrefixStart, mapping.PrefixLength);
-
-                    if (prefix.SequenceEqual(mappedPrefix))
-                    {
-                        var iriNs = _source.Slice(mapping.IriStart, mapping.IriLength);
-                        var nsWithoutClose = iriNs.Slice(0, iriNs.Length - 1);
-
-                        // For single-term resolution, store in subject field (reusable)
-                        _expandedSubject = string.Concat(nsWithoutClose, localName, ">");
-                        return _expandedSubject.AsSpan();
-                    }
-                }
-            }
+            _expandedSubject = expanded; // single-term resolution reuses the subject scratch
+            return _expandedSubject.AsSpan();
         }
 
         // ADR-044: canonicalize quoted-literal source spans before atom-store match.
@@ -1826,40 +1770,8 @@ internal ref struct TriplePatternScan
     private ReadOnlySpan<char> ExpandPathPredicate(int start, int length)
     {
         var predSpan = _source.Slice(start, length);
-
-        // Handle 'a' shorthand for rdf:type
-        if (predSpan.Length == 1 && predSpan[0] == 'a')
-        {
-            return SyntheticTermHelper.RdfType.AsSpan();
-        }
-
-        // Check if this is a prefixed name that needs expansion
-        if (_prefixes != null && predSpan.Length > 0 && predSpan[0] != '<' && predSpan[0] != '"')
-        {
-            var colonIdx = predSpan.IndexOf(':');
-            if (colonIdx >= 0)
-            {
-                var prefix = predSpan.Slice(0, colonIdx + 1);
-                var localName = predSpan.Slice(colonIdx + 1);
-
-                for (int i = 0; i < _prefixes.Length; i++)
-                {
-                    var mapping = _prefixes[i];
-                    var mappedPrefix = _source.Slice(mapping.PrefixStart, mapping.PrefixLength);
-
-                    if (prefix.SequenceEqual(mappedPrefix))
-                    {
-                        var iriNs = _source.Slice(mapping.IriStart, mapping.IriLength);
-                        var nsWithoutClose = iriNs.Slice(0, iriNs.Length - 1);
-
-                        // Store expanded IRI in _expandedPredicate field
-                        _expandedPredicate = string.Concat(nsWithoutClose, localName, ">");
-                        return _expandedPredicate.AsSpan();
-                    }
-                }
-            }
-        }
-
+        var expanded = PrefixExpander.TryExpand(predSpan, _prefixes, _source); // 'a' / prefixed name; throws on undefined
+        if (expanded != null) { _expandedPredicate = expanded; return _expandedPredicate.AsSpan(); }
         return predSpan;
     }
 
@@ -1869,39 +1781,8 @@ internal ref struct TriplePatternScan
     /// </summary>
     private ReadOnlySpan<char> ExpandPathPredicateSpan(ReadOnlySpan<char> predSpan)
     {
-        // Handle 'a' shorthand for rdf:type
-        if (predSpan.Length == 1 && predSpan[0] == 'a')
-        {
-            return SyntheticTermHelper.RdfType.AsSpan();
-        }
-
-        // Check if this is a prefixed name that needs expansion
-        if (_prefixes != null && predSpan.Length > 0 && predSpan[0] != '<' && predSpan[0] != '"')
-        {
-            var colonIdx = predSpan.IndexOf(':');
-            if (colonIdx >= 0)
-            {
-                var prefix = predSpan.Slice(0, colonIdx + 1);
-                var localName = predSpan.Slice(colonIdx + 1);
-
-                for (int i = 0; i < _prefixes.Length; i++)
-                {
-                    var mapping = _prefixes[i];
-                    var mappedPrefix = _source.Slice(mapping.PrefixStart, mapping.PrefixLength);
-
-                    if (prefix.SequenceEqual(mappedPrefix))
-                    {
-                        var iriNs = _source.Slice(mapping.IriStart, mapping.IriLength);
-                        var nsWithoutClose = iriNs.Slice(0, iriNs.Length - 1);
-
-                        // Store expanded IRI in _expandedPredicate field
-                        _expandedPredicate = string.Concat(nsWithoutClose, localName, ">");
-                        return _expandedPredicate.AsSpan();
-                    }
-                }
-            }
-        }
-
+        var expanded = PrefixExpander.TryExpand(predSpan, _prefixes, _source); // 'a' / prefixed name; throws on undefined
+        if (expanded != null) { _expandedPredicate = expanded; return _expandedPredicate.AsSpan(); }
         return predSpan;
     }
 
@@ -2144,40 +2025,10 @@ internal ref struct TriplePatternScan
     /// </summary>
     private ReadOnlySpan<char> ExpandPrefixedName(ReadOnlySpan<char> term)
     {
-        // If already a full IRI (starts with <), return as-is
-        if (term.Length > 0 && term[0] == '<')
-            return term;
-
-        // If no prefixes available, return as-is
-        if (_prefixes == null)
-            return term;
-
-        // Look for colon to identify prefixed name
-        var colonIdx = term.IndexOf(':');
-        if (colonIdx < 0)
-            return term;
-
-        var prefix = term.Slice(0, colonIdx + 1);
-        var localName = term.Slice(colonIdx + 1);
-
-        // Find matching prefix
-        for (int i = 0; i < _prefixes.Length; i++)
-        {
-            var mapping = _prefixes[i];
-            var mappedPrefix = _source.Slice(mapping.PrefixStart, mapping.PrefixLength);
-
-            if (prefix.SequenceEqual(mappedPrefix))
-            {
-                var iriNs = _source.Slice(mapping.IriStart, mapping.IriLength);
-                var nsWithoutClose = iriNs.Slice(0, iriNs.Length - 1);
-
-                // Build expanded IRI and store for span lifetime
-                _expandedPredicate = string.Concat(nsWithoutClose, localName, ">");
-                return _expandedPredicate.AsSpan();
-            }
-        }
-
-        return term;
+        var expanded = PrefixExpander.TryExpand(term, _prefixes, _source);
+        if (expanded is null) return term;
+        _expandedPredicate = expanded;
+        return _expandedPredicate.AsSpan();
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

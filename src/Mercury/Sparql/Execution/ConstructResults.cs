@@ -202,45 +202,10 @@ internal ref struct ConstructResults
     /// </summary>
     private ReadOnlySpan<char> ExpandPrefixedName(ReadOnlySpan<char> term)
     {
-        // Skip if already a full IRI, literal, or blank node
-        if (term.Length == 0 || term[0] == '<' || term[0] == '"' || term[0] == '_')
-            return term;
-
-        // Handle 'a' shorthand for rdf:type (SPARQL keyword)
-        if (term.Length == 1 && term[0] == 'a')
-            return SyntheticTermHelper.RdfType.AsSpan();
-
-        // Look for colon indicating prefixed name
-        var colonIdx = term.IndexOf(':');
-        if (colonIdx < 0 || _prefixes == null)
-            return term;
-
-        // Include the colon in the prefix (stored prefixes include trailing colon, e.g., "ex:")
-        var prefixWithColon = term.Slice(0, colonIdx + 1);
-        var localPart = term.Slice(colonIdx + 1);
-
-        // Find matching prefix in mappings
-        foreach (var mapping in _prefixes)
-        {
-            var mappingPrefix = _source.Slice(mapping.PrefixStart, mapping.PrefixLength);
-            if (prefixWithColon.SequenceEqual(mappingPrefix))
-            {
-                // Found matching prefix, expand to full IRI
-                // The IRI is stored with angle brackets, e.g., "<http://example.org/>"
-                var iriBase = _source.Slice(mapping.IriStart, mapping.IriLength);
-
-                // Strip angle brackets from IRI base if present, then build full IRI
-                var iriContent = iriBase;
-                if (iriContent.Length >= 2 && iriContent[0] == '<' && iriContent[^1] == '>')
-                    iriContent = iriContent.Slice(1, iriContent.Length - 2);
-
-                // Build full IRI: <base + localPart>
-                _expandedTerm = $"<{iriContent.ToString()}{localPart.ToString()}>";
-                return _expandedTerm.AsSpan();
-            }
-        }
-
-        return term;
+        var expanded = PrefixExpander.TryExpand(term, _prefixes, _source);
+        if (expanded is null) return term;
+        _expandedTerm = expanded;
+        return _expandedTerm.AsSpan();
     }
 
     public void Dispose()

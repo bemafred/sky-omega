@@ -1238,57 +1238,19 @@ internal class UpdateExecutor
     /// Also handles 'a' shorthand for rdf:type.
     /// Returns the original span if not a prefixed name or no matching prefix found.
     /// </summary>
+    private PrefixMapping[]? _updatePrefixMappings;
+
     private ReadOnlySpan<char> ExpandPrefixedName(ReadOnlySpan<char> term)
     {
-        // Skip if already a full IRI or blank node
-        if (term.Length == 0 || term[0] == '<' || term[0] == '_')
-            return term;
-
-        // ADR-044: literals are canonicalized to the wrapped-decoded form so SPARQL
-        // INSERT produces the same atom bytes as Turtle/N-Triples ingestion of the
-        // same logical triple. Fast path (no '\\') returns the verbatim span.
-        if (term[0] == '"')
+        // ADR-044: literals canonicalize to the wrapped-decoded form (UpdateExecutor-specific) so SPARQL
+        // INSERT produces the same atom bytes as Turtle/N-Triples ingestion — handled here before the
+        // shared prefixed-name expander takes over for IRIs / 'a' / prefixed names (and throws on undefined).
+        if (term.Length > 0 && term[0] == '"')
             return LiteralForm.Canonicalize(term, out _literalScratch);
-
-        // Handle 'a' shorthand for rdf:type (SPARQL keyword)
-        if (term.Length == 1 && term[0] == 'a')
-            return SyntheticTermHelper.RdfType.AsSpan();
-
-        // Look for colon indicating prefixed name
-        var colonIdx = term.IndexOf(':');
-        if (colonIdx < 0)
-            return term;
-
-        var prefixCount = _update.Prologue.PrefixCount;
-        if (prefixCount == 0)
-            return term;
-
-        // Include the colon in the prefix (stored prefixes include trailing colon, e.g., "ex:")
-        var prefixWithColon = term.Slice(0, colonIdx + 1);
-        var localPart = term.Slice(colonIdx + 1);
-
-        // Find matching prefix in mappings
-        for (int i = 0; i < prefixCount; i++)
-        {
-            var (prefixStart, prefixLength, iriStart, iriLength) = _update.Prologue.GetPrefix(i);
-            var mappingPrefix = _source.AsSpan(prefixStart, prefixLength);
-            if (prefixWithColon.SequenceEqual(mappingPrefix))
-            {
-                // Found matching prefix, expand to full IRI
-                // The IRI is stored with angle brackets, e.g., "<http://example.org/>"
-                var iriBase = _source.AsSpan(iriStart, iriLength);
-
-                // Strip angle brackets from IRI base if present, then build full IRI
-                var iriContent = iriBase;
-                if (iriContent.Length >= 2 && iriContent[0] == '<' && iriContent[^1] == '>')
-                    iriContent = iriContent.Slice(1, iriContent.Length - 2);
-
-                // Build full IRI: <base + localPart>
-                _expandedTerm = $"<{iriContent.ToString()}{localPart.ToString()}>";
-                return _expandedTerm.AsSpan();
-            }
-        }
-
-        return term;
+        _updatePrefixMappings ??= PrefixExpander.Extract(_update.Prologue);
+        var expanded = PrefixExpander.TryExpand(term, _updatePrefixMappings, _source.AsSpan());
+        if (expanded is null) return term;
+        _expandedTerm = expanded;
+        return _expandedTerm.AsSpan();
     }
 }

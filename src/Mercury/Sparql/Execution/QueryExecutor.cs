@@ -126,8 +126,8 @@ internal partial class QueryExecutor : IDisposable
         // Store prologue for prefix expansion
         _prologue = query.Prologue;
 
-        // Extract prefix mappings for subquery execution
-        _prefixMappings = ExtractPrefixMappings(in _prologue);
+        // Extract prefix mappings for subquery execution (shared with the other executors)
+        _prefixMappings = PrefixExpander.Extract(in _prologue);
 
         _defaultGraphs = null;
         _namedGraphs = null;
@@ -210,30 +210,6 @@ internal partial class QueryExecutor : IDisposable
             return new DateTimeOffset(dt, TimeSpan.Zero);
 
         return DateTimeOffset.MinValue;
-    }
-
-    /// <summary>
-    /// Extract prefix mappings from Prologue into an array for subquery execution.
-    /// Returns null if no prefixes are defined.
-    /// </summary>
-    private static PrefixMapping[]? ExtractPrefixMappings(in Prologue prologue)
-    {
-        if (prologue.PrefixCount == 0)
-            return null;
-
-        var mappings = new PrefixMapping[prologue.PrefixCount];
-        for (int i = 0; i < prologue.PrefixCount; i++)
-        {
-            var (ps, pl, irs, irl) = prologue.GetPrefix(i);
-            mappings[i] = new PrefixMapping
-            {
-                PrefixStart = ps,
-                PrefixLength = pl,
-                IriStart = irs,
-                IriLength = irl
-            };
-        }
-        return mappings;
     }
 
     /// <summary>
@@ -1207,49 +1183,9 @@ internal partial class QueryExecutor : IDisposable
     /// </summary>
     private ReadOnlySpan<char> ExpandPrefixedName(ReadOnlySpan<char> term)
     {
-        // Skip if already a full IRI, literal, or blank node
-        if (term.Length == 0 || term[0] == '<' || term[0] == '"' || term[0] == '_')
-            return term;
-
-        // Handle 'a' shorthand for rdf:type (SPARQL keyword)
-        if (term.Length == 1 && term[0] == 'a')
-            return SyntheticTermHelper.RdfType.AsSpan();
-
-        // Look for colon indicating prefixed name
-        var colonIdx = term.IndexOf(':');
-        if (colonIdx < 0)
-            return term;
-
-        var prefixCount = _prologue.PrefixCount;
-        if (prefixCount == 0)
-            return term;
-
-        // Include the colon in the prefix (stored prefixes include trailing colon, e.g., "ex:")
-        var prefixWithColon = term.Slice(0, colonIdx + 1);
-        var localPart = term.Slice(colonIdx + 1);
-
-        // Find matching prefix in mappings
-        for (int i = 0; i < prefixCount; i++)
-        {
-            var (prefixStart, prefixLength, iriStart, iriLength) = _prologue.GetPrefix(i);
-            var mappingPrefix = _source.AsSpan(prefixStart, prefixLength);
-            if (prefixWithColon.SequenceEqual(mappingPrefix))
-            {
-                // Found matching prefix, expand to full IRI
-                // The IRI is stored with angle brackets, e.g., "<http://example.org/>"
-                var iriBase = _source.AsSpan(iriStart, iriLength);
-
-                // Strip angle brackets from IRI base if present, then build full IRI
-                var iriContent = iriBase;
-                if (iriContent.Length >= 2 && iriContent[0] == '<' && iriContent[^1] == '>')
-                    iriContent = iriContent.Slice(1, iriContent.Length - 2);
-
-                // Build full IRI: <base + localPart>
-                _expandedTerm = $"<{iriContent.ToString()}{localPart.ToString()}>";
-                return _expandedTerm.AsSpan();
-            }
-        }
-
-        return term;
+        var expanded = PrefixExpander.TryExpand(term, _prefixMappings, _source.AsSpan());
+        if (expanded is null) return term;
+        _expandedTerm = expanded;
+        return _expandedTerm.AsSpan();
     }
 }
