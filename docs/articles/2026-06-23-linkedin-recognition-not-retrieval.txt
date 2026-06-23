@@ -1,0 +1,44 @@
+============================================================
+LINKEDIN POST — paste-ready (no markdown)
+Companion to: docs/articles/2026-06-23-recognition-not-retrieval.md
+Publish: any day. No relative-time phrasing — no date edit needed.
+A short teaser (hook + one paragraph + links), driving to the full
+write-up. Well under LinkedIn's 3,000-character limit.
+============================================================
+
+PUBLISHING NOTES (do not paste):
+
+* This is a teaser, not the essay — one hook line, one paragraph,
+  the links. The depth lives in the article; the post earns the click.
+* LinkedIn truncates with "see more" around 210 characters. The
+  first line ("...What it can't do is remember the last one.") is
+  the whole hook and stands alone before the cut. It mirrors the
+  compile-test-inspect post's hook on purpose — the arc reads as a series.
+* LinkedIn auto-renders bare URLs as clickable; preview before posting.
+* No hashtags in the body. Add 2-3 at the bottom only for reach:
+  #AI #KnowledgeGraphs #RDF #AIAgents #SemanticWeb — else leave clean.
+* The "we" framing makes this the project's story, not a personal
+  claim. Confirm that's the public face you want.
+* Image: a screenshot of the actual recall — the reconstructed
+  five-session arc, dated and threaded — shows "recognition, not
+  retrieval" in one glance. High-leverage attachment.
+
+============================================================
+POST BODY (paste from here down)
+============================================================
+
+Your AI can reason, reflect, and learn — inside one conversation. What it can't do is remember the last one.
+
+That flaw was obvious the day the first ChatGPT shipped, and RAG — the standard fix — only papers over it: it retrieves text that is similar to your question, with no sense of how facts relate, when they were learned, or whether they were later overturned. So we built memory that works the way human memory does — recognition, not retrieval: surface what's associated, follow the connections outward, place each fact in time. It's called Lucy, it runs on an RDF triple store, and asked to recall one debugging subsystem it didn't hand back paragraphs — it reconstructed the whole arc across five sessions, dated and linked. RAG retrieves similar text; Lucy reconstructs known structure.
+
+Full write-up:
+https://github.com/bemafred/sky-omega/blob/main/docs/articles/2026-06-23-recognition-not-retrieval.md
+
+The repo (MIT):
+https://github.com/bemafred/sky-omega
+
+The artifacts are open. Curious is enough.
+
+============================================================
+END OF BODY
+============================================================
