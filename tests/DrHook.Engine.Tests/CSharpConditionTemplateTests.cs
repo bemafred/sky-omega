@@ -81,6 +81,19 @@ public sealed class CSharpConditionTemplateTests
         Assert.Equal(("box", "Size"), resolver.LastResolved);
     }
 
+    // ─── Argument interpolation (by real parameter name) ──────────────────────
+
+    [Fact]
+    public void CompileTemplate_InterpolatesArgumentByName()
+    {
+        // A logpoint template can interpolate a parameter by its real name — the same identifier
+        // path conditions use — so "logging instead of breaking" works over arguments too.
+        var render = CSharpCondition.CompileTemplate("idx={index}", new NullMemberResolver());
+        var ctx = new FakeEvalContext(Locals: new(),
+            Arguments: new() { new ArgumentValue(ELEMENT_TYPE_I4, RawValue: 9, Name: "index") });
+        Assert.Equal("idx=9", render(ctx));
+    }
+
     // ─── Escape sequences {{ and }} ───────────────────────────────────────────
 
     [Fact]

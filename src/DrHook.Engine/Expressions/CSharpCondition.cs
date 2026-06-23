@@ -112,10 +112,12 @@ internal static class CSharpCondition
             Dictionary<string, Type> locals = new(StringComparer.Ordinal);
             foreach (LocalValue l in ctx.Locals)
                 locals[l.Name] = TypeOf(l.RawValue, l.ElementType);
+            // Arguments are keyed by their real source name (this + declared parameters), so a
+            // condition or logpoint template can reference a parameter by name — e.g. `index % 2 == 0`
+            // or `seed == 7`. A local shadows a same-named argument (locals are the inner scope).
             Dictionary<string, Type> args = new(StringComparer.Ordinal);
-            int i = 0;
             foreach (ArgumentValue a in ctx.Arguments)
-                args["arg" + i++] = TypeOf(a.RawValue, a.ElementType);
+                if (a.Name.Length > 0) args[a.Name] = TypeOf(a.RawValue, a.ElementType);
             return new Schema(locals, args);
         }
 
@@ -227,12 +229,13 @@ internal static class CSharpCondition
     private static Expression BuildIdentifier(IdentifierNameSyntax id, TranslationContext tc)
     {
         string name = id.Identifier.Text;
-        // If the local is in the schema, emit a typed unbox so binary ops see the real CLR type.
-        // Otherwise emit an untyped call: ReadLocalRaw throws at runtime, but only if reached
-        // (short-circuit logical operators may guard the call). The translator must not pre-empt
-        // the runtime — that breaks `value == 3 && missing == 1` when value != 3.
-        Expression rawCall = Expression.Call(ReadLocalRawMethod, tc.CtxParam, Expression.Constant(name));
-        if (tc.Schema.Locals.TryGetValue(name, out Type? clrType) && clrType != typeof(object))
+        // If the identifier is a known local OR argument, emit a typed unbox so binary ops see the
+        // real CLR type. Otherwise emit an untyped call: ReadIdentifierRaw throws at runtime, but only
+        // if reached (short-circuit logical operators may guard the call). The translator must not
+        // pre-empt the runtime — that breaks `value == 3 && missing == 1` when value != 3.
+        Expression rawCall = Expression.Call(ReadIdentifierRawMethod, tc.CtxParam, Expression.Constant(name));
+        if ((tc.Schema.Locals.TryGetValue(name, out Type? clrType) || tc.Schema.Arguments.TryGetValue(name, out clrType))
+            && clrType != typeof(object))
             return Expression.Convert(rawCall, clrType);
         return rawCall;
     }
@@ -320,18 +323,22 @@ internal static class CSharpCondition
 
     // ─── Runtime helpers (called via Expression.Call from the compiled delegate) ──────────────
 
-    private static readonly MethodInfo ReadLocalRawMethod =
-        typeof(CSharpCondition).GetMethod(nameof(ReadLocalRaw), BindingFlags.Static | BindingFlags.NonPublic)!;
+    private static readonly MethodInfo ReadIdentifierRawMethod =
+        typeof(CSharpCondition).GetMethod(nameof(ReadIdentifierRaw), BindingFlags.Static | BindingFlags.NonPublic)!;
 
     private static readonly MethodInfo ResolveMemberMethod =
         typeof(CSharpCondition).GetMethod(nameof(ResolveMember), BindingFlags.Static | BindingFlags.NonPublic)!;
 
-    private static object? ReadLocalRaw(IEvalContext ctx, string name)
+    private static object? ReadIdentifierRaw(IEvalContext ctx, string name)
     {
+        // Locals are the inner scope: a local shadows a same-named argument.
         foreach (LocalValue l in ctx.Locals)
             if (l.Name == name)
                 return l.RawValue ?? throw new InvalidOperationException($"local '{name}' has no primitive value");
-        throw new InvalidOperationException($"local '{name}' not found at this stop");
+        foreach (ArgumentValue a in ctx.Arguments)
+            if (a.Name == name)
+                return a.RawValue ?? throw new InvalidOperationException($"argument '{name}' has no primitive value");
+        throw new InvalidOperationException($"identifier '{name}' not found at this stop (no local or argument)");
     }
 
     private static object? ResolveMember(IMemberResolver resolver, string thisLocalName, string memberName)

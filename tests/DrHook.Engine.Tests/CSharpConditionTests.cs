@@ -48,6 +48,53 @@ public sealed class CSharpConditionTests
         Assert.Contains("obj", ex.Message);
     }
 
+    // ─── Arguments (identifier resolution by real parameter name) ──────────────
+
+    [Theory]
+    [InlineData(7, true)]
+    [InlineData(3, false)]
+    public void Argument_Equality_AgainstLiteral(int actual, bool expected)
+    {
+        // A condition can reference a parameter by its real name — not just locals.
+        var predicate = CSharpCondition.Compile("seed == 7", new NullMemberResolver());
+        var ctx = new FakeEvalContext(Locals: new(),
+            Arguments: new() { new ArgumentValue(ELEMENT_TYPE_I4, RawValue: actual, Name: "seed") });
+        Assert.Equal(expected, predicate(ctx));
+    }
+
+    [Theory]
+    [InlineData(4, true)]
+    [InlineData(3, false)]
+    public void Argument_Modulo_GatesOnParameterValue(int actual, bool expected)
+    {
+        // The %-gating pattern applied to an argument: fire only when index % 2 == 0.
+        var predicate = CSharpCondition.Compile("index % 2 == 0", new NullMemberResolver());
+        var ctx = new FakeEvalContext(Locals: new(),
+            Arguments: new() { new ArgumentValue(ELEMENT_TYPE_I4, RawValue: actual, Name: "index") });
+        Assert.Equal(expected, predicate(ctx));
+    }
+
+    [Fact]
+    public void Local_Shadows_SameNamedArgument()
+    {
+        // A local and an argument sharing a name: the local (inner scope) wins.
+        var predicate = CSharpCondition.Compile("x == 1", new NullMemberResolver());
+        var ctx = new FakeEvalContext(
+            Locals: new() { L("x", 1) },
+            Arguments: new() { new ArgumentValue(ELEMENT_TYPE_I4, RawValue: 2, Name: "x") });
+        Assert.True(predicate(ctx));
+    }
+
+    [Fact]
+    public void Identifier_NeitherLocalNorArgument_Throws()
+    {
+        var predicate = CSharpCondition.Compile("ghost == 1", new NullMemberResolver());
+        var ctx = new FakeEvalContext(Locals: new(),
+            Arguments: new() { new ArgumentValue(ELEMENT_TYPE_I4, RawValue: 5, Name: "real") });
+        var ex = Assert.Throws<InvalidOperationException>(() => predicate(ctx));
+        Assert.Contains("ghost", ex.Message);
+    }
+
     // ─── Binary comparisons (typed operands via System.Linq.Expressions.MakeBinary) ──────────
 
     [Theory]
