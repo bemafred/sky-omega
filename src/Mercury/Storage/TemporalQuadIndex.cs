@@ -652,8 +652,13 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
 
                     if (_store.CompareKeys(in _currentKey, in _minKey) >= 0)
                     {
-                        // Check temporal bounds
-                        if (MatchesTemporalQuery(entry))
+                        // Check temporal bounds AND the bound spatial dimensions. The spatial check is
+                        // load-bearing for the TGSP (time-leading) index that DURING/Range selects: there
+                        // ValidFrom leads, so the graph/S/P/O key range cannot gate those dimensions and a
+                        // pure CompareKeys scan would leak entries from every graph/S/P/O in the time window
+                        // (the DURING over-count bug). For the spatial-leading indexes (GSPO/GPOS/GOSP) the
+                        // key range already constrains them, so MatchesSpatialBounds is a redundant no-op.
+                        if (MatchesTemporalQuery(entry) && MatchesSpatialBounds(in _currentKey))
                         {
                             _currentSlot++;
                             return true;
@@ -694,6 +699,17 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
                 _ => false
             };
         }
+
+        // Post-filter the bound graph/S/P/O dimensions. A dimension is BOUND iff its min and max
+        // search-key values coincide (CreateSearchKey sets both to the term's value; an unbound
+        // dimension spans [0, long.MaxValue], so min != max and the check is skipped). On the TGSP
+        // time-leading index the key range cannot constrain these dimensions, so this is what actually
+        // applies the graph/S/P/O filter for DURING; on spatial-leading indexes it is a no-op.
+        private readonly bool MatchesSpatialBounds(in TemporalKey key)
+            => (_minKey.Graph     != _maxKey.Graph     || key.Graph     == _minKey.Graph)
+            && (_minKey.Primary   != _maxKey.Primary   || key.Primary   == _minKey.Primary)
+            && (_minKey.Secondary != _maxKey.Secondary || key.Secondary == _minKey.Secondary)
+            && (_minKey.Tertiary  != _maxKey.Tertiary  || key.Tertiary  == _minKey.Tertiary);
 
         public readonly TemporalQuad Current
         {

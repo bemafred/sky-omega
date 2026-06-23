@@ -254,6 +254,47 @@ public class TemporalSparqlTests : PooledStoreTestBase
     }
 
     [Fact]
+    public void During_ConstrainsToNamedGraph()
+    {
+        // Regression: DURING selected the TGSP (time-leading) index but never post-filtered by graph, so a
+        // graph-scoped range query leaked entries from EVERY graph overlapping the window (the over-count
+        // bug — counts exceeded a single graph's, even the whole store's). The same predicate/object live in
+        // two graphs; a DURING scoped to <urn:g1> must return only g1's subject, not g2's.
+        Store.Add("<urn:s1>", "<urn:p>", "<urn:o>",
+            new DateTimeOffset(2024, 1, 1, 0, 0, 0, TimeSpan.Zero), DateTimeOffset.MaxValue, "<urn:g1>");
+        Store.Add("<urn:s2>", "<urn:p>", "<urn:o>",
+            new DateTimeOffset(2024, 1, 1, 0, 0, 0, TimeSpan.Zero), DateTimeOffset.MaxValue, "<urn:g2>");
+
+        var query = "SELECT ?s WHERE { GRAPH <urn:g1> { ?s <urn:p> ?o } } DURING [\"2024-01-01\"^^xsd:date, \"2024-12-31\"^^xsd:date]";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsed = parser.ParseQuery();
+
+        Store.AcquireReadLock();
+        try
+        {
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsed);
+            var results = executor.Execute();
+
+            var subjects = new List<string>();
+            while (results.MoveNext())
+            {
+                var b = results.Current;
+                var idx = b.FindBinding("?s".AsSpan());
+                if (idx >= 0) subjects.Add(b.GetString(idx).ToString());
+            }
+            results.Dispose();
+
+            Assert.Single(subjects);                                  // only g1, not g1+g2
+            Assert.Contains(subjects, s => s.Contains("s1"));
+            Assert.DoesNotContain(subjects, s => s.Contains("s2"));   // the leak would include g2's subject
+        }
+        finally
+        {
+            Store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
     public void TemporalWithLimitOffset_ParsesCorrectly()
     {
         // Verify that temporal clauses can be combined with LIMIT/OFFSET
