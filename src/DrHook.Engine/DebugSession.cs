@@ -911,20 +911,8 @@ public sealed class DebugSession : IDisposable, IMemberResolver
     {
         result = default;
 
-        // 1. Resolve `this`: find the named local's slot (top frame's PDB) and read its value.
-        List<Interop.FrameInfo> frames = Frames.WalkManagedFrames(_pump.StopThread);
-        if (frames.Count == 0) return EvalStatus.SetupFailed;
-        Interop.FrameInfo top = frames[0];
-        if (top.ModulePath.Length == 0 || (top.Token >> 24) != 0x06) return EvalStatus.SetupFailed;
-
-        SymbolReader? symbols = SymbolsFor(top.ModulePath);
-        if (symbols is null) return EvalStatus.SetupFailed;
-        int slot = -1;
-        foreach (LocalName local in symbols.GetLocalNames(top.Token))
-            if (local.Name == thisLocalName) { slot = local.Slot; break; }
-        if (slot < 0) return EvalStatus.SetupFailed;
-
-        nint thisValue = Variables.GetActiveFrameLocalValue(_pump.StopThread, slot);
+        // 1. Resolve the receiver (`this`) by name to its value — a named local or an argument.
+        nint thisValue = ResolveReceiverValue(thisLocalName);
         if (thisValue == 0) return EvalStatus.SetupFailed;
         try
         {
@@ -971,10 +959,7 @@ public sealed class DebugSession : IDisposable, IMemberResolver
     public EvalStatus TryEvalMemberCall(string thisLocalName, string memberName, TimeSpan timeout, out ArgumentValue result)
     {
         result = default;
-        int slot = ResolveLocalSlot(thisLocalName);
-        if (slot < 0) return EvalStatus.SetupFailed;
-
-        nint thisValue = Variables.GetActiveFrameLocalValue(_pump.StopThread, slot);
+        nint thisValue = ResolveReceiverValue(thisLocalName);
         if (thisValue == 0) return EvalStatus.SetupFailed;
         try
         {
@@ -1056,6 +1041,26 @@ public sealed class DebugSession : IDisposable, IMemberResolver
         foreach (LocalName local in symbols.GetLocalNames(top.Token))
             if (local.Name == localName) return local.Slot;
         return -1;
+    }
+
+    /// <summary>Resolve a member-eval receiver by name to an OWNED ICorDebugValue (the caller releases
+    /// it): a named local at the top frame (PDB slot), or — failing that — an argument by its metadata
+    /// name (<c>this</c> + declared parameters, via <see cref="MethodMetadata.ArgumentNames"/>). A local
+    /// shadows a same-named argument (locals are the inner scope), matching the condition evaluator's
+    /// identifier resolution. 0 if neither resolves or there is no managed top frame.</summary>
+    private nint ResolveReceiverValue(string name)
+    {
+        int slot = ResolveLocalSlot(name);
+        if (slot >= 0) return Variables.GetActiveFrameLocalValue(_pump.StopThread, slot);
+
+        List<Interop.FrameInfo> frames = Frames.WalkManagedFrames(_pump.StopThread);
+        if (frames.Count == 0) return 0;
+        Interop.FrameInfo top = frames[0];
+        if (top.ModulePath.Length == 0 || (top.Token >> 24) != 0x06) return 0;
+        IReadOnlyList<string> argNames = MethodMetadata.ArgumentNames(top.ModulePath, top.Token);
+        for (int i = 0; i < argNames.Count; i++)
+            if (argNames[i] == name) return Variables.GetActiveFrameArgumentValue(_pump.StopThread, i);
+        return 0;
     }
 
     /// <summary>Resolve <paramref name="typeName"/>.<paramref name="methodName"/> in the module
