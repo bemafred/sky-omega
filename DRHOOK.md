@@ -204,6 +204,20 @@ Either way you get source breakpoints, **local names** (from the PDB) and **argu
 
 Before scripting around a tool, read its flags — `--help`, or `/?` on Windows. The MTP runner's real `--filter` / `--list-tests` / `--output` flags were found this way; guessing them wastes a cycle.
 
+## Lifecycle discipline & common pitfalls (for AI operators)
+
+> **Why this section exists.** DrHook is the first interactive debugger built for an LLM operator — there is no training corpus on *driving* a debugger, so the mistakes below are easy to make and **will recur every session unless they are written down**. This section is the training surface. Read it before a debugging session; these are real mistakes made while building the tool, not hypotheticals.
+
+- **No `Debugger.Break()` crutch.** `drhook_launch` takes a `sourceFile`+`line` and arms that breakpoint *before main runs* — the engine holds the target at the entry module's load (ADR-011 Layer-2 hold-gate, derived from the launched module) and binds it there. A `dotnet exec X.dll` launch stops **directly at your breakpoint with no `Debugger.Break()` in the target**. Inserting `Debugger.Break()` is an unnecessary crutch that also litters the source — rely on the launch's initial breakpoint. (A probe *smoke* that calls `DebugSession.Launch` directly gets the same hold-gate by passing `entryModule:`; only without it does it need a self-stop.)
+
+- **End sessions cleanly — `drhook_stop`, not `drhook_kill`.** A well-behaved target ends by running to completion (`drhook_continue` past the last breakpoint → `processExited`) or via `drhook_stop` (graceful SIGTERM-with-grace). **`drhook_kill` is the anomaly escape hatch** — every kill is worth investigating, because it means the target was *stuck*. Do not reach for `drhook_kill` to reset a demo or switch targets; `drhook_stop` does that cleanly. Only one session is active at a time (`drhook_launch`/`drhook_attach` refuse with "a stepping session is already active — use drhook_stop first").
+
+- **Process hygiene — check for orphans, clean them up.** A *failed* `drhook_launch` can leave the spawned target orphaned (dbgshim spawns it suspended, then the launch errors before cleanup); a session you don't end cleanly leaks one too. Periodically run `drhook_processes` and scan for orphaned debuggee targets (your `*-target` / apphost names, or unnamed suspended/`<defunct>` processes) and `kill <pid>` the strays from a shell. Leaked targets hold FDs and memory. (Reap `<defunct>` zombies by letting the parent exit; `kill` only the live `S`/`T`-state strays.)
+
+- **Single-file deployments are engine-validated but currently blocked through the live MCP.** A managed `PublishSingleFile` apphost debugs correctly at the *engine* level (the `single-file{,-embedded}` probes), but **launching *or* attaching to one through the `drhook_*` MCP tools currently fails with `HRESULT 0x80131C3C`** (dbgshim `LaunchWithDebuggerPosix` / `CreateDebuggingInterfaceFromVersion`). The identical `DebugSession.Launch` succeeds from a fresh `dotnet run` probe, so it is a dbgshim/mscordbi resolution difference in the long-lived MCP-server process context (under investigation — `poc/drhook-engine/findings/86-*`). Until fixed, validate single-file via the engine probes, not the live MCP tools.
+
+- **The launch's initial breakpoint isn't `drhook_break_remove`-able.** It is engine-registered (appears in `drhook_break_list`) but not in the MCP layer's removable set, so `drhook_break_remove` returns "not tracked at the MCP layer". Choose the launch's initial `line` deliberately — if you need a *conditional* breakpoint at that line, launch at a different one-shot line rather than trying to remove the initial one.
+
 ## Running the tests
 
 The repo has **two kinds** of test project, and on the .NET 10 SDK they run by **different commands**. Knowing which is which saves a confusing error.
