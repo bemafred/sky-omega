@@ -69,6 +69,24 @@ public sealed class SymbolReader : IDisposable
         }
     }
 
+    /// <summary>Open a sidecar Portable PDB by its OWN path (no PE). For a bundled single-file module
+    /// whose assembly has no standalone PE on disk — it loads from the bundle, so its reported module
+    /// path is a bare name — but whose <c>.pdb</c> sits next to the apphost (the PublishSingleFile
+    /// <c>DebugType=portable</c> shape). Returns null if absent or not a Portable PDB.</summary>
+    public static SymbolReader? TryOpenPdb(string pdbPath)
+    {
+        if (string.IsNullOrEmpty(pdbPath) || !File.Exists(pdbPath)) return null;
+        try
+        {
+            MetadataReaderProvider provider = MetadataReaderProvider.FromPortablePdbStream(File.OpenRead(pdbPath));
+            return new SymbolReader(provider, provider.GetMetadataReader(), null);
+        }
+        catch (Exception ex) when (ex is BadImageFormatException or IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
     /// <summary>Map an <c>mdMethodDef</c> token + IL offset to its source file and line (the line
     /// of the nearest sequence point at or before the offset). Null if unmapped.</summary>
     public SourceLocation? TryGetLine(int methodToken, int ilOffset)

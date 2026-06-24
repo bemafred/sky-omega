@@ -41,6 +41,7 @@ public sealed class DebugSession : IDisposable, IMemberResolver
     private int _disposed;  // 0 = live, 1 = disposed; atomic via Interlocked.Exchange (ENG-DS-1)
     private readonly bool _ownsTarget;  // true = Owned (substrate kills target on Dispose); false = Borrowed (detach-leave-running). Probe 44 + finding 64.
     private readonly Process? _targetProcess;  // non-null when _ownsTarget — substrate holds Process handle, kills internally on Dispose. Closes MCH-RE-2 (finding 63).
+    private readonly string? _imageBaseDir;    // directory of the launched/attached executable — where a single-file app's sidecar <module>.pdb lives when the bundled module has no on-disk PE.
 
     /// <summary>Settle window between Process.Kill and Quiesce/Detach. Empirically ~50–100 ms
     /// on macOS-arm64 lets mscordbi's RC event thread notice the exit before substrate teardown.</summary>
@@ -130,7 +131,7 @@ public sealed class DebugSession : IDisposable, IMemberResolver
     private DebugSession(int processId, DbgShim dbgShim, CallbackPump pump, ManagedCallbackHost callback,
                          ICorDebug cordbg, ICorDebugController controller, IDebugEventSink sink,
                          nint pUnknown, nint pProcess, bool ownsTarget, Process? targetProcess,
-                         TimeSpan naturalExitTimeout)
+                         TimeSpan naturalExitTimeout, string? imageBaseDir)
     {
         ProcessId = processId;
         _dbgShim = dbgShim;
@@ -144,6 +145,7 @@ public sealed class DebugSession : IDisposable, IMemberResolver
         _ownsTarget = ownsTarget;
         _targetProcess = targetProcess;
         _naturalExitTimeout = naturalExitTimeout;
+        _imageBaseDir = imageBaseDir;
     }
 
     /// <summary>OS process id of the attached target.</summary>
@@ -180,7 +182,7 @@ public sealed class DebugSession : IDisposable, IMemberResolver
             ThrowIfFailed(dbgShim.CreateCordbForProcess(processId, out pUnknown), "CreateDebuggingInterfaceFromVersion");
             // Borrowed sessions don't use naturalExitTimeout (substrate doesn't terminate them).
             // Pass DefaultNaturalExitTimeout for field initialization symmetry only.
-            return FromCordbg(dbgShim, sink, processId, pUnknown, ownsTarget: false, targetProcess: targetProcess, naturalExitTimeout: DefaultNaturalExitTimeout);
+            return FromCordbg(dbgShim, sink, processId, pUnknown, ownsTarget: false, targetProcess: targetProcess, naturalExitTimeout: DefaultNaturalExitTimeout, imageBaseDir: ImageDirOf(targetProcess));
         }
         catch
         {
@@ -218,7 +220,7 @@ public sealed class DebugSession : IDisposable, IMemberResolver
         {
             ThrowIfFailed(dbgShim.CreateCordbForProcess(processId, out pUnknown), "CreateDebuggingInterfaceFromVersion");
             return FromCordbg(dbgShim, sink, processId, pUnknown, ownsTarget: true, targetProcess: targetProcess,
-                naturalExitTimeout: naturalExitTimeout ?? DefaultNaturalExitTimeout);
+                naturalExitTimeout: naturalExitTimeout ?? DefaultNaturalExitTimeout, imageBaseDir: ImageDirOf(targetProcess));
         }
         catch
         {
@@ -252,6 +254,10 @@ public sealed class DebugSession : IDisposable, IMemberResolver
         nint pUnknown = 0;
         Process? targetProcess = null;
         int stdoutFd = -1, stderrFd = -1;
+        // For a single-file app the launched program IS the apphost, so its directory holds the
+        // sidecar <module>.pdb. (For `dotnet exec X.dll` program is the muxer — but those modules are
+        // on disk, so the SymbolsFor sidecar fallback never fires and this value goes unused.)
+        string? launchedImageDir = File.Exists(program) ? Path.GetDirectoryName(Path.GetFullPath(program)) : null;
         try
         {
             if (!OperatingSystem.IsWindows())
@@ -266,7 +272,7 @@ public sealed class DebugSession : IDisposable, IMemberResolver
                 try { targetProcess = Process.GetProcessById((int)pidPosix); } catch (ArgumentException) { /* exited already */ }
                 DebugSession session = FromCordbg(dbgShim, sink, (int)pidPosix, pUnknown, ownsTarget: true,
                     targetProcess: targetProcess, naturalExitTimeout: naturalExitTimeout ?? DefaultNaturalExitTimeout,
-                    entryModule: entryModule);
+                    entryModule: entryModule, imageBaseDir: launchedImageDir ?? ImageDirOf(targetProcess));
                 session.BeginConsoleDrain(stdoutFd, stderrFd);
                 return session;
             }
@@ -286,7 +292,8 @@ public sealed class DebugSession : IDisposable, IMemberResolver
                 "DbgShim.LaunchWithDebugger");
             try { targetProcess = Process.GetProcessById((int)pid); } catch (ArgumentException) { /* exited already */ }
             return FromCordbg(dbgShim, sink, (int)pid, pUnknown, ownsTarget: true, targetProcess: targetProcess,
-                naturalExitTimeout: naturalExitTimeout ?? DefaultNaturalExitTimeout, entryModule: entryModule);
+                naturalExitTimeout: naturalExitTimeout ?? DefaultNaturalExitTimeout, entryModule: entryModule,
+                imageBaseDir: launchedImageDir ?? ImageDirOf(targetProcess));
         }
         catch
         {
@@ -340,7 +347,15 @@ public sealed class DebugSession : IDisposable, IMemberResolver
     /// <summary>Shared post-cordbg setup: cast to <see cref="ICorDebug"/>, build the pump and
     /// callback vtable, register the handler, <c>DebugActiveProcess</c>, start the continue-loop.
     /// Same shape used by Attach and Launch.</summary>
-    private static DebugSession FromCordbg(DbgShim dbgShim, IDebugEventSink sink, int processId, nint pUnknown, bool ownsTarget, Process? targetProcess, TimeSpan naturalExitTimeout, string? entryModule = null)
+    /// <summary>Best-effort directory of a process's main executable — for locating a single-file
+    /// app's sidecar <c>.pdb</c> on Attach. Null if the main module can't be read (permissions/exited).</summary>
+    private static string? ImageDirOf(Process? process)
+    {
+        try { return process?.MainModule?.FileName is { } file ? Path.GetDirectoryName(file) : null; }
+        catch { return null; }
+    }
+
+    private static DebugSession FromCordbg(DbgShim dbgShim, IDebugEventSink sink, int processId, nint pUnknown, bool ownsTarget, Process? targetProcess, TimeSpan naturalExitTimeout, string? entryModule = null, string? imageBaseDir = null)
     {
         CallbackPump? pump = null;
         ManagedCallbackHost? callback = null;
@@ -380,7 +395,7 @@ public sealed class DebugSession : IDisposable, IMemberResolver
             // Construct the session before Start so the pump's per-LoadModule hook can call
             // session.TryBindPending (full pending-breakpoints). Start begins the worker; nothing
             // drains until then, so building the session first is race-free.
-            var session = new DebugSession(processId, dbgShim, pump, callback, cordbg, controller, sink, pUnknown, pProcess, ownsTarget, targetProcess, naturalExitTimeout);
+            var session = new DebugSession(processId, dbgShim, pump, callback, cordbg, controller, sink, pUnknown, pProcess, ownsTarget, targetProcess, naturalExitTimeout, imageBaseDir);
             pump.Start(
                 (kind, thread) =>
                 {
@@ -709,6 +724,11 @@ public sealed class DebugSession : IDisposable, IMemberResolver
         if (!_symbols.TryGetValue(modulePath, out SymbolReader? reader))
         {
             reader = SymbolReader.TryOpen(modulePath);
+            // Single-file/bundled module: the assembly loads from the bundle, so its reported path is a
+            // bare name with no on-disk PE. Fall back to a sidecar <imageDir>/<name>.pdb next to the
+            // launched/attached executable, where PublishSingleFile (DebugType=portable) drops it.
+            if (reader is null && _imageBaseDir is not null && !File.Exists(modulePath))
+                reader = SymbolReader.TryOpenPdb(Path.Combine(_imageBaseDir, Path.GetFileNameWithoutExtension(modulePath) + ".pdb"));
             _symbols[modulePath] = reader;
         }
         return reader;
