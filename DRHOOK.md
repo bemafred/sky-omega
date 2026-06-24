@@ -159,7 +159,7 @@ Both target kinds must be **Debug-compiled** — a Release build optimizes away 
 ### The two kinds
 
 - **Stand-alone compiled target** — a built `.dll`. Pre-build (`dotnet build … -c Debug`), then `drhook_launch` (own the process) or `drhook_attach` (borrow a running one).
-- **Single-file app / tool / harness** — a `.cs` file-based app (`#:project …`) that `dotnet run` builds. The probe corpus is this kind; a harness usually **spawns its target and attaches** (`poc/drhook-inspection-robustness/adr014-*`). Debug-compiled by default.
+- **Single-file app / tool / harness** — a `.cs` file-based app (`#:project …`) that `dotnet run` builds (a *file-based* app — distinct from a `PublishSingleFile` *deployment*, covered in [Single-file deployments](#single-file-deployments-publishsinglefile) below). The probe corpus is this kind; a harness usually **spawns its target and attaches** (`poc/drhook-inspection-robustness/adr014-*`). Debug-compiled by default.
 
 ### Manage the file-based-app cache when iterating
 
@@ -182,6 +182,24 @@ new ProcessStartInfo("dotnet", $"run --no-cache --file \"{targetPath}\"")
 - **Type names are namespace-qualified** (`SkyOmega.Mercury.Sparql.Types.BindingTable`, not `BindingTable`), and **private methods resolve fine** — metadata ignores accessibility, so you can break in `EnsureStringCapacity`.
 - **The module hint is a substring, resolved most-specific-first** — `"Mercury"` resolves to `SkyOmega.Mercury.dll`, not `.Abstractions`/`.Runtime` (ADR-014 taught `FindModule` to prefer an exact assembly-name / trailing-namespace-segment match over the old first-substring-wins). A unique substring still resolves to its one match.
 
+### Single-file *deployments* (`PublishSingleFile`)
+
+Distinct from the file-based "single-file app / harness" above: a **`PublishSingleFile=true`** deployment bundles the managed assemblies into one native apphost. DrHook debugs these — **launch the apphost directly**, not via `dotnet exec`:
+
+```bash
+dotnet publish App.csproj -c Debug -r osx-arm64 --self-contained false -p:PublishSingleFile=true
+drhook_launch: program=path/to/publish/App, args=[], sourceFile=…, line=…   # the apphost itself, no "dotnet exec"
+```
+
+It works because the app still runs on CoreCLR, so ICorDebug attaches. The wrinkle is symbols: the app assembly loads **from the bundle**, so ICorDebug reports it by a bare name with **no on-disk PE**. DrHook recovers the symbols automatically, keyed on `DebugType`:
+
+- **`DebugType=portable`** (the default) — DrHook reads the sidecar `App.pdb` next to the apphost.
+- **`DebugType=embedded`** — the PDB is inside the bundle; DrHook reads the loaded module's PE image from target memory and extracts the embedded PDB.
+
+Either way you get source breakpoints, **local names** (from the PDB) and **argument names** (resolved from the loaded module's metadata, since the `Param` table is in the bundle, not the PDB). Still **Debug-compiled** — a Release single-file optimizes away locals and sequence points. See [finding 85](poc/drhook-engine/findings/85-single-file-breakpoints.md) and the `single-file{,-embedded}-smoke.cs` probes.
+
+**NativeAOT is _not_ debuggable.** It compiles to native machine code with **no managed runtime**, so ICorDebug doesn't apply — use native tooling (lldb / the `.dSYM`). Watch out: **`dotnet publish app.cs` on a file-based app defaults to NativeAOT** — pass `-p:PublishAot=false -p:PublishSingleFile=true` to get a debuggable *managed* single file.
+
 ### Check the flags first
 
 Before scripting around a tool, read its flags — `--help`, or `/?` on Windows. The MTP runner's real `--filter` / `--list-tests` / `--output` flags were found this way; guessing them wastes a cycle.
@@ -197,7 +215,7 @@ The repo has **two kinds** of test project, and on the .NET 10 SDK they run by *
 | Project | Command | Count |
 |---------|---------|-------|
 | Mercury (W3C conformance + unit) | `dotnet test tests/Mercury.Tests/Mercury.Tests.csproj` | ~4,700 |
-| DrHook.Engine (unit) | `dotnet test tests/DrHook.Engine.Tests/DrHook.Engine.Tests.csproj` | 119 |
+| DrHook.Engine (unit) | `dotnet test tests/DrHook.Engine.Tests/DrHook.Engine.Tests.csproj` | 130 |
 | Mercury.Solid | `dotnet test tests/Mercury.Solid.Tests/Mercury.Solid.Tests.csproj` | — |
 | SkyOmega.Bcl | `dotnet test tests/SkyOmega.Bcl.Tests/SkyOmega.Bcl.Tests.csproj` | — |
 
