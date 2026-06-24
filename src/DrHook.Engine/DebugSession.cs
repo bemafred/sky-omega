@@ -725,10 +725,24 @@ public sealed class DebugSession : IDisposable, IMemberResolver
         {
             reader = SymbolReader.TryOpen(modulePath);
             // Single-file/bundled module: the assembly loads from the bundle, so its reported path is a
-            // bare name with no on-disk PE. Fall back to a sidecar <imageDir>/<name>.pdb next to the
-            // launched/attached executable, where PublishSingleFile (DebugType=portable) drops it.
-            if (reader is null && _imageBaseDir is not null && !File.Exists(modulePath))
-                reader = SymbolReader.TryOpenPdb(Path.Combine(_imageBaseDir, Path.GetFileNameWithoutExtension(modulePath) + ".pdb"));
+            // bare name with no on-disk PE. Two single-file shapes to recover from:
+            if (reader is null && !File.Exists(modulePath))
+            {
+                //  (1) DebugType=portable — a sidecar <imageDir>/<name>.pdb next to the apphost.
+                if (_imageBaseDir is not null)
+                    reader = SymbolReader.TryOpenPdb(Path.Combine(_imageBaseDir, Path.GetFileNameWithoutExtension(modulePath) + ".pdb"));
+                //  (2) DebugType=embedded — the PDB is embedded in the bundled assembly; read the loaded
+                //      PE image from target memory and extract it (no sidecar, no on-disk PE).
+                if (reader is null)
+                {
+                    nint pModule = RuntimeNavigation.FindModule(_pProcess, modulePath);
+                    if (pModule != 0)
+                    {
+                        try { reader = SymbolReader.TryOpenEmbeddedFromImage(ModuleImage.Read(_pProcess, pModule)); }
+                        finally { RuntimeNavigation.Release(pModule); }
+                    }
+                }
+            }
             _symbols[modulePath] = reader;
         }
         return reader;

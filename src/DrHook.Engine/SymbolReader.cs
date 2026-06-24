@@ -87,6 +87,39 @@ public sealed class SymbolReader : IDisposable
         }
     }
 
+    /// <summary>Open the EMBEDDED Portable PDB from a module's LOADED PE image (read from the target's
+    /// memory by <see cref="Interop.ModuleImage"/>) — for a <c>DebugType=embedded</c> single-file app
+    /// whose assembly has no on-disk PE and no sidecar <c>.pdb</c>. The bytes are the loaded, section-
+    /// mapped image, so the PE is opened with <see cref="PEStreamOptions.IsLoadedImage"/>. Returns null
+    /// if the image has no embedded Portable PDB or can't be parsed.</summary>
+    public static SymbolReader? TryOpenEmbeddedFromImage(byte[]? loadedImage)
+    {
+        if (loadedImage is null || loadedImage.Length == 0) return null;
+        // A single-file bundled assembly is held in FILE layout (flat, as stored in the bundle), so
+        // parse that first; fall back to the section-mapped IsLoadedImage layout for a normally-mapped
+        // image. PrefetchEntireImage copies the bytes so the backing MemoryStream needn't outlive this.
+        foreach (PEStreamOptions options in new[] { PEStreamOptions.PrefetchEntireImage, PEStreamOptions.IsLoadedImage | PEStreamOptions.PrefetchEntireImage })
+        {
+            PEReader? pe = null;
+            try
+            {
+                pe = new PEReader(new MemoryStream(loadedImage), options);
+                foreach (DebugDirectoryEntry entry in pe.ReadDebugDirectory())
+                {
+                    if (entry.Type != DebugDirectoryEntryType.EmbeddedPortablePdb) continue;
+                    MetadataReaderProvider embedded = pe.ReadEmbeddedPortablePdbDebugDirectoryData(entry);
+                    return new SymbolReader(embedded, embedded.GetMetadataReader(), pe); // keep pe alive
+                }
+                pe.Dispose();
+            }
+            catch (Exception ex) when (ex is BadImageFormatException or IOException or InvalidOperationException)
+            {
+                pe?.Dispose();
+            }
+        }
+        return null;
+    }
+
     /// <summary>Map an <c>mdMethodDef</c> token + IL offset to its source file and line (the line
     /// of the nearest sequence point at or before the offset). Null if unmapped.</summary>
     public SourceLocation? TryGetLine(int methodToken, int ilOffset)

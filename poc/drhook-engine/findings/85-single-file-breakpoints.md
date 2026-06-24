@@ -1,8 +1,9 @@
 # Finding 85 — Source breakpoints in managed PublishSingleFile apps (sidecar-PDB fallback) + the single-file landscape
 
 **Date:** 2026-06-24
-**Status:** Engine + probe validated for managed single-file **binding + local names + argument names**.
-Remaining residuals below — one deeper (embedded-PDB-in-bundle), one structural (NativeAOT).
+**Status:** Engine + probe validated for managed single-file — **binding + local names + argument
+names** — for both **DebugType=portable** (sidecar PDB) and **DebugType=embedded** (PDB in the bundle).
+Only NativeAOT remains unsupported (structural).
 **Probe:** `poc/drhook-engine/single-file-smoke.cs` + `single-file-target/`
 
 ## The two "single-file" meanings (an important distinction)
@@ -51,11 +52,20 @@ sequence point and the local), launch the apphost, arm a source breakpoint → *
 Full `DrHook.Engine.Tests` **130/130**, no regression; the normal file-based path is unaffected (its
 modules are on disk, so the COM fallback never fires).
 
-## Remaining residuals
+## Embedded PDB (`DebugType=embedded`)
 
-1. **`DebugType=embedded` single-file** (PDB embedded in the bundled assembly, no sidecar) — DrHook
-   can't read the embedded PDB off-disk; would need to read assembly bytes via ICorDebug. Unverified; deeper.
-2. **NativeAOT** — structural not-supported (above).
+When the PDB is **embedded in the bundled assembly** (no sidecar, no on-disk PE), DrHook reads the
+loaded module's **PE image from target memory** — `ModuleImage.Read` (ICorDebugModule `GetBaseAddress`
+slot 4 + `GetSize` slot 18; ICorDebugProcess `ReadMemory` slot 21) — and extracts the embedded Portable
+PDB via `SymbolReader.TryOpenEmbeddedFromImage`. The bundled assembly is held in **file layout** (flat,
+as stored in the bundle), so the PE is parsed with `PrefetchEntireImage` (**not** `IsLoadedImage`; the
+section-mapped layout is tried only as a fallback). Validated by the `single-file-embedded` probe:
+published `-p:DebugType=embedded` (no sidecar), breakpoint **bound + hit**, `doubled=14` (from the
+memory-extracted embedded PDB) + `seed=7` (IMetaDataImport — same path as the portable case).
+
+## Remaining residual
+
+**NativeAOT** — structural not-supported (above): no managed runtime, no ICorDebug. Not a gap to close.
 
 ## References
 
