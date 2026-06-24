@@ -762,7 +762,20 @@ public sealed class DebugSession : IDisposable, IMemberResolver
         {
             Interop.FrameInfo top = frames[0];
             if (top.ModulePath.Length > 0 && (top.Token >> 24) == 0x06)
+            {
                 argNames = MethodMetadata.ArgumentNames(top.ModulePath, top.Token);
+                // Single-file/bundled module: the assembly has no on-disk PE for the file-based reader,
+                // so read the parameter names from the LOADED module's metadata (IMetaDataImport).
+                if (argNames.Count == 0 && !File.Exists(top.ModulePath))
+                {
+                    nint pModule = RuntimeNavigation.FindModule(_pProcess, top.ModulePath);
+                    if (pModule != 0)
+                    {
+                        try { argNames = MetadataResolver.ArgumentNames(pModule, (uint)top.Token); }
+                        finally { RuntimeNavigation.Release(pModule); }
+                    }
+                }
+            }
         }
         return Variables.ReadActiveFrameArguments(_pump.StopThread, argNames, 16, depth);
     }

@@ -9,8 +9,8 @@
 // reports its module path as a bare NAME with no on-disk PE — SymbolReader.TryOpen fails. The fix:
 // DebugSession falls back to the sidecar <imageDir>/<module>.pdb next to the apphost (where
 // DebugType=portable drops it), via SymbolReader.TryOpenPdb. Local names resolve from that PDB.
-// (Argument NAMES still come from the assembly Param table, which is inside the bundle, not the PDB —
-// so they remain positional for single-file until a loaded-module-metadata path is added; tracked.)
+// Argument NAMES come from the assembly Param table (inside the bundle, not the PDB) — read from the
+// LOADED module's metadata via ICorDebug IMetaDataImport (MetadataResolver.ArgumentNames).
 //
 // Construction: publish single-file-target as a framework-dependent single file, launch the apphost
 // directly (it starts CoreCLR — ICorDebug attaches), take the Debugger.Break setup stop, arm a source
@@ -89,13 +89,15 @@ static class SingleFile
         { Console.Error.WriteLine($"FALSIFIED (hit): {(hit?.Reason.ToString() ?? "timeout")} — breakpoint never fired."); return 7; }
 
         List<LocalValue> locals = session.GetLocals().ToList();
-        string argView = string.Join(", ", session.GetArguments().Select(a => $"{a.Name}={a.RawValue}"));
-        Console.WriteLine($"HIT        : args=[{argView}]  locals=[{string.Join(", ", locals.Select(l => $"{l.Name}={l.RawValue}"))}]");
+        List<ArgumentValue> args = session.GetArguments().ToList();
+        Console.WriteLine($"HIT        : args=[{string.Join(", ", args.Select(a => $"{a.Name}={a.RawValue}"))}]  locals=[{string.Join(", ", locals.Select(l => $"{l.Name}={l.RawValue}"))}]");
 
         if (!locals.Any(l => l.Name == "doubled" && l.RawValue is int v && v == 14))
         { Console.Error.WriteLine("FALSIFIED: local 'doubled'==14 not resolved from the sidecar PDB."); return 8; }
+        if (!args.Any(a => a.Name == "seed" && a.RawValue is int s && s == 7))
+        { Console.Error.WriteLine($"FALSIFIED: argument 'seed'==7 not resolved from the loaded-module metadata; got [{string.Join(", ", args.Select(a => a.Name))}]."); return 8; }
 
-        Console.WriteLine("\nPROBE PASSED — managed single-file source breakpoint BOUND + HIT via the sidecar-PDB fallback; local 'doubled'=14 resolved from the sidecar PDB. (Argument names are positional for single-file — Param table is in the bundle; loaded-module-metadata path is the tracked follow-on.)");
+        Console.WriteLine("\nPROBE PASSED — managed single-file: source breakpoint BOUND + HIT; local 'doubled'=14 from the sidecar PDB; argument 'seed'=7 from the loaded-module metadata (IMetaDataImport). Full single-file inspection works.");
         return 0;
     }
 

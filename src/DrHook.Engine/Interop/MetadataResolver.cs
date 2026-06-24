@@ -21,7 +21,10 @@ internal static unsafe class MetadataResolver
     private const int FindTypeDefByName = 9;
     private const int GetTypeDefProps = 12;
     private const int EnumMethodsWithName = 19;
+    private const int EnumParams = 22;
     private const int GetMethodProps = 30;
+    private const int GetParamProps = 59;
+    private const uint mdStatic = 0x0010; // CorMethodAttr — a static method has no `this` receiver
 
     private static nint Slot(nint pUnk, int index) => ((nint*)*(nint*)pUnk)[index];
 
@@ -83,6 +86,65 @@ internal static unsafe class MetadataResolver
             string method = ToName(nameBuf, chName);
             string type = TypeName(pImport, classToken);
             return type.Length == 0 ? method : $"{type}.{method}";
+        }
+        finally { Release(pImport); }
+    }
+
+    /// <summary>Ordered argument names of an <c>mdMethodDef</c> from the LOADED module's metadata via
+    /// IMetaDataImport — the bundle-resident counterpart to the file-based
+    /// <see cref="MethodMetadata.ArgumentNames"/>, for a single-file app whose assembly has no on-disk
+    /// PE. Aligned to <c>ICorDebugILFrame.GetArgument(i)</c>: index 0 is <c>this</c> for an instance
+    /// method (from the method's <c>mdStatic</c> attribute), then declared parameters by sequence
+    /// number. Empty entries (no name) fall back positionally at the caller. Empty list if metadata is
+    /// unavailable or the token is not a method.</summary>
+    public static IReadOnlyList<string> ArgumentNames(nint pModule, uint methodToken)
+    {
+        if ((methodToken >> 24) != 0x06) return Array.Empty<string>();
+        nint pImport = GetMetaDataImport(pModule);
+        if (pImport == 0) return Array.Empty<string>();
+        try
+        {
+            // HasThis: the method's attributes carry mdStatic. GetMethodProps' signature matches MethodName's.
+            var getMethodProps = (delegate* unmanaged[Cdecl]<nint, uint, uint*, char*, uint, uint*, uint*, nint*, uint*, uint*, uint*, int>)Slot(pImport, GetMethodProps);
+            uint classToken = 0, chMethod = 0, attr = 0, cbSig = 0, rva = 0, impl = 0;
+            nint sig = 0;
+            char* methodName = stackalloc char[512]; // name not needed here, but give the API a real buffer
+            if (getMethodProps(pImport, methodToken, &classToken, methodName, 512, &chMethod, &attr, &sig, &cbSig, &rva, &impl) < 0)
+                return Array.Empty<string>();
+            bool hasThis = (attr & mdStatic) == 0;
+
+            // IMetaDataImport.EnumParams(HCORENUM* phEnum, mdMethodDef mb, mdParamDef rParams[], ULONG cMax, ULONG* pcTokens)
+            var enumParams = (delegate* unmanaged[Cdecl]<nint, nint*, uint, uint*, uint, uint*, int>)Slot(pImport, EnumParams);
+            // IMetaDataImport.GetParamProps(mdParamDef tk, mdMethodDef* pmd, ULONG* pulSequence, LPWSTR szName,
+            //   ULONG cchName, ULONG* pchName, DWORD* pdwAttr, DWORD* pdwCPlusTypeFlag, UVCP_CONSTANT* ppValue, ULONG* pcchValue)
+            var getParamProps = (delegate* unmanaged[Cdecl]<nint, uint, uint*, uint*, char*, uint, uint*, uint*, uint*, nint*, uint*, int>)Slot(pImport, GetParamProps);
+            var closeEnum = (delegate* unmanaged[Cdecl]<nint, nint, void>)Slot(pImport, CloseEnum);
+
+            Dictionary<int, string> bySequence = new();
+            int maxSequence = 0;
+            nint hEnum = 0;
+            uint* paramTokens = stackalloc uint[64];
+            uint fetched = 0;
+            if (enumParams(pImport, &hEnum, methodToken, paramTokens, 64, &fetched) >= 0)
+            {
+                char* nameBuf = stackalloc char[512];
+                for (uint i = 0; i < fetched; i++)
+                {
+                    uint pmd = 0, seq = 0, pchName = 0, pAttr = 0, cpType = 0, pcchValue = 0;
+                    nint ppValue = 0;
+                    if (getParamProps(pImport, paramTokens[i], &pmd, &seq, nameBuf, 512, &pchName, &pAttr, &cpType, &ppValue, &pcchValue) < 0) continue;
+                    if (seq == 0) continue; // sequence 0 is the return value, not an argument
+                    bySequence[(int)seq] = ToName(nameBuf, pchName);
+                    if ((int)seq > maxSequence) maxSequence = (int)seq;
+                }
+            }
+            closeEnum(pImport, hEnum);
+
+            List<string> ordered = new();
+            if (hasThis) ordered.Add("this");
+            for (int seq = 1; seq <= maxSequence; seq++)
+                ordered.Add(bySequence.TryGetValue(seq, out string? name) ? name : "");
+            return ordered;
         }
         finally { Release(pImport); }
     }
