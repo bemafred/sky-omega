@@ -220,6 +220,7 @@ public sealed class EngineSteppingSession : IDisposable
             JsonObject result = new()
             {
                 ["status"] = "attached",
+                ["lockedRuntime"] = DebugSession.ProcessRuntimeMajor is { } major ? $".NET {major}" : "unspecified",
                 ["pid"] = pid,
                 ["assemblyVersion"] = _targetVersion,
                 ["breakpoint"] = new JsonObject { ["file"] = sourceFile, ["line"] = line },
@@ -298,6 +299,7 @@ public sealed class EngineSteppingSession : IDisposable
             JsonObject result = new()
             {
                 ["status"] = "launched",
+                ["lockedRuntime"] = DebugSession.ProcessRuntimeMajor is { } major ? $".NET {major}" : "unspecified",
                 ["program"] = program,
                 ["args"] = new JsonArray(args.Select(a => (JsonNode)JsonValue.Create(a)!).ToArray()),
                 ["assemblyVersion"] = _targetVersion,

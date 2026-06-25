@@ -43,6 +43,12 @@ public sealed class DebugSession : IDisposable, IMemberResolver
     private readonly Process? _targetProcess;  // non-null when _ownsTarget — substrate holds Process handle, kills internally on Dispose. Closes MCH-RE-2 (finding 63).
     private readonly string? _imageBaseDir;    // directory of the launched/attached executable — where a single-file app's sidecar <module>.pdb lives when the bundled module has no on-disk PE.
 
+    // The .NET runtime MAJOR this debugger PROCESS is locked to — the first target it debugged. dbgshim
+    // loads that version's mscordbi/DAC process-globally and they never unload (persist across Dispose),
+    // so a later target on a different major fails inside dbgshim with 0x80131C3C. Set once after the
+    // first successful attach; GuardRuntimeLock refuses mismatches up front. Finding 86.
+    private static int? _processRuntimeMajor;
+
     /// <summary>Settle window between Process.Kill and Quiesce/Detach. Empirically ~50–100 ms
     /// on macOS-arm64 lets mscordbi's RC event thread notice the exit before substrate teardown.</summary>
     private const int KillSettleMs = 100;
@@ -179,10 +185,13 @@ public sealed class DebugSession : IDisposable, IMemberResolver
         nint pUnknown = 0;
         try
         {
+            // Refuse a runtime-major mismatch before dbgshim attaches (finding 86) — clear error, no leak.
+            int? targetRuntimeMajor = RuntimeMajorOf(targetProcess);
+            GuardRuntimeLock(targetRuntimeMajor);
             ThrowIfFailed(dbgShim.CreateCordbForProcess(processId, out pUnknown), "CreateDebuggingInterfaceFromVersion");
             // Borrowed sessions don't use naturalExitTimeout (substrate doesn't terminate them).
             // Pass DefaultNaturalExitTimeout for field initialization symmetry only.
-            return FromCordbg(dbgShim, sink, processId, pUnknown, ownsTarget: false, targetProcess: targetProcess, naturalExitTimeout: DefaultNaturalExitTimeout, imageBaseDir: ImageDirOf(targetProcess));
+            return FromCordbg(dbgShim, sink, processId, pUnknown, ownsTarget: false, targetProcess: targetProcess, naturalExitTimeout: DefaultNaturalExitTimeout, imageBaseDir: ImageDirOf(targetProcess), targetRuntimeMajor: targetRuntimeMajor);
         }
         catch
         {
@@ -218,9 +227,12 @@ public sealed class DebugSession : IDisposable, IMemberResolver
         nint pUnknown = 0;
         try
         {
+            // Refuse a runtime-major mismatch before dbgshim attaches (finding 86) — clear error, no leak.
+            int? targetRuntimeMajor = RuntimeMajorOf(targetProcess);
+            GuardRuntimeLock(targetRuntimeMajor);
             ThrowIfFailed(dbgShim.CreateCordbForProcess(processId, out pUnknown), "CreateDebuggingInterfaceFromVersion");
             return FromCordbg(dbgShim, sink, processId, pUnknown, ownsTarget: true, targetProcess: targetProcess,
-                naturalExitTimeout: naturalExitTimeout ?? DefaultNaturalExitTimeout, imageBaseDir: ImageDirOf(targetProcess));
+                naturalExitTimeout: naturalExitTimeout ?? DefaultNaturalExitTimeout, imageBaseDir: ImageDirOf(targetProcess), targetRuntimeMajor: targetRuntimeMajor);
         }
         catch
         {
@@ -258,6 +270,10 @@ public sealed class DebugSession : IDisposable, IMemberResolver
         // sidecar <module>.pdb. (For `dotnet exec X.dll` program is the muxer — but those modules are
         // on disk, so the SymbolsFor sidecar fallback never fires and this value goes unused.)
         string? launchedImageDir = File.Exists(program) ? Path.GetDirectoryName(Path.GetFullPath(program)) : null;
+        // Refuse a runtime-major mismatch before dbgshim spawns the target (finding 86) — clear error, no
+        // leaked suspended spawn. Detected from the target's runtimeconfig.json (the .dll arg, else the apphost).
+        int? targetRuntimeMajor = RuntimeConfig.MajorOfLaunchTarget(program, args);
+        GuardRuntimeLock(targetRuntimeMajor);
         try
         {
             if (!OperatingSystem.IsWindows())
@@ -272,7 +288,7 @@ public sealed class DebugSession : IDisposable, IMemberResolver
                 try { targetProcess = Process.GetProcessById((int)pidPosix); } catch (ArgumentException) { /* exited already */ }
                 DebugSession session = FromCordbg(dbgShim, sink, (int)pidPosix, pUnknown, ownsTarget: true,
                     targetProcess: targetProcess, naturalExitTimeout: naturalExitTimeout ?? DefaultNaturalExitTimeout,
-                    entryModule: entryModule, imageBaseDir: launchedImageDir ?? ImageDirOf(targetProcess));
+                    entryModule: entryModule, imageBaseDir: launchedImageDir ?? ImageDirOf(targetProcess), targetRuntimeMajor: targetRuntimeMajor);
                 session.BeginConsoleDrain(stdoutFd, stderrFd);
                 return session;
             }
@@ -293,7 +309,7 @@ public sealed class DebugSession : IDisposable, IMemberResolver
             try { targetProcess = Process.GetProcessById((int)pid); } catch (ArgumentException) { /* exited already */ }
             return FromCordbg(dbgShim, sink, (int)pid, pUnknown, ownsTarget: true, targetProcess: targetProcess,
                 naturalExitTimeout: naturalExitTimeout ?? DefaultNaturalExitTimeout, entryModule: entryModule,
-                imageBaseDir: launchedImageDir ?? ImageDirOf(targetProcess));
+                imageBaseDir: launchedImageDir ?? ImageDirOf(targetProcess), targetRuntimeMajor: targetRuntimeMajor);
         }
         catch
         {
@@ -355,7 +371,37 @@ public sealed class DebugSession : IDisposable, IMemberResolver
         catch { return null; }
     }
 
-    private static DebugSession FromCordbg(DbgShim dbgShim, IDebugEventSink sink, int processId, nint pUnknown, bool ownsTarget, Process? targetProcess, TimeSpan naturalExitTimeout, string? entryModule = null, string? imageBaseDir = null)
+    /// <summary>The .NET runtime MAJOR this debugger process is locked to (the first target it
+    /// debugged), or null if it hasn't debugged anything yet. Surfaced so the MCP can report which
+    /// runtime the live server is bound to. Finding 86.</summary>
+    public static int? ProcessRuntimeMajor => _processRuntimeMajor;
+
+    /// <summary>The target's .NET runtime MAJOR from its main module's <c>runtimeconfig.json</c>, for
+    /// the attach paths (a <see cref="Process"/> but no program/args). Null if undetectable.</summary>
+    private static int? RuntimeMajorOf(Process? process)
+    {
+        try { return process?.MainModule?.FileName is { } file ? RuntimeConfig.MajorOfImage(file) : null; }
+        catch { return null; }
+    }
+
+    /// <summary>A debugger PROCESS can host the debug components (mscordbi/DAC) of only ONE .NET runtime
+    /// major (finding 86): the first target debugged loads them process-globally and they never unload.
+    /// Refuse a mismatched launch/attach UP FRONT — before dbgshim spawns/attaches — so the caller gets
+    /// an actionable message instead of a late <c>CORDBG_E_DEBUG_COMPONENT_MISSING</c> (0x80131C3C) plus
+    /// a leaked suspended spawn. A null (undetectable) target is permitted — never block on uncertainty.</summary>
+    private static void GuardRuntimeLock(int? targetMajor)
+    {
+        if (_processRuntimeMajor is { } locked && targetMajor is { } target && target != locked)
+            throw new InvalidOperationException(
+                $"This DrHook debugger process is locked to .NET {locked} — the runtime of the first target it " +
+                $"debugged — and cannot also debug a .NET {target} target: a debugger process can host only one " +
+                $"runtime version's debug components (ICorDebug/mscordbi, finding 86; the masked failure is " +
+                $"CORDBG_E_DEBUG_COMPONENT_MISSING / 0x80131C3C). Reconnect/restart the DrHook server to debug a " +
+                $".NET {target} target, or pin this target to net{locked}.0 (for a file-based app: " +
+                $"#:property TargetFramework=net{locked}.0).");
+    }
+
+    private static DebugSession FromCordbg(DbgShim dbgShim, IDebugEventSink sink, int processId, nint pUnknown, bool ownsTarget, Process? targetProcess, TimeSpan naturalExitTimeout, string? entryModule = null, string? imageBaseDir = null, int? targetRuntimeMajor = null)
     {
         CallbackPump? pump = null;
         ManagedCallbackHost? callback = null;
@@ -405,6 +451,9 @@ public sealed class DebugSession : IDisposable, IMemberResolver
                 () => controller.Stop(0),
                 moduleHold,
                 session.TryBindPending);
+            // First successful attach locks this PROCESS to the target's runtime major — dbgshim has now
+            // loaded that version's mscordbi/DAC, and they never unload. Finding 86.
+            _processRuntimeMajor ??= targetRuntimeMajor;
             return session;
         }
         catch
