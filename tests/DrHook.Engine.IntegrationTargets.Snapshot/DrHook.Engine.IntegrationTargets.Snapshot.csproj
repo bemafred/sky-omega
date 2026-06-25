@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Layer 3 — LAUNCHABLE INTEGRATION TARGET for the ADR-012 Phase 1 CaptureState snapshot test.
+
+    Unlike the MTP / VSTest integration targets (which are test-host executables the substrate ATTACHES
+    to, using Debugger.Break + a READY handshake), this is a plain console app the substrate LAUNCHES via
+    DebugSession.Launch + the entry-module hold-gate — so it needs no Debugger.Break/READY plumbing. It
+    exposes Worker.Compute(n, label): a two-frame call stack with named arguments and named locals at the
+    marked code line, giving CaptureState a rich, self-contained snapshot to assemble.
+
+    Built as a sibling artifact via the test project's ProjectReference (ReferenceOutputAssembly=false);
+    located at test time by IntegrationTargetPaths.SnapshotTargetDll().
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <Nullable>enable</Nullable>
+    <AssemblyName>DrHookSnapshotTarget</AssemblyName>
+    <RootNamespace>DrHook.Engine.IntegrationTargets.Snapshot</RootNamespace>
+  </PropertyGroup>
+
+</Project>
