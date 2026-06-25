@@ -83,6 +83,21 @@ public sealed class BoundedConsoleSink : IDebugEventSink
         }
     }
 
+    /// <summary>Non-destructively read the buffered chunks (newest last) + the dropped count, WITHOUT
+    /// clearing — for an inspection snapshot (ADR-012 Phase 1 / <see cref="DebugSession.CaptureState"/>) that
+    /// must not consume records the <c>drhook_drain_console</c> tool still owns. Same shape as
+    /// <see cref="Drain"/>; the buffer and dropped counter are left intact.</summary>
+    public ConsoleDrainResult Peek()
+    {
+        lock (_lock)
+        {
+            ConsoleOutputRecord[] records = new ConsoleOutputRecord[_buffer.Count];
+            int i = 0;
+            foreach (ConsoleOutputRecord r in _buffer) records[i++] = r;
+            return new ConsoleDrainResult(records, _dropped);
+        }
+    }
+
     /// <summary>Drop all buffered chunks and the dropped counter — called when a NEW debug session
     /// starts so its drains reflect only that session. (The buffer intentionally survives a session's
     /// END for a final drain; this resets it at the next session's START.)</summary>

@@ -82,7 +82,7 @@ The **debug-state model and the transport are BCL-only** — they are substrate,
 
 ## Phasing (EEE — one unknown per phase; discover the rest in use)
 
-1. **Phase 1 — The model + a read-only tap.** Promote the piecemeal queryable state into one unified **snapshot** type and formalize the **delta stream** atop `IDebugEventSink`. Prove it by adding a sink to the existing `CompositeEventSink` that logs the unified stream. Pure substrate; smallest.
+1. **Phase 1 — The model + a read-only tap.** Promote the piecemeal queryable state into one unified **snapshot** type and formalize the **delta stream** atop `IDebugEventSink`. Prove it by adding a sink to the existing `CompositeEventSink` that logs the unified stream. The snapshot must be **self-contained enough for a view connecting mid-session to render full current state from it alone** (consequence of the 2026-06-25 ownership directive — a human-launched view joins an already-running session), then stay live on the delta stream. Pure substrate; smallest.
 2. **Phase 2 — The transport (read-only).** Publish the stream over a local socket; a trivial consumer (`drhook-tail`, prints deltas) proves **multiple live consumers decoupled from the MCP channel**. The urgent correctness property: the MCP JSON-RPC channel stays clean (the D2 lesson generalized).
 3. **Phase 3 — Record the braid (D4).** Begin persisting `(hypothesis, observation)` pairs into the model; surface them on the tap.
 4. **Phase 4 — The TUI dashboard, read-only.** Render the model — execution position, stack, locals, breakpoints, console/log/anomaly streams, and the braid.
@@ -91,12 +91,15 @@ The **debug-state model and the transport are BCL-only** — they are substrate,
 
 ## Open questions (resolve before Proposed → Accepted)
 
-1. **Transport topology** — MCP-server-as-host (publishes the stream + accepts commands) vs a separate DrHook host/broker both the MCP server and the dashboard connect to? Lighter-now vs cleaner-long-term.
-2. **TUI technology** — BCL-`Console`-only (sovereign, "simple") vs a TUI library? (Avalonia is settled for the GUI.)
-3. **Shared-session control semantics (D5)** — how do agent and human commands serialize and display? What happens to an in-flight agent operation when the human continues/stops? Is there an explicit "who holds the stop" notion, or pure FIFO?
-4. **Wire format** — a JSON line-protocol over the socket, a binary frame, or a reuse of the existing MCP/tool JSON shapes?
-5. **Console (PTY) + debug-state in one surface?** — does the dashboard also host the debuggee's PTY (ADR-011 D4), giving one surface for both the program's console *and* the debug-state, or are they separate panes/processes?
-6. **Dashboard lifecycle** — does the dashboard *attach* to a running MCP-hosted session, or can it *launch / own* sessions independently (human-driven debugging with no agent present)? Both, eventually — which first?
+> **Resolution log — 2026-06-25 (architect directive, Martin).** *"The mcp debugger is owned by the LLM. Views should be standalone, started by the human and connectable to a session. Human can terminate a view without affecting an ongoing debugging session."* This resolves **Q1**, **Q6**, and the **lifecycle half of Q3**, and surfaces a new **Q7 (rendezvous)**. Q2, Q4, Q5, and the command-serialization half of Q3 remain open.
+
+1. **Transport topology** — ~~MCP-server-as-host vs a separate DrHook broker~~ → **Resolved (2026-06-25): MCP-server-as-host, no broker.** The session-owning MCP/engine process is the **listener**; human-launched views are **connect-in clients**. The host *accepts* connections — it never *spawns* a view. The cleaner-long-term broker is explicitly declined for now.
+2. **TUI technology** — BCL-`Console`-only (sovereign, "simple") vs a TUI library? (Avalonia is settled for the GUI.) *(Open.)*
+3. **Shared-session control semantics (D5)** — **Lifecycle half resolved (2026-06-25):** a view's lifecycle is independent of the session's; terminating a view never affects the ongoing session; views are ephemeral peers, the LLM-owned session is authoritative. **Still open:** when a view *sends commands* (Phase 5), how do agent and human commands serialize and display — explicit "who holds the stop", or pure FIFO? What happens to an in-flight agent operation when the human continues/stops?
+4. **Wire format** — a JSON line-protocol over the socket, a binary frame, or a reuse of the existing MCP/tool JSON shapes? *(Open.)*
+5. **Console (PTY) + debug-state in one surface?** — does the dashboard also host the debuggee's PTY (ADR-011 D4), giving one surface for both the program's console *and* the debug-state, or are they separate panes/processes? *(Open.)*
+6. **Dashboard lifecycle** — ~~attach vs launch/own~~ → **Resolved (2026-06-25): attach only.** Views connect to a running, LLM-owned session; the agent owns sessions. Human-driven debugging with no agent present is not the near-term model.
+7. **Rendezvous (new — 2026-06-25)** — how does a human-launched standalone view *discover / address* the LLM-owned session it connects to? Lean: a well-known **per-session socket path** (one session → one predictable socket, e.g. under `~/Library/SkyOmega/drhook/`), no registry/broker. Resolve in Phase 2.
 
 ## Consequences
 

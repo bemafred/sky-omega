@@ -905,6 +905,72 @@ public sealed class DebugSession : IDisposable, IMemberResolver
     /// the stop thread. Valid only while stopped.</summary>
     public string? GetCurrentExceptionTypeName() => ExceptionInspector.CurrentExceptionTypeName(_pump.StopThread);
 
+    /// <summary>Capture one self-contained <see cref="DebugStateSnapshot"/> — the unified "snapshot" face of
+    /// the ADR-012 surface-agnostic debug-state model. Promotes this session's piecemeal queryable state
+    /// (lifecycle, position, breakpoints, exception filters) plus the host-composed stream tails into ONE
+    /// value a view can render with no prior context (the 2026-06-25 ownership directive: a human-launched
+    /// view joins an already-running session and renders from the snapshot alone, then stays current on the
+    /// delta stream, <see cref="DebugStateDelta"/>).
+    ///
+    /// <para><paramref name="currentStop"/> is supplied by the session DRIVER — the loop that drives
+    /// <see cref="WaitForStop"/> is the authority on whether the debuggee is frozen (this session does not
+    /// track it; WaitForStop returns the stop and forgets it, so threading state through CaptureState keeps
+    /// the hot stepping path untouched). <c>null</c> ⇒ running (no position);
+    /// <see cref="StopReason.ProcessExited"/> ⇒ exited; otherwise stopped, and the position — call stack,
+    /// locals, arguments (depth 0; deeper levels stay on-demand via <see cref="ExpandLocal"/> /
+    /// <see cref="ExpandArgument"/>), and exception type at an <see cref="StopReason.Exception"/> stop — is
+    /// walked from the synchronized frame.</para>
+    ///
+    /// <para>The three stream tails are the host's bounded buffers read NON-destructively (their
+    /// <c>Peek()</c>), so a snapshot never consumes records the drain tools still own. Reads are
+    /// fault-contained (ADR-014): a frame's shape cannot crash the engine.</para></summary>
+    public DebugStateSnapshot CaptureState(
+        StopInfo? currentStop,
+        ConsoleDrainResult console,
+        DrainResult logs,
+        AnomalyDrainResult anomalies)
+    {
+        ArgumentNullException.ThrowIfNull(console);
+        ArgumentNullException.ThrowIfNull(logs);
+        ArgumentNullException.ThrowIfNull(anomalies);
+
+        bool exited = currentStop?.Reason == StopReason.ProcessExited;
+        bool stopped = currentStop is not null && !exited;
+        ExecutionState execution = exited ? ExecutionState.Exited
+                                 : stopped ? ExecutionState.Stopped
+                                 : ExecutionState.Running;
+
+        var session = new SessionInfo(
+            ProcessId,
+            OwnsTarget,
+            ProcessRuntimeMajor,
+            IsDetached: Volatile.Read(ref _detached) != 0,
+            IsDisposed: Volatile.Read(ref _disposed) != 0,
+            execution);
+
+        ExecutionPosition position = stopped
+            ? new ExecutionPosition(
+                currentStop,
+                currentStop!.Reason == StopReason.Exception ? GetCurrentExceptionTypeName() : null,
+                GetStackFrames(),
+                GetLocals(),
+                GetArguments())
+            : ExecutionPosition.None;
+
+        IReadOnlyList<BreakpointInfo> bps = ListBreakpoints();
+        BreakpointStatus[] breakpoints = new BreakpointStatus[bps.Count];
+        for (int i = 0; i < bps.Count; i++)
+            breakpoints[i] = new BreakpointStatus(bps[i], GetBreakpointHits(bps[i].Id));
+
+        IReadOnlyList<ExceptionFilterInfo> filters = ListExceptionFilters();
+        ExceptionFilterStatus[] exceptionFilters = new ExceptionFilterStatus[filters.Count];
+        for (int i = 0; i < filters.Count; i++)
+            exceptionFilters[i] = new ExceptionFilterStatus(filters[i], GetExceptionFilterHits(filters[i].Id));
+
+        return new DebugStateSnapshot(
+            DateTimeOffset.UtcNow, session, position, breakpoints, exceptionFilters, console, logs, anomalies);
+    }
+
     /// <summary>Evaluate a static, parameterless method in the debuggee at the current stop and
     /// return its value. Creates an eval on the stopped thread, calls the function, resumes to run
     /// it, and waits up to <paramref name="timeout"/> for the EvalComplete stop. A timeout is the

@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <RootNamespace>DebugStateTarget</RootNamespace>
+    <AssemblyName>DebugStateTarget</AssemblyName>
+    <!-- ADR-012 Phase 1 — CaptureState snapshot probe target. A two-frame call stack (Worker.Compute
+         called from Main) with NAMED arguments (n, label) and NAMED locals (doubled, contribution) at the
+         SNAPSHOT_HERE marker, so the unified debug-state snapshot has a rich position to render. Pinned to
+         net10.0 (the substrate's runtime — finding 86) and Debug-compiled (locals + sequence points). Not
+         part of the solution; built ad-hoc by debugstate-snapshot-smoke.cs. -->
+  </PropertyGroup>
+</Project>
