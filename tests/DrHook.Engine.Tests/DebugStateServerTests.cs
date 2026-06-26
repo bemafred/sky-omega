@@ -153,4 +153,26 @@ public sealed class DebugStateServerTests
         server.Stop(); // idempotent — no throw
         server.Dispose();
     }
+
+    [Fact]
+    public void Restart_StartStopStart_AcceptsConnectionsAgain()
+    {
+        string sock = TempSocketPath();
+        using var server = new DebugStateServer(sock);
+        server.Start();
+        server.Stop();
+        Assert.False(server.IsRunning);
+
+        // Restart the SAME server object — the per-session lifecycle the MCP host uses. Stop cancels the
+        // shutdown token; Start must recreate it, else the accept loop would exit immediately on restart.
+        server.Start();
+        Assert.True(server.IsRunning);
+        server.PublishSnapshot(Snapshot(ExecutionState.Stopped));
+
+        using Socket client = Connect(sock);
+        using JsonDocument first = ReadMessage(client);
+        Assert.Equal("snapshot", first.RootElement.GetProperty("type").GetString()); // accepts + serves after restart
+
+        server.Stop();
+    }
 }

@@ -46,7 +46,7 @@ public sealed class DebugStateServer : IDebugEventSink, IDisposable
     private readonly LinkedList<Outbound> _queue = new();
     private readonly object _queueLock = new();
     private readonly ManualResetEventSlim _wake = new(false);
-    private readonly CancellationTokenSource _shutdownCts = new();
+    private CancellationTokenSource _shutdownCts = new(); // recreated per Start (see Start) so the server restarts
     private long _droppedMessages;
     private long _workerErrors;
     private long _seq;
@@ -98,6 +98,10 @@ public sealed class DebugStateServer : IDebugEventSink, IDisposable
     public void Start()
     {
         if (_running) throw new InvalidOperationException("DebugStateServer is already running.");
+
+        // A CancellationTokenSource is single-use; the previous run cancelled it on Stop. Recreate it so the
+        // server is RESTARTABLE — the MCP host starts/stops the same server object per debug session.
+        if (_shutdownCts.IsCancellationRequested) { _shutdownCts.Dispose(); _shutdownCts = new CancellationTokenSource(); }
 
         string? dir = Path.GetDirectoryName(_socketPath);
         if (dir is not null) Directory.CreateDirectory(dir);

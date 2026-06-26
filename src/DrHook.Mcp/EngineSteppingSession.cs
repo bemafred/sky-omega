@@ -23,6 +23,8 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using SkyOmega.DrHook.Engine;
 using SkyOmega.DrHook.Engine.Interop;
+using SkyOmega.DrHook.Engine.Transport;
+using SkyOmega.DrHook.Wire;
 
 namespace SkyOmega.DrHook.Mcp;
 
@@ -67,11 +69,18 @@ public sealed class EngineSteppingSession : IDisposable
     // seam (D5): the substrate emits to one sink; Mira views will add their own consumers later.
     private readonly BoundedLogSink _logs = new(capacity: 512);
     private readonly BoundedConsoleSink _console = new(capacity: 512);
+
+    // ADR-012 Phase 2: the debug-state transport — a 4th sink on the composite. It observes the live delta
+    // stream via the fan-out (no-ops while not running), and the session driver pushes a fresh snapshot after
+    // each stop (PublishTransportSnapshot). Human-launched views connect to the rendezvous socket. Started per
+    // session (StartTransport, on attach/launch), stopped in CleanupSession; killing a view never affects the
+    // session, and the driver owns snapshot capture so there is no transport<->stepping race.
+    private readonly DebugStateServer _transport = new(WireRendezvous.DefaultSocketPath());
     private readonly IDebugEventSink _sink;
 
     public EngineSteppingSession()
     {
-        _sink = new CompositeEventSink(_anomalies, _logs, _console);
+        _sink = new CompositeEventSink(_anomalies, _logs, _console, _transport);
     }
 
     /// <summary>Drain the substrate-anomaly buffer as a structured JSON envelope. Anomalies
@@ -169,6 +178,38 @@ public sealed class EngineSteppingSession : IDisposable
 
     public bool IsActive => _session is not null;
 
+    // ─── ADR-012 Phase 2 transport plumbing ─────────────────────────────────────────────────────
+
+    /// <summary>Start the debug-state transport for this session — BEST-EFFORT. A bind failure (stale socket,
+    /// permissions) must NEVER break debugging: surface it as an anomaly (drained by drhook_drain_anomalies)
+    /// and continue without a live view.</summary>
+    private void StartTransport()
+    {
+        try
+        {
+            _transport.Start();
+        }
+        catch (Exception ex)
+        {
+            _anomalies.OnAnomaly(new EngineAnomaly(DateTimeOffset.UtcNow, AnomalyKind.UnexpectedHResult, "mcp-request",
+                "DebugStateServer.Start",
+                Observed: $"{ex.GetType().Name}: {ex.Message}",
+                Expected: "transport listener bound to the rendezvous socket",
+                Context: null));
+        }
+    }
+
+    /// <summary>Push a fresh self-contained snapshot to connected views after a stop. BEST-EFFORT — a transport
+    /// fault must never break a debug response. The DRIVER (this MCP request thread) owns the capture, so views
+    /// only ever receive immutable snapshots/deltas: there is no transport↔stepping race (ADR-012 Phase 2). The
+    /// stream tails are read non-destructively (Peek) so the drain tools still see them.</summary>
+    private void PublishTransportSnapshot(StopInfo? stop)
+    {
+        if (_session is null || !_transport.IsRunning) return;
+        try { _transport.PublishSnapshot(_session.CaptureState(stop, _console.Peek(), _logs.Peek(), _anomalies.Peek())); }
+        catch { /* transport is best-effort; never break a debug response */ }
+    }
+
     // ─── Session lifecycle ────────────────────────────────────────────────────────────────────
 
     public Task<string> AttachAsync(int pid, string sourceFile, int line, string hypothesis, CancellationToken ct)
@@ -186,6 +227,7 @@ public sealed class EngineSteppingSession : IDisposable
             _targetPid = pid;
 
             _session = DebugSession.Attach(pid, _sink);
+            StartTransport(); // a view can now connect; it gets its first snapshot at the first stop below
             // Setup stop: the engine breaks on attach (Debugger.IsAttached transition). Drain it.
             StopInfo? setup = _session.WaitForStop(TimeSpan.FromSeconds(10));
 
@@ -216,6 +258,8 @@ public sealed class EngineSteppingSession : IDisposable
                 return Task.FromResult(RenderProcessExited("attach",
                     $"The process exited before reaching the breakpoint at {sourceFile}:{line} — it completed or threw before that line executed. Drain drhook_drain_log / drhook_drain_console for any output; start the next session with drhook_launch or drhook_attach.",
                     hypothesis));
+
+            PublishTransportSnapshot(stop);
 
             JsonObject result = new()
             {
@@ -259,6 +303,7 @@ public sealed class EngineSteppingSession : IDisposable
             // targets that don't self-stop (no Debugger.Break needed). env overrides are merged onto
             // the inherited environment by the POSIX spawn (BuildChildEnv) — Owned/launch only.
             _session = DebugSession.Launch(program, args, cwd, _sink, entryModule: DeriveEntryModule(program, args), env: env);
+            StartTransport(); // a view can now connect; it gets its first snapshot at the first stop below
 
             // Capture the launched PID for status reporting. DebugSession.Launch (finding 64)
             // now owns the Process handle internally and kill-firsts on Dispose — no separate
@@ -295,6 +340,8 @@ public sealed class EngineSteppingSession : IDisposable
                 return Task.FromResult(RenderProcessExited("launch",
                     $"The process exited before reaching the breakpoint at {sourceFile}:{line} — it completed or threw before that line executed. Drain drhook_drain_log / drhook_drain_console for any output; start the next session with drhook_launch or drhook_attach.",
                     hypothesis));
+
+            PublishTransportSnapshot(stop);
 
             JsonObject result = new()
             {
@@ -444,6 +491,8 @@ public sealed class EngineSteppingSession : IDisposable
                     "The debuggee exited (ran to completion) — no further stops, the session is over. Drain drhook_drain_log / drhook_drain_console for any final output; start the next session with drhook_launch or drhook_attach.",
                     hypothesis));
 
+            PublishTransportSnapshot(stop);
+
             JsonObject result = new()
             {
                 ["operation"] = "continue",
@@ -475,6 +524,8 @@ public sealed class EngineSteppingSession : IDisposable
                     "The debuggee exited before the pause could synchronize — no stop to report; the session is over. Drain drhook_drain_log / drhook_drain_console for any final output; start the next session with drhook_launch or drhook_attach.",
                     hypothesis));
 
+            PublishTransportSnapshot(stop);
+
             JsonObject result = new()
             {
                 ["operation"] = "pause",
@@ -503,6 +554,8 @@ public sealed class EngineSteppingSession : IDisposable
                 return Task.FromResult(RenderProcessExited(operationName,
                     $"The debuggee exited (ran to completion) during {operationName} — no further stops, the session is over. Drain drhook_drain_log / drhook_drain_console for any final output; start the next session with drhook_launch or drhook_attach.",
                     hypothesis));
+
+            PublishTransportSnapshot(stop);
 
             JsonObject result = new()
             {
@@ -1136,6 +1189,10 @@ public sealed class EngineSteppingSession : IDisposable
 
     private void CleanupSession()
     {
+        // Stop the transport FIRST — close the listener + drop view connections before the session is torn
+        // down (ADR-012: session-end drops the views; a view drop never affects the session). Best-effort.
+        try { _transport.Stop(); } catch { /* never let a transport fault block session cleanup */ }
+
         if (_session is not null)
         {
             // Finding 64 — substrate-enforced lifecycle: DebugSession.Dispose handles the
@@ -1170,5 +1227,9 @@ public sealed class EngineSteppingSession : IDisposable
         _sessionHypothesis = "";
     }
 
-    public void Dispose() => CleanupSession();
+    public void Dispose()
+    {
+        CleanupSession();
+        _transport.Dispose();
+    }
 }
