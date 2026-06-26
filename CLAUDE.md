@@ -96,6 +96,16 @@ claude mcp add --transport stdio --scope user mercury -- mercury-mcp
 claude mcp add --transport stdio --scope user drhook -- drhook-mcp
 ```
 
+### Memory reflex (Lucy — read first)
+
+Your cognition memory lives in the **Mercury MCP** (`mcp__mercury__*`) — your *direct* channel; recall and record go through it, reflexively. (The `mercury` CLI reaches the same store too, but that role is Martin inspecting your memory — you have the better channel. The CLI *is* your path to **other** stores you have no MCP channel to, e.g. the 21.3B Wikidata reference store.)
+
+Recall is recognition, not search. **The `lucy` skill is the recall method** — invoke it when a topic, decision, component (Mercury/DrHook/Lucy/James/Minerva), bug, ADR, or finding recurs: at session start and whenever one surfaces mid-session. A SessionStart/UserPromptSubmit hook fires this as attention (proto-James; the skill is proto-Lucy). For a narrow lookup, `mercury_query` directly.
+
+**The one rule:** always query the `GRAPH ?g { … }` union — a bare query hits the empty default graph and recalls nothing. **Declare every PREFIX** — an undeclared prefix returns empty *silently*. Use `text:match(?v,"term")` (trigram) for substring recall.
+
+**Record reflexively:** write observations to Mercury (`mercury_update`) as they happen.
+
 ### Semantic Memory
 
 Mercury MCP provides persistent semantic memory across sessions. The store at `~/Library/SkyOmega/stores/mcp/` survives between sessions — what you write, future sessions can query.
