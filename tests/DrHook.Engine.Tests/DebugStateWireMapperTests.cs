@@ -9,7 +9,7 @@ using Xunit;
 
 namespace SkyOmega.DrHook.Engine.Tests;
 
-public sealed class DebugStateWireSerializerTests
+public sealed class DebugStateWireMapperTests
 {
     private static DebugStateSnapshot StoppedSnapshot() => new(
         CapturedAt: DateTimeOffset.UnixEpoch,
@@ -28,7 +28,7 @@ public sealed class DebugStateWireSerializerTests
     [Fact]
     public void SnapshotLine_IsOneNdjsonLine_WithTheProjectedState()
     {
-        string line = DebugStateWireSerializer.SnapshotLine(StoppedSnapshot(), seq: 7);
+        string line = DebugStateWireMapper.SnapshotLine(StoppedSnapshot(), seq: 7);
 
         Assert.EndsWith("\n", line);
         Assert.DoesNotContain("\n", line[..^1]); // single line — no embedded newlines before the terminator
@@ -58,7 +58,7 @@ public sealed class DebugStateWireSerializerTests
     [Fact]
     public void DeltaLine_Event_ProjectsKindAndName()
     {
-        string line = DebugStateWireSerializer.DeltaLine(DebugStateDelta.ForEvent(DateTimeOffset.UnixEpoch, "Breakpoint"), seq: 3);
+        string line = DebugStateWireMapper.DeltaLine(DebugStateDelta.ForEvent(DateTimeOffset.UnixEpoch, "Breakpoint"), seq: 3);
         using JsonDocument doc = JsonDocument.Parse(line);
         JsonElement delta = doc.RootElement.GetProperty("delta");
         Assert.Equal("delta", doc.RootElement.GetProperty("type").GetString());
@@ -69,7 +69,7 @@ public sealed class DebugStateWireSerializerTests
     [Fact]
     public void DeltaLine_Console_ProjectsStreamAndText()
     {
-        string line = DebugStateWireSerializer.DeltaLine(
+        string line = DebugStateWireMapper.DeltaLine(
             DebugStateDelta.ForConsole(new ConsoleOutputRecord(DateTimeOffset.UnixEpoch, ConsoleStream.Stdout, "hello")), seq: 9);
         using JsonDocument doc = JsonDocument.Parse(line);
         JsonElement delta = doc.RootElement.GetProperty("delta");

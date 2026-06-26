@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <RootNamespace>SkyOmega.DrHook.Viz.Tests</RootNamespace>
+    <AssemblyName>SkyOmega.DrHook.Viz.Tests</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.*" />
+    <PackageReference Include="xunit" Version="2.*" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The client under test... -->
+    <ProjectReference Include="../../src/DrHook.Viz/DrHook.Viz.csproj" />
+    <!-- ...the console view, for the rendering tests (it takes a TextWriter, so a StringWriter drives it). -->
+    <ProjectReference Include="../../src/DrHook.Viz.Console/DrHook.Viz.Console.csproj" />
+    <!-- ...and the engine's transport server, to drive the end-to-end test (a real session publishes; the
+         client receives). The production client (DrHook.Viz) references only DrHook.Wire — only the TEST
+         wires both ends. -->
+    <ProjectReference Include="../../src/DrHook.Engine/DrHook.Engine.csproj" />
+  </ItemGroup>
+
+</Project>

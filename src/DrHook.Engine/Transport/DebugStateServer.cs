@@ -61,7 +61,7 @@ public sealed class DebugStateServer : IDebugEventSink, IDisposable
     private Thread? _publishThread;
     private volatile bool _running;
 
-    /// <summary>Construct a server bound to <paramref name="socketPath"/> (see <see cref="DefaultSocketPath"/>).
+    /// <summary>Construct a server bound to <paramref name="socketPath"/> (see <see cref="SkyOmega.DrHook.Wire.WireRendezvous.DefaultSocketPath"/>).
     /// Does not bind until <see cref="Start"/>. <paramref name="maxClients"/> caps concurrent views;
     /// <paramref name="queueCapacity"/> bounds the outbound buffer (drop-oldest on overflow).</summary>
     public DebugStateServer(string socketPath, int maxClients = 8, int queueCapacity = 4096, int sendTimeoutMs = 2000)
@@ -73,19 +73,6 @@ public sealed class DebugStateServer : IDebugEventSink, IDisposable
         _maxClients = maxClients;
         _queueCapacity = queueCapacity;
         _sendTimeoutMs = sendTimeoutMs;
-    }
-
-    /// <summary>The well-known per-host rendezvous path (ADR-012 Q7) — one active session at a time, so a
-    /// fixed path is the simplest rendezvous. macOS uses the Sky Omega data-dir convention
-    /// (<c>~/Library/SkyOmega/drhook/session.sock</c>); other POSIX uses an XDG-style path.</summary>
-    public static string DefaultSocketPath()
-    {
-        string home = Environment.GetEnvironmentVariable("HOME")
-            ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        string dir = OperatingSystem.IsMacOS()
-            ? Path.Combine(home, "Library", "SkyOmega", "drhook")
-            : Path.Combine(home, ".local", "share", "sky-omega", "drhook");
-        return Path.Combine(dir, "session.sock");
     }
 
     /// <summary>True once <see cref="Start"/> has bound the listener and not yet stopped.</summary>
@@ -206,7 +193,7 @@ public sealed class DebugStateServer : IDebugEventSink, IDisposable
                 // client ahead of its snapshot.
                 long joinedSeq = Interlocked.Read(ref _seq);
                 DebugStateSnapshot? snap = _latestSnapshot;
-                string? snapshotLine = snap is null ? null : DebugStateWireSerializer.SnapshotLine(snap, Interlocked.Increment(ref _seq));
+                string? snapshotLine = snap is null ? null : DebugStateWireMapper.SnapshotLine(snap, Interlocked.Increment(ref _seq));
 
                 lock (_clientsLock)
                 {
@@ -246,8 +233,8 @@ public sealed class DebugStateServer : IDebugEventSink, IDisposable
                 try
                 {
                     string line = m.Snapshot is { } s
-                        ? DebugStateWireSerializer.SnapshotLine(s, m.Seq)
-                        : DebugStateWireSerializer.DeltaLine(m.Delta!, m.Seq);
+                        ? DebugStateWireMapper.SnapshotLine(s, m.Seq)
+                        : DebugStateWireMapper.DeltaLine(m.Delta!, m.Seq);
                     Broadcast(m.Seq, line);
                 }
                 catch

@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <!-- Namespace deliberately ends in ConsoleView, not Console: a "...Viz.Console" namespace would shadow
+         System.Console (the enclosing namespace would expose a child "Console" namespace, making the type
+         ambiguous). The project / assembly name stays DrHook.Viz.Console. -->
+    <RootNamespace>SkyOmega.DrHook.Viz.ConsoleView</RootNamespace>
+    <AssemblyName>SkyOmega.DrHook.Viz.Console</AssemblyName>
+    <Description>DrHook console visualizer — a thin view over DrHook.Viz that tails the live debug-state stream to the console. The simplest IDebugStateView, and the first proper DrHook debuggee (drhook_launch-able).</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DrHook.Viz\DrHook.Viz.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>SkyOmega.DrHook.Viz</RootNamespace>
+    <AssemblyName>SkyOmega.DrHook.Viz</AssemblyName>
+    <Description>DrHook visualization client — the shared, view-agnostic library that connects to the debug-state transport, maintains the client-side model, and pushes updates to an IDebugStateView. Console / TUI / GUI views are thin consumers of this one library. BCL-only; references only DrHook.Wire (never the engine).</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DrHook.Wire\DrHook.Wire.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="SkyOmega.DrHook.Viz.Tests" />
+  </ItemGroup>
+
+</Project>

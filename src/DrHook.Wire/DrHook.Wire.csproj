@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>SkyOmega.DrHook.Wire</RootNamespace>
+    <AssemblyName>SkyOmega.DrHook.Wire</AssemblyName>
+    <Description>DrHook debug-state wire protocol — the NDJSON contract shared by the transport server (DrHook.Engine) and visualization clients (DrHook.Viz and its views). Zero dependencies (BCL only); source-generated System.Text.Json. The domain-to-wire mapping lives in DrHook.Engine; this project is pure wire so a view never drags in the engine's native/diagnostics dependencies.</Description>
+  </PropertyGroup>
+
+</Project>

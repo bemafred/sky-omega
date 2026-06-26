@@ -51,6 +51,12 @@
     </ItemGroup>
 
     <ItemGroup>
+        <!-- The shared wire protocol (zero-dep). The engine maps domain -> wire and serializes; view clients
+             reference DrHook.Wire directly, never the engine. -->
+        <ProjectReference Include="..\DrHook.Wire\DrHook.Wire.csproj" />
+    </ItemGroup>
+
+    <ItemGroup>
         <InternalsVisibleTo Include="SkyOmega.DrHook.Engine.Tests" />
     </ItemGroup>
 
