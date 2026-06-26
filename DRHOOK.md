@@ -87,6 +87,44 @@ The substrate is `DrHook.Engine` — a BCL + P/Invoke + source-gen COM implement
 
 **Every step, continue, and pause response includes process metrics** — working set, private bytes, thread count, GC heap size, collection counts with deltas from the previous capture. No extra tool call needed.
 
+## Debug-State Visualization (ADR-012 Phase 2)
+
+The MCP tools above are how the **agent** drives DrHook. A parallel surface lets a **human watch the same session live**: the engine publishes a unified debug-state to a rendezvous socket, and standalone views render it. This is [ADR-012](docs/adrs/drhook/ADR-012-debug-state-surfaces.md) (Phases 1–2 built and dogfooded end-to-end, 2026-06-26).
+
+**Ownership.** The debug session is **owned by the LLM** (the MCP server). Views are **standalone, human-launched** processes that *connect in* — at Phase 2 they are read-only and never spawn or drive the session. Terminating a view never affects the ongoing session; ending the session cleanly drops the views.
+
+### The rendezvous socket
+
+While a session is active, the engine binds a fixed, well-known Unix-domain socket and publishes to it:
+
+- **macOS:** `~/Library/SkyOmega/drhook/session.sock`
+- **Other POSIX:** `~/.local/share/sky-omega/drhook/session.sock` (Windows AF_UNIX is a later refinement)
+
+One active session at a time, so a fixed path is the whole rendezvous — no broker, no registry. The socket is created on `drhook_launch` / `drhook_attach` and unlinked on session end (a stale socket is unlinked on bind). A connecting view receives a **snapshot on connect**, then a live **delta stream**, as **NDJSON** — one JSON message per line (`{"type":"snapshot"|"delta", …}`).
+
+### The console view: `drhook-viz-console`
+
+```bash
+# while a DrHook session is active (the agent has launched/attached a target):
+dotnet run --project src/DrHook.Viz.Console          # optional: pass a socket path as the one argument
+```
+
+It prints the snapshot-on-connect — session (pid, owned/borrowed, runtime, exec state), execution position (stop reason, top frame, call stack), locals + arguments, breakpoints, and the console/log/anomaly stream counts — then one line per delta as the agent steps, and a clean `disconnected` when the session ends. It is also **the first proper DrHook debuggee** — a clean .NET app to `drhook_launch` and step.
+
+### Architecture — one client, many views
+
+Layered like Mercury's `Mercury.Abstractions ← Mercury.Sparql.Tool ← Mercury.Cli.Sparql`, so console / TUI / GUI share one client + model:
+
+| Layer | Project | Scope |
+|-------|---------|-------|
+| Protocol contract | `DrHook.Wire` | The NDJSON wire DTOs + source-gen `WireCodec` + `WireRendezvous`. Zero-dependency; both the server and every view depend on it. |
+| Client library | `DrHook.Viz` | `DebugStateClient` (connect, read, parse, update model, push to a view), `DebugStateClientModel` (snapshot + bounded delta tail), `IDebugStateView` (the seam views implement). BCL-only; references **only** `DrHook.Wire`. |
+| View | `DrHook.Viz.Console` | The console renderer (`ConsoleDebugStateView` over a `TextWriter`). The planned TUI (Phase 4) and Avalonia GUI (Phase 6) are richer renderings of the **same** client + model. |
+
+**Server side:** `DrHook.Engine/Transport/DebugStateServer` publishes a snapshot after each stop and the delta stream throughout; `EngineSteppingSession` wires it as a 4th `CompositeEventSink` member. The server **never calls into `DebugSession`** — the request-thread *driver* captures the immutable snapshot after each stop and pushes it, so there is no transport↔stepping concurrency hazard. Best-effort throughout: a transport fault never breaks a debug response.
+
+**Not yet:** the `(hypothesis, observation)` braid recorded in the model (Phase 3), a full TUI (Phase 4), command-in / control (Phase 5), the Avalonia GUI sibling (Phase 6).
+
 ## What's NOT yet shipped
 
 Substrate work is required before these surfaces become functional:
@@ -291,6 +329,8 @@ Run probes with `dotnet run --no-cache <probe-smoke.cs> <target>` from `poc/drho
 - [ADR-007](docs/adrs/drhook/ADR-007-teardown-concurrency-test-debug.md) — substrate-correctness arc. **Accepted.** Phase 1 Complete, Phase 2 Complete, Phase 3 Superseded (by ADR-009 → ADR-010), Phases 4-6 Closed (substrate proved runner-agnostic), Phase 7 (MCP surface cleanup) subsumed by ADR-010 Tier 1, Phase 8 Complete (12/12 CI), Phase 9 Open (cross-platform campaign).
 - [ADR-008](docs/adrs/drhook/ADR-008-process-lifecycle-discipline.md) — natural-exit-by-default, explicit `Abandon` for forced termination; SIGTERM-then-SIGKILL escalation. **Completed.**
 - [ADR-010](docs/adrs/drhook/ADR-010-mcp-tool-surface-redesign.md) — MCP tool surface redesign. **Accepted.** Tier 1 (this rename pass) shipped; Tier 2 (substrate-verification tools) and Tier 3 (substrate-addition tools) land in successor increments.
+- [ADR-011](docs/adrs/drhook/ADR-011-lifecycle-console-dashboard.md) — debug-session lifecycle (stop / detach / kill) + debuggee console-I/O isolation + the dashboard seam. **Accepted.**
+- [ADR-012](docs/adrs/drhook/ADR-012-debug-state-surfaces.md) — debug-state surfaces: a surface-agnostic model + human views (console / TUI / Avalonia) over a Unix-domain-socket transport. **Proposed; Phases 1–2 built (2026-06-26)** — the model + transport + first console view (`DrHook.Wire` / `DrHook.Viz` / `DrHook.Viz.Console`), dogfooded end-to-end. See [Debug-State Visualization](#debug-state-visualization-adr-012-phase-2).
 
 ## Key Principle
 

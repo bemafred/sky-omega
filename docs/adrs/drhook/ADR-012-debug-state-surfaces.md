@@ -1,6 +1,6 @@
 # ADR-012: Debug-state surfaces — a surface-agnostic model and its first human views (TUI dashboard, Avalonia sibling)
 
-**Status:** Proposed — 2026-06-03 (Emergence / ideation).
+**Status:** Proposed — 2026-06-03 (Emergence / ideation); **Phases 1–2 built — 2026-06-26** — the surface-agnostic model + the read-only transport + the first console view (`DrHook.Wire` / `DrHook.Viz` / `DrHook.Viz.Console`) shipped and dogfooded end-to-end, resolving Q1/Q4/Q6/Q7 + the lifecycle half of Q3. Phases 3–6, and Q2/Q5 + the command half of Q3, remain Proposed.
 
 **Realizes:** [ADR-011](ADR-011-lifecycle-console-dashboard.md) D4 (DrHook owns the terminal/dashboard surface) and D5 (a surface-agnostic debug-state model, not "a dashboard"), which ADR-011 deferred behind its Q6 (ship D2 + D3 first, let the dashboard's demand and form emerge). F-010-2 (Owned detach-leave-running) is now closed end-to-end (ADR-011 lifecycle triad complete on macOS; findings 78–80), so the next DrHook phase is the human surface.
 
@@ -82,8 +82,8 @@ The **debug-state model and the transport are BCL-only** — they are substrate,
 
 ## Phasing (EEE — one unknown per phase; discover the rest in use)
 
-1. **Phase 1 — The model + a read-only tap.** Promote the piecemeal queryable state into one unified **snapshot** type and formalize the **delta stream** atop `IDebugEventSink`. Prove it by adding a sink to the existing `CompositeEventSink` that logs the unified stream. The snapshot must be **self-contained enough for a view connecting mid-session to render full current state from it alone** (consequence of the 2026-06-25 ownership directive — a human-launched view joins an already-running session), then stay live on the delta stream. Pure substrate; smallest.
-2. **Phase 2 — The transport (read-only).** Publish the stream over a local socket; a trivial consumer (`drhook-tail`, prints deltas) proves **multiple live consumers decoupled from the MCP channel**. The urgent correctness property: the MCP JSON-RPC channel stays clean (the D2 lesson generalized).
+1. **Phase 1 — The model + a read-only tap. ✅ BUILT (2026-06-26).** `DebugStateSnapshot` (the unified, self-contained snapshot — renderable mid-session by a view connecting alone) + `DebugStateDelta` (the live stream atop `IDebugEventSink`) + a `DebugStateTapSink` on the existing `CompositeEventSink`; `DebugSession.CaptureState` assembles the snapshot from the bounded buffers (non-destructive `Peek`). Pure substrate; smallest — done first.
+2. **Phase 2 — The transport (read-only). ✅ BUILT (2026-06-26).** `DebugStateServer` (`src/DrHook.Engine/Transport/`) publishes snapshot-on-connect + a delta stream over a Unix-domain socket, wired into `EngineSteppingSession` as a 4th composite sink (`PublishTransportSnapshot` after each stop). The consumer overshot the planned trivial `drhook-tail`: a layered **`DrHook.Wire` (protocol contract) ← `DrHook.Viz` (client library) ← `DrHook.Viz.Console` (view)** stack — a structured console view that renders the full model (a down-payment on Phase 4, minus the braid). Proved **multiple live consumers decoupled from the MCP channel**, dogfooded end-to-end through the real DrHook MCP. The urgent correctness property held: the MCP JSON-RPC channel stays clean (the D2 lesson generalized).
 3. **Phase 3 — Record the braid (D4).** Begin persisting `(hypothesis, observation)` pairs into the model; surface them on the tap.
 4. **Phase 4 — The TUI dashboard, read-only.** Render the model — execution position, stack, locals, breakpoints, console/log/anomaly streams, and the braid.
 5. **Phase 5 — Control (commands in).** The transport goes bidirectional; the TUI drives break / step / continue / detach. The shared-session concurrency nuances (D5 / Q3) are discovered here.
