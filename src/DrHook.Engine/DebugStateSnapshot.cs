@@ -32,25 +32,35 @@ public sealed record SessionInfo(
     bool IsDisposed,
     ExecutionState Execution);
 
+/// <summary>One frame of the managed call stack at a stop: its <see cref="Display"/> form
+/// ("Type.Method @ file:line" when a Portable PDB resolves the location, else "Type.Method";
+/// "[external]" for native/internal frames) PLUS the structured source location the display is built from.
+/// <see cref="File"/> is the FULL source path — not the basename the display abbreviates to — and
+/// <see cref="Line"/> the 1-based line; both null for a frame with no resolvable PDB location. The full
+/// path is what a source-rendering view needs to open the file, so it is preserved here even though
+/// <see cref="Display"/> abbreviates it (ADR-012 Phase-2 enrichment: the structured location reaches the
+/// wire instead of being flattened away at <see cref="DebugSession.GetStackFrames"/>).</summary>
+public sealed record FrameLocation(string Display, string? File, int? Line);
+
 /// <summary>Execution-position facet — where the debuggee is frozen, populated only when
 /// <see cref="SessionInfo.Execution"/> is <see cref="ExecutionState.Stopped"/>. Empty
 /// (<see cref="None"/>) while running or exited: a running debuggee has no synchronized frame to walk.
-/// <see cref="CallStack"/> is top-frame-first "Type.Method @ file:line" strings
-/// (<see cref="DebugSession.GetStackFrames"/>); <see cref="TopFrame"/> is its head.
+/// <see cref="CallStack"/> is the top-frame-first list of <see cref="FrameLocation"/>
+/// (<see cref="DebugSession.GetStackFrameLocations"/>); <see cref="TopFrame"/> is the head's display form.
 /// <see cref="ExceptionTypeName"/> is set only at a <see cref="StopReason.Exception"/> stop.</summary>
 public sealed record ExecutionPosition(
     StopInfo? Stop,
     string? ExceptionTypeName,
-    IReadOnlyList<string> CallStack,
+    IReadOnlyList<FrameLocation> CallStack,
     IReadOnlyList<LocalValue> Locals,
     IReadOnlyList<ArgumentValue> Arguments)
 {
-    /// <summary>The top (innermost) frame, or null when the stack is empty / the session is not stopped.</summary>
-    public string? TopFrame => CallStack.Count > 0 ? CallStack[0] : null;
+    /// <summary>The top (innermost) frame's display form, or null when the stack is empty / not stopped.</summary>
+    public string? TopFrame => CallStack.Count > 0 ? CallStack[0].Display : null;
 
     /// <summary>The position of a session that is not at a stop (running or exited) — no frame, no locals.</summary>
     public static ExecutionPosition None { get; } =
-        new(null, null, Array.Empty<string>(), Array.Empty<LocalValue>(), Array.Empty<ArgumentValue>());
+        new(null, null, Array.Empty<FrameLocation>(), Array.Empty<LocalValue>(), Array.Empty<ArgumentValue>());
 }
 
 /// <summary>A breakpoint paired with its running hit count (<see cref="DebugSession.GetBreakpointHits"/>) —

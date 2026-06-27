@@ -18,8 +18,12 @@ public sealed class ConsoleDebugStateViewTests
 
         var snap = new WireSnapshot("1970-01-01T00:00:00.0000000+00:00",
             new WireSession(4242, Owned: true, RuntimeMajor: 10, Detached: false, Disposed: false, Execution: "Stopped"),
-            new WirePosition("Breakpoint", ExceptionType: null, TopFrame: "Acme.Worker.Run @ Worker.cs:42",
-                CallStack: new[] { "Acme.Worker.Run @ Worker.cs:42", "Acme.Program.Main @ Program.cs:10" },
+            new WirePosition("Breakpoint", ExceptionType: null,
+                CallStack: new[]
+                {
+                    new WireFrame("Acme.Worker.Run @ Worker.cs:42", "/src/Acme/Worker.cs", 42),
+                    new WireFrame("Acme.Program.Main @ Program.cs:10", "/src/Acme/Program.cs", 10),
+                },
                 Locals: new[] { new WireVar("count", 0x08, "7") },
                 Arguments: new[] { new WireVar("n", 0x08, "1") }),
             Breakpoints: new[] { new WireBreakpoint(1, 3, "line", "Worker.cs", 42, null, null) },
@@ -45,7 +49,7 @@ public sealed class ConsoleDebugStateViewTests
         var sw = new StringWriter();
         var snap = new WireSnapshot("t",
             new WireSession(1, false, 10, false, false, "Running"),
-            new WirePosition(null, null, null, Array.Empty<string>(), Array.Empty<WireVar>(), Array.Empty<WireVar>()),
+            new WirePosition(null, null, Array.Empty<WireFrame>(), Array.Empty<WireVar>(), Array.Empty<WireVar>()),
             Array.Empty<WireBreakpoint>(), Array.Empty<WireExceptionFilter>(), new WireStreams(0, 0, 0, 0, 0, 0));
 
         new ConsoleDebugStateView(sw).OnSnapshot(snap, new DebugStateClientModel(100));

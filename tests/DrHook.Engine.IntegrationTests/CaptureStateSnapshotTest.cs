@@ -72,6 +72,14 @@ public sealed class CaptureStateSnapshotTest
             Assert.IsTrue(snap.Position.CallStack.Count >= 2, $"Expected >=2 frames; got {snap.Position.CallStack.Count}.");
             Assert.IsTrue(snap.Position.TopFrame!.Contains("Compute", StringComparison.Ordinal), $"Top frame should be Worker.Compute; got '{snap.Position.TopFrame}'.");
 
+            // ...and the top frame's STRUCTURED source location resolves live from the target's PDB
+            // (ADR-012 Phase-2 enrichment): the FULL source path + the exact stopped line, not just the
+            // abbreviated display string. The line must equal the bound breakpoint line (asserted below).
+            FrameLocation top = snap.Position.CallStack[0];
+            Assert.IsNotNull(top.File, "Top frame should carry a resolved source file path (PDB present).");
+            Assert.IsTrue(top.File!.EndsWith("Program.cs", StringComparison.Ordinal), $"Top frame file should be Program.cs; got '{top.File}'.");
+            Assert.AreEqual(markerLine, top.Line, $"Top frame line should be the SNAPSHOT_HERE marker line {markerLine}; got {top.Line?.ToString() ?? "(null)"}.");
+
             LocalValue doubled = snap.Position.Locals.FirstOrDefault(l => l.Name == "doubled");
             LocalValue contribution = snap.Position.Locals.FirstOrDefault(l => l.Name == "contribution");
             Assert.IsTrue(Equals(doubled.RawValue, 2), $"local doubled (beat=1: n*2) should be 2; got {doubled.RawValue ?? "(null)"}.");

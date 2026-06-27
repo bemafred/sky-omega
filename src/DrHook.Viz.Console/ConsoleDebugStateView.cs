@@ -25,9 +25,9 @@ public sealed class ConsoleDebugStateView : IDebugStateView
         if (s.Position.Stop is { } stop)
         {
             _out.WriteLine($"  stop    : {stop}{(s.Position.ExceptionType is { } et ? $" [{et}]" : "")}");
-            if (s.Position.TopFrame is { } tf) _out.WriteLine($"  frame   : {tf}");
+            if (s.Position.CallStack.Length > 0) _out.WriteLine($"  frame   : {s.Position.CallStack[0].Display}");
             if (s.Position.CallStack.Length > 1)
-                foreach (string f in s.Position.CallStack) _out.WriteLine($"      {f}");
+                foreach (WireFrame f in s.Position.CallStack) _out.WriteLine($"      {f.Display}");
             if (s.Position.Locals.Length > 0)
                 _out.WriteLine($"  locals  : {string.Join(", ", s.Position.Locals.Select(v => $"{v.Name}={v.Value ?? "?"}"))}");
             if (s.Position.Arguments.Length > 0)

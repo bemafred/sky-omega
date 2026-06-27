@@ -16,7 +16,11 @@ public sealed class DebugStateWireMapperTests
         Session: new SessionInfo(4242, OwnsTarget: true, RuntimeMajor: 10, IsDetached: false, IsDisposed: false, ExecutionState.Stopped),
         Position: new ExecutionPosition(
             new StopInfo(StopReason.Breakpoint), ExceptionTypeName: null,
-            CallStack: new[] { "Acme.Worker.Run @ Worker.cs:42", "Acme.Program.Main @ Program.cs:10" },
+            CallStack: new[]
+            {
+                new FrameLocation("Acme.Worker.Run @ Worker.cs:42", "/src/Acme/Worker.cs", 42),
+                new FrameLocation("Acme.Program.Main @ Program.cs:10", "/src/Acme/Program.cs", 10),
+            },
             Locals: new[] { new LocalValue("count", 0x08, 7) },
             Arguments: new[] { new ArgumentValue(0x12, null, Name: "this"), new ArgumentValue(0x08, 1, Name: "n") }),
         Breakpoints: new[] { new BreakpointStatus(new LineBreakpointInfo(1, "Acme", "Worker.cs", 42), HitCount: 3) },
@@ -42,8 +46,14 @@ public sealed class DebugStateWireMapperTests
         Assert.Equal(4242, snap.GetProperty("session").GetProperty("pid").GetInt32());
         Assert.Equal("Stopped", snap.GetProperty("session").GetProperty("execution").GetString());
         Assert.Equal("Breakpoint", snap.GetProperty("position").GetProperty("stop").GetString());
-        Assert.Equal("Acme.Worker.Run @ Worker.cs:42", snap.GetProperty("position").GetProperty("topFrame").GetString());
-        Assert.Equal(2, snap.GetProperty("position").GetProperty("callStack").GetArrayLength());
+        JsonElement callStack = snap.GetProperty("position").GetProperty("callStack");
+        Assert.Equal(2, callStack.GetArrayLength());
+        // The top frame carries its display string AND the structured source location (ADR-012 Phase-2
+        // enrichment): the FULL path survives to the wire (not the basename the display abbreviates to).
+        JsonElement topFrame = callStack[0];
+        Assert.Equal("Acme.Worker.Run @ Worker.cs:42", topFrame.GetProperty("display").GetString());
+        Assert.Equal("/src/Acme/Worker.cs", topFrame.GetProperty("file").GetString());
+        Assert.Equal(42, topFrame.GetProperty("line").GetInt32());
 
         JsonElement bp = snap.GetProperty("breakpoints")[0];
         Assert.Equal("line", bp.GetProperty("kind").GetString());

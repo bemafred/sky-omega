@@ -756,13 +756,30 @@ public sealed class DebugSession : IDisposable, IMemberResolver
     /// (after <see cref="WaitForStop"/>).</summary>
     public IReadOnlyList<string> GetStackFrames()
     {
-        List<string> result = new();
+        IReadOnlyList<FrameLocation> frames = GetStackFrameLocations();
+        List<string> result = new(frames.Count);
+        foreach (FrameLocation f in frames) result.Add(f.Display);
+        return result;
+    }
+
+    /// <summary>The managed call stack at the current stop, top frame first, as structured
+    /// <see cref="FrameLocation"/>s — each pairs the "Type.Method @ file:line" <see cref="FrameLocation.Display"/>
+    /// with the structured <see cref="FrameLocation.File"/> (the FULL source path, NOT the basename the
+    /// display abbreviates to) and <see cref="FrameLocation.Line"/> resolved from the module's Portable PDB
+    /// (both null when no PDB / for native/internal frames). The full path is what a source-rendering view
+    /// (ADR-012) needs to open the file; <see cref="GetStackFrames"/> is the display-only projection of this.
+    /// Valid only while the debuggee is stopped (after <see cref="WaitForStop"/>).</summary>
+    public IReadOnlyList<FrameLocation> GetStackFrameLocations()
+    {
+        List<FrameLocation> result = new();
         foreach (Interop.FrameInfo frame in Frames.WalkManagedFrames(_pump.StopThread))
         {
             SourceLocation? loc = frame.IlOffset >= 0 && frame.ModulePath.Length > 0
                 ? SymbolsFor(frame.ModulePath)?.TryGetLine(frame.Token, frame.IlOffset)
                 : null;
-            result.Add(loc is { } l ? $"{frame.Method} @ {Path.GetFileName(l.File)}:{l.Line}" : frame.Method);
+            result.Add(loc is { } l
+                ? new FrameLocation($"{frame.Method} @ {Path.GetFileName(l.File)}:{l.Line}", l.File, l.Line)
+                : new FrameLocation(frame.Method, null, null));
         }
         return result;
     }
@@ -952,7 +969,7 @@ public sealed class DebugSession : IDisposable, IMemberResolver
             ? new ExecutionPosition(
                 currentStop,
                 currentStop!.Reason == StopReason.Exception ? GetCurrentExceptionTypeName() : null,
-                GetStackFrames(),
+                GetStackFrameLocations(),
                 GetLocals(),
                 GetArguments())
             : ExecutionPosition.None;

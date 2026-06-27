@@ -21,8 +21,17 @@ public sealed record WireSnapshot(string CapturedAt, WireSession Session, WirePo
 
 public sealed record WireSession(int Pid, bool Owned, int? RuntimeMajor, bool Detached, bool Disposed, string Execution);
 
-public sealed record WirePosition(string? Stop, string? ExceptionType, string? TopFrame,
-    string[] CallStack, WireVar[] Locals, WireVar[] Arguments);
+public sealed record WirePosition(string? Stop, string? ExceptionType,
+    WireFrame[] CallStack, WireVar[] Locals, WireVar[] Arguments);
+
+/// <summary>One call-stack frame on the wire: the <see cref="Display"/> string a text view prints
+/// ("Type.Method @ file:line" / "Type.Method" / "[external]") PLUS the structured source location —
+/// <see cref="File"/> (the FULL source path, null when unresolved) and <see cref="Line"/> (1-based, null
+/// when unresolved). The full path lets a view open the file for a source-on-step rendering (ADR-012
+/// Phase 4); before the Phase-2 enrichment the position carried only the abbreviated display string, so a
+/// view could show WHERE execution stopped but not open the file. Mirrors how <see cref="WireBreakpoint"/>
+/// already carries structured File/Line. The top (innermost) frame is <c>CallStack[0]</c>.</summary>
+public sealed record WireFrame(string Display, string? File, int? Line);
 
 public sealed record WireVar(string Name, int ElementType, string? Value);
 

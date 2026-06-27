@@ -12,8 +12,12 @@ public sealed class WireCodecTests
     private static WireMessage SnapshotMessage() => new("snapshot", 7, Snapshot: new WireSnapshot(
         CapturedAt: "1970-01-01T00:00:00.0000000+00:00",
         Session: new WireSession(4242, Owned: true, RuntimeMajor: 10, Detached: false, Disposed: false, Execution: "Stopped"),
-        Position: new WirePosition("Breakpoint", ExceptionType: null, TopFrame: "Acme.Worker.Run @ Worker.cs:42",
-            CallStack: new[] { "Acme.Worker.Run @ Worker.cs:42", "Acme.Program.Main @ Program.cs:10" },
+        Position: new WirePosition("Breakpoint", ExceptionType: null,
+            CallStack: new[]
+            {
+                new WireFrame("Acme.Worker.Run @ Worker.cs:42", "/src/Acme/Worker.cs", 42),
+                new WireFrame("Acme.Program.Main @ Program.cs:10", "/src/Acme/Program.cs", 10),
+            },
             Locals: new[] { new WireVar("count", 0x08, "7") },
             Arguments: new[] { new WireVar("n", 0x08, "1") }),
         Breakpoints: new[] { new WireBreakpoint(1, 3, "line", "Worker.cs", 42, null, null) },
@@ -42,8 +46,12 @@ public sealed class WireCodecTests
         Assert.Equal(4242, snap.Session.Pid);
         Assert.Equal("Stopped", snap.Session.Execution);
         Assert.Equal("Breakpoint", snap.Position.Stop);
-        Assert.Equal("Acme.Worker.Run @ Worker.cs:42", snap.Position.TopFrame);
         Assert.Equal(2, snap.Position.CallStack.Length);
+        // The structured frame round-trips — display AND the full source path + line (ADR-012 Phase-2 enrichment):
+        WireFrame top = snap.Position.CallStack[0];
+        Assert.Equal("Acme.Worker.Run @ Worker.cs:42", top.Display);
+        Assert.Equal("/src/Acme/Worker.cs", top.File);
+        Assert.Equal(42, top.Line);
         Assert.Equal("count", snap.Position.Locals[0].Name);
         Assert.Equal("1", snap.Position.Arguments.Single(a => a.Name == "n").Value);
         Assert.Equal(42, snap.Breakpoints[0].Line);

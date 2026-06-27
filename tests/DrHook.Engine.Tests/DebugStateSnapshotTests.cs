@@ -19,7 +19,11 @@ public sealed class DebugStateSnapshotTests
             Position: new ExecutionPosition(
                 new StopInfo(StopReason.Breakpoint),
                 ExceptionTypeName: null,
-                CallStack: new[] { "Acme.Worker.Run @ Worker.cs:42", "Acme.Program.Main @ Program.cs:10" },
+                CallStack: new[]
+                {
+                    new FrameLocation("Acme.Worker.Run @ Worker.cs:42", "/src/Acme/Worker.cs", 42),
+                    new FrameLocation("Acme.Program.Main @ Program.cs:10", "/src/Acme/Program.cs", 10),
+                },
                 Locals: new[] { new LocalValue("count", 0, 7) },
                 Arguments: new[] { new ArgumentValue(0, null, Name: "this") }),
             Breakpoints: new[] { new BreakpointStatus(new LineBreakpointInfo(1, "Acme", "Worker.cs", 42), HitCount: 3) },
@@ -36,6 +40,10 @@ public sealed class DebugStateSnapshotTests
         // ...the execution position (top frame is the stack head)...
         Assert.Equal("Acme.Worker.Run @ Worker.cs:42", snapshot.Position.TopFrame);
         Assert.Equal(2, snapshot.Position.CallStack.Count);
+        // ...each frame's structured source location — the FULL path + line a source-rendering view needs
+        // (ADR-012 Phase-2 enrichment), not just the abbreviated display string:
+        Assert.Equal("/src/Acme/Worker.cs", snapshot.Position.CallStack[0].File);
+        Assert.Equal(42, snapshot.Position.CallStack[0].Line);
         Assert.Equal("count", snapshot.Position.Locals[0].Name);
         Assert.Equal("this", snapshot.Position.Arguments[0].Name);
 
