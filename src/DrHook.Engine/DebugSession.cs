@@ -1142,6 +1142,13 @@ public sealed class DebugSession : IDisposable, IMemberResolver
         if (thisValue == 0) return EvalStatus.SetupFailed;
         try
         {
+            // D3 (ADR-013): a span (ReadOnlySpan<T>/Span<T>) receiver cannot be func-eval'd — a ref
+            // struct cannot be boxed as the getter's `this` argument — so read its field-backed members
+            // (`.Length`) directly off the frame value. Falls through to func-eval for every other
+            // receiver / member, so reference receivers and ordinary getters are unaffected.
+            if (Variables.TryReadSpanMember(thisValue, memberName, out result))
+                return EvalStatus.Completed;
+
             nint function = MemberResolver.ResolveGetter(thisValue, memberName);
             if (function == 0) return EvalStatus.SetupFailed;
             try

@@ -260,6 +260,66 @@ internal static unsafe class Variables
         finally { RuntimeNavigation.Release(refVal); }
     }
 
+    /// <summary>D3 (ADR-013): read a <c>Span&lt;T&gt;</c> / <c>ReadOnlySpan&lt;T&gt;</c> member directly
+    /// from its backing field instead of func-eval'ing the getter. A ref struct cannot be passed as a
+    /// func-eval receiver — the runtime cannot box it as the getter's <c>this</c> argument — so a getter
+    /// call faults (the <c>conditionError</c> that blocked <c>value.Length &gt; 1000</c> in the Mercury
+    /// ADR-050 hunt). Only field-backed span members are served here (<c>.Length</c> → the <c>_length</c>
+    /// field); any other member or receiver returns false so the caller falls back to the func-eval path
+    /// (which still serves reference receivers and ordinary getters). A byref receiver (a ref-struct
+    /// method's <c>this</c>) is dereferenced one level first. Returns an OWNED-free <paramref name="result"/>
+    /// (the field value is read and released here). PRECONDITION: process synchronized.</summary>
+    internal static bool TryReadSpanMember(nint pValue, string memberName, out ArgumentValue result)
+    {
+        result = default;
+        if (pValue == 0) return false;
+
+        string? field = SpanBackingField(memberName);
+        if (field is null) return false; // cheap early-out: not a field-backed span member
+
+        // A ref struct `this` arrives as a BYREF — deref one level to the struct value itself.
+        nint owned = 0;
+        nint target = pValue;
+        if (OutInt(pValue, ValueGetType) == 0x10 /* BYREF */)
+        {
+            owned = DerefByRef(pValue);
+            if (owned == 0) return false;
+            target = owned;
+        }
+        try
+        {
+            int elementType = OutInt(target, ValueGetType);
+            if (elementType != 0x11 /* VALUETYPE */) return false; // spans are value types
+            if (!IsSpan(target, elementType)) return false;
+
+            nint fieldValue = FieldEnumerator.GetFieldValueByName(target, field);
+            if (fieldValue == 0) return false;
+            try { result = ReadValue(fieldValue); return result.RawValue is not null; }
+            finally { RuntimeNavigation.Release(fieldValue); }
+        }
+        finally { if (owned != 0) RuntimeNavigation.Release(owned); }
+    }
+
+    // The backing field for a span member that can be read without a getter call. Span<T> and
+    // ReadOnlySpan<T> store their length in `_length`; both the `.Length` property and the `_length`
+    // field name itself map to it. Null for any other member.
+    private static string? SpanBackingField(string memberName) => memberName switch
+    {
+        "Length" or "_length" => "_length",
+        _ => null,
+    };
+
+    // True if pValue's runtime type is System.Span<T> or System.ReadOnlySpan<T> (a value-type ref
+    // struct). Resolves the runtime type name via the shared ValueTypeInspector (metadata reads only —
+    // no value-byte copy, safe for large value types per ADR-014).
+    private static bool IsSpan(nint pValue, int elementType)
+    {
+        string? typeName = ValueTypeInspector.Read(pValue, elementType).TypeName;
+        return typeName is not null
+            && (typeName.StartsWith("System.ReadOnlySpan<", StringComparison.Ordinal)
+                || typeName.StartsWith("System.Span<", StringComparison.Ordinal));
+    }
+
     // The immediate children (one level) of a value, dispatched by its element type. Reuses the
     // one-level GetChildren; null (a non-expandable leaf) collapses to an empty list.
     private static IReadOnlyList<FieldValue> ImmediateChildren(nint pValue)

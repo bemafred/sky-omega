@@ -16,5 +16,5 @@ Intent and rationale: [ADR-004 — DrHook: Runtime Observation Substrate](../ADR
 | [ADR-010](ADR-010-mcp-tool-surface-redesign.md)                  | MCP Tool Surface Redesign — Semantic Naming and Established-Debugger Alignment | Accepted |
 | [ADR-011](ADR-011-lifecycle-console-dashboard.md)                | Debug-Session Lifecycle (stop/detach/kill) and Debuggee Console I/O — Isolation, Surfacing, and the DrHook Dashboard | Accepted |
 | [ADR-012](ADR-012-debug-state-surfaces.md)                       | Debug-State Surfaces — a Surface-Agnostic Model and its First Human Views (TUI Dashboard, Avalonia Sibling) | Proposed · Phases 1–2 built · Phase 4 accepted (2026-06-27) |
-| [ADR-013](ADR-013-value-type-refstruct-inspection.md)            | Inspection of Value Types and Ref Structs — VALUETYPE + BYREF Field Expansion, Span-Aware Expression Evaluation | Accepted |
+| [ADR-013](ADR-013-value-type-refstruct-inspection.md)            | Inspection of Value Types and Ref Structs — VALUETYPE + BYREF Field Expansion, Span-Aware Expression Evaluation | Completed |
 | [ADR-014](ADR-014-inspection-fault-containment.md)              | DrHook Inspection Robustness — Value-Type Read Safety and Fault Containment (a frame's shape must never crash the engine) | Completed |

@@ -1,6 +1,6 @@
 # ADR-013: Inspection of value types and ref structs — VALUETYPE + BYREF field expansion, and span-aware expression evaluation
 
-**Status:** Accepted — 2026-06-21
+**Status:** Completed — 2026-06-27. **D1 + D2 shipped — 2026-06-22** (commit `1fe8dcc`, v1.8.5): VALUETYPE field expansion + BYREF deref make structs / spans / ref-struct `this` navigable through `drhook_expand`. **D3 — 2026-06-27:** span-aware expression evaluation — a condition / logpoint can read a `Span<T>` / `ReadOnlySpan<T>` member (`.Length`) directly from its `_length` field, since a ref struct cannot be func-eval'd. Validated by a file-based probe (`poc/drhook-engine/span-length-condition-smoke.cs`) and a CI regression test (`SpanConditionTest`, integration suite 14/14, engine units 154/154). **Finale — 2026-06-27:** the Mercury [ADR-050](../mercury/ADR-050-growable-result-binding-buffer.md) hunt re-run live through the real DrHook MCP — read `value.Length` (2002), `this._stringOffset` (34), and `this._stringBuffer.Length` (65536) directly at a live `BindingTable.Bind` frame (tree path), with the D3 condition `value.Length > 1000` evaluating on the spans with no `conditionError`. All five criteria met.
 
 ## Context
 
@@ -39,11 +39,11 @@ These are **increments 2–3** of the lazy-inspection arc, under the same rules 
 **Proposed → Accepted** on review of the VALUETYPE/BYREF interop approach (the no-deref value-type path and the byref single-deref are the pieces to verify against Rider as oracle, per `reference_rider_as_oracle`).
 
 **Accepted → Completed** when:
-- A VALUETYPE struct local expands to its fields via `drhook_expand`.
-- A BYREF `this` (ref-struct method) expands to the struct, then to its fields.
-- A `ReadOnlySpan<char>` expands to show `_length`, **and** a breakpoint condition `span.Length > N` compiles and evaluates (no `conditionError`).
-- A probe + regression test under the file-based PoC convention.
-- **The finale (dogfooding at its best):** re-run the Mercury [ADR-050](../mercury/ADR-050-growable-result-binding-buffer.md) hunt under this fix and read `value.Length`, `_stringOffset`, and `_stringBuffer.Length` *directly* at `BindingTable.Bind:115` — confirming the DrHook fix — then watch `_stringBuffer.Length` grow and the binding succeed after the Mercury fix — confirming that one. One session validates both fixes, with no custom debugging tool.
+- ✅ A VALUETYPE struct local expands to its fields via `drhook_expand`. *(D1 — shipped `1fe8dcc` / v1.8.5.)*
+- ✅ A BYREF `this` (ref-struct method) expands to the struct, then to its fields. *(D2 — shipped `1fe8dcc` / v1.8.5.)*
+- ✅ A `ReadOnlySpan<char>` expands to show `_length` (D1), **and** a breakpoint condition `span.Length > N` compiles and evaluates (no `conditionError`). *(D3 — 2026-06-27; `value.Length > 5` on a `ReadOnlySpan<char>` argument compiles, gates the `<= 5` calls, and fires on the `> 5` call with no fault.)*
+- ✅ A probe + regression test under the file-based PoC convention. *(Probe `poc/drhook-engine/span-length-condition-smoke.cs` PASSED; regression test `SpanConditionTest` — integration suite 14/14, engine units 154/154.)*
+- ✅ **The finale (dogfooding at its best) — 2026-06-27:** re-ran the hunt live through the real DrHook MCP. At a live `BindingTable.Bind` frame (tree path: `TreeJoinExecutor → TriplePatternScan → Bind`), DrHook read `value.Length` (**2002**), `this._stringOffset` (**34**), and `this._stringBuffer.Length` (**65536**) directly, and the D3 condition `value.Length > 1000` evaluated on the spans across all binds (17, 17, 2002) with **no `conditionError`**. ADR-050's Mercury growable buffer shipped earlier (the 64K buffer was already above need), so this confirms the DrHook side — reading the span + ref-struct fields live on real Mercury code.
 
 ## Consequences
 
