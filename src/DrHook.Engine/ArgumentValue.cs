@@ -16,14 +16,18 @@ namespace SkyOmega.DrHook.Engine;
 /// name — the declared parameter name from the method's metadata <c>Param</c> table, or <c>this</c>
 /// for an instance method's receiver (via <see cref="MethodMetadata.ArgumentNames"/>); empty when the
 /// value is a bare carrier (an eval result or a raw value read) or no metadata resolves, in which
-/// case a consumer supplies a positional <c>argN</c> fallback.</summary>
+/// case a consumer supplies a positional <c>argN</c> fallback. <see cref="TypeName"/> is the runtime
+/// type name of an object / array / value-type reference (e.g. <c>Worker</c>, <c>System.Exception</c>),
+/// resolved from metadata via <c>ICorDebugValue2.GetExactType</c>; null for primitives, strings, and
+/// null references — it lets a view render an object as its type rather than a bare placeholder.</summary>
 public readonly record struct ArgumentValue(
     int ElementType,
     object? RawValue,
     string? StringValue = null,
     IReadOnlyList<FieldValue>? Fields = null,
     bool HasChildren = false,
-    string Name = "");
+    string Name = "",
+    string? TypeName = null);
 
 /// <summary>A named local variable at a stop: its source name (from the PDB) plus the same
 /// CorElementType + CLR-typed boxed primitive + optional rendered string content + optional
@@ -40,7 +44,8 @@ public readonly record struct LocalValue(
     object? RawValue,
     string? StringValue = null,
     IReadOnlyList<FieldValue>? Fields = null,
-    bool HasChildren = false);
+    bool HasChildren = false,
+    string? TypeName = null);
 
 /// <summary>An instance field on an object value. Same shape as <see cref="LocalValue"/> — a
 /// name + CLR-typed boxed primitive + optional rendered string + a <see cref="HasChildren"/> flag.
@@ -54,7 +59,8 @@ public readonly record struct FieldValue(
     object? RawValue,
     string? StringValue = null,
     IReadOnlyList<FieldValue>? Fields = null,
-    bool HasChildren = false);
+    bool HasChildren = false,
+    string? TypeName = null);
 
 /// <summary>Read-only snapshot of a stop's inspectable state, passed to a conditional-breakpoint
 /// predicate. A C#-expression front end (e.g. a Roslyn walker) resolves identifiers against this.</summary>

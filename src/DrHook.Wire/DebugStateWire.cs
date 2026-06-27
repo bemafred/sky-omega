@@ -33,7 +33,16 @@ public sealed record WirePosition(string? Stop, string? ExceptionType,
 /// already carries structured File/Line. The top (innermost) frame is <c>CallStack[0]</c>.</summary>
 public sealed record WireFrame(string Display, string? File, int? Line);
 
-public sealed record WireVar(string Name, int ElementType, string? Value);
+/// <summary>One local / argument on the wire: <see cref="Name"/>, the raw CorElementType
+/// (<see cref="ElementType"/>), the rendered <see cref="Value"/> (a primitive's text or a string's
+/// content; null for an object/array reference or an unavailable value), <see cref="TypeName"/> — the
+/// runtime type of a non-null object/array/value-type reference (e.g. <c>Worker</c>; null otherwise) — and
+/// <see cref="HasChildren"/>, true when the value is a non-null object/array with expandable members.
+/// Together these let a view render a value precisely: a primitive/string by <see cref="Value"/>, an object
+/// as its type (<c>{Worker}</c>) from <see cref="TypeName"/>, an object of unresolved type as expandable
+/// (<c>{…}</c>) from <see cref="HasChildren"/>, and a null reference as <c>null</c> — never a bare
+/// <c>?</c>.</summary>
+public sealed record WireVar(string Name, int ElementType, string? Value, bool HasChildren = false, string? TypeName = null);
 
 public sealed record WireBreakpoint(int Id, int HitCount, string Kind, string? File, int? Line, string? Type, string? Method);
 

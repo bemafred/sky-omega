@@ -100,7 +100,7 @@ internal static unsafe class ArrayInspector
                     // as expandable so a caller navigates deeper on demand (DebugSession.ExpandLocal),
                     // not the eager multi-level walk that faulted at scale (ADR-007).
                     elements.Add(new FieldValue($"[{i.ToString(CultureInfo.InvariantCulture)}]",
-                        v.ElementType, v.RawValue, v.StringValue, null, v.HasChildren));
+                        v.ElementType, v.RawValue, v.StringValue, null, v.HasChildren, v.TypeName));
                 }
                 finally { RuntimeNavigation.Release(elementValue); }
             }

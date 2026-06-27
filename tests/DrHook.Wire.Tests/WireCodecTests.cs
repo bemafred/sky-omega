@@ -19,7 +19,7 @@ public sealed class WireCodecTests
                 new WireFrame("Acme.Program.Main @ Program.cs:10", "/src/Acme/Program.cs", 10),
             },
             Locals: new[] { new WireVar("count", 0x08, "7") },
-            Arguments: new[] { new WireVar("n", 0x08, "1") }),
+            Arguments: new[] { new WireVar("n", 0x08, "1"), new WireVar("this", 0x12, null, HasChildren: true, TypeName: "Acme.Worker") }),
         Breakpoints: new[] { new WireBreakpoint(1, 3, "line", "Worker.cs", 42, null, null) },
         ExceptionFilters: Array.Empty<WireExceptionFilter>(),
         Streams: new WireStreams(0, 0, 0, 0, 0, 0)));
@@ -54,6 +54,11 @@ public sealed class WireCodecTests
         Assert.Equal(42, top.Line);
         Assert.Equal("count", snap.Position.Locals[0].Name);
         Assert.Equal("1", snap.Position.Arguments.Single(a => a.Name == "n").Value);
+        // an object-reference arg round-trips with HasChildren, a null Value, and its runtime TypeName
+        WireVar thisArg = snap.Position.Arguments.Single(a => a.Name == "this");
+        Assert.True(thisArg.HasChildren);
+        Assert.Null(thisArg.Value);
+        Assert.Equal("Acme.Worker", thisArg.TypeName);
         Assert.Equal(42, snap.Breakpoints[0].Line);
         Assert.Equal(3, snap.Breakpoints[0].HitCount);
         Assert.Empty(snap.ExceptionFilters);

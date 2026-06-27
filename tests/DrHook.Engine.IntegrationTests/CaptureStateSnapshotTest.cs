@@ -89,6 +89,12 @@ public sealed class CaptureStateSnapshotTest
             Assert.IsTrue(Equals(n.RawValue, 1), $"arg n (first beat) should be 1; got {n.RawValue ?? "(null)"}.");
             Assert.IsTrue(snap.Position.Arguments.Any(a => a.Name == "label"), "arg label should be present.");
 
+            // the receiver `this` resolves its runtime type name live from the target's metadata
+            // (substrate completeness, 2026-06-27) — a non-null object, expandable, typed Worker.
+            ArgumentValue self = snap.Position.Arguments.FirstOrDefault(a => a.Name == "this");
+            Assert.AreEqual("Worker", self.TypeName, $"arg this should report its runtime type Worker; got '{self.TypeName ?? "(null)"}'.");
+            Assert.IsTrue(self.HasChildren, "this (a non-null object) should be expandable.");
+
             // the armed breakpoint travels in the snapshot, at its line
             BreakpointStatus bp = snap.Breakpoints.Single(b => b.Info.Id == bpId);
             Assert.AreEqual(markerLine, ((LineBreakpointInfo)bp.Info).Line);

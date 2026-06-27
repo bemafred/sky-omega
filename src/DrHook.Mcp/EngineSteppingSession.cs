@@ -1098,6 +1098,7 @@ public sealed class EngineSteppingSession : IDisposable
         };
         if (l.RawValue is { } raw) node["value"] = RawToJson(raw);
         if (l.StringValue is not null) node["string"] = l.StringValue;
+        if (l.TypeName is not null) node["typeName"] = l.TypeName;
         if (l.HasChildren) node["hasChildren"] = true;
         if (l.Fields is { Count: > 0 } fs) node["fields"] = FieldsToJson(fs);
         return node;
@@ -1113,6 +1114,7 @@ public sealed class EngineSteppingSession : IDisposable
         };
         if (a.RawValue is { } raw) node["value"] = RawToJson(raw);
         if (a.StringValue is not null) node["string"] = a.StringValue;
+        if (a.TypeName is not null) node["typeName"] = a.TypeName;
         if (a.HasChildren) node["hasChildren"] = true;
         if (a.Fields is { Count: > 0 } fs) node["fields"] = FieldsToJson(fs);
         return node;
@@ -1130,6 +1132,7 @@ public sealed class EngineSteppingSession : IDisposable
             };
             if (f.RawValue is { } raw) node["value"] = RawToJson(raw);
             if (f.StringValue is not null) node["string"] = f.StringValue;
+            if (f.TypeName is not null) node["typeName"] = f.TypeName;
             if (f.HasChildren) node["hasChildren"] = true;
             if (f.Fields is { Count: > 0 } sub) node["fields"] = FieldsToJson(sub);
             arr.Add(node);

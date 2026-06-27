@@ -22,7 +22,7 @@ public sealed class DebugStateWireMapperTests
                 new FrameLocation("Acme.Program.Main @ Program.cs:10", "/src/Acme/Program.cs", 10),
             },
             Locals: new[] { new LocalValue("count", 0x08, 7) },
-            Arguments: new[] { new ArgumentValue(0x12, null, Name: "this"), new ArgumentValue(0x08, 1, Name: "n") }),
+            Arguments: new[] { new ArgumentValue(0x12, null, HasChildren: true, Name: "this", TypeName: "Acme.Worker"), new ArgumentValue(0x08, 1, Name: "n") }),
         Breakpoints: new[] { new BreakpointStatus(new LineBreakpointInfo(1, "Acme", "Worker.cs", 42), HitCount: 3) },
         ExceptionFilters: new[] { new ExceptionFilterStatus(new ExceptionFilterInfo(1, "System.IOException", ExceptionStopKind.Unhandled), HitCount: 0) },
         Console: new ConsoleDrainResult(Array.Empty<ConsoleOutputRecord>(), 0),
@@ -63,6 +63,13 @@ public sealed class DebugStateWireMapperTests
         // a string-arg renders via StringValue; nulls are omitted (camelCase, WhenWritingNull)
         JsonElement nArg = snap.GetProperty("position").GetProperty("arguments").EnumerateArray().Single(a => a.GetProperty("name").GetString() == "n");
         Assert.Equal("1", nArg.GetProperty("value").GetString());
+
+        // an object-reference arg (this) carries hasChildren — NOT a value — so a view renders it as an
+        // expandable object, not a bare "?" (dogfood 2026-06-27: `this=?` was the lossy projection).
+        JsonElement thisArg = snap.GetProperty("position").GetProperty("arguments").EnumerateArray().Single(a => a.GetProperty("name").GetString() == "this");
+        Assert.True(thisArg.GetProperty("hasChildren").GetBoolean());
+        Assert.False(thisArg.TryGetProperty("value", out _));            // object ref: no rendered value
+        Assert.Equal("Acme.Worker", thisArg.GetProperty("typeName").GetString()); // ...carries its runtime type instead
     }
 
     [Fact]

@@ -65,7 +65,7 @@ internal static unsafe class Variables
                         ArgumentValue v = ReadValue(value);
                         IReadOnlyList<FieldValue>? children = GetChildren(value, v.ElementType, depth);
                         string name = ((int)i < argNames.Count && argNames[(int)i].Length > 0) ? argNames[(int)i] : $"arg{i}";
-                        args.Add(new ArgumentValue(v.ElementType, v.RawValue, v.StringValue, children, v.HasChildren, name));
+                        args.Add(new ArgumentValue(v.ElementType, v.RawValue, v.StringValue, children, v.HasChildren, name, v.TypeName));
                     }
                     finally { RuntimeNavigation.Release(value); }
                 }
@@ -108,7 +108,7 @@ internal static unsafe class Variables
                     {
                         ArgumentValue v = ReadValue(value);
                         IReadOnlyList<FieldValue>? children = GetChildren(value, v.ElementType, depth);
-                        locals.Add(new LocalValue(name.Name, v.ElementType, v.RawValue, v.StringValue, children, v.HasChildren));
+                        locals.Add(new LocalValue(name.Name, v.ElementType, v.RawValue, v.StringValue, children, v.HasChildren, v.TypeName));
                     }
                     finally { RuntimeNavigation.Release(value); }
                 }
@@ -297,7 +297,21 @@ internal static unsafe class Variables
         // Reference-string rendering (finding 44 / probe 35) — cheap on misses (one or two QIs).
         string? stringValue = StringInspector.TryRead(pValue, out string? text) ? text : null;
 
-        return new ArgumentValue(elementType, raw, stringValue, null, IsExpandable(elementType));
+        // Runtime type name + null-ness for reference / value-type values — the substrate source for a view to
+        // render an object as its type (e.g. `{Worker}`) and a null reference as `null` rather than a bare
+        // placeholder (ADR-012 dogfood, 2026-06-27). Only for expandable kinds carrying neither a primitive
+        // nor a string value (objects, arrays, structs). Metadata + flag reads only — no value-byte copy, so
+        // safe for large value types (ADR-014). A null reference is then NOT expandable.
+        bool hasChildren = IsExpandable(elementType);
+        string? typeName = null;
+        if (hasChildren && raw is null && stringValue is null)
+        {
+            ValueTypeInspector.TypeInfo info = ValueTypeInspector.Read(pValue, elementType);
+            if (info.IsNullReference) hasChildren = false;
+            else typeName = info.TypeName;
+        }
+
+        return new ArgumentValue(elementType, raw, stringValue, null, hasChildren, "", typeName);
     }
 
     /// <summary>Reify the raw 8-byte buffer returned by <c>ICorDebugGenericValue.GetValue</c> as a

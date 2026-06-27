@@ -16,10 +16,7 @@ internal static unsafe class ExceptionInspector
 
     private const int ThreadGetCurrentException = 10;  // ICorDebugThread
     private const int Value2GetExactType        = 3;   // ICorDebugValue2
-    private const int TypeGetClass              = 4;   // ICorDebugType
-    private const int TypeGetBase               = 7;
-    private const int ClassGetModule            = 3;   // ICorDebugClass
-    private const int ClassGetToken             = 4;
+    private const int TypeGetBase               = 7;   // ICorDebugType (GetClass→name now via ValueTypeInspector.NameOfType)
 
     private static nint Slot(nint pUnk, int index) => ((nint*)*(nint*)pUnk)[index];
 
@@ -76,7 +73,7 @@ internal static unsafe class ExceptionInspector
             {
                 while (type != 0)
                 {
-                    string? name = NameOfType(type);
+                    string? name = ValueTypeInspector.NameOfType(type);
                     if (name is not null) chain.Add(name);
 
                     nint baseType = Out(type, TypeGetBase);
@@ -89,26 +86,5 @@ internal static unsafe class ExceptionInspector
         finally { RuntimeNavigation.Release(value); }
 
         return chain;
-    }
-
-    private static string? NameOfType(nint type)
-    {
-        nint klass = Out(type, TypeGetClass);
-        if (klass == 0) return null;
-        try
-        {
-            nint module = Out(klass, ClassGetModule);
-            if (module == 0) return null;
-            try
-            {
-                uint typeToken;
-                if (((delegate* unmanaged[Cdecl]<nint, uint*, int>)Slot(klass, ClassGetToken))(klass, &typeToken) < 0)
-                    return null;
-                string name = MetadataResolver.TypeNameFromToken(module, typeToken);
-                return name.Length == 0 ? null : name;
-            }
-            finally { RuntimeNavigation.Release(module); }
-        }
-        finally { RuntimeNavigation.Release(klass); }
     }
 }

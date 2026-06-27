@@ -45,8 +45,8 @@ public static class DebugStateWireMapper
 
     private static WireFrame ToWire(FrameLocation f) => new(f.Display, f.File, f.Line);
 
-    private static WireVar ToWire(LocalValue l) => new(l.Name, l.ElementType, l.StringValue ?? Render(l.RawValue));
-    private static WireVar ToWire(ArgumentValue a) => new(a.Name, a.ElementType, a.StringValue ?? Render(a.RawValue));
+    private static WireVar ToWire(LocalValue l) => new(l.Name, l.ElementType, l.StringValue ?? Render(l.RawValue), l.HasChildren, l.TypeName);
+    private static WireVar ToWire(ArgumentValue a) => new(a.Name, a.ElementType, a.StringValue ?? Render(a.RawValue), a.HasChildren, a.TypeName);
 
     private static WireBreakpoint ToWire(BreakpointStatus b) => b.Info switch
     {

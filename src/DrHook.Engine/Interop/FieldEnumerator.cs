@@ -175,7 +175,7 @@ internal static unsafe class FieldEnumerator
                         // object/array field as expandable so a caller navigates deeper on demand
                         // (DebugSession.ExpandLocal), instead of the eager multi-level walk that
                         // faulted in coreclr's unwinder at scale (ADR-007 — inspection at scale).
-                        output.Add(new FieldValue(name, v.ElementType, v.RawValue, v.StringValue, null, v.HasChildren));
+                        output.Add(new FieldValue(name, v.ElementType, v.RawValue, v.StringValue, null, v.HasChildren, v.TypeName));
                     }
                     finally { RuntimeNavigation.Release(fieldValue); }
                 }
