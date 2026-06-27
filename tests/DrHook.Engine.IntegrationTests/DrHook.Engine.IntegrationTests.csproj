@@ -27,6 +27,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\DrHook.Engine\DrHook.Engine.csproj" />
+    <!-- MCP-layer session (EngineSteppingSession) — exercised by the launch-breakpoint-removable regression. -->
+    <ProjectReference Include="..\..\src\DrHook.Mcp\DrHook.Mcp.csproj" />
     <!-- Build dependency on the MTP integration target so its exe is available at test time. -->
     <ProjectReference Include="..\DrHook.Engine.IntegrationTargets.Mtp\DrHook.Engine.IntegrationTargets.Mtp.csproj">
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>

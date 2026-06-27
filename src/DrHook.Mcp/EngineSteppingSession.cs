@@ -247,9 +247,8 @@ public sealed class EngineSteppingSession : IDisposable
                     hypothesis));
 
             // Set the initial breakpoint and run to it.
-            int id = _session.SetBreakpointAtLine(sourceFile, line);
+            int id = TrackSourceBreakpoint(sourceFile, line);
             if (id == 0) return Task.FromResult(Error($"Could not set breakpoint at {sourceFile}:{line}."));
-            _lineBreakpoints[KeyLine(sourceFile, line)] = id;
 
             _session.Resume();
             StopInfo? stop = _session.WaitForStop(TimeSpan.FromMinutes(2));
@@ -329,9 +328,8 @@ public sealed class EngineSteppingSession : IDisposable
                     $"The process exited during launch setup, before the breakpoint at {sourceFile}:{line} could be armed — it completed or threw within the 10s setup window. Drain drhook_drain_log / drhook_drain_console for any output; start the next session with drhook_launch or drhook_attach.",
                     hypothesis));
 
-            int id = _session.SetBreakpointAtLine(sourceFile, line);
+            int id = TrackSourceBreakpoint(sourceFile, line);
             if (id == 0) { CleanupSession(); return Task.FromResult(Error($"Could not set breakpoint at {sourceFile}:{line}.")); }
-            _lineBreakpoints[KeyLine(sourceFile, line)] = id;
 
             _session.Resume();
             StopInfo? stop = _session.WaitForStop(TimeSpan.FromMinutes(2));
@@ -594,11 +592,8 @@ public sealed class EngineSteppingSession : IDisposable
             catch (Exception ex) { return Task.FromResult(Error($"Policy compile failed: {ex.GetType().Name}: {ex.Message}")); }
         }
 
-        int id = _session.SetBreakpointAtLine(sourceFile, line, policy);
+        int id = TrackSourceBreakpoint(sourceFile, line, policy, spec);
         if (id == 0) return Task.FromResult(Error($"Could not set breakpoint at {sourceFile}:{line} — module/PDB unavailable or no sequence point at that line."));
-        _lineBreakpoints[KeyLine(sourceFile, line)] = id;
-        _breakpointKinds[id] = BreakpointKind.Source;
-        if (spec is not null) _policySpecs[id] = spec;
 
         JsonObject result = new()
         {
@@ -1178,6 +1173,24 @@ public sealed class EngineSteppingSession : IDisposable
         string typeName = typePart;          // full "Namespace.Type"
         string module  = typePart[..prevDot]; // best-effort module guess from the namespace prefix
         return (module, typeName, method);
+    }
+
+    /// <summary>Set a source-line breakpoint AND register it across the MCP tracking maps as ONE
+    /// atomic operation — the single registration point every source breakpoint goes through (the
+    /// launch + attach initial bp, and drhook_break_source). Keeping the maps in lockstep here makes
+    /// drift structurally impossible: a source bp cannot be set without also recording its kind. The
+    /// drift this collapses was a real bug — the launch/attach initial bp registered in
+    /// <c>_lineBreakpoints</c> but not <c>_breakpointKinds</c>, so <c>RemoveByIdAsync</c> (kind-gated)
+    /// rejected an id that <c>ListBreakpoints</c> showed (the ADR-013 finale finding). Returns the
+    /// substrate id, or 0 if the breakpoint could not be set (the caller renders its own 0 message).</summary>
+    private int TrackSourceBreakpoint(string sourceFile, int line, BreakpointPolicy? policy = null, BreakpointPolicySpec? spec = null)
+    {
+        int id = _session!.SetBreakpointAtLine(sourceFile, line, policy);
+        if (id == 0) return 0;
+        _lineBreakpoints[KeyLine(sourceFile, line)] = id;
+        _breakpointKinds[id] = BreakpointKind.Source;
+        if (spec is not null) _policySpecs[id] = spec;
+        return id;
     }
 
     private static string KeyLine(string file, int line) => $"{file}:{line.ToString(CultureInfo.InvariantCulture)}";
