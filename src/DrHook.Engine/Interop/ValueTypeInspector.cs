@@ -19,13 +19,24 @@ internal static unsafe class ValueTypeInspector
     private static readonly Guid IID_ICorDebugValue2          = new("5E0B54E7-D88A-4626-9420-A691E0A78B49");
     private static readonly Guid IID_ICorDebugReferenceValue  = new("CC7BCAF9-8A68-11D2-983C-0000F808342D");
 
-    private const int ReferenceValueIsNull = 7;   // ICorDebugReferenceValue
-    private const int Value2GetExactType   = 3;   // ICorDebugValue2
-    private const int TypeGetClass         = 4;   // ICorDebugType
-    private const int ClassGetModule       = 3;   // ICorDebugClass
-    private const int ClassGetToken        = 4;
+    private const int ReferenceValueIsNull       = 7;   // ICorDebugReferenceValue
+    private const int Value2GetExactType         = 3;   // ICorDebugValue2
+    private const int TypeGetType                = 3;   // ICorDebugType → CorElementType
+    private const int TypeGetClass               = 4;
+    private const int TypeEnumerateTypeParameters = 5;
+    private const int TypeGetFirstTypeParameter  = 6;
+    private const int TypeEnumNext               = 7;   // ICorDebugTypeEnum (ICorDebugEnum + Next)
+    private const int ClassGetModule             = 3;   // ICorDebugClass
+    private const int ClassGetToken              = 4;
+    private const int MaxTypeDepth               = 5;   // guard pathological generic nesting / recursion
 
     private static nint Slot(nint pUnk, int index) => ((nint*)*(nint*)pUnk)[index];
+
+    private static int OutInt(nint pUnk, int slot)
+    {
+        int v;
+        return ((delegate* unmanaged[Cdecl]<nint, int*, int>)Slot(pUnk, slot))(pUnk, &v) < 0 ? 0 : v;
+    }
 
     private static nint QueryInterface(nint pUnk, Guid iid)
     {
@@ -85,10 +96,50 @@ internal static unsafe class ValueTypeInspector
         finally { RuntimeNavigation.Release(type); }
     }
 
-    /// <summary>The metadata type name of an <c>ICorDebugType</c>: GetClass → (module, mdTypeDef) →
-    /// <see cref="MetadataResolver.TypeNameFromToken"/>. Null if any step fails. The single shared
+    /// <summary>The full runtime type name of an <c>ICorDebugType</c> — intrinsics by their CLR name, arrays
+    /// as <c>Elem[]</c>, and class / value types by their metadata name PLUS their generic arguments
+    /// (<c>List`1&lt;Int32&gt;</c> → <c>System.Collections.Generic.List&lt;Int32&gt;</c>), walked recursively
+    /// over <c>ICorDebugType.EnumerateTypeParameters</c>. Namespace-qualified (the wire carries the complete
+    /// name; a view abbreviates for display). Null if the type can't be resolved. The single shared
     /// "type → name" step (also used by <see cref="ExceptionInspector"/>'s base-chain walk).</summary>
-    internal static string? NameOfType(nint type)
+    internal static string? NameOfType(nint type) => FullTypeName(type, 0);
+
+    private static string? FullTypeName(nint type, int depth)
+    {
+        if (type == 0 || depth > MaxTypeDepth) return null;
+
+        int elementType = OutInt(type, TypeGetType);
+        if (PrimitiveName(elementType) is { } primitive) return primitive;
+
+        // Arrays render as Element[] — the element type is the load-bearing part (rank is elided).
+        if (elementType is 0x1D /* SZARRAY */ or 0x14 /* ARRAY */)
+        {
+            nint element = Out(type, TypeGetFirstTypeParameter);
+            if (element == 0) return "[]";
+            try { return (FullTypeName(element, depth + 1) ?? "?") + "[]"; }
+            finally { RuntimeNavigation.Release(element); }
+        }
+
+        // Class / value type: its metadata name, plus <…> generic arguments when it is an instantiation.
+        string? open = ClassName(type);
+        if (open is null) return null;
+        string args = TypeArguments(type, depth);
+        return args.Length == 0 ? open : StripArity(open) + "<" + args + ">";
+    }
+
+    // CorElementType → CLR intrinsic name; null for non-intrinsic types (which resolve via metadata).
+    private static string? PrimitiveName(int elementType) => elementType switch
+    {
+        0x02 => "Boolean", 0x03 => "Char",
+        0x04 => "SByte", 0x05 => "Byte", 0x06 => "Int16", 0x07 => "UInt16",
+        0x08 => "Int32", 0x09 => "UInt32", 0x0A => "Int64", 0x0B => "UInt64",
+        0x0C => "Single", 0x0D => "Double", 0x0E => "String",
+        0x18 => "IntPtr", 0x19 => "UIntPtr", 0x1C => "Object",
+        _ => null,
+    };
+
+    // The namespace-qualified metadata name of a class / value type: GetClass → (module, mdTypeDef) → name.
+    private static string? ClassName(nint type)
     {
         nint klass = Out(type, TypeGetClass);
         if (klass == 0) return null;
@@ -107,5 +158,34 @@ internal static unsafe class ValueTypeInspector
             finally { RuntimeNavigation.Release(module); }
         }
         finally { RuntimeNavigation.Release(klass); }
+    }
+
+    // Comma-joined generic type arguments of an instantiation (each resolved recursively); "" when non-generic.
+    private static string TypeArguments(nint type, int depth)
+    {
+        nint typeEnum = Out(type, TypeEnumerateTypeParameters);
+        if (typeEnum == 0) return "";
+        List<string> names = new();
+        try
+        {
+            var next = (delegate* unmanaged[Cdecl]<nint, uint, nint*, uint*, int>)Slot(typeEnum, TypeEnumNext);
+            while (true)
+            {
+                nint param;
+                uint fetched = 0;
+                if (next(typeEnum, 1, &param, &fetched) < 0 || fetched == 0 || param == 0) break;
+                try { names.Add(FullTypeName(param, depth + 1) ?? "?"); }
+                finally { RuntimeNavigation.Release(param); }
+            }
+        }
+        finally { RuntimeNavigation.Release(typeEnum); }
+        return string.Join(", ", names);
+    }
+
+    // Drop the generic-arity backtick suffix (List`1 → List); the <…> arguments make the arity explicit.
+    private static string StripArity(string name)
+    {
+        int tick = name.IndexOf('`');
+        return tick >= 0 ? name[..tick] : name;
     }
 }

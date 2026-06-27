@@ -85,6 +85,13 @@ public sealed class CaptureStateSnapshotTest
             Assert.IsTrue(Equals(doubled.RawValue, 2), $"local doubled (beat=1: n*2) should be 2; got {doubled.RawValue ?? "(null)"}.");
             Assert.IsTrue(Equals(contribution.RawValue, 6L), $"local contribution (doubled + \"tick\".Length) should be 6; got {contribution.RawValue ?? "(null)"}.");
 
+            // a generic local resolves its runtime type name WITH its arguments (List<String>) — live from
+            // metadata via EnumerateTypeParameters (generic type-arg rendering, 2026-06-27). Lenient on the
+            // arg form (String vs System.String) since the view abbreviates either way.
+            LocalValue tags = snap.Position.Locals.FirstOrDefault(l => l.Name == "tags");
+            Assert.IsTrue(tags.TypeName is not null && tags.TypeName.Contains("List<") && tags.TypeName.Contains("String") && tags.TypeName.EndsWith(">"),
+                $"local tags should render as a generic List<String>; got '{tags.TypeName ?? "(null)"}'.");
+
             ArgumentValue n = snap.Position.Arguments.FirstOrDefault(a => a.Name == "n");
             Assert.IsTrue(Equals(n.RawValue, 1), $"arg n (first beat) should be 1; got {n.RawValue ?? "(null)"}.");
             Assert.IsTrue(snap.Position.Arguments.Any(a => a.Name == "label"), "arg label should be present.");

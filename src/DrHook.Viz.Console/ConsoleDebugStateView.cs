@@ -84,15 +84,35 @@ public sealed class ConsoleDebugStateView : IDebugStateView
     private static string RenderVar(WireVar v)
         => $"{v.Name}={v.Value ?? (v.TypeName is { } t ? $"{{{ShortType(t)}}}" : v.HasChildren ? "{…}" : "null")}";
 
-    // The readable tail of a metadata type name for display: drop the namespace (last '.' segment) and the
-    // generic-arity backtick (System.Collections.Generic.List`1 → List). The wire carries the full name; the
-    // view abbreviates it, the same way it shows a source file by basename.
+    // Abbreviate a (possibly generic) full type name for display: reduce each qualified name component to its
+    // simple name (namespace dropped, generic-arity backtick dropped) while preserving the generic structure
+    // (<, >, commas, []). "System.Collections.Generic.List<System.Int32>" → "List<Int32>". The wire carries
+    // the full name; the view abbreviates it, the same way it shows a source file by basename.
     private static string ShortType(string typeName)
     {
-        int dot = typeName.LastIndexOf('.');
-        string simple = dot >= 0 ? typeName[(dot + 1)..] : typeName;
+        var sb = new System.Text.StringBuilder(typeName.Length);
+        int i = 0;
+        while (i < typeName.Length)
+        {
+            char c = typeName[i];
+            if (char.IsLetterOrDigit(c) || c is '_' or '.' or '`')
+            {
+                int start = i;
+                while (i < typeName.Length && (char.IsLetterOrDigit(typeName[i]) || typeName[i] is '_' or '.' or '`')) i++;
+                sb.Append(SimpleName(typeName.AsSpan(start, i - start)));
+            }
+            else { sb.Append(c); i++; }
+        }
+        return sb.ToString();
+    }
+
+    // One qualified component → its simple name: drop the namespace (after the last '.') and the arity backtick.
+    private static string SimpleName(ReadOnlySpan<char> qualified)
+    {
+        int dot = qualified.LastIndexOf('.');
+        ReadOnlySpan<char> simple = dot >= 0 ? qualified[(dot + 1)..] : qualified;
         int tick = simple.IndexOf('`');
-        return tick >= 0 ? simple[..tick] : simple;
+        return (tick >= 0 ? simple[..tick] : simple).ToString();
     }
 
     public void OnDelta(WireDelta d, DebugStateClientModel model)

@@ -171,4 +171,32 @@ public sealed class ConsoleDebugStateViewTests : IDisposable
         Assert.Contains("n=1", output);           // primitive → value
         Assert.DoesNotContain("=?", output);      // the bare question-mark rendering is gone
     }
+
+    [Fact]
+    public void OnSnapshot_GenericAndArrayTypeNames_AbbreviatedPreservingStructure()
+    {
+        // The full namespace-qualified generic name on the wire is abbreviated for display: each component is
+        // reduced to its simple name while the generic structure (<, >, commas, []) is preserved.
+        var sw = new StringWriter();
+        var snap = new WireSnapshot("t",
+            new WireSession(7, true, 10, false, false, "Stopped"),
+            new WirePosition("Breakpoint", ExceptionType: null,
+                CallStack: new[] { new WireFrame("M @ Program.cs:1", null, null) },
+                Locals: new[]
+                {
+                    new WireVar("list", 0x12, null, HasChildren: true, TypeName: "System.Collections.Generic.List<System.Int32>"),
+                    new WireVar("map", 0x12, null, HasChildren: true, TypeName: "System.Collections.Generic.Dictionary<System.String, Acme.Models.Foo>"),
+                    new WireVar("arr", 0x1D, null, HasChildren: true, TypeName: "Acme.Models.Bar[]"),
+                },
+                Arguments: Array.Empty<WireVar>()),
+            Breakpoints: Array.Empty<WireBreakpoint>(), ExceptionFilters: Array.Empty<WireExceptionFilter>(),
+            Streams: new WireStreams(0, 0, 0, 0, 0, 0));
+
+        new ConsoleDebugStateView(sw).OnSnapshot(snap, new DebugStateClientModel(10));
+        string output = sw.ToString();
+
+        Assert.Contains("list={List<Int32>}", output);
+        Assert.Contains("map={Dictionary<String, Foo>}", output);
+        Assert.Contains("arr={Bar[]}", output);
+    }
 }

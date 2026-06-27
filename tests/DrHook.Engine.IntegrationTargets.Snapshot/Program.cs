@@ -7,6 +7,7 @@
 // (lesson from probes 17/18). Bounded loop — the test disposes the Owned session long before it ends.
 
 using System;
+using System.Collections.Generic;
 using System.Threading;
 
 var worker = new Worker();
@@ -24,7 +25,9 @@ sealed class Worker
     {
         int doubled = n * 2;
         long contribution = doubled + label.Length;
+        var tags = new List<string> { label };  // a generic local — exercises runtime generic type-name rendering
         Total += contribution;   // SNAPSHOT_HERE
+        GC.KeepAlive(tags);
         return Total;
     }
 }
