@@ -24,6 +24,7 @@ using System.Text.Json.Nodes;
 using SkyOmega.DrHook.Engine;
 using SkyOmega.DrHook.Engine.Interop;
 using SkyOmega.DrHook.Engine.Transport;
+using SkyOmega.DrHook.Viz;
 using SkyOmega.DrHook.Wire;
 
 namespace SkyOmega.DrHook.Mcp;
@@ -77,6 +78,15 @@ public sealed class EngineSteppingSession : IDisposable
     // session, and the driver owns snapshot capture so there is no transport<->stepping race.
     private readonly DebugStateServer _transport = new(WireRendezvous.DefaultSocketPath());
     private readonly IDebugEventSink _sink;
+
+    // The most recent stop, recorded at the single stop chokepoint (PublishTransportSnapshot) — independent of
+    // whether the transport bound. drhook_snapshot_image needs it to capture the CURRENT state on demand:
+    // DebugSession.CaptureState marks "stopped" only when given the stop, so a null here renders as "running".
+    private StopInfo? _lastStop;
+
+    // Reused source-window reader for the image projection's source-on-step pane (an internal bounded cache, like
+    // the console view's). Reading source from disk is sound — the MCP server is co-located with the target.
+    private readonly SourceWindowReader _sourceReader = new();
 
     public EngineSteppingSession()
     {
@@ -199,15 +209,46 @@ public sealed class EngineSteppingSession : IDisposable
         }
     }
 
-    /// <summary>Push a fresh self-contained snapshot to connected views after a stop. BEST-EFFORT — a transport
-    /// fault must never break a debug response. The DRIVER (this MCP request thread) owns the capture, so views
-    /// only ever receive immutable snapshots/deltas: there is no transport↔stepping race (ADR-012 Phase 2). The
-    /// stream tails are read non-destructively (Peek) so the drain tools still see them.</summary>
+    /// <summary>Record the current stop and push a fresh self-contained snapshot to connected views. This is the
+    /// single stop chokepoint, so it also records <see cref="_lastStop"/> for on-demand capture
+    /// (drhook_snapshot_image) — done BEFORE the transport guard, so it holds even when no view/socket is running.
+    /// Pushing to views is BEST-EFFORT — a transport fault must never break a debug response. The DRIVER (this MCP
+    /// request thread) owns the capture, so views only ever receive immutable snapshots/deltas: there is no
+    /// transport↔stepping race (ADR-012 Phase 2). The stream tails are read non-destructively (Peek) so the drain
+    /// tools still see them.</summary>
     private void PublishTransportSnapshot(StopInfo? stop)
     {
+        _lastStop = stop; // track the current stop regardless of transport state (on-demand image capture)
         if (_session is null || !_transport.IsRunning) return;
         try { _transport.PublishSnapshot(_session.CaptureState(stop, _console.Peek(), _logs.Peek(), _anomalies.Peek())); }
         catch { /* transport is best-effort; never break a debug response */ }
+    }
+
+    /// <summary>Render the CURRENT debug-state to a PNG (drhook_snapshot_image): capture the live state, map it to
+    /// the wire shape, project it to text through the SHARED <see cref="DebugStateTextRenderer"/> (the same one the
+    /// console view uses — so the image is exactly what a view shows, never a forked render), then rasterize. Pure
+    /// (engine + viz, no MCP types); the tool layer wraps the bytes in an image content block. Returns null
+    /// <c>Png</c> with an explanatory <c>Caption</c> when there is no session or capture fails.</summary>
+    public (byte[]? Png, string Caption) RenderCurrentStateImage(string? hypothesis)
+    {
+        if (_session is null) return (null, "No active stepping session. Launch or attach first.");
+        EmitHypothesis(hypothesis, HypothesisLens.Inspection);
+        try
+        {
+            // CaptureState reads the live frame/locals/args; _lastStop supplies the stop reason and the "stopped"
+            // flag (null → rendered as running). Same thread as drhook_locals reads on — the established pattern.
+            WireSnapshot wire = DebugStateWireMapper.ToWire(
+                _session.CaptureState(_lastStop, _console.Peek(), _logs.Peek(), _anomalies.Peek()));
+
+            var text = new StringWriter();
+            DebugStateTextRenderer.RenderSnapshot(text, wire, _stepCount, _sourceReader);
+            byte[] png = TextImageRenderer.RenderToPng(text.ToString());
+
+            string stop = wire.Position.Stop is { } s ? $", {s}" : "";
+            string hint = hypothesis is not null ? $" — hypothesis: {hypothesis}" : "";
+            return (png, $"debug-state image: pid={wire.Session.Pid} {wire.Session.Execution}{stop}{hint}");
+        }
+        catch (Exception ex) { return (null, $"Snapshot image failed: {ex.Message}"); }
     }
 
     // ─── Session lifecycle ────────────────────────────────────────────────────────────────────
@@ -1256,6 +1297,7 @@ public sealed class EngineSteppingSession : IDisposable
         _exceptionFilters.Clear();
         _stepCount = 0;
         _targetPid = 0;
+        _lastStop = null; // no current stop once the session ends (the next session starts fresh)
         _targetVersion = "unknown";
         _sessionHypothesis = "";
     }

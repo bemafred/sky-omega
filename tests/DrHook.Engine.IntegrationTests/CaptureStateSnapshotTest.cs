@@ -11,12 +11,16 @@
 // at the SNAPSHOT_HERE marker is safe). macOS/arm64 today (ADR-007 Phase 9 = cross-platform).
 
 using System;
+using System.Buffers.Binary;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SkyOmega.DrHook.Engine;
+using SkyOmega.DrHook.Engine.Transport;
+using SkyOmega.DrHook.Viz;
+using SkyOmega.DrHook.Wire;
 
 namespace DrHook.Engine.IntegrationTests;
 
@@ -108,6 +112,22 @@ public sealed class CaptureStateSnapshotTest
 
             // the tap observed the unified delta stream as a peer consumer (lifecycle events fired)
             Assert.IsTrue(tap.Peek().Deltas.Any(d => d.Kind == DebugStateDeltaKind.Event), "The tap should have captured lifecycle deltas.");
+
+            // ── ADR-012 visual snapshot (drhook_snapshot_image): the SAME engine→wire→text projection the image
+            // tool uses, rasterized — locks the whole composition against a REAL capture, not a synthetic one. ──
+            WireSnapshot wire = DebugStateWireMapper.ToWire(snap);
+            var projected = new StringWriter();
+            DebugStateTextRenderer.RenderSnapshot(projected, wire, seq: 0, new SourceWindowReader());
+            string text = projected.ToString();
+            Assert.IsTrue(text.Contains("Compute", StringComparison.Ordinal), $"projected text should name the stopped frame; got:\n{text}");
+            Assert.IsTrue(text.Contains("doubled=2", StringComparison.Ordinal), $"projected text should show the live local doubled=2; got:\n{text}");
+
+            byte[] png = TextImageRenderer.RenderToPng(text);
+            Assert.IsTrue(png.Length > 8 && png[0] == 0x89 && png[1] == 0x50 && png[2] == 0x4E && png[3] == 0x47,
+                "drhook_snapshot_image must produce a PNG (signature).");
+            Assert.IsTrue(BinaryPrimitives.ReadInt32BigEndian(png.AsSpan(16, 4)) > 0
+                       && BinaryPrimitives.ReadInt32BigEndian(png.AsSpan(20, 4)) > 0,
+                "the rendered image must have positive dimensions.");
         }
         finally
         {

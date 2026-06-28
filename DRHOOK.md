@@ -29,7 +29,7 @@ The substrate is `DrHook.Engine` — a BCL + P/Invoke + source-gen COM implement
 
 ## DrHook MCP Tools
 
-22 tools. Every state-changing operation and every inspection that reads target state takes a `hypothesis` parameter — state what you expect *before* you observe (Sky Omega epistemic discipline; ADR-010 Decision principle 5).
+23 tools. Every state-changing operation and every inspection that reads target state takes a `hypothesis` parameter — state what you expect *before* you observe (Sky Omega epistemic discipline; ADR-010 Decision principle 5).
 
 ### Session lifecycle
 
@@ -69,6 +69,7 @@ The substrate is `DrHook.Engine` — a BCL + P/Invoke + source-gen COM implement
 | Tool | What it does | Former name |
 |------|---------------|-------------|
 | `drhook_locals` | Inspect locals + arguments at current stop. Depth parameter (≥ 2) expands object fields and arrays (SZARRAY). **Top frame only** — frame selection comes via ADR-010 Tier 2 (`drhook_frames` / `drhook_locals(frame=N)`). | `drhook_step_vars` |
+| `drhook_snapshot_image` | Render the CURRENT debug-state as a PNG **image** you can see — the same compact view `drhook-viz-console` shows (session, stop, call stack, source-on-step pane, locals/args, breakpoints), rasterized through the SHARED renderer so the image is exactly what a view shows. Returns a caption + the image. Requires a `hypothesis`. (ADR-012 visual snapshot.) | *(new)* |
 
 ### Observation (no session required)
 

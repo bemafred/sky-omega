@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 using SkyOmega.DrHook.Engine.Diagnostics;
 
@@ -271,6 +272,25 @@ public sealed class DrHookTools
     {
         string[] segments = path.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         return await _session.ExpandAsync(target, segments, string.IsNullOrWhiteSpace(hypothesis) ? null : hypothesis, ct);
+    }
+
+    [McpServerTool(Name = "drhook_snapshot_image"), Description(
+        "Render the CURRENT debug-state as a PNG IMAGE you can SEE — the same compact view drhook-viz-console " +
+        "shows (session, stop, call stack, the source-on-step pane with the stopped line marked, locals/args, " +
+        "breakpoints, stream counts), rasterized through the shared renderer so the image is exactly what a view " +
+        "shows. Use while stopped to PERCEIVE the state visually rather than reading JSON — and the same eye for " +
+        "inspecting a Mira/TUI/GUI surface under development. Returns a short caption plus the image. Requires a " +
+        "hypothesis: state what you expect the state to look like before you look.")]
+    public IEnumerable<ContentBlock> SnapshotImage(
+        [Description("What you expect the state to look like. Required — state it before you look (epistemic discipline).")] string hypothesis)
+    {
+        (byte[]? png, string caption) = _session.RenderCurrentStateImage(hypothesis);
+        if (png is null) return [new TextContentBlock { Text = caption }]; // no session / capture failed — text only
+        return
+        [
+            new TextContentBlock { Text = caption },
+            new ImageContentBlock { Data = Convert.ToBase64String(png), MimeType = "image/png" },
+        ];
     }
 
     [McpServerTool(Name = "drhook_stop"), Description(

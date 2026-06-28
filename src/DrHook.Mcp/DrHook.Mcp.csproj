@@ -43,8 +43,12 @@
     <ItemGroup>
         <!-- DrHook.Engine — BCL-only stepping substrate (finding 51) + EventPipe diagnostics
              (Diagnostics/ProcessAttacher + StackInspector, moved here as part of the netcoredbg
-             retirement, finding 52). Sole DrHook dependency now. -->
+             retirement, finding 52). -->
         <ProjectReference Include="..\DrHook.Engine\DrHook.Engine.csproj" />
+        <!-- DrHook.Viz — the Wire-pure visualization lib (references only DrHook.Wire, no native deps).
+             drhook_snapshot_image renders the current debug-state through the SHARED DebugStateTextRenderer
+             + TextImageRenderer to a PNG, so the image is exactly what drhook-viz-console shows (ADR-012). -->
+        <ProjectReference Include="..\DrHook.Viz\DrHook.Viz.csproj" />
     </ItemGroup>
 
 </Project>
