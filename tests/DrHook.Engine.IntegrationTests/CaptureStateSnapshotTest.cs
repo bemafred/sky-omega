@@ -157,6 +157,14 @@ public sealed class CaptureStateSnapshotTest
             Assert.AreEqual(EvalStatus.Completed, argCall, "static→instance(int) N-arg call should complete.");
             Assert.IsTrue(Equals(added.RawValue, 43),
                 $"EvalProbe.Create().AddTo(2) should be 43; got {added.RawValue?.ToString() ?? "(null)"}.");
+
+            // ── Q8 (a) mechanic 4: NewObject — construct new EvalProbe(7) in the target, then read .Tag off it
+            // (= 7). The new RenderTargetBitmap(size) shape: construct an object, then operate on the result. ──
+            EvalStatus construct = session.TryEvalNewObjectThenGetter(
+                EntryModule, "EvalProbe", 7, "Tag", TimeSpan.FromSeconds(10), out ArgumentValue built);
+            Assert.AreEqual(EvalStatus.Completed, construct, "NewObject construction + getter should complete.");
+            Assert.IsTrue(Equals(built.RawValue, 7),
+                $"new EvalProbe(7).Tag should be 7; got {built.RawValue?.ToString() ?? "(null)"}.");
         }
         finally
         {

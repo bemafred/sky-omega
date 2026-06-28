@@ -15,7 +15,8 @@ namespace SkyOmega.DrHook.Engine.Interop;
 internal static unsafe class Eval
 {
     private const int ThreadCreateEval = 17;          // ICorDebugThread (… CreateStepper12 … CreateEval17)
-    private const int EvalCallFunction = 3;           // ICorDebugEval (CallFunction3, …, IsActive8, Abort9, GetResult10, …, CreateValue12)
+    private const int EvalCallFunction = 3;           // ICorDebugEval (CallFunction3, NewObject4, …, NewString6, IsActive8, Abort9, GetResult10, …, CreateValue12)
+    private const int EvalNewObject = 4;
     private const int EvalAbort = 9;
     private const int EvalGetResult = 10;
     private const int EvalCreateValue = 12;
@@ -95,6 +96,18 @@ internal static unsafe class Eval
         var call = (delegate* unmanaged[Cdecl]<nint, nint, uint, nint*, int>)Slot(pEval, EvalCallFunction);
         fixed (nint* p = args) // null when empty → a no-arg (static) call
             return call(pEval, pFunction, (uint)args.Length, p) >= 0;
+    }
+
+    /// <summary>Set up a CONSTRUCTION via <c>ICorDebugEval.NewObject</c>: allocate an instance and run
+    /// <paramref name="pConstructor"/> (the type's <c>.ctor</c>) with <paramref name="args"/> — the ctor
+    /// PARAMETERS only (NewObject allocates the instance, so there is no <c>this</c> arg, unlike
+    /// <see cref="CallFunction"/>). Runs on the next Continue; <see cref="GetResultRaw"/> after EvalComplete is
+    /// the new object. Drives <c>new RenderTargetBitmap(size)</c>.</summary>
+    public static bool NewObject(nint pEval, nint pConstructor, ReadOnlySpan<nint> args)
+    {
+        var newObject = (delegate* unmanaged[Cdecl]<nint, nint, uint, nint*, int>)Slot(pEval, EvalNewObject);
+        fixed (nint* p = args)
+            return newObject(pEval, pConstructor, (uint)args.Length, p) >= 0;
     }
 
     /// <summary>Abort a running/hung evaluation (ICorDebugEval.Abort) — the safety net for an eval

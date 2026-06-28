@@ -1361,6 +1361,75 @@ public sealed class DebugSession : IDisposable, IMemberResolver
         finally { RuntimeNavigation.Release(pModule); }
     }
 
+    /// <summary>Mechanic 4 (ADR-012 Q8 (a)): CONSTRUCTION. Build <c>new <paramref name="typeName"/>(<paramref name="ctorArg"/>)</c>
+    /// via <see cref="Eval.NewObject"/> (the type's <c>.ctor</c> with one int parameter), then read
+    /// <paramref name="getterMember"/> off the constructed object to confirm it — the <c>new RenderTargetBitmap(size)</c>
+    /// shape (construct, then operate on the result). The construction eval is held alive while its object is the
+    /// getter's receiver. Valid only while stopped. (Probe scaffolding; the orchestration subsumes it.)</summary>
+    public EvalStatus TryEvalNewObjectThenGetter(string moduleSubstring, string typeName, int ctorArg,
+                                                 string getterMember, TimeSpan timeout, out ArgumentValue result)
+    {
+        result = default;
+        nint pModule = RuntimeNavigation.FindModule(_pProcess, moduleSubstring);
+        if (pModule == 0) return EvalStatus.SetupFailed;
+        try
+        {
+            uint ctorToken = MetadataResolver.ResolveMethodToken(pModule, typeName, ".ctor");
+            if (ctorToken == 0) return EvalStatus.SetupFailed;
+            nint ctorFn = Eval.GetFunction(pModule, ctorToken);
+            if (ctorFn == 0) return EvalStatus.SetupFailed;
+            try
+            {
+                // Step 1 — new typeName(ctorArg). Keep eval1 alive: the constructed object is the receiver below.
+                nint eval1 = Eval.CreateEval(_pump.StopThread);
+                if (eval1 == 0) return EvalStatus.SetupFailed;
+                try
+                {
+                    nint argValue = Eval.CreateInt32(eval1, ctorArg);
+                    if (argValue == 0) return EvalStatus.SetupFailed;
+                    try
+                    {
+                        Span<nint> ctorArgs = stackalloc nint[1];
+                        ctorArgs[0] = argValue; // the ctor parameter (NewObject allocates `this`)
+                        if (!Eval.NewObject(eval1, ctorFn, ctorArgs)) return EvalStatus.SetupFailed;
+                        EvalStatus builtStatus = RunToComplete(eval1, timeout);
+                        if (builtStatus != EvalStatus.Completed) return builtStatus;
+
+                        nint obj = Eval.GetResultRaw(eval1);
+                        if (obj == 0) return EvalStatus.SetupFailed;
+                        try
+                        {
+                            // Step 2 — read getterMember off the new object (confirms the construction took).
+                            nint getterFn = MemberResolver.ResolveGetter(obj, getterMember);
+                            if (getterFn == 0) return EvalStatus.SetupFailed;
+                            try
+                            {
+                                nint eval2 = Eval.CreateEval(_pump.StopThread);
+                                if (eval2 == 0) return EvalStatus.SetupFailed;
+                                try
+                                {
+                                    if (!Eval.CallWithOneArg(eval2, getterFn, obj)) return EvalStatus.SetupFailed;
+                                    EvalStatus readStatus = RunToComplete(eval2, timeout);
+                                    if (readStatus != EvalStatus.Completed) return readStatus;
+
+                                    result = Eval.GetResultValue(eval2);
+                                    return EvalStatus.Completed;
+                                }
+                                finally { RuntimeNavigation.Release(eval2); }
+                            }
+                            finally { RuntimeNavigation.Release(getterFn); }
+                        }
+                        finally { RuntimeNavigation.Release(obj); }
+                    }
+                    finally { RuntimeNavigation.Release(argValue); }
+                }
+                finally { RuntimeNavigation.Release(eval1); }
+            }
+            finally { RuntimeNavigation.Release(ctorFn); }
+        }
+        finally { RuntimeNavigation.Release(pModule); }
+    }
+
     /// <summary>Call the property getter <c>thisLocal.member</c> by resolving <c>get_&lt;member&gt;</c>
     /// on the local's RUNTIME type — no hardcoded declaring type/module — and func-evaluating it.
     /// Works for plain reference objects; strings/non-object kinds return SetupFailed (the

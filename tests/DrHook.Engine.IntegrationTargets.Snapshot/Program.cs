@@ -50,7 +50,7 @@ sealed class Worker
 sealed class EvalProbe
 {
     private readonly int _seed;
-    private EvalProbe(int seed) => _seed = seed;
+    public EvalProbe(int seed) => _seed = seed;   // public ctor — NewObject (mechanic 4) constructs new EvalProbe(n)
     public static EvalProbe Create() => new EvalProbe(41);
     public int NextValue() => _seed + 1;   // 42 — the chained static→instance call proof
 
