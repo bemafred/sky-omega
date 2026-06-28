@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <RootNamespace>SkyOmega.DrHook.Capture.Tests</RootNamespace>
+    <AssemblyName>SkyOmega.DrHook.Capture.Tests</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.*" />
+    <PackageReference Include="xunit" Version="2.*" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The capture view under test; brings DrHook.Viz/Wire (the DTOs) + Mercury (the store) transitively. -->
+    <ProjectReference Include="../../src/DrHook.Capture/DrHook.Capture.csproj" />
+  </ItemGroup>
+
+</Project>
