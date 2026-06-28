@@ -173,6 +173,16 @@ public sealed class CaptureStateSnapshotTest
             Assert.AreEqual(EvalStatus.Completed, madeString, "NewString + static(string) call should complete.");
             Assert.IsTrue(Equals(length.RawValue, 8),
                 $"EvalProbe.LengthOf(\"snapshot\") should be 8; got {length.RawValue?.ToString() ?? "(null)"}.");
+
+            // ── Q8 (a) mechanic 6: VALUE-TYPE arg — NewObject allocates + constructs new Pair(3,4) in one step,
+            // then it's passed BY VALUE to SumPair (= 7). The new RenderTargetBitmap(PixelSize) shape; the
+            // fiddliest mechanic — CreateValueForType + set-its-contents was a dead end (the synthetic value
+            // exposes only ICorDebugValue2), NewObject is the clean path. ──
+            EvalStatus valueType = session.TryEvalConstructValueTypeViaCtorAndPass(
+                EntryModule, "Pair", new[] { 3, 4 }, "EvalProbe", "SumPair", TimeSpan.FromSeconds(10), out ArgumentValue summed);
+            Assert.AreEqual(EvalStatus.Completed, valueType, "value-type construction (NewObject) + by-value pass should complete.");
+            Assert.IsTrue(Equals(summed.RawValue, 7),
+                $"SumPair(new Pair(3,4)) should be 7; got {summed.RawValue?.ToString() ?? "(null)"}.");
         }
         finally
         {

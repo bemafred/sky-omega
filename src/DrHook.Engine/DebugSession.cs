@@ -1487,6 +1487,87 @@ public sealed class DebugSession : IDisposable, IMemberResolver
         finally { RuntimeNavigation.Release(pModule); }
     }
 
+    /// <summary>Mechanic 6 (ADR-012 Q8 (a)): construct a VALUE TYPE (struct) and pass it BY VALUE to a method —
+    /// the <c>new RenderTargetBitmap(PixelSize)</c> shape. <see cref="Eval.NewObject"/> allocates AND runs the
+    /// struct's <c>.ctor</c> in one step — the cleanest value-type construction (a CreateValueForType value
+    /// exposes only ICorDebugValue2: it can neither be set field-by-field/byte-wise nor serve as a ctor's byref
+    /// <c>this</c>). The constructed struct is then passed by value to the static <paramref name="consumerMethod"/>.
+    /// Two evals; the first is held alive while its result is the consumer's argument. Valid only while stopped.
+    /// (Probe scaffolding; the orchestration subsumes it.)</summary>
+    public EvalStatus TryEvalConstructValueTypeViaCtorAndPass(string moduleSubstring, string structTypeName,
+                                                              int[] ctorArgs, string consumerType,
+                                                              string consumerMethod, TimeSpan timeout, out ArgumentValue result)
+    {
+        result = default;
+        nint pModule = RuntimeNavigation.FindModule(_pProcess, moduleSubstring);
+        if (pModule == 0) return EvalStatus.SetupFailed;
+        try
+        {
+            uint ctorToken = MetadataResolver.ResolveMethodToken(pModule, structTypeName, ".ctor");
+            uint consumerToken = MetadataResolver.ResolveMethodToken(pModule, consumerType, consumerMethod);
+            if (ctorToken == 0 || consumerToken == 0) return EvalStatus.SetupFailed;
+
+            nint ctorFn = Eval.GetFunction(pModule, ctorToken);
+            if (ctorFn == 0) return EvalStatus.SetupFailed;
+            try
+            {
+                nint consumerFn = Eval.GetFunction(pModule, consumerToken);
+                if (consumerFn == 0) return EvalStatus.SetupFailed;
+                try
+                {
+                    // eval1 — NewObject allocates + constructs the value type from its .ctor + the int args.
+                    nint eval1 = Eval.CreateEval(_pump.StopThread);
+                    if (eval1 == 0) return EvalStatus.SetupFailed;
+                    try
+                    {
+                        Span<nint> newArgs = stackalloc nint[ctorArgs.Length];
+                        int created = 0;
+                        try
+                        {
+                            for (; created < ctorArgs.Length; created++)
+                            {
+                                nint a = Eval.CreateInt32(eval1, ctorArgs[created]);
+                                if (a == 0) return EvalStatus.SetupFailed;
+                                newArgs[created] = a;
+                            }
+                            if (!Eval.NewObject(eval1, ctorFn, newArgs)) return EvalStatus.SetupFailed;
+                            EvalStatus builtStatus = RunToComplete(eval1, timeout);
+                            if (builtStatus != EvalStatus.Completed) return builtStatus;
+                        }
+                        finally { for (int i = 0; i < created; i++) RuntimeNavigation.Release(newArgs[i]); }
+
+                        nint structValue = Eval.GetResultRaw(eval1);
+                        if (structValue == 0) return EvalStatus.SetupFailed;
+                        try
+                        {
+                            // eval2 — pass the constructed struct to the consumer.
+                            nint eval2 = Eval.CreateEval(_pump.StopThread);
+                            if (eval2 == 0) return EvalStatus.SetupFailed;
+                            try
+                            {
+                                Span<nint> consumerCall = stackalloc nint[1];
+                                consumerCall[0] = structValue;
+                                if (!Eval.CallFunction(eval2, consumerFn, consumerCall)) return EvalStatus.SetupFailed;
+                                EvalStatus ranStatus = RunToComplete(eval2, timeout);
+                                System.Console.Error.WriteLine($"[VT] ranStatus={ranStatus}");
+                                if (ranStatus != EvalStatus.Completed) return ranStatus;
+
+                                result = Eval.GetResultValue(eval2);
+                                return EvalStatus.Completed;
+                            }
+                            finally { RuntimeNavigation.Release(eval2); }
+                        }
+                        finally { RuntimeNavigation.Release(structValue); }
+                    }
+                    finally { RuntimeNavigation.Release(eval1); }
+                }
+                finally { RuntimeNavigation.Release(consumerFn); }
+            }
+            finally { RuntimeNavigation.Release(ctorFn); }
+        }
+        finally { RuntimeNavigation.Release(pModule); }
+    }
+
     /// <summary>Call the property getter <c>thisLocal.member</c> by resolving <c>get_&lt;member&gt;</c>
     /// on the local's RUNTIME type — no hardcoded declaring type/module — and func-evaluating it.
     /// Works for plain reference objects; strings/non-object kinds return SetupFailed (the

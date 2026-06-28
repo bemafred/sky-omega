@@ -62,4 +62,15 @@ sealed class EvalProbe
 
     public int AddTo(int x) => _seed + x;               // instance method, this + ONE arg — the Render(window)/Save(path) arity
     public static int LengthOf(string s) => s.Length;   // static + STRING arg — confirms a NewString value (Save's path arg)
+    public static int SumPair(Pair p) => p.A + p.B;     // static + VALUE-TYPE arg — the new RenderTargetBitmap(PixelSize) shape
+}
+
+// A two-int struct shaped like PixelSize(int width, int height) — mechanic 6: NewObject allocates + constructs it
+// via this ctor (value-type construction in one step), then it's passed by value to a call. (CreateValueForType +
+// setting its contents was a dead end — the synthetic value exposes only ICorDebugValue2.)
+struct Pair
+{
+    public int A;
+    public int B;
+    public Pair(int a, int b) { A = a; B = b; }
 }
