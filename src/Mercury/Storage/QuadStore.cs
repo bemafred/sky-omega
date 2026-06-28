@@ -2600,8 +2600,17 @@ public sealed class QuadStore : IDisposable
     /// </summary>
     public NamedGraphEnumerator GetNamedGraphs()
     {
-        RequireTemporalProfile(nameof(GetNamedGraphs));
-        return new NamedGraphEnumerator(_gspoIndex, _atoms);
+        // Named-graph enumeration needs a graph-aware GSPO index, NOT temporal semantics — the enumerator
+        // walks GSPO graph-first and dedups by the leading graph atom; the temporal dimension is irrelevant.
+        // Dispatch to whichever B+Tree GSPO the profile built. (Dogfood fix, 2026-06-28: a Graph-profile store
+        // could not enumerate its own named graphs because the path was only ever wired for the temporal
+        // index — surfaced by DrHook.Capture.)
+        if (_gspoIndex is not null) return new NamedGraphEnumerator(_gspoIndex, _atoms);   // Cognitive (temporal)
+        if (_gspoGraph is not null) return new NamedGraphEnumerator(_gspoGraph, _atoms);   // Graph (versioned)
+        if (_gspoMinimal is not null) return new NamedGraphEnumerator(_atoms);             // Minimal: single-graph → no named graphs
+        throw new ProfileCapabilityException(
+            $"GetNamedGraphs is not yet implemented for the {_schema.Profile} profile. The enumerator-union " +
+            "covers Cognitive (temporal) and Graph (versioned); a Reference branch is planned.");
     }
 
     /// <summary>
@@ -3455,50 +3464,81 @@ public readonly ref struct ResolvedTemporalQuad
 /// </summary>
 public ref struct NamedGraphEnumerator
 {
-    private TemporalQuadIndex.TemporalQuadEnumerator _enumerator;
+    private enum Mode { Empty, Temporal, Versioned }
+
+    // Holds EITHER the temporal OR the versioned sub-enumerator (selected by Mode) — a small ref-struct union
+    // so named-graph enumeration is profile-agnostic without growing IQuadIndex or boxing. Both sub-enumerators
+    // walk GSPO graph-first, so the distinct-graph dedup below is identical across profiles. (2026-06-28: the
+    // versioned arm fixed Graph-profile enumeration, which had no path before — DrHook.Capture dogfood.)
+    private TemporalQuadIndex.TemporalQuadEnumerator _temporal;
+    private VersionedQuadIndex.VersionedQuadEnumerator _versioned;
+    private readonly Mode _mode;
     private readonly IAtomStore _atoms;
     private long _lastGraphAtom;
     private string? _current;
 
+    /// <summary>Cognitive (temporal) named graphs — all current quads across all graphs.</summary>
     internal NamedGraphEnumerator(TemporalQuadIndex index, IAtomStore atoms)
     {
-        // Query all current quads across ALL graphs (default + named)
-        _enumerator = index.QueryCurrentAllGraphs();
+        _temporal = index.QueryCurrentAllGraphs();
+        _versioned = default;
+        _mode = Mode.Temporal;
         _atoms = atoms;
         _lastGraphAtom = -1; // -1 means "no graph seen yet"
         _current = null;
     }
 
-    /// <summary>
-    /// Current graph IRI.
-    /// </summary>
+    /// <summary>Graph (versioned) named graphs — all live entries (wildcards), graph-first via the GSPO key.</summary>
+    internal NamedGraphEnumerator(VersionedQuadIndex index, IAtomStore atoms)
+    {
+        _temporal = default;
+        _versioned = index.Query(-1, -1, -1, -1);
+        _mode = Mode.Versioned;
+        _atoms = atoms;
+        _lastGraphAtom = -1;
+        _current = null;
+    }
+
+    /// <summary>No named-graph dimension (e.g. the single-graph Minimal profile): yields nothing.</summary>
+    internal NamedGraphEnumerator(IAtomStore atoms)
+    {
+        _temporal = default;
+        _versioned = default;
+        _mode = Mode.Empty;
+        _atoms = atoms;
+        _lastGraphAtom = -1;
+        _current = null;
+    }
+
+    /// <summary>Current graph IRI.</summary>
     public readonly ReadOnlySpan<char> Current => _current.AsSpan();
 
-    /// <summary>
-    /// Move to the next distinct named graph.
-    /// </summary>
+    /// <summary>Move to the next distinct named graph (the default graph, atom 0, is skipped).</summary>
     public bool MoveNext()
     {
-        while (_enumerator.MoveNext())
+        switch (_mode)
         {
-            var graphAtom = _enumerator.Current.Graph;
-
-            // Skip default graph (atom 0)
-            if (graphAtom == 0)
-                continue;
-
-            // Skip if same as last graph (takes advantage of GSPO ordering)
-            if (graphAtom == _lastGraphAtom)
-                continue;
-
-            _lastGraphAtom = graphAtom;
-
-            // Resolve atom to string
-            _current = _atoms.GetAtomString(graphAtom);
-            return true;
+            case Mode.Temporal:
+                while (_temporal.MoveNext())
+                    if (Accept(_temporal.Current.Graph)) return true;
+                return false;
+            case Mode.Versioned:
+                while (_versioned.MoveNext())
+                    if (Accept(_versioned.Current.Graph)) return true;
+                return false;
+            default:
+                return false;
         }
+    }
 
-        return false;
+    // Accept the next DISTINCT named graph: skip the default graph (atom 0) and runs of the same graph
+    // (GSPO is graph-first, so identical graphs are contiguous). Resolves the atom to its IRI on accept.
+    private bool Accept(long graphAtom)
+    {
+        if (graphAtom == 0 || graphAtom == _lastGraphAtom) return false;
+        _lastGraphAtom = graphAtom;
+        _current = _atoms.GetAtomString(graphAtom);
+        return true;
     }
 
     public NamedGraphEnumerator GetEnumerator() => this;

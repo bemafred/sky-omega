@@ -28,6 +28,46 @@ public class QuadStoreProfileDispatchTests : IDisposable
 
     private string NewStoreDir(string suffix) => Path.Combine(_testDir, suffix);
 
+    #region Named-graph enumeration across profiles (dogfood fix 2026-06-28)
+
+    // GetNamedGraphs no longer requires temporal semantics — it dispatches to the profile's GSPO index via
+    // the enumerator-union, so a Graph-profile (non-temporal) store can enumerate its own named graphs.
+    // Surfaced by DrHook.Capture, which writes one named graph per debug session into a Graph-profile store.
+    [Fact]
+    public void Graph_EnumeratesNamedGraphs_WithoutTemporalSemantics()
+    {
+        var dir = NewStoreDir("graph-namedgraphs");
+        Directory.CreateDirectory(dir);
+        using var store = new QuadStore(dir, null, null, new StorageOptions { Profile = StoreProfile.Graph });
+        Assert.False(store.Schema.HasTemporal); // the whole point — a non-temporal, graph-aware profile
+
+        store.AddCurrent("<urn:s1>", "<urn:p>", "\"a\"", "<urn:g1>");
+        store.AddCurrent("<urn:s2>", "<urn:p>", "\"b\"", "<urn:g2>");
+        store.AddCurrent("<urn:s3>", "<urn:p>", "\"c\"", "<urn:g1>"); // same graph again — must dedup
+
+        var graphs = new System.Collections.Generic.List<string>();
+        foreach (var g in store.GetNamedGraphs()) graphs.Add(g.ToString());
+
+        Assert.Equal(2, graphs.Count);
+        Assert.Contains(graphs, g => g.Contains("g1"));
+        Assert.Contains(graphs, g => g.Contains("g2"));
+    }
+
+    // Minimal is single-graph: it has no named graphs, so enumeration is cleanly empty (not an error).
+    [Fact]
+    public void Minimal_HasNoNamedGraphs_EnumerationIsEmpty()
+    {
+        var dir = NewStoreDir("minimal-namedgraphs");
+        Directory.CreateDirectory(dir);
+        using var store = new QuadStore(dir, null, null, new StorageOptions { Profile = StoreProfile.Minimal });
+
+        int count = 0;
+        foreach (var _ in store.GetNamedGraphs()) count++;
+        Assert.Equal(0, count);
+    }
+
+    #endregion
+
     #region Reference profile
 
     [Fact]
