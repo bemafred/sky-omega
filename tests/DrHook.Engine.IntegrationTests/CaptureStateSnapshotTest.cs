@@ -128,6 +128,17 @@ public sealed class CaptureStateSnapshotTest
             Assert.IsTrue(BinaryPrimitives.ReadInt32BigEndian(png.AsSpan(16, 4)) > 0
                        && BinaryPrimitives.ReadInt32BigEndian(png.AsSpan(20, 4)) > 0,
                 "the rendered image must have positive dimensions.");
+
+            // ── ADR-012 Q8 (a) FOUNDATION: cooperation-free func-eval CHAINING. Call a static factory that
+            // returns an object, then a parameterless instance method on THAT result (the first call's raw value
+            // becomes the second call's `this`) — the mechanic for driving a target's OWN framework APIs with no
+            // debuggee cooperation. EvalProbe.Create().NextValue() must chain to 42. (Runs last: a func-eval
+            // resumes the target to run, so it follows the stop-state assertions above.) ──
+            EvalStatus chain = session.TryEvalStaticThenInstance(
+                EntryModule, "EvalProbe", "Create", "NextValue", TimeSpan.FromSeconds(10), out ArgumentValue chained);
+            Assert.AreEqual(EvalStatus.Completed, chain, "chained static→instance func-eval should complete.");
+            Assert.IsTrue(Equals(chained.RawValue, 42),
+                $"EvalProbe.Create().NextValue() should chain to 42; got {chained.RawValue?.ToString() ?? "(null)"}.");
         }
         finally
         {

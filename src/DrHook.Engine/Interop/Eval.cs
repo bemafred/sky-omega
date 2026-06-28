@@ -98,4 +98,15 @@ internal static unsafe class Eval
         try { return Variables.ReadValue(value); }
         finally { RuntimeNavigation.Release(value); }
     }
+
+    /// <summary>Read the eval's result (after EvalComplete) as a RAW <c>ICorDebugValue</c> handle (owned; caller
+    /// releases) — for CHAINING: the object a call returns becomes the <c>this</c> (or an argument) of the next.
+    /// <see cref="GetResultValue"/> projects + releases for display; this keeps the handle live. 0 on no result
+    /// (e.g. a <c>void</c> call).</summary>
+    public static nint GetResultRaw(nint pEval)
+    {
+        var getResult = (delegate* unmanaged[Cdecl]<nint, nint*, int>)Slot(pEval, EvalGetResult);
+        nint value;
+        return getResult(pEval, &value) < 0 ? 0 : value;
+    }
 }

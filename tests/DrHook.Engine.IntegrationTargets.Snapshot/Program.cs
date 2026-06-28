@@ -42,3 +42,15 @@ sealed class Worker
         Scanned += value.Length;   // SPAN_HERE
     }
 }
+
+// Eval-surface probe fixture (ADR-012 Q8 (a)): a static factory returning an object + a parameterless instance
+// method, so the FOUNDATION func-eval mechanic — call a static method that returns an object, then call an
+// INSTANCE method on that result (chaining the raw ICorDebugValue as `this`) — can be validated WITHOUT any
+// cooperation in the call itself. This is the building block for driving a target's own framework render APIs.
+sealed class EvalProbe
+{
+    private readonly int _seed;
+    private EvalProbe(int seed) => _seed = seed;
+    public static EvalProbe Create() => new EvalProbe(41);
+    public int NextValue() => _seed + 1;   // 42 — the chained static→instance call proof
+}
