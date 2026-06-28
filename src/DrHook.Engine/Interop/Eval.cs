@@ -84,6 +84,19 @@ internal static unsafe class Eval
         return call(pEval, pFunction, 1, &args) >= 0;
     }
 
+    /// <summary>Set up a call to <paramref name="pFunction"/> with N argument values (the
+    /// <c>ICorDebugValue*[]</c> passed to <c>CallFunction</c>); for an INSTANCE method, <c>args[0]</c> is
+    /// <c>this</c> and the rest are the parameters. Generalizes <see cref="CallStaticNoArgs"/> (empty) and
+    /// <see cref="CallWithOneArg"/> (one) — the shape <c>Render(window)</c> / <c>Save(path)</c> need (this + 1).
+    /// Each entry is an owned eval value (a chained raw result, or a created primitive/string). Runs on the next
+    /// Continue; completion arrives as EvalComplete/EvalException.</summary>
+    public static bool CallFunction(nint pEval, nint pFunction, ReadOnlySpan<nint> args)
+    {
+        var call = (delegate* unmanaged[Cdecl]<nint, nint, uint, nint*, int>)Slot(pEval, EvalCallFunction);
+        fixed (nint* p = args) // null when empty → a no-arg (static) call
+            return call(pEval, pFunction, (uint)args.Length, p) >= 0;
+    }
+
     /// <summary>Abort a running/hung evaluation (ICorDebugEval.Abort) — the safety net for an eval
     /// that deadlocks on a target-side lock. Best-effort.</summary>
     public static void Abort(nint pEval)

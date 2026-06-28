@@ -148,6 +148,15 @@ public sealed class CaptureStateSnapshotTest
             Assert.AreEqual(EvalStatus.Completed, getterChain, "static→instance getter chain should complete.");
             Assert.IsTrue(Equals(tagged.RawValue, 42),
                 $"EvalProbe.Origin.Inner.Tag should chain to 42; got {tagged.RawValue?.ToString() ?? "(null)"}.");
+
+            // ── Q8 (a) mechanic 3: N-ARG instance call — Create().AddTo(2) calls an instance method with `this`
+            // plus one argument (CallFunction with a two-entry value array) — the Render(window)/Save(path)
+            // arity. Must be 43 (seed 41 + 2). ──
+            EvalStatus argCall = session.TryEvalStaticThenInstanceInt(
+                EntryModule, "EvalProbe", "Create", "AddTo", 2, TimeSpan.FromSeconds(10), out ArgumentValue added);
+            Assert.AreEqual(EvalStatus.Completed, argCall, "static→instance(int) N-arg call should complete.");
+            Assert.IsTrue(Equals(added.RawValue, 43),
+                $"EvalProbe.Create().AddTo(2) should be 43; got {added.RawValue?.ToString() ?? "(null)"}.");
         }
         finally
         {

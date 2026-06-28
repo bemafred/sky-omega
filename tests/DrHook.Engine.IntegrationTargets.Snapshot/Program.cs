@@ -59,4 +59,6 @@ sealed class EvalProbe
     public static EvalProbe Origin => Create();         // static getter → object (seed 41)  ~ Application.Current
     public EvalProbe Inner => new EvalProbe(_seed + 1); // instance getter → object (seed 42) ~ .ApplicationLifetime
     public int Tag => _seed;                            // instance getter → int  (terminal, for the assertion)
+
+    public int AddTo(int x) => _seed + x;               // instance method, this + ONE arg — the Render(window)/Save(path) arity
 }

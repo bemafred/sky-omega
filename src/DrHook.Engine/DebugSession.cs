@@ -1288,6 +1288,79 @@ public sealed class DebugSession : IDisposable, IMemberResolver
         }
     }
 
+    /// <summary>Mechanic 3 (ADR-012 Q8 (a)): an N-ARG instance call. Like <see cref="TryEvalStaticThenInstance"/>,
+    /// but the instance method takes ONE argument (an <c>int</c>) — proving the <c>this + 1</c> call shape that
+    /// <c>Render(window)</c> / <c>Save(path)</c> need: <see cref="Eval.CallFunction"/> with a two-entry
+    /// <c>ICorDebugValue</c> array (<c>args[0]</c> = the chained receiver, <c>args[1]</c> = the argument, created
+    /// on the call eval via <see cref="Eval.CreateInt32"/>). Valid only while stopped. (Probe-phase scaffolding —
+    /// the capture orchestration will subsume these per-mechanic methods.)</summary>
+    public EvalStatus TryEvalStaticThenInstanceInt(string moduleSubstring, string typeName, string staticFactory,
+                                                   string instanceMethod, int arg, TimeSpan timeout, out ArgumentValue result)
+    {
+        result = default;
+        nint pModule = RuntimeNavigation.FindModule(_pProcess, moduleSubstring);
+        if (pModule == 0) return EvalStatus.SetupFailed;
+        try
+        {
+            uint factoryToken = MetadataResolver.ResolveMethodToken(pModule, typeName, staticFactory);
+            uint methodToken = MetadataResolver.ResolveMethodToken(pModule, typeName, instanceMethod);
+            if (factoryToken == 0 || methodToken == 0) return EvalStatus.SetupFailed;
+
+            nint factoryFn = Eval.GetFunction(pModule, factoryToken);
+            if (factoryFn == 0) return EvalStatus.SetupFailed;
+            try
+            {
+                // Step 1 — the static factory (kept alive through step 2; its result is the receiver).
+                nint eval1 = Eval.CreateEval(_pump.StopThread);
+                if (eval1 == 0) return EvalStatus.SetupFailed;
+                try
+                {
+                    if (!Eval.CallStaticNoArgs(eval1, factoryFn)) return EvalStatus.SetupFailed;
+                    EvalStatus madeStatus = RunToComplete(eval1, timeout);
+                    if (madeStatus != EvalStatus.Completed) return madeStatus;
+
+                    nint instance = Eval.GetResultRaw(eval1);
+                    if (instance == 0) return EvalStatus.SetupFailed;
+                    try
+                    {
+                        nint methodFn = Eval.GetFunction(pModule, methodToken);
+                        if (methodFn == 0) return EvalStatus.SetupFailed;
+                        try
+                        {
+                            // Step 2 — instanceMethod(arg) with `this` + the int argument (a two-entry call).
+                            nint eval2 = Eval.CreateEval(_pump.StopThread);
+                            if (eval2 == 0) return EvalStatus.SetupFailed;
+                            try
+                            {
+                                nint argValue = Eval.CreateInt32(eval2, arg);
+                                if (argValue == 0) return EvalStatus.SetupFailed;
+                                try
+                                {
+                                    Span<nint> args = stackalloc nint[2];
+                                    args[0] = instance; // this
+                                    args[1] = argValue; // the int parameter
+                                    if (!Eval.CallFunction(eval2, methodFn, args)) return EvalStatus.SetupFailed;
+                                    EvalStatus ranStatus = RunToComplete(eval2, timeout);
+                                    if (ranStatus != EvalStatus.Completed) return ranStatus;
+
+                                    result = Eval.GetResultValue(eval2);
+                                    return EvalStatus.Completed;
+                                }
+                                finally { RuntimeNavigation.Release(argValue); }
+                            }
+                            finally { RuntimeNavigation.Release(eval2); }
+                        }
+                        finally { RuntimeNavigation.Release(methodFn); }
+                    }
+                    finally { RuntimeNavigation.Release(instance); }
+                }
+                finally { RuntimeNavigation.Release(eval1); }
+            }
+            finally { RuntimeNavigation.Release(factoryFn); }
+        }
+        finally { RuntimeNavigation.Release(pModule); }
+    }
+
     /// <summary>Call the property getter <c>thisLocal.member</c> by resolving <c>get_&lt;member&gt;</c>
     /// on the local's RUNTIME type — no hardcoded declaring type/module — and func-evaluating it.
     /// Works for plain reference objects; strings/non-object kinds return SetupFailed (the
