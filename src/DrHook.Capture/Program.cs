@@ -1,6 +1,7 @@
 using SkyOmega.DrHook.Capture;
 using SkyOmega.DrHook.Viz;
 using SkyOmega.Mercury.Abstractions;
+using SkyOmega.Mercury.Runtime.IO;
 using SkyOmega.Mercury.Storage;
 
 // DrHook capture — persists the live debug-state stream (the hypothesis-observation braid) to a dedicated
@@ -38,7 +39,10 @@ for (int i = 0; i < args.Length; i++)
     socketPath ??= arg;
 }
 
-storeDir ??= DefaultStoreDir();
+// Default to the canonical named-store path (alongside cli/mcp) — cross-platform-correct via the same helper
+// Mercury itself uses, rather than a hand-rolled path. There is no store registry; this naming convention is
+// the closest thing to "registration".
+storeDir ??= MercuryPaths.Store("drhook");
 Directory.CreateDirectory(storeDir);
 
 using var store = new QuadStore(storeDir, null, null, new StorageOptions { Profile = StoreProfile.Graph });
@@ -52,12 +56,3 @@ Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
 Console.Error.WriteLine($"drhook-capture → store {storeDir} (profile Graph) ← {options.SocketPath}  (Ctrl+C to quit)");
 await new DebugStateClient(options).RunAsync(new MercuryCaptureView(store, Console.Error), cts.Token);
 return 0;
-
-static string DefaultStoreDir()
-{
-    string home = Environment.GetEnvironmentVariable("HOME")
-        ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-    return OperatingSystem.IsMacOS()
-        ? Path.Combine(home, "Library", "SkyOmega", "stores", "drhook")
-        : Path.Combine(home, ".local", "share", "sky-omega", "stores", "drhook");
-}
