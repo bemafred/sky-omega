@@ -1,6 +1,6 @@
 # ADR-006: DrHook.Engine — Native ICorDebug Replacement for netcoredbg
 
-**Status:** Accepted — 2026-05-21
+**Status:** Completed — 2026-06-28 (Accepted — 2026-05-21). Substrate-independence reached at **1.8.2** (`src/DrHook/` retired entirely). The engine meets this ADR's own Validation bar: zero netcoredbg spawns, managed-client + `libdbgshim` the only diagnostics dependencies, **12/12** MCP integration tests (ADR-008 Increment 4), macOS/arm64 stepping + func-eval working (probe 19). The remaining Phase 4 *breadth* (reference-typed result rendering, the exception-breakpoint axis) was delivered by successor ADRs — [ADR-010](ADR-010-mcp-tool-surface-redesign.md) / [ADR-012](ADR-012-debug-state-surfaces.md) / [ADR-013](ADR-013-value-type-refstruct-inspection.md) / [ADR-014](ADR-014-inspection-fault-containment.md).
 
 Emergence 2026-04-17 (Proposed). Scope narrowed 2026-05-19 per [ADR-009](../ADR-009-substrate-dependency-policy.md). **Moved to Accepted 2026-05-21** after the `poc/drhook-engine/` evidence pack (probes 02–06, findings 01–13) validated the entire interop approach end-to-end on macOS/ARM64, BCL-only. This ADR is rewritten from that evidence, not from design intent — every load-bearing decision below has a probe behind it.
 

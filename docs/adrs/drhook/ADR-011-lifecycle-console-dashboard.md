@@ -1,6 +1,6 @@
 # ADR-011: Debug-session lifecycle (stop / detach / kill) and debuggee console I/O — isolation, surfacing, and the DrHook dashboard
 
-**Status:** Accepted — 2026-06-01 (Proposed — 2026-05-31 → Accepted after all Open Questions resolved/deferred by reviewer 2026-06-01).
+**Status:** Completed — 2026-06-28 (Proposed — 2026-05-31 → Accepted — 2026-06-01 → Completed). D1 (lifecycle triad stop/detach/kill) / D2 (launched-debuggee console isolation) / D3 (drain seam) shipped at **1.8.3**; D4 (dashboard) + D5 (surface-agnostic debug-state model) were deferred behind Q6 and are carried by [ADR-012](ADR-012-debug-state-surfaces.md) (which "Realizes ADR-011 D4 + D5"). This ADR's lifecycle + console scope is complete; the dashboard surface lives in ADR-012.
 
 **Revises:** [ADR-010](ADR-010-mcp-tool-surface-redesign.md) lifecycle decisions (Q2 + the Session-lifecycle tool catalog). ADR-010 stays Accepted; this ADR refines the lifecycle verbs it shipped in Tier 1 and adds the debuggee-console-I/O concern ADR-010 did not address.
 

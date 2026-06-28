@@ -2,7 +2,7 @@
 
 ## Status
 
-**Status:** Accepted — 2026-04-11
+**Status:** Superseded — 2026-06-28 by [ADR-006](ADR-006-drhook-engine.md) (Accepted — 2026-04-11). The diagnosis stands and was decisive — eval hangs were netcoredbg-specific, not a CoreCLR / macOS-ARM64 limit (Rider evaluates on the same hardware) — but the correction it drove was to **replace** netcoredbg, not fix it: ADR-006 built the BCL-only ICorDebug engine, validated func-eval (probe 19), and retired `src/DrHook/` entirely at 1.8.2, subsuming this ADR's scope.
 
 ## Context
 
