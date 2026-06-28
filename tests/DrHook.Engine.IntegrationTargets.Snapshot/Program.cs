@@ -53,4 +53,10 @@ sealed class EvalProbe
     private EvalProbe(int seed) => _seed = seed;
     public static EvalProbe Create() => new EvalProbe(41);
     public int NextValue() => _seed + 1;   // 42 — the chained static→instance call proof
+
+    // Getter-chain fixture, shaped like the Avalonia capture chain (static getter root → instance getters →
+    // terminal value): Origin.Inner.Tag mirrors Application.Current → .ApplicationLifetime → .MainWindow.
+    public static EvalProbe Origin => Create();         // static getter → object (seed 41)  ~ Application.Current
+    public EvalProbe Inner => new EvalProbe(_seed + 1); // instance getter → object (seed 42) ~ .ApplicationLifetime
+    public int Tag => _seed;                            // instance getter → int  (terminal, for the assertion)
 }

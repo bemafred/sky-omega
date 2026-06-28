@@ -1202,6 +1202,92 @@ public sealed class DebugSession : IDisposable, IMemberResolver
         finally { RuntimeNavigation.Release(pModule); }
     }
 
+    // Resume the target to run an already-set-up eval, wait for EvalComplete, and map the stop to an EvalStatus
+    // (aborting a timed-out eval). Extracted because the getter chain runs this once PER HOP; the older
+    // single-shot eval methods (probes 19–24) inline the same five lines.
+    private EvalStatus RunToComplete(nint eval, TimeSpan timeout)
+    {
+        _pump.Resume();
+        StopInfo? stop = _pump.WaitForStop(timeout);
+        if (stop is null) { Eval.Abort(eval); return EvalStatus.TimedOut; }
+        if (stop.Reason == StopReason.EvalException) return EvalStatus.ThrewException;
+        if (stop.Reason != StopReason.EvalComplete) return EvalStatus.SetupFailed;
+        return EvalStatus.Completed;
+    }
+
+    /// <summary>Cooperation-free GETTER CHAIN (ADR-012 Q8 (a), mechanic 2): start at a STATIC property getter
+    /// (<paramref name="staticGetter"/>, e.g. <c>get_Current</c> on <paramref name="typeName"/>) and walk a
+    /// sequence of INSTANCE property getters (<paramref name="memberChain"/>), each resolved against the prior
+    /// result's RUNTIME type (reusing <c>MemberResolver.ResolveGetter</c>, probe 24) and called with that result
+    /// as <c>this</c> (result-chaining, the foundation mechanic). This drives e.g.
+    /// <c>Application.Current → .ApplicationLifetime → .MainWindow</c> with no debuggee cooperation. Each hop
+    /// keeps the prior eval alive while its result is the next call's argument, then releases it — so only one
+    /// eval + value is live at a time. Returns the final getter's value. Valid only while stopped.</summary>
+    public EvalStatus TryEvalStaticGetterChain(string moduleSubstring, string typeName, string staticGetter,
+                                               string[] memberChain, TimeSpan timeout, out ArgumentValue result)
+    {
+        result = default;
+        nint pModule = RuntimeNavigation.FindModule(_pProcess, moduleSubstring);
+        if (pModule == 0) return EvalStatus.SetupFailed;
+
+        nint staticFn = 0, curEval = 0, curValue = 0;
+        try
+        {
+            uint token = MetadataResolver.ResolveMethodToken(pModule, typeName, staticGetter);
+            if (token == 0) return EvalStatus.SetupFailed;
+            staticFn = Eval.GetFunction(pModule, token);
+            if (staticFn == 0) return EvalStatus.SetupFailed;
+
+            // Root — the static getter (a static, no-arg method). Keep its eval + result as the chain head.
+            curEval = Eval.CreateEval(_pump.StopThread);
+            if (curEval == 0) return EvalStatus.SetupFailed;
+            if (!Eval.CallStaticNoArgs(curEval, staticFn)) return EvalStatus.SetupFailed;
+            EvalStatus rootStatus = RunToComplete(curEval, timeout);
+            if (rootStatus != EvalStatus.Completed) return rootStatus;
+            curValue = Eval.GetResultRaw(curEval);
+            if (curValue == 0) return EvalStatus.SetupFailed;
+
+            foreach (string member in memberChain)
+            {
+                // Resolve get_<member> on the CURRENT result's runtime type, call it with that result as `this`.
+                nint getter = MemberResolver.ResolveGetter(curValue, member);
+                if (getter == 0) return EvalStatus.SetupFailed;
+                nint hopEval = 0;
+                try
+                {
+                    hopEval = Eval.CreateEval(_pump.StopThread);
+                    if (hopEval == 0) return EvalStatus.SetupFailed;
+                    if (!Eval.CallWithOneArg(hopEval, getter, curValue)) return EvalStatus.SetupFailed; // args[0] = this
+                    EvalStatus hopStatus = RunToComplete(hopEval, timeout);
+                    if (hopStatus != EvalStatus.Completed) return hopStatus;
+                    nint nextValue = Eval.GetResultRaw(hopEval);
+                    if (nextValue == 0) return EvalStatus.SetupFailed;
+
+                    // The prior hop is fully consumed (its value was the arg just used); swap the new one in.
+                    RuntimeNavigation.Release(curValue);
+                    RuntimeNavigation.Release(curEval);
+                    curEval = hopEval; hopEval = 0; // ownership moves to cur; do not release in finally
+                    curValue = nextValue;
+                }
+                finally
+                {
+                    RuntimeNavigation.Release(getter);
+                    if (hopEval != 0) RuntimeNavigation.Release(hopEval); // only reached on an early-return failure
+                }
+            }
+
+            result = Variables.ReadValue(curValue);
+            return EvalStatus.Completed;
+        }
+        finally
+        {
+            if (curValue != 0) RuntimeNavigation.Release(curValue);
+            if (curEval != 0) RuntimeNavigation.Release(curEval);
+            if (staticFn != 0) RuntimeNavigation.Release(staticFn);
+            RuntimeNavigation.Release(pModule);
+        }
+    }
+
     /// <summary>Call the property getter <c>thisLocal.member</c> by resolving <c>get_&lt;member&gt;</c>
     /// on the local's RUNTIME type — no hardcoded declaring type/module — and func-evaluating it.
     /// Works for plain reference objects; strings/non-object kinds return SetupFailed (the

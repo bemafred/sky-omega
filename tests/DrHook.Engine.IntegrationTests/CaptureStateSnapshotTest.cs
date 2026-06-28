@@ -139,6 +139,15 @@ public sealed class CaptureStateSnapshotTest
             Assert.AreEqual(EvalStatus.Completed, chain, "chained static→instance func-eval should complete.");
             Assert.IsTrue(Equals(chained.RawValue, 42),
                 $"EvalProbe.Create().NextValue() should chain to 42; got {chained.RawValue?.ToString() ?? "(null)"}.");
+
+            // ── Q8 (a) mechanic 2: cooperation-free GETTER CHAIN — a static property getter root, then instance
+            // getters resolved on each raw result's runtime type (Origin.Inner.Tag has the SAME shape as the
+            // capture chain Application.Current → .ApplicationLifetime → .MainWindow). Must chain to 42. ──
+            EvalStatus getterChain = session.TryEvalStaticGetterChain(
+                EntryModule, "EvalProbe", "get_Origin", new[] { "Inner", "Tag" }, TimeSpan.FromSeconds(10), out ArgumentValue tagged);
+            Assert.AreEqual(EvalStatus.Completed, getterChain, "static→instance getter chain should complete.");
+            Assert.IsTrue(Equals(tagged.RawValue, 42),
+                $"EvalProbe.Origin.Inner.Tag should chain to 42; got {tagged.RawValue?.ToString() ?? "(null)"}.");
         }
         finally
         {
