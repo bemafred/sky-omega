@@ -17,6 +17,7 @@ internal static unsafe class Eval
     private const int ThreadCreateEval = 17;          // ICorDebugThread (… CreateStepper12 … CreateEval17)
     private const int EvalCallFunction = 3;           // ICorDebugEval (CallFunction3, NewObject4, …, NewString6, IsActive8, Abort9, GetResult10, …, CreateValue12)
     private const int EvalNewObject = 4;
+    private const int EvalNewString = 6;
     private const int EvalAbort = 9;
     private const int EvalGetResult = 10;
     private const int EvalCreateValue = 12;
@@ -108,6 +109,17 @@ internal static unsafe class Eval
         var newObject = (delegate* unmanaged[Cdecl]<nint, nint, uint, nint*, int>)Slot(pEval, EvalNewObject);
         fixed (nint* p = args)
             return newObject(pEval, pConstructor, (uint)args.Length, p) >= 0;
+    }
+
+    /// <summary>Set up creation of a managed STRING in the debuggee (<c>ICorDebugEval.NewString</c>, vtable slot
+    /// 6). Runs on the next Continue; <see cref="GetResultRaw"/> after EvalComplete is the string value — e.g. the
+    /// path argument to <c>RenderTargetBitmap.Save(path)</c>. The C# string pins as a null-terminated LPCWSTR (the
+    /// CLR null-terminates string data for exactly this interop).</summary>
+    public static bool NewString(nint pEval, string value)
+    {
+        var newString = (delegate* unmanaged[Cdecl]<nint, char*, int>)Slot(pEval, EvalNewString);
+        fixed (char* p = value)
+            return newString(pEval, p) >= 0;
     }
 
     /// <summary>Abort a running/hung evaluation (ICorDebugEval.Abort) — the safety net for an eval

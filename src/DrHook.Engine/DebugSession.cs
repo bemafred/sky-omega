@@ -1430,6 +1430,63 @@ public sealed class DebugSession : IDisposable, IMemberResolver
         finally { RuntimeNavigation.Release(pModule); }
     }
 
+    /// <summary>Mechanic 5 (ADR-012 Q8 (a)): NewString. Create a managed string (<paramref name="text"/>) in the
+    /// debuggee via <see cref="Eval.NewString"/>, then pass it to a static method <paramref name="staticMethod"/>
+    /// (one string parameter) to confirm it — the <c>Save(path)</c> argument shape (a created string passed to a
+    /// call). The string eval is held alive while its value is the call argument. Valid only while stopped.
+    /// (Probe scaffolding; the orchestration subsumes it.)</summary>
+    public EvalStatus TryEvalNewStringThenStaticCall(string moduleSubstring, string typeName, string staticMethod,
+                                                     string text, TimeSpan timeout, out ArgumentValue result)
+    {
+        result = default;
+        nint pModule = RuntimeNavigation.FindModule(_pProcess, moduleSubstring);
+        if (pModule == 0) return EvalStatus.SetupFailed;
+        try
+        {
+            uint token = MetadataResolver.ResolveMethodToken(pModule, typeName, staticMethod);
+            if (token == 0) return EvalStatus.SetupFailed;
+            nint methodFn = Eval.GetFunction(pModule, token);
+            if (methodFn == 0) return EvalStatus.SetupFailed;
+            try
+            {
+                // Step 1 — create the string. Keep eval1 alive: its value is the call argument below.
+                nint eval1 = Eval.CreateEval(_pump.StopThread);
+                if (eval1 == 0) return EvalStatus.SetupFailed;
+                try
+                {
+                    if (!Eval.NewString(eval1, text)) return EvalStatus.SetupFailed;
+                    EvalStatus madeStatus = RunToComplete(eval1, timeout);
+                    if (madeStatus != EvalStatus.Completed) return madeStatus;
+
+                    nint strValue = Eval.GetResultRaw(eval1);
+                    if (strValue == 0) return EvalStatus.SetupFailed;
+                    try
+                    {
+                        // Step 2 — staticMethod(string).
+                        nint eval2 = Eval.CreateEval(_pump.StopThread);
+                        if (eval2 == 0) return EvalStatus.SetupFailed;
+                        try
+                        {
+                            Span<nint> args = stackalloc nint[1];
+                            args[0] = strValue;
+                            if (!Eval.CallFunction(eval2, methodFn, args)) return EvalStatus.SetupFailed;
+                            EvalStatus ranStatus = RunToComplete(eval2, timeout);
+                            if (ranStatus != EvalStatus.Completed) return ranStatus;
+
+                            result = Eval.GetResultValue(eval2);
+                            return EvalStatus.Completed;
+                        }
+                        finally { RuntimeNavigation.Release(eval2); }
+                    }
+                    finally { RuntimeNavigation.Release(strValue); }
+                }
+                finally { RuntimeNavigation.Release(eval1); }
+            }
+            finally { RuntimeNavigation.Release(methodFn); }
+        }
+        finally { RuntimeNavigation.Release(pModule); }
+    }
+
     /// <summary>Call the property getter <c>thisLocal.member</c> by resolving <c>get_&lt;member&gt;</c>
     /// on the local's RUNTIME type — no hardcoded declaring type/module — and func-evaluating it.
     /// Works for plain reference objects; strings/non-object kinds return SetupFailed (the

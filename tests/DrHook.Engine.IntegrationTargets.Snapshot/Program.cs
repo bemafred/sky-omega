@@ -61,4 +61,5 @@ sealed class EvalProbe
     public int Tag => _seed;                            // instance getter → int  (terminal, for the assertion)
 
     public int AddTo(int x) => _seed + x;               // instance method, this + ONE arg — the Render(window)/Save(path) arity
+    public static int LengthOf(string s) => s.Length;   // static + STRING arg — confirms a NewString value (Save's path arg)
 }

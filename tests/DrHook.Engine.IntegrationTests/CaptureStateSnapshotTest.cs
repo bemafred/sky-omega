@@ -165,6 +165,14 @@ public sealed class CaptureStateSnapshotTest
             Assert.AreEqual(EvalStatus.Completed, construct, "NewObject construction + getter should complete.");
             Assert.IsTrue(Equals(built.RawValue, 7),
                 $"new EvalProbe(7).Tag should be 7; got {built.RawValue?.ToString() ?? "(null)"}.");
+
+            // ── Q8 (a) mechanic 5: NewString — create "snapshot" in the target, pass it to LengthOf (= 8). The
+            // Save(path) argument shape: a created managed string passed to a call. ──
+            EvalStatus madeString = session.TryEvalNewStringThenStaticCall(
+                EntryModule, "EvalProbe", "LengthOf", "snapshot", TimeSpan.FromSeconds(10), out ArgumentValue length);
+            Assert.AreEqual(EvalStatus.Completed, madeString, "NewString + static(string) call should complete.");
+            Assert.IsTrue(Equals(length.RawValue, 8),
+                $"EvalProbe.LengthOf(\"snapshot\") should be 8; got {length.RawValue?.ToString() ?? "(null)"}.");
         }
         finally
         {
