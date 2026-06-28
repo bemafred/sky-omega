@@ -29,6 +29,19 @@ public sealed class DebugStateTapSinkTests
     }
 
     [Fact]
+    public void Tap_CapturesHypothesis_AsADelta()
+    {
+        var tap = new DebugStateTapSink(16);
+        tap.OnHypothesis(new HypothesisRecord(DateTimeOffset.UnixEpoch, "span.Length == 5", HypothesisLens.Inspection));
+
+        DebugStateDeltaResult r = tap.Peek();
+        Assert.Single(r.Deltas);
+        Assert.Equal(DebugStateDeltaKind.Hypothesis, r.Deltas[0].Kind);
+        Assert.Equal("span.Length == 5", r.Deltas[0].Hypothesis!.Text);
+        Assert.Equal(HypothesisLens.Inspection, r.Deltas[0].Hypothesis!.Lens);
+    }
+
+    [Fact]
     public void Tap_IsBounded_DropsOldest_AndCounts()
     {
         var tap = new DebugStateTapSink(2);

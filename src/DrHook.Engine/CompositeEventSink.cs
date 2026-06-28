@@ -24,4 +24,5 @@ public sealed class CompositeEventSink : IDebugEventSink
     public void OnLog(LogRecord record) { foreach (IDebugEventSink s in _sinks) s.OnLog(record); }
     public void OnAnomaly(EngineAnomaly anomaly) { foreach (IDebugEventSink s in _sinks) s.OnAnomaly(anomaly); }
     public void OnConsoleOutput(ConsoleOutputRecord record) { foreach (IDebugEventSink s in _sinks) s.OnConsoleOutput(record); }
+    public void OnHypothesis(HypothesisRecord record) { foreach (IDebugEventSink s in _sinks) s.OnHypothesis(record); }
 }

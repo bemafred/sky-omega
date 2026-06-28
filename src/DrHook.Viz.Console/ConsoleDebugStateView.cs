@@ -123,9 +123,10 @@ public sealed class ConsoleDebugStateView : IDebugStateView
             "log"     => $"{(d.LogFault == true ? "FAULT " : "")}{d.LogMessage}",
             "anomaly" => $"{d.AnomalyKind}: {d.AnomalyObserved}",
             "console" => $"[{d.ConsoleStream}] {d.ConsoleText}",
+            "hypothesis" => $"▸ {(d.HypothesisLens ?? "").ToLowerInvariant()}: {d.HypothesisText}",
             _         => "",
         };
-        _out.WriteLine($"  Δ {d.Kind,-8} {detail}");
+        _out.WriteLine($"  Δ {d.Kind,-10} {detail}");
     }
 
     public void OnDisconnected(string? reason)

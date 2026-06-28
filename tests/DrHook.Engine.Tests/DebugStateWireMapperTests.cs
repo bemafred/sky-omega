@@ -94,4 +94,16 @@ public sealed class DebugStateWireMapperTests
         Assert.Equal("Stdout", delta.GetProperty("consoleStream").GetString());
         Assert.Equal("hello", delta.GetProperty("consoleText").GetString());
     }
+
+    [Fact]
+    public void DeltaLine_Hypothesis_ProjectsTextAndLens()
+    {
+        string line = DebugStateWireMapper.DeltaLine(
+            DebugStateDelta.ForHypothesis(new HypothesisRecord(DateTimeOffset.UnixEpoch, "span.Length == 5", HypothesisLens.Inspection)), seq: 11);
+        using JsonDocument doc = JsonDocument.Parse(line);
+        JsonElement delta = doc.RootElement.GetProperty("delta");
+        Assert.Equal("hypothesis", delta.GetProperty("kind").GetString());
+        Assert.Equal("span.Length == 5", delta.GetProperty("hypothesisText").GetString());
+        Assert.Equal("Inspection", delta.GetProperty("hypothesisLens").GetString());
+    }
 }

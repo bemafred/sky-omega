@@ -157,6 +157,12 @@ public sealed class DebugStateServer : IDebugEventSink, IDisposable
         Enqueue(new Outbound(Interlocked.Increment(ref _seq), null, DebugStateDelta.ForConsole(record)));
     }
 
+    public void OnHypothesis(HypothesisRecord record)
+    {
+        if (record is null || !_running) return;
+        Enqueue(new Outbound(Interlocked.Increment(ref _seq), null, DebugStateDelta.ForHypothesis(record)));
+    }
+
     private void Enqueue(Outbound message)
     {
         lock (_queueLock)

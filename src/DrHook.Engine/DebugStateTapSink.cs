@@ -59,6 +59,9 @@ public sealed class DebugStateTapSink : IDebugEventSink
     /// <summary>Tap a console chunk. Null is ignored.</summary>
     public void OnConsoleOutput(ConsoleOutputRecord record) { if (record is not null) Append(DebugStateDelta.ForConsole(record)); }
 
+    /// <summary>Tap a hypothesis (the braid's prediction half, ADR-012 Phase 3). Null is ignored.</summary>
+    public void OnHypothesis(HypothesisRecord record) { if (record is not null) Append(DebugStateDelta.ForHypothesis(record)); }
+
     private void Append(DebugStateDelta delta)
     {
         lock (_lock)

@@ -40,6 +40,7 @@ public static class DebugStateWireMapper
         DebugStateDeltaKind.Log => new WireDelta("log", At(d.At), LogMessage: d.Log?.Message, LogFault: d.Log?.IsFault),
         DebugStateDeltaKind.Anomaly => new WireDelta("anomaly", At(d.At), AnomalyKind: d.Anomaly?.Kind.ToString(), AnomalyObserved: d.Anomaly?.Observed),
         DebugStateDeltaKind.Console => new WireDelta("console", At(d.At), ConsoleStream: d.Console?.Stream.ToString(), ConsoleText: d.Console?.Text),
+        DebugStateDeltaKind.Hypothesis => new WireDelta("hypothesis", At(d.At), HypothesisText: d.Hypothesis?.Text, HypothesisLens: d.Hypothesis?.Lens.ToString()),
         _ => new WireDelta("unknown", At(d.At)),
     };
 

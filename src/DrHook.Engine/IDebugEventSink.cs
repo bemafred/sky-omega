@@ -52,4 +52,12 @@ public interface IDebugEventSink
     /// implementations must be thread-safe and MUST NOT throw — an unhandled throw would kill the
     /// drain thread, the pipe would stop draining, and the debuggee would block on its next write.</summary>
     void OnConsoleOutput(ConsoleOutputRecord record) { }
+
+    /// <summary>Invoked when the operator states a hypothesis at a debug step — the prediction half of the
+    /// (hypothesis, observation) braid (ADR-012 D4 / Phase 3). Emitted from the MCP boundary, where every
+    /// state-changing / inspecting tool already takes a <c>hypothesis</c>; the transport publishes it as a
+    /// delta so a connected view shows it inline, immediately before the observation it predicts. Default
+    /// no-op so existing sinks compile unchanged; braid-aware sinks override. Same O(1) / must-not-throw
+    /// contract as the other channels.</summary>
+    void OnHypothesis(HypothesisRecord record) { }
 }

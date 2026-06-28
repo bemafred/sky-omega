@@ -78,12 +78,15 @@ public sealed class ConsoleDebugStateViewTests : IDisposable
         view.OnDelta(new WireDelta("console", "t", ConsoleStream: "Stdout", ConsoleText: "hello"), model);
         view.OnDelta(new WireDelta("log", "t", LogMessage: "logged"), model);
         view.OnDelta(new WireDelta("anomaly", "t", AnomalyKind: "DepthClamped", AnomalyObserved: "too deep"), model);
+        view.OnDelta(new WireDelta("hypothesis", "t", HypothesisText: "span.Length == 5", HypothesisLens: "Inspection"), model);
         string output = sw.ToString();
 
         Assert.Contains("StepComplete", output);
         Assert.Contains("[Stdout] hello", output);
         Assert.Contains("logged", output);
         Assert.Contains("DepthClamped", output);
+        Assert.Contains("span.Length == 5", output);  // the braid's prediction line renders verbatim
+        Assert.Contains("inspection", output);         // tagged with its lens
     }
 
     [Fact]

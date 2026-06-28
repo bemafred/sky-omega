@@ -83,6 +83,22 @@ public sealed class WireCodecTests
     }
 
     [Fact]
+    public void Serialize_ThenParse_RoundTripsAHypothesisDelta()
+    {
+        var msg = new WireMessage("delta", 11, Delta: new WireDelta("hypothesis", "1970-01-01T00:00:00.0000000+00:00",
+            HypothesisText: "span.Length == 5", HypothesisLens: "Inspection"));
+
+        WireMessage? parsed = WireCodec.Parse(WireCodec.Serialize(msg));
+
+        Assert.NotNull(parsed);
+        WireDelta delta = Assert.IsType<WireDelta>(parsed!.Delta);
+        Assert.Equal("hypothesis", delta.Kind);
+        Assert.Equal("span.Length == 5", delta.HypothesisText);
+        Assert.Equal("Inspection", delta.HypothesisLens);
+        Assert.Null(delta.ConsoleText); // unset fields omitted on the wire
+    }
+
+    [Fact]
     public void Parse_BlankLine_ReturnsNull()
     {
         Assert.Null(WireCodec.Parse(""));

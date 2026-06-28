@@ -56,7 +56,8 @@ public sealed record WireStreams(int Console, long ConsoleDropped, int Logs, lon
 public sealed record WireDelta(string Kind, string At, string? Event = null,
     string? LogMessage = null, bool? LogFault = null,
     string? AnomalyKind = null, string? AnomalyObserved = null,
-    string? ConsoleStream = null, string? ConsoleText = null);
+    string? ConsoleStream = null, string? ConsoleText = null,
+    string? HypothesisText = null, string? HypothesisLens = null);
 
 /// <summary>The NDJSON codec for <see cref="WireMessage"/> — one newline-terminated line per message,
 /// SOURCE-GENERATED (not reflection-based: the repo builds with reflection-based <c>System.Text.Json</c>

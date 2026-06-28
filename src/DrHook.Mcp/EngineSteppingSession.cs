@@ -465,6 +465,7 @@ public sealed class EngineSteppingSession : IDisposable
     public Task<string> ContinueAsync(string? hypothesis, bool waitForBreakpoint, CancellationToken ct)
     {
         if (_session is null) return Task.FromResult(Error("No active stepping session. Use drhook_launch or drhook_attach first."));
+        EmitHypothesis(hypothesis, HypothesisLens.Navigation);
         try
         {
             _session.Resume();
@@ -512,6 +513,7 @@ public sealed class EngineSteppingSession : IDisposable
     public Task<string> PauseAsync(string? hypothesis, CancellationToken ct)
     {
         if (_session is null) return Task.FromResult(Error("No active stepping session."));
+        EmitHypothesis(hypothesis, HypothesisLens.Navigation);
         try
         {
             _session.Pause();
@@ -542,6 +544,7 @@ public sealed class EngineSteppingSession : IDisposable
     private Task<string> StepOperation(string operationName, Action<DebugSession> step, string? hypothesis)
     {
         if (_session is null) return Task.FromResult(Error("No active stepping session. Use drhook_launch or drhook_attach first."));
+        EmitHypothesis(hypothesis, HypothesisLens.Navigation);
         try
         {
             _stepCount++;
@@ -940,6 +943,7 @@ public sealed class EngineSteppingSession : IDisposable
     public Task<string> InspectVariablesAsync(int depth, string? hypothesis, CancellationToken ct)
     {
         if (_session is null) return Task.FromResult(Error("No active stepping session."));
+        EmitHypothesis(hypothesis, HypothesisLens.Inspection);
         try
         {
             IReadOnlyList<LocalValue> locals = _session.GetLocals(depth);
@@ -976,6 +980,7 @@ public sealed class EngineSteppingSession : IDisposable
     public Task<string> ExpandAsync(string target, IReadOnlyList<string> path, string? hypothesis, CancellationToken ct)
     {
         if (_session is null) return Task.FromResult(Error("No active stepping session."));
+        EmitHypothesis(hypothesis, HypothesisLens.Inspection);
         try
         {
             // Resolve the target to an argument by its real name ("this" or a declared parameter name,
@@ -1194,6 +1199,18 @@ public sealed class EngineSteppingSession : IDisposable
     }
 
     private static string KeyLine(string file, int line) => $"{file}:{line.ToString(CultureInfo.InvariantCulture)}";
+
+    /// <summary>Emit the operator's verbatim hypothesis into the debug-state stream as the prediction half
+    /// of the (hypothesis, observation) braid (ADR-012 Phase 3). Stated BEFORE the operation, so it lands in
+    /// the timeline immediately before the observation it predicts; no-op for an empty hypothesis or before a
+    /// session exists. <c>_sink</c> is the <see cref="CompositeEventSink"/> (transport + bounded sinks), so
+    /// this reaches every connected view via the transport's delta broadcast. Append-only by construction —
+    /// a correction is the next emitted hypothesis, never an edit.</summary>
+    private void EmitHypothesis(string? hypothesis, HypothesisLens lens)
+    {
+        if (_session is null || string.IsNullOrWhiteSpace(hypothesis)) return;
+        _sink.OnHypothesis(new HypothesisRecord(DateTimeOffset.UtcNow, hypothesis, lens));
+    }
 
     private static string Error(string message)
         => Render(new JsonObject { ["status"] = "error", ["message"] = message });

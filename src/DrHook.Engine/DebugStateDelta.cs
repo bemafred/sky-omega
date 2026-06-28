@@ -17,6 +17,11 @@ public enum DebugStateDeltaKind
 
     /// <summary>A chunk of LAUNCHED-debuggee console output (<see cref="IDebugEventSink.OnConsoleOutput"/>).</summary>
     Console,
+
+    /// <summary>The operator's verbatim stated hypothesis at a navigation or inspection step
+    /// (<see cref="IDebugEventSink.OnHypothesis"/>) — the prediction half of the (hypothesis, observation)
+    /// braid (ADR-012 D4 / Phase 3). Append-only: a correction is a later delta, never a mutation.</summary>
+    Hypothesis,
 }
 
 /// <summary>One element of the live "delta stream" face of the ADR-012 surface-agnostic model — a single
@@ -32,7 +37,8 @@ public sealed record DebugStateDelta(
     string? EventName = null,
     LogRecord? Log = null,
     EngineAnomaly? Anomaly = null,
-    ConsoleOutputRecord? Console = null)
+    ConsoleOutputRecord? Console = null,
+    HypothesisRecord? Hypothesis = null)
 {
     /// <summary>A lifecycle-event delta. <paramref name="at"/> is the receipt time (OnEvent has no timestamp).</summary>
     public static DebugStateDelta ForEvent(DateTimeOffset at, string name) => new(at, DebugStateDeltaKind.Event, EventName: name);
@@ -45,4 +51,28 @@ public sealed record DebugStateDelta(
 
     /// <summary>A console delta, timestamped by the record's own <see cref="ConsoleOutputRecord.CapturedAt"/>.</summary>
     public static DebugStateDelta ForConsole(ConsoleOutputRecord record) => new(record.CapturedAt, DebugStateDeltaKind.Console, Console: record);
+
+    /// <summary>A hypothesis delta — the operator's verbatim prediction, timestamped by the record's own
+    /// <see cref="HypothesisRecord.CapturedAt"/>. The observation it predicts is the snapshot / delta that
+    /// follows it in the stream (per-stop pairing by timeline position).</summary>
+    public static DebugStateDelta ForHypothesis(HypothesisRecord record) => new(record.CapturedAt, DebugStateDeltaKind.Hypothesis, Hypothesis: record);
 }
+
+/// <summary>Which kind of prediction a <see cref="HypothesisRecord"/> carries — the lens a view uses to pair
+/// and nest it. <see cref="Navigation"/> predicts WHERE execution goes (stated on continue / step / launch /
+/// attach / pause); it pairs with the resulting stop. <see cref="Inspection"/> predicts the CONTENTS of a
+/// value (stated on locals / expand); it nests under the current stop — the richest reasoning-window
+/// (ADR-012 Phase 3).</summary>
+public enum HypothesisLens
+{
+    Navigation,
+    Inspection,
+}
+
+/// <summary>The operator's verbatim stated hypothesis at a debug step — the prediction half of the
+/// (hypothesis, observation) braid (ADR-012 D4 / Phase 3). Carried into the engine as a sink event
+/// (<see cref="IDebugEventSink.OnHypothesis"/>) from the MCP boundary, where every state-changing /
+/// inspecting tool already takes a <c>hypothesis</c>. <see cref="Text"/> is verbatim — the operator's exact
+/// words; the point is to observe the reasoning, not a paraphrase. Immutable / append-only: a correction is
+/// a NEW record, never an edit (editing would erase the wrong→right repair, which is the learning signal).</summary>
+public sealed record HypothesisRecord(DateTimeOffset CapturedAt, string Text, HypothesisLens Lens);
