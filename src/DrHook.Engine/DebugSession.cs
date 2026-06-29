@@ -15,7 +15,7 @@ namespace SkyOmega.DrHook.Engine;
 
 /// <summary>An attached managed-debugging session over a target .NET process. Dispose detaches
 /// and releases all native resources.</summary>
-public sealed class DebugSession : IDisposable, IMemberResolver
+public sealed partial class DebugSession : IDisposable, IMemberResolver
 {
     /// <summary>Maximum recursion depth for object/array inspection (ENG-STK-1).
     /// Mercury-aligned with <c>SparqlParser.DefaultMaxDepth</c>. At ~2 KB per level across
