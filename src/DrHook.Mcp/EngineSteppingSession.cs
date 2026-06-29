@@ -251,6 +251,54 @@ public sealed class EngineSteppingSession : IDisposable
         catch (Exception ex) { return (null, $"Snapshot image failed: {ex.Message}"); }
     }
 
+    /// <summary>Capture the live GUI debuggee's OWN rendered window to a PNG (drhook_capture_visual) by driving
+    /// <see cref="DebugSession.TryEvalRenderCapture"/> at the current stop — cooperation-free, func-evaluating the
+    /// target's own render APIs (nothing is added to the target). The debuggee writes the PNG to a temp path (same
+    /// machine + user as the server), which we read back and return, then delete. Requires an active session
+    /// STOPPED on the thread that should run the render — the operator breaks at a UI-thread site (a timer tick, an
+    /// event handler) and continues to it first. Framework type/method names default to Avalonia; override for
+    /// WPF/WinUI. Returns null <c>Png</c> with an explanatory <c>Caption</c> (carrying the capture trace) when there
+    /// is no session, the target is not stopped, or a step fails.</summary>
+    public (byte[]? Png, string Caption) CaptureVisual(
+        string? hypothesis, int width, int height,
+        string appModule, string appType, string currentGetter, string windowGetterChain,
+        string gfxModule, string pixelSizeType, string bitmapType, string renderMethod, string saveMethod)
+    {
+        if (_session is null) return (null, "No active stepping session. Attach/launch, then break on the UI thread first.");
+        if (_lastStop is null) return (null, "Not stopped — drhook_capture_visual needs an active stop on the UI thread (break at a UI-thread site, continue to it, then call this).");
+        if (width <= 0 || height <= 0) return (null, $"Invalid capture size {width}x{height} — width and height must be positive.");
+        EmitHypothesis(hypothesis, HypothesisLens.Inspection);
+
+        string outputPath = Path.Combine(Path.GetTempPath(), $"drhook-capture-{_targetPid}-{_stepCount}.png");
+        try { if (File.Exists(outputPath)) File.Delete(outputPath); } catch { /* best effort */ }
+
+        string[] chain = windowGetterChain.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var plan = new RenderCapturePlan(
+            appModule, appType, currentGetter, chain,
+            gfxModule, pixelSizeType, bitmapType, renderMethod, saveMethod,
+            width, height, outputPath);
+
+        string hint = hypothesis is not null ? $" — hypothesis: {hypothesis}" : "";
+        EvalStatus status;
+        string trace;
+        try { status = _session.TryEvalRenderCapture(plan, TimeSpan.FromSeconds(30), out trace); }
+        catch (Exception ex) { return (null, $"Visual capture threw: {ex.GetType().Name}: {ex.Message}{hint}"); }
+
+        if (status != EvalStatus.Completed)
+        {
+            try { if (File.Exists(outputPath)) File.Delete(outputPath); } catch { /* best effort */ }
+            return (null, $"Visual capture did not complete: {status} (trace: {trace}){hint}. " +
+                          "Stopped on the UI thread? And do the framework type/module names match this app?");
+        }
+
+        byte[] png;
+        try { png = File.ReadAllBytes(outputPath); }
+        catch (Exception ex) { return (null, $"Capture saved but unreadable at {outputPath}: {ex.Message}{hint}"); }
+        finally { try { File.Delete(outputPath); } catch { /* best effort */ } }
+
+        return (png, $"debuggee visual capture: pid={_targetPid}, {width}x{height}, {png.Length} bytes, trace={trace}{hint}");
+    }
+
     // ─── Session lifecycle ────────────────────────────────────────────────────────────────────
 
     public Task<string> AttachAsync(int pid, string sourceFile, int line, string hypothesis, CancellationToken ct)
@@ -269,8 +317,17 @@ public sealed class EngineSteppingSession : IDisposable
 
             _session = DebugSession.Attach(pid, _sink);
             StartTransport(); // a view can now connect; it gets its first snapshot at the first stop below
-            // Setup stop: the engine breaks on attach (Debugger.IsAttached transition). Drain it.
-            StopInfo? setup = _session.WaitForStop(TimeSpan.FromSeconds(10));
+            // Setup stop: most targets break on attach (the Debugger.IsAttached transition) and we drain it. But an
+            // IDLE target — e.g. a GUI app blocked in its native message pump between events — may never reach a
+            // managed safe-point on its own, so if the organic stop does not arrive, force synchronization with an
+            // async-break (Pause), which mscordbi delivers regardless of what the target is doing. Without this,
+            // drhook_attach to a quiescent GUI debuggee times out (surfaced dogfooding drhook_capture_visual, 2026-06-29).
+            StopInfo? setup = _session.WaitForStop(TimeSpan.FromSeconds(5));
+            if (setup is null)
+            {
+                _session.Pause();
+                setup = _session.WaitForStop(TimeSpan.FromSeconds(5));
+            }
 
             // The target must be synchronized before ICorDebug inspection (SetBreakpointAtLine ->
             // EnumerateAppDomains). If the attached process exited or never broke within the window,

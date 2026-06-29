@@ -293,6 +293,42 @@ public sealed class DrHookTools
         ];
     }
 
+    [McpServerTool(Name = "drhook_capture_visual"), Description(
+        "Capture the live GUI debuggee's OWN rendered window as a PNG you can SEE — cooperation-free, by " +
+        "func-evaluating the target's framework render APIs at the current stop (nothing is added to the target). " +
+        "The complement to drhook_snapshot_image: that shows the DEBUGGER's view of state (locals/stack/source); " +
+        "this shows the DEBUGGEE's actual pixels — the visual half of the picture. PRECONDITION: stopped on the UI " +
+        "THREAD — break at a UI-thread site (a timer tick, an event handler) and continue to it first; the render " +
+        "runs on the stop's thread. Type/method names default to Avalonia; override the *Type / *Module / getter " +
+        "params for WPF/WinUI (the chain is app-current → window getters → construct pixel-size + render-target " +
+        "bitmap → render(window) → save(path)). Returns a caption with the capture trace plus the image. Requires a " +
+        "hypothesis: state what you expect the window to show before you look.")]
+    public IEnumerable<ContentBlock> CaptureVisual(
+        [Description("What you expect the rendered window to show. Required — state it before you look (epistemic discipline).")] string hypothesis,
+        [Description("Image width in pixels (default 1024).")] int width = 1024,
+        [Description("Image height in pixels (default 768).")] int height = 768,
+        [Description("Module substring holding the application type (default Avalonia 'Avalonia.Controls').")] string appModule = "Avalonia.Controls",
+        [Description("Application type, namespace-qualified (default 'Avalonia.Application').")] string appType = "Avalonia.Application",
+        [Description("Static getter for the running app instance (default 'get_Current').")] string currentGetter = "get_Current",
+        [Description("'/'-separated instance getter chain from the app to the top-level visual (default 'ApplicationLifetime/MainWindow').")] string windowGetterChain = "ApplicationLifetime/MainWindow",
+        [Description("Module substring holding the graphics types (default Avalonia 'Avalonia.Base').")] string gfxModule = "Avalonia.Base",
+        [Description("Pixel-size value type, namespace-qualified (default 'Avalonia.PixelSize').")] string pixelSizeType = "Avalonia.PixelSize",
+        [Description("Render-target bitmap type, namespace-qualified (default 'Avalonia.Media.Imaging.RenderTargetBitmap').")] string bitmapType = "Avalonia.Media.Imaging.RenderTargetBitmap",
+        [Description("Method that renders a visual into the bitmap (default 'Render').")] string renderMethod = "Render",
+        [Description("Method that saves the bitmap to a file path (default 'Save').")] string saveMethod = "Save")
+    {
+        (byte[]? png, string caption) = _session.CaptureVisual(
+            string.IsNullOrWhiteSpace(hypothesis) ? null : hypothesis, width, height,
+            appModule, appType, currentGetter, windowGetterChain,
+            gfxModule, pixelSizeType, bitmapType, renderMethod, saveMethod);
+        if (png is null) return [new TextContentBlock { Text = caption }]; // no session / not stopped / capture failed — text only
+        return
+        [
+            new TextContentBlock { Text = caption },
+            new ImageContentBlock { Data = Convert.ToBase64String(png), MimeType = "image/png" },
+        ];
+    }
+
     [McpServerTool(Name = "drhook_stop"), Description(
         "End the active debugging session — the normal way to finish. " +
         "Borrowed sessions (started with drhook_attach) detach and leave the target running. " +
