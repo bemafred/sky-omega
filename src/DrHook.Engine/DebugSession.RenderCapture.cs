@@ -22,7 +22,7 @@ public sealed partial class DebugSession
     /// ("window-resolved" → "pixelsize-built" → "bitmap-built" → "render-complete" → "saved"), so a partial run
     /// still says exactly where it stopped — in particular whether <c>render-complete</c> was reached (the open
     /// question: does the framework's render run during a func-eval).</summary>
-    public EvalStatus TryEvalRenderCapture(in RenderCapturePlan plan, TimeSpan timeout, out string trace)
+    public EvalStatus TryEvalRenderCapture(in RenderCapturePlan plan, TimeSpan timeout, out string trace, string stopAfter = "")
     {
         trace = "start";
         nint appModule = RuntimeNavigation.FindModule(_pProcess, plan.AppModule);
@@ -116,6 +116,7 @@ public sealed partial class DebugSession
             // The size value is consumed by the ctor — release it now.
             RuntimeNavigation.Release(size); RuntimeNavigation.Release(sizeEval); size = 0; sizeEval = 0;
             trace = "bitmap-built";
+            if (stopAfter == "bitmap") return EvalStatus.Completed; // diagnostic: stop BEFORE Render (isolate the UI-thread hang)
 
             // ── Step 4 — THE OPEN QUESTION: rtb.Render(window). Does the framework's render run during a
             //    func-eval Continue at a stop? args[0] = `this` (rtb), args[1] = the visual. ──
@@ -135,6 +136,7 @@ public sealed partial class DebugSession
             // The window is no longer needed once rendered.
             RuntimeNavigation.Release(window); RuntimeNavigation.Release(windowEval); window = 0; windowEval = 0;
             trace = "render-complete"; // ← the open question is answered YES if we reach here
+            if (stopAfter == "render") return EvalStatus.Completed; // diagnostic: stop AFTER Render, BEFORE Save (isolate the UI-thread hang)
 
             // ── Step 5 — create the output path string in the debuggee (NewString). ──
             nint pathEvalLocal = Eval.CreateEval(_pump.StopThread);
