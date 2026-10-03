@@ -227,6 +227,7 @@ SkyOmega.sln
 │   │   └── Transport/       # DebugStateServer (UDS publisher) + DebugStateWireMapper (domain→wire) — debug-state visualization (ADR-012 Phase 2)
 │   ├── DrHook.Wire/         # Zero-dependency NDJSON protocol contract — Wire* DTOs + source-gen WireCodec + WireRendezvous (ADR-012 Phase 2). BOTH the server and every view depend on it.
 │   ├── DrHook.Viz/          # Shared BCL-only client library — DebugStateClient + DebugStateClientModel + IDebugStateView; references ONLY DrHook.Wire (the GUI never drags in the engine's native deps)
+│   ├── DrHook.Viz.Tui/      # Full-screen TUI dashboard — `drhook-viz-tui`, redraw-in-place panes (stack, source, locals, breakpoints, braid, console, anomalies). BCL Console + ANSI only (ADR-012 Q2).
 │   ├── DrHook.Viz.Console/  # First console view — `drhook-viz-console`, a thin IDebugStateView that tails the live debug-state. The first proper DrHook debuggee. (TUI/Avalonia views are later phases over the same client.)
 │   ├── DrHook.Mcp/          # MCP server for .NET runtime inspection — 25 tools (lifecycle + stepping + breakpoints + inspection/expand + drains + processes + snapshot + snapshot-image + capture-visual), all backed by DrHook.Engine
 │   │

@@ -21,6 +21,8 @@
     <ProjectReference Include="../../src/DrHook.Viz/DrHook.Viz.csproj" />
     <!-- ...the console view, for the rendering tests (it takes a TextWriter, so a StringWriter drives it). -->
     <ProjectReference Include="../../src/DrHook.Viz.Console/DrHook.Viz.Console.csproj" />
+    <!-- ...the TUI dashboard, whose compositor (DashboardScreen) and presenter (AnsiTerminal) are pure / writer-driven. -->
+    <ProjectReference Include="../../src/DrHook.Viz.Tui/DrHook.Viz.Tui.csproj" />
     <!-- ...and the engine's transport server, to drive the end-to-end test (a real session publishes; the
          client receives). The production client (DrHook.Viz) references only DrHook.Wire — only the TEST
          wires both ends. -->

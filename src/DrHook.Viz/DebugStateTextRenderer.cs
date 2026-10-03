@@ -53,9 +53,9 @@ public static class DebugStateTextRenderer
             }
 
             if (s.Position.Locals.Length > 0)
-                o.WriteLine($"  locals  : {string.Join(", ", s.Position.Locals.Select(RenderVar))}");
+                o.WriteLine($"  locals  : {string.Join(", ", s.Position.Locals.Select(FormatVar))}");
             if (s.Position.Arguments.Length > 0)
-                o.WriteLine($"  args    : {string.Join(", ", s.Position.Arguments.Select(RenderVar))}");
+                o.WriteLine($"  args    : {string.Join(", ", s.Position.Arguments.Select(FormatVar))}");
         }
         else
         {
@@ -63,7 +63,7 @@ public static class DebugStateTextRenderer
         }
 
         foreach (WireBreakpoint b in s.Breakpoints)
-            o.WriteLine($"  break   : id={b.Id} {b.Kind} {(b.Kind == "line" ? $"{b.File}:{b.Line}" : $"{b.Type}.{b.Method}")} hits={b.HitCount}");
+            o.WriteLine($"  break   : {FormatBreakpoint(b)}");
 
         WireStreams st = s.Streams;
         o.WriteLine($"  streams : console={st.Console}(+{st.ConsoleDropped}) logs={st.Logs}(+{st.LogsDropped}) anomalies={st.Anomalies}(+{st.AnomaliesDropped})");
@@ -71,23 +71,33 @@ public static class DebugStateTextRenderer
 
     /// <summary>Render one live delta as a single line (lifecycle event / log / anomaly / console / hypothesis).</summary>
     public static void RenderDelta(TextWriter o, WireDelta d)
-    {
-        string detail = d.Kind switch
-        {
-            "event"   => d.Event ?? "",
-            "log"     => $"{(d.LogFault == true ? "FAULT " : "")}{d.LogMessage}",
-            "anomaly" => $"{d.AnomalyKind}: {d.AnomalyObserved}",
-            "console" => $"[{d.ConsoleStream}] {d.ConsoleText}",
-            "hypothesis" => $"▸ {(d.HypothesisLens ?? "").ToLowerInvariant()}: {d.HypothesisText}",
-            _         => "",
-        };
-        o.WriteLine($"  Δ {d.Kind,-10} {detail}");
-    }
+        => o.WriteLine($"  Δ {d.Kind,-10} {FormatDeltaDetail(d)}");
 
-    // A local/argument as "name=value": the rendered value when present (a primitive or string); else the runtime
-    // type for a non-null object (so `this` reads as `{Worker}`, not a bare "?"); else an expandable marker "{…}"
-    // for an object whose type didn't resolve; else "null" for a null / unavailable value.
-    private static string RenderVar(WireVar v)
+    // ── Per-item formatters — SHARED by every text projection (this block/line renderer, the image tool through it,
+    //    and the TUI dashboard's panes), so a value, delta or breakpoint reads the same on every surface. ──
+
+    /// <summary>A delta's payload as text, without the kind prefix: the event name, the log message (FAULT-tagged),
+    /// "Kind: observed" for an anomaly, "[stream] text" for console output, "▸ lens: text" for a hypothesis.</summary>
+    public static string FormatDeltaDetail(WireDelta d) => d.Kind switch
+    {
+        "event"   => d.Event ?? "",
+        "log"     => $"{(d.LogFault == true ? "FAULT " : "")}{d.LogMessage}",
+        "anomaly" => $"{d.AnomalyKind}: {d.AnomalyObserved}",
+        "console" => $"[{d.ConsoleStream}] {d.ConsoleText}",
+        "hypothesis" => $"▸ {(d.HypothesisLens ?? "").ToLowerInvariant()}: {d.HypothesisText}",
+        _         => "",
+    };
+
+    /// <summary>A breakpoint as "id=N kind location hits=H" — the location is file-name:line for a line breakpoint (the
+    /// file NAME, like a stack frame's display — the full path carried on the wire would crowd out the line number and
+    /// hit count in any pane), else Type.Method.</summary>
+    public static string FormatBreakpoint(WireBreakpoint b)
+        => $"id={b.Id} {b.Kind} {(b.Kind == "line" ? $"{Path.GetFileName(b.File)}:{b.Line}" : $"{b.Type}.{b.Method}")} hits={b.HitCount}";
+
+    /// <summary>A local/argument as "name=value": the rendered value when present (a primitive or string); else the
+    /// runtime type for a non-null object (so `this` reads as `{Worker}`, not a bare "?"); else an expandable marker
+    /// "{…}" for an object whose type didn't resolve; else "null" for a null / unavailable value.</summary>
+    public static string FormatVar(WireVar v)
         => $"{v.Name}={v.Value ?? (v.TypeName is { } t ? $"{{{ShortType(t)}}}" : v.HasChildren ? "{…}" : "null")}";
 
     // Abbreviate a (possibly generic) full type name for display: reduce each qualified name component to its

@@ -114,6 +114,15 @@ dotnet run --project src/DrHook.Viz.Console          # optional: pass a socket p
 
 It prints the snapshot-on-connect — session (pid, owned/borrowed, runtime, exec state), execution position (stop reason, top frame, call stack), locals + arguments, breakpoints, and the console/log/anomaly stream counts — then one line per delta as the agent steps, and a clean `disconnected` when the session ends. It is also **the first proper DrHook debuggee** — a clean .NET app to `drhook_launch` and step.
 
+### The dashboard: `drhook-viz-tui`
+
+```bash
+# in a real terminal (it refuses to run with redirected I/O), while a DrHook session is active:
+dotnet run --project src/DrHook.Viz.Tui              # optional: pass a socket path as the one argument
+```
+
+A full-screen view that **redraws in place** (the console view *appends*): a title bar (pid, owned/borrowed, runtime, execution state, stop reason, snapshot #, connection status) over fixed panes — **stack** | **source-on-step** (caret on the stopped line), **locals/args** | **breakpoints** (with hit counts), **braid / events** (the agent's hypotheses interleaved with lifecycle events and logpoint output), **console** (the launched target's stdout/stderr) | **anomalies**. BCL `System.Console` + ANSI only (ADR-012 Q2): alternate screen, changed-rows-only redraw, at most one frame per 50 ms however busy the stream. Debuggee text is sanitized — a target printing ANSI escapes cannot take over the screen. On session end it keeps the last picture with `disconnected (q to quit)`; **q** or Ctrl+C quits and restores the terminal. Read-only, like every view: closing it never affects the session. It does **not** host the target's terminal (ADR-012 Q5 — no PTY; interactive stdin is a separate, deferred increment). Needs at least 60×16; 110×34 or larger shows every pane comfortably.
+
 ### Architecture — one client, many views
 
 Layered like Mercury's `Mercury.Abstractions ← Mercury.Sparql.Tool ← Mercury.Cli.Sparql`, so console / TUI / GUI share one client + model:
@@ -126,7 +135,7 @@ Layered like Mercury's `Mercury.Abstractions ← Mercury.Sparql.Tool ← Mercury
 
 **Server side:** `DrHook.Engine/Transport/DebugStateServer` publishes a snapshot after each stop and the delta stream throughout; `EngineSteppingSession` wires it as a 4th `CompositeEventSink` member. The server **never calls into `DebugSession`** — the request-thread *driver* captures the immutable snapshot after each stop and pushes it, so there is no transport↔stepping concurrency hazard. Best-effort throughout: a transport fault never breaks a debug response.
 
-**Shipped since Phase 2:** source-on-step + typed value rendering in the console view (Phase 4 approach), the `(hypothesis, observation)` braid as a delta kind rendered inline (Phase 3), and `DrHook.Capture` persisting the braid to a Mercury store. **Not yet:** the full TUI dashboard (Phase 4), command-in / control (Phase 5), the Avalonia GUI sibling (Phase 6).
+**Shipped since Phase 2:** the full-screen TUI dashboard `drhook-viz-tui` (Phase 4, 2026-10-03), source-on-step + typed value rendering, the `(hypothesis, observation)` braid as a delta kind rendered inline (Phase 3), and `DrHook.Capture` persisting the braid to a Mercury store. **Not yet:** command-in / control (Phase 5), the Avalonia GUI sibling (Phase 6), hosting the target's PTY (interactive stdin — deferred, ADR-012 Q5).
 
 ## What's NOT yet shipped
 
