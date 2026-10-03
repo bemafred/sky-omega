@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- A windowed Avalonia app whose UI thread can be HUNG ON DEMAND — the positive control for the
+       capture-liveness guard (ADR-012 Q8 / the 1-in-41 post-capture hang). TicTacToe stays the pristine,
+       uninstrumented debuggee; this one exists only so a liveness signal can be validated against a REAL hung
+       UI thread. NOT in SkyOmega.sln (a poc fixture). net10.0 — finding 86. -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>HangTarget</AssemblyName>
+    <RootNamespace>HangTarget</RootNamespace>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <DebugType>portable</DebugType>
+    <Optimize>false</Optimize>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="11.*" />
+    <PackageReference Include="Avalonia.Desktop" Version="11.*" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.*" />
+  </ItemGroup>
+
+</Project>

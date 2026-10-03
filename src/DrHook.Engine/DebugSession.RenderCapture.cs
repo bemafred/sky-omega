@@ -5,7 +5,7 @@ namespace SkyOmega.DrHook.Engine;
 
 public sealed partial class DebugSession
 {
-    private const int ELEMENT_TYPE_STRING = 0x0E; // CorElementType — picks Save(string) over Save(Stream)
+    private const byte ELEMENT_TYPE_STRING = 0x0E; // CorElementType — picks Save(string) over Save(Stream)
 
     /// <summary>ADR-012 Q8 (a) mechanic 7 — the CAPTURE ORCHESTRATION the six probe mechanics (chaining /
     /// getter-chain / N-arg call / NewObject / NewString / value-type) each prove a part of, here threaded into
@@ -69,7 +69,7 @@ public sealed partial class DebugSession
             trace = "window-resolved";
 
             // ── Step 2 — construct the pixel-size value type: new PixelSize(Width, Height) (2-arg ctor). ──
-            uint sizeCtor = MetadataResolver.ResolveOverload(gfxModule, plan.PixelSizeType, ".ctor", paramCount: 2, firstParamElementType: 0);
+            uint sizeCtor = MetadataResolver.ResolveOverload(gfxModule, plan.PixelSizeType, ".ctor", paramCount: 2);
             if (sizeCtor == 0) { trace = $"unresolved-ctor:{plan.PixelSizeType}(2)"; return EvalStatus.SetupFailed; }
             nint sizeCtorFn = Eval.GetFunction(gfxModule, sizeCtor);
             if (sizeCtorFn == 0) { trace = "no-function:pixelsize-ctor"; return EvalStatus.SetupFailed; }
@@ -101,7 +101,7 @@ public sealed partial class DebugSession
             trace = "pixelsize-built";
 
             // ── Step 3 — construct the render target: new RenderTargetBitmap(pixelSize) (the 1-arg ctor). ──
-            uint rtbCtor = MetadataResolver.ResolveOverload(gfxModule, plan.BitmapType, ".ctor", paramCount: 1, firstParamElementType: 0);
+            uint rtbCtor = MetadataResolver.ResolveOverload(gfxModule, plan.BitmapType, ".ctor", paramCount: 1);
             if (rtbCtor == 0) { trace = $"unresolved-ctor:{plan.BitmapType}(1)"; return EvalStatus.SetupFailed; }
             nint rtbCtorFn = Eval.GetFunction(gfxModule, rtbCtor);
             if (rtbCtorFn == 0) { trace = "no-function:bitmap-ctor"; return EvalStatus.SetupFailed; }
@@ -120,7 +120,7 @@ public sealed partial class DebugSession
 
             // ── Step 4 — THE OPEN QUESTION: rtb.Render(window). Does the framework's render run during a
             //    func-eval Continue at a stop? args[0] = `this` (rtb), args[1] = the visual. ──
-            uint renderTok = MetadataResolver.ResolveOverload(gfxModule, plan.BitmapType, plan.RenderMethod, paramCount: 1, firstParamElementType: 0);
+            uint renderTok = MetadataResolver.ResolveOverload(gfxModule, plan.BitmapType, plan.RenderMethod, paramCount: 1);
             if (renderTok == 0) { trace = $"unresolved:{plan.BitmapType}.{plan.RenderMethod}"; return EvalStatus.SetupFailed; }
             nint renderFn = Eval.GetFunction(gfxModule, renderTok);
             if (renderFn == 0) { trace = "no-function:render"; return EvalStatus.SetupFailed; }
@@ -139,13 +139,8 @@ public sealed partial class DebugSession
             if (stopAfter == "render") return EvalStatus.Completed; // diagnostic: stop AFTER Render, BEFORE Save (isolate the UI-thread hang)
 
             // ── Step 5 — create the output path string in the debuggee (NewString). ──
-            nint pathEvalLocal = Eval.CreateEval(_pump.StopThread);
-            if (pathEvalLocal == 0) { trace = "no-eval:path"; return EvalStatus.SetupFailed; }
-            if (!Eval.NewString(pathEvalLocal, plan.OutputPath)) { RuntimeNavigation.Release(pathEvalLocal); trace = "setup:path"; return EvalStatus.SetupFailed; }
-            EvalStatus pst = RunToComplete(pathEvalLocal, timeout);
-            if (pst != EvalStatus.Completed) { RuntimeNavigation.Release(pathEvalLocal); trace = $"path:{pst}"; return pst; }
-            path = Eval.GetResultRaw(pathEvalLocal);
-            pathEval = pathEvalLocal;
+            EvalStatus pst = NewDebuggeeString(plan.OutputPath, timeout, out path, out pathEval);
+            if (pst != EvalStatus.Completed) { trace = $"path:{pst}"; return pst; }
             if (path == 0) { trace = "path:null"; return EvalStatus.SetupFailed; }
 
             // ── Step 6 — rtb.Save(path, quality). The framework's Save is Save(string fileName, int? quality)
@@ -153,7 +148,7 @@ public sealed partial class DebugSession
             //    type. quality is a Nullable<int> — pass its DEFAULT (null / HasValue=false), the param's own
             //    default, built correctly-typed via CreateValueForType (a plain I4 here WEDGES the eval). args[0]
             //    = `this` (rtb), args[1] = path, args[2] = quality. ──
-            uint saveTok = MetadataResolver.ResolveOverload(gfxModule, plan.BitmapType, plan.SaveMethod, paramCount: 2, firstParamElementType: ELEMENT_TYPE_STRING);
+            uint saveTok = MetadataResolver.ResolveOverload(gfxModule, plan.BitmapType, plan.SaveMethod, paramCount: 2, [ELEMENT_TYPE_STRING]);
             if (saveTok == 0) { trace = $"unresolved:{plan.BitmapType}.{plan.SaveMethod}(string,..)"; return EvalStatus.SetupFailed; }
             nint saveFn = Eval.GetFunction(gfxModule, saveTok);
             if (saveFn == 0) { trace = "no-function:save"; return EvalStatus.SetupFailed; }

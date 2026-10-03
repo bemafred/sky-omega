@@ -16,6 +16,7 @@
 //   - UnexpectedCleanupException — EngineSteppingSession.CleanupSession swallowed an exception
 //   - TargetStuckAtDispose     — Owned Dispose's Stage 1 SIGTERM timed out; escalated to SIGKILL
 //   - TargetIsHostChild        — Attach/AttachAndOwn target is a direct OS child of the debugger host (finding 87)
+//   - UiThreadUnresponsive     — after a visual capture + detach, the target's UI thread did not drain a queued job
 //
 // New kinds are added as new substrate surprises surface. The discipline rule: each kind is a
 // named concept, not "Generic / Other" — and each emission site documents what would have to be
@@ -97,6 +98,14 @@ public enum AnomalyKind
     /// (a child spawned via posix_spawn is untracked by the BCL and safe), so it is surfaced, not
     /// refused: a host must not debug a target it started via System.Diagnostics.Process.</summary>
     TargetIsHostChild,
+
+    /// <summary>After a <c>drhook_capture_visual</c> session, the target was left running (detach) but its UI
+    /// thread did not execute a job queued on its dispatcher within the drain window — the UI thread is HUNG
+    /// (managed or native), the 1-in-41 post-capture hang (ADR-012 Q8). Detected by
+    /// <see cref="DispatcherDrainSentinel"/> (probe 88: an idle app drains within the first 50 ms poll; managed
+    /// and native hangs never drain). Actionable: the app beachballs — sample it (<c>sample &lt;pid&gt; 3</c>)
+    /// BEFORE killing it; the stuck stack is the only path to the root cause.</summary>
+    UiThreadUnresponsive,
 }
 
 /// <summary>A structured record of a substrate-correctness anomaly. Surfaced through

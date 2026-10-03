@@ -254,13 +254,14 @@ internal static unsafe class MetadataResolver
 
     /// <summary>Resolve an OVERLOADED method/ctor on <paramref name="typeName"/> (or an inherited one,
     /// walking the within-module base chain like <see cref="FindMethodInType"/>) to the <c>mdMethodDef</c>
-    /// whose parameter list matches <paramref name="paramCount"/> and — when
-    /// <paramref name="firstParamElementType"/> is non-zero — whose FIRST parameter's leading
-    /// <c>CorElementType</c> equals it. <see cref="ResolveMethodToken"/> returns the first by-name match only,
-    /// which is ambiguous for overloads: RenderTargetBitmap's 1- vs 2-arg <c>.ctor</c> (disambiguated by count)
-    /// and Bitmap's <c>Save(string)</c> vs <c>Save(Stream)</c> (both 1 param — disambiguated by the STRING
-    /// element type). 0 if no candidate matches. Parses the method signature blob (ECMA-335 II.23.2.1).</summary>
-    public static uint ResolveOverload(nint pModule, string typeName, string methodName, int paramCount, int firstParamElementType)
+    /// whose parameter list matches <paramref name="paramCount"/> and whose leading parameters' <c>CorElementType</c>s
+    /// match <paramref name="paramElementTypes"/> position by position (0 at a position = any type; an empty
+    /// pattern = arity-only). <see cref="ResolveMethodToken"/> returns the first by-name match only, which is
+    /// ambiguous for overloads: RenderTargetBitmap's 1- vs 2-arg <c>.ctor</c> (disambiguated by count), Bitmap's
+    /// <c>Save(string, int?)</c> vs <c>Save(Stream, int?)</c> (by the FIRST parameter, STRING), and
+    /// <c>Delegate.CreateDelegate(Type, Type, string)</c> vs <c>(Type, object, string)</c> (by the SECOND, CLASS vs
+    /// OBJECT). 0 if no candidate matches. Parses the method signature blob (ECMA-335 II.23.2.1).</summary>
+    public static uint ResolveOverload(nint pModule, string typeName, string methodName, int paramCount, ReadOnlySpan<byte> paramElementTypes = default)
     {
         nint pImport = GetMetaDataImport(pModule);
         if (pImport == 0) return 0;
@@ -274,7 +275,7 @@ internal static unsafe class MetadataResolver
             uint current = typeToken;
             while (current != 0)
             {
-                uint match = MatchOverloadInType(pImport, current, methodName, paramCount, firstParamElementType);
+                uint match = MatchOverloadInType(pImport, current, methodName, paramCount, paramElementTypes);
                 if (match != 0) return match;
                 current = GetBaseTypeDef(pImport, current);
             }
@@ -283,7 +284,7 @@ internal static unsafe class MetadataResolver
         finally { Release(pImport); }
     }
 
-    private static uint MatchOverloadInType(nint pImport, uint typeToken, string methodName, int paramCount, int firstParamElementType)
+    private static uint MatchOverloadInType(nint pImport, uint typeToken, string methodName, int paramCount, ReadOnlySpan<byte> paramElementTypes)
     {
         var enumWithName = (delegate* unmanaged[Cdecl]<nint, nint*, uint, char*, uint*, uint, uint*, int>)Slot(pImport, EnumMethodsWithName);
         var closeEnum = (delegate* unmanaged[Cdecl]<nint, nint, void>)Slot(pImport, CloseEnum);
@@ -303,7 +304,7 @@ internal static unsafe class MetadataResolver
                     uint classTok = 0, chName = 0, attr = 0, cbSig = 0, rva = 0, impl = 0;
                     nint sig = 0;
                     if (getMethodProps(pImport, tokens[i], &classTok, nameBuf, 512, &chName, &attr, &sig, &cbSig, &rva, &impl) < 0) continue;
-                    if (SignatureMatches((byte*)sig, (int)cbSig, paramCount, firstParamElementType))
+                    if (SignatureMatches((byte*)sig, (int)cbSig, paramCount, paramElementTypes))
                     {
                         chosen = tokens[i];
                         break;
@@ -315,29 +316,36 @@ internal static unsafe class MetadataResolver
         return chosen;
     }
 
-    // Match a MethodDefSig (ECMA-335 II.23.2.1) by parameter count and, when firstParamElementType != 0, by the
-    // leading CorElementType of the first parameter. Best-effort: a return/parameter type the minimal SkipType
-    // cannot walk (generics, etc.) yields NO match for that candidate rather than a wrong one.
-    private static bool SignatureMatches(byte* sig, int len, int paramCount, int firstParamElementType)
+    // Match a MethodDefSig (ECMA-335 II.23.2.1) by parameter count and, position by position, the leading
+    // CorElementType of each parameter covered by paramElementTypes (0 = any). Best-effort: a return/parameter type
+    // the minimal SkipType cannot walk (generics, etc.) yields NO match for that candidate rather than a wrong one.
+    private static bool SignatureMatches(byte* sig, int len, int paramCount, ReadOnlySpan<byte> paramElementTypes)
     {
         if (sig == null || len < 2) return false;
+        if (paramElementTypes.Length > paramCount) return false;
         int pos = 0;
         byte callingConv = sig[pos++];
         if ((callingConv & 0x10) != 0) ReadCompressedUInt(sig, ref pos, len); // GENERIC: skip the generic-param count
         int count = (int)ReadCompressedUInt(sig, ref pos, len);
         if (count != paramCount) return false;
         if (!SkipType(sig, ref pos, len)) return false; // the return type
-        if (firstParamElementType == 0) return true;     // arity-only match
-        if (paramCount == 0 || pos >= len) return false;
-        byte et = sig[pos];
-        while (et == 0x1f || et == 0x20 || et == 0x45)    // CMOD_REQD / CMOD_OPT / PINNED preceding the type
+        for (int i = 0; i < paramElementTypes.Length; i++)
         {
-            pos++;
-            if (et != 0x45) ReadCompressedUInt(sig, ref pos, len); // a CMOD carries a token
             if (pos >= len) return false;
-            et = sig[pos];
+            byte et = sig[pos];
+            int typeStart = pos;
+            while (et == 0x1f || et == 0x20 || et == 0x45)    // CMOD_REQD / CMOD_OPT / PINNED preceding the type
+            {
+                pos++;
+                if (et != 0x45) ReadCompressedUInt(sig, ref pos, len); // a CMOD carries a token
+                if (pos >= len) return false;
+                et = sig[pos];
+            }
+            if (paramElementTypes[i] != 0 && et != paramElementTypes[i]) return false;
+            pos = typeStart;
+            if (i + 1 < paramElementTypes.Length && !SkipType(sig, ref pos, len)) return false; // advance to the next parameter
         }
-        return et == firstParamElementType;
+        return true;
     }
 
     private static uint ReadCompressedUInt(byte* p, ref int pos, int len)

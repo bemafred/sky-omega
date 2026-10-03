@@ -79,10 +79,22 @@ public sealed class EngineSteppingSession : IDisposable
     private readonly DebugStateServer _transport = new(WireRendezvous.DefaultSocketPath());
     private readonly IDebugEventSink _sink;
 
-    // The most recent stop, recorded at the single stop chokepoint (PublishTransportSnapshot) — independent of
-    // whether the transport bound. drhook_snapshot_image needs it to capture the CURRENT state on demand:
-    // DebugSession.CaptureState marks "stopped" only when given the stop, so a null here renders as "running".
+    // The CURRENT stop: recorded at the single stop chokepoint (PublishTransportSnapshot) — independent of whether
+    // the transport bound — and cleared at every release (Resume / step), so it means "stopped NOW", not "stopped
+    // at some point". drhook_snapshot_image renders null as "running"; drhook_capture_visual and the UI-liveness
+    // job require a real stop (func-eval needs a synchronized target).
     private StopInfo? _lastStop;
+
+    // The UI-liveness plan to verify with when this session leaves its target running, set by a SUCCESSFUL
+    // drhook_capture_visual whose framework the dispatcher-drain job is validated for (Avalonia — probe 88). Null =
+    // no check owed. The post-capture UI-thread hang (1 in 41, root cause unreproduced) appeared AFTER detach, so
+    // the release paths queue a job while still stopped and read the verdict once the target runs free.
+    private UiLivenessPlan? _uiLivenessPlan;
+
+    /// <summary>How long a released target's UI thread gets to drain the liveness job. Basis (probe 88, 2026-10-03):
+    /// an idle Avalonia app drained within the first 50 ms poll; managed and native hangs never drained. 3 s
+    /// leaves room for a busy UI thread to finish the job it is running first.</summary>
+    private static readonly TimeSpan UiLivenessDrainTimeout = TimeSpan.FromSeconds(3);
 
     // Reused source-window reader for the image projection's source-on-step pane (an internal bounded cache, like
     // the console view's). Reading source from disk is sound — the MCP server is co-located with the target.
@@ -296,6 +308,8 @@ public sealed class EngineSteppingSession : IDisposable
         catch (Exception ex) { return (null, $"Capture saved but unreadable at {outputPath}: {ex.Message}{hint}"); }
         finally { try { File.Delete(outputPath); } catch { /* best effort */ } }
 
+        // Owe a liveness verdict when the target is released (Avalonia only — the validated dispatcher shape).
+        if (appModule.StartsWith("Avalonia", StringComparison.Ordinal)) _uiLivenessPlan = UiLivenessPlan.Avalonia;
         return (png, $"debuggee visual capture: pid={_targetPid}, {width}x{height}, {png.Length} bytes, trace={trace}{hint}");
     }
 
@@ -348,6 +362,7 @@ public sealed class EngineSteppingSession : IDisposable
             int id = TrackSourceBreakpoint(sourceFile, line);
             if (id == 0) return Task.FromResult(Error($"Could not set breakpoint at {sourceFile}:{line}."));
 
+            _lastStop = null; // released — no current stop until the next one arrives
             _session.Resume();
             StopInfo? stop = _session.WaitForStop(TimeSpan.FromMinutes(2));
             if (stop is null) return Task.FromResult(Error("Timed out waiting for the breakpoint to hit."));
@@ -429,6 +444,7 @@ public sealed class EngineSteppingSession : IDisposable
             int id = TrackSourceBreakpoint(sourceFile, line);
             if (id == 0) { CleanupSession(); return Task.FromResult(Error($"Could not set breakpoint at {sourceFile}:{line}.")); }
 
+            _lastStop = null; // released — no current stop until the next one arrives
             _session.Resume();
             StopInfo? stop = _session.WaitForStop(TimeSpan.FromMinutes(2));
             if (stop is null) { CleanupSession(); return Task.FromResult(Error("Timed out waiting for the breakpoint to hit.")); }
@@ -470,6 +486,9 @@ public sealed class EngineSteppingSession : IDisposable
         if (!IsActive) return Task.FromResult(Error("No active stepping session."));
 
         bool owned = _session!.OwnsTarget;
+        int pid = _targetPid;
+        // Borrowed stop leaves the target running — owe the same liveness verdict as drhook_detach. Owned stop ends it.
+        (DispatcherDrainSentinel? sentinel, string? livenessNote) = owned ? (null, null) : QueueUiLivenessJob();
         JsonObject summary = new()
         {
             ["status"] = "stopped",
@@ -486,6 +505,7 @@ public sealed class EngineSteppingSession : IDisposable
         };
 
         CleanupSession();
+        if (sentinel is not null || livenessNote is not null) summary["uiLiveness"] = ReadUiLivenessVerdict(sentinel, livenessNote, pid);
         return Task.FromResult(Render(summary));
     }
 
@@ -498,12 +518,14 @@ public sealed class EngineSteppingSession : IDisposable
         if (!IsActive) return Task.FromResult(Error("No active stepping session."));
 
         bool owned = _session!.OwnsTarget;
+        int pid = _targetPid;
+        (DispatcherDrainSentinel? sentinel, string? livenessNote) = QueueUiLivenessJob();
         if (owned)
         {
             // Owned leave-running: explicitly detach-without-kill. Sets DebugSession._disposed, so the
             // CleanupSession -> Dispose below is the idempotent no-op + state reset (the KillAsync pattern).
             try { _session.DetachLeaveRunning(); }
-            catch (Exception ex) { return Task.FromResult(Error($"Detach (leave-running) failed: {ex.GetType().Name}: {ex.Message}")); }
+            catch (Exception ex) { sentinel?.Dispose(); return Task.FromResult(Error($"Detach (leave-running) failed: {ex.GetType().Name}: {ex.Message}")); }
         }
 
         JsonObject summary = new()
@@ -521,6 +543,7 @@ public sealed class EngineSteppingSession : IDisposable
                          $"Did the observations confirm or challenge the hypothesis: \"{_sessionHypothesis}\"?"
         };
         CleanupSession();
+        if (sentinel is not null || livenessNote is not null) summary["uiLiveness"] = ReadUiLivenessVerdict(sentinel, livenessNote, pid);
         return Task.FromResult(Render(summary));
     }
 
@@ -566,6 +589,7 @@ public sealed class EngineSteppingSession : IDisposable
         EmitHypothesis(hypothesis, HypothesisLens.Navigation);
         try
         {
+            _lastStop = null; // released — no current stop until the next one arrives
             _session.Resume();
             if (!waitForBreakpoint)
             {
@@ -646,6 +670,7 @@ public sealed class EngineSteppingSession : IDisposable
         try
         {
             _stepCount++;
+            _lastStop = null; // released — no current stop until the step completes
             step(_session);
             StopInfo? stop = _session.WaitForStop(TimeSpan.FromMinutes(2));
             if (stop is null) return Task.FromResult(Error("Step did not complete within budget."));
@@ -1318,6 +1343,45 @@ public sealed class EngineSteppingSession : IDisposable
     // by Probe 41). Equivalent output for the JsonObject inputs we use.
     private static string Render(JsonObject obj) => obj.ToJsonString(Indented);
 
+    // Queue the UI-liveness job while the session still holds a stop (finding: the post-capture hang appeared after
+    // detach — ADR-012 Q8). Returns the sentinel to read once the target is released, or a note saying why no
+    // verdict is possible. (null, null) = no capture this session, so no check is owed.
+    private (DispatcherDrainSentinel? Sentinel, string? Note) QueueUiLivenessJob()
+    {
+        if (_uiLivenessPlan is not { } plan) return (null, null);
+        if (_lastStop is null) return (null, "not checked — the target was running at release, so there was no stop to queue the liveness job from");
+        DispatcherDrainSentinel sentinel = DispatcherDrainSentinel.Create(_targetPid);
+        EvalStatus status;
+        string trace;
+        try { status = _session!.TryEvalPostLivenessJob(plan, sentinel.Path, TimeSpan.FromSeconds(10), out trace); }
+        catch (Exception ex) { sentinel.Dispose(); return (null, $"not checked — queueing the liveness job threw {ex.GetType().Name}: {ex.Message}"); }
+        if (status != EvalStatus.Completed) { sentinel.Dispose(); return (null, $"not checked — the liveness job was not queued ({status}, trace={trace})"); }
+        return (sentinel, null);
+    }
+
+    // The released target's verdict: its UI thread deleted the sentinel (alive) or did not within the drain window
+    // (hung — surfaced as the UiThreadUnresponsive anomaly).
+    private JsonObject ReadUiLivenessVerdict(DispatcherDrainSentinel? sentinel, string? note, int pid)
+    {
+        if (sentinel is null) return new JsonObject { ["verdict"] = "not-checked", ["note"] = note };
+        using (sentinel)
+        {
+            if (sentinel.WaitForDrain(UiLivenessDrainTimeout))
+                return new JsonObject { ["verdict"] = "alive", ["note"] = "the UI thread drained a queued dispatcher job after release" };
+        }
+        _anomalies.OnAnomaly(new EngineAnomaly(
+            DateTimeOffset.UtcNow, AnomalyKind.UiThreadUnresponsive, "mcp-request", "ReadUiLivenessVerdict",
+            Observed: $"target {pid}: UI thread did not drain the liveness job within {UiLivenessDrainTimeout.TotalSeconds:0} s of release after drhook_capture_visual",
+            Expected: "the released target's UI thread executes a queued dispatcher job promptly (probe 88: < 50 ms when idle)",
+            Context: new Dictionary<string, string> { ["pid"] = pid.ToString(System.Globalization.CultureInfo.InvariantCulture) }));
+        return new JsonObject
+        {
+            ["verdict"] = "unresponsive",
+            ["note"] = $"the UI thread did not drain a queued job within {UiLivenessDrainTimeout.TotalSeconds:0} s — the app is likely hung (beachball). " +
+                       $"Sample it BEFORE killing it (`sample {pid} 3`): the stuck stack is the only path to the post-capture-hang root cause.",
+        };
+    }
+
     private void CleanupSession()
     {
         // Stop the transport FIRST — close the listener + drop view connections before the session is torn
@@ -1355,6 +1419,7 @@ public sealed class EngineSteppingSession : IDisposable
         _stepCount = 0;
         _targetPid = 0;
         _lastStop = null; // no current stop once the session ends (the next session starts fresh)
+        _uiLivenessPlan = null;
         _targetVersion = "unknown";
         _sessionHypothesis = "";
     }

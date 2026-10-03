@@ -304,7 +304,9 @@ public sealed class DrHookTools
         "bitmap → render(window) → save(path)). Returns a caption with the capture trace plus the image. Requires a " +
         "hypothesis: state what you expect the window to show before you look. CHARACTERIZED LIMIT: low-risk, not " +
         "zero-risk — in 1 of 41 observed captures the app's UI thread was left hung after detach (root cause " +
-        "unreproduced); if the app beachballs afterwards, sample it (`sample <pid> 3`) before killing it.")]
+        "unreproduced); if the app beachballs afterwards, sample it (`sample <pid> 3`) before killing it. GUARDED: once " +
+        "a capture has run, drhook_detach (and a Borrowed drhook_stop) report uiLiveness — whether the app's UI thread " +
+        "still drains its dispatcher after release. Detach from the stop to get a verdict.")]
     public IEnumerable<ContentBlock> CaptureVisual(
         [Description("What you expect the rendered window to show. Required — state it before you look (epistemic discipline).")] string hypothesis,
         [Description("Image width in pixels (default 1024).")] int width = 1024,
@@ -351,7 +353,9 @@ public sealed class DrHookTools
         "Owned sessions (drhook_launch): the launched target is detached cleanly and left running — it reparents " +
         "(to launchd/PPID=1 on macOS) and keeps executing un-debugged (F-010-2; breakpoints are deactivated before " +
         "Detach so it does not hang). Contrast drhook_stop, which ENDS the session (graceful-terminate for an Owned " +
-        "target), and drhook_kill, which force-terminates. Requires a hypothesis.")]
+        "target), and drhook_kill, which force-terminates. After a drhook_capture_visual the response carries " +
+        "uiLiveness (alive / unresponsive / not-checked) — whether the app's UI thread still drains a queued job once " +
+        "released; detach while stopped to get a verdict. Requires a hypothesis.")]
     public async Task<string> Detach(
         [Description("What you expect the target to do after you disconnect (e.g. 'keeps serving requests un-debugged').")] string hypothesis,
         CancellationToken ct = default)
