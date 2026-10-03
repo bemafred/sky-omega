@@ -7,6 +7,17 @@
 //
 // Both use the same regex. Phase 8 (ADR-008 Increment 4) integration tests all
 // reuse this helper to keep spawn + handshake logic in one place.
+//
+// TOPOLOGY (finding 87 — the dual-reaper race): the debuggee must NOT be a Process.Start child of
+// this test host. Once DrHook attaches, the CoreCLR PAL inside the in-process debug components polls
+// wait4(pid, WNOHANG) and reaps the target if it is our child; the BCL also tracks every
+// Process.Start child and reaps it on SIGCHLD. Two reapers on one pid: when the PAL wins,
+// bootstrap.WaitForExit never sees the exit and the runtime later FailFasts the whole test host
+// ("Error while reaping child. errno = 10"). So MTP targets run under a /bin/sh parent — the shell is
+// the BCL-tracked child, the target is its child (the PAL's wait4 gets ECHILD, harmless), and the
+// shell's `wait` makes its exit mirror the target's. VSTest already has this shape: the attached
+// testhost is a child of `dotnet test`, not of this host. It also matches production attach, where
+// the debuggee is never the debugger's own child.
 
 using System;
 using System.Diagnostics;
@@ -21,21 +32,30 @@ internal static class TargetSpawn
 {
     /// <summary>Spawn an MTP integration target with --debug. Optionally filters which test
     /// method(s) MTP runs via `--filter FullyQualifiedName~<methodFilter>`. Returns the bootstrap
-    /// Process; caller is responsible for disposing it (typically via `using`).</summary>
+    /// Process — the /bin/sh parent, whose exit mirrors the target's (see TOPOLOGY above); the target
+    /// pid comes from <see cref="ExtractPid"/>. Caller is responsible for disposing it (typically via
+    /// `using`).</summary>
     public static Process Mtp(string targetExe, string? methodFilter = null)
     {
-        string args = methodFilter is null
-            ? "--debug"
-            : $"--debug --filter \"FullyQualifiedName~{methodFilter}\"";
-        Process bootstrap = new()
+        // `"$0" "$@" & wait $!` — the target runs as the shell's background child (not exec'd, so it
+        // is never this host's child), and the shell exits with the target's status. Arguments pass
+        // positionally, so no quoting of paths or filters.
+        ProcessStartInfo startInfo = new("/bin/sh")
         {
-            StartInfo = new ProcessStartInfo(targetExe, args)
-            {
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-            }
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
         };
+        startInfo.ArgumentList.Add("-c");
+        startInfo.ArgumentList.Add("\"$0\" \"$@\" & wait $!");
+        startInfo.ArgumentList.Add(targetExe);
+        startInfo.ArgumentList.Add("--debug");
+        if (methodFilter is not null)
+        {
+            startInfo.ArgumentList.Add("--filter");
+            startInfo.ArgumentList.Add($"FullyQualifiedName~{methodFilter}");
+        }
+        Process bootstrap = new() { StartInfo = startInfo };
         bootstrap.Start();
         return bootstrap;
     }

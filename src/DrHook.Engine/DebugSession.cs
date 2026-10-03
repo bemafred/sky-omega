@@ -181,6 +181,7 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
         // Substrate does NOT take ownership of kill for Borrowed — the handle is consulted
         // in Dispose to short-circuit mscordbi protocol ops when the target has died externally.
         Process targetProcess = Process.GetProcessById(processId);
+        SurfaceHostChildReapRace(processId, sink, "Attach");
         DbgShim dbgShim = DbgShim.Load();
         nint pUnknown = 0;
         try
@@ -200,6 +201,30 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
             targetProcess.Dispose();
             throw;
         }
+    }
+
+    /// <summary>Finding 87 — the dual-reaper race. Once attached, the CoreCLR PAL inside the in-process
+    /// debug components polls <c>wait4(pid, WNOHANG)</c> to detect target exit, and reaps the target if
+    /// it is a child of THIS process. A host that started the target via
+    /// <see cref="Process.Start()"/> has a second reaper (the BCL's SIGCHLD child tracking) on the same
+    /// pid; when the PAL wins, the BCL never observes the exit and later FailFasts the host
+    /// (<c>errno = 10</c>, ECHILD). Observed 2026-10-03 with a waitpid/wait4 interposer: the PAL reaped an
+    /// MTP target the integration harness had Process.Start'ed. The substrate cannot tell whether the
+    /// BCL tracks the child (a posix_spawn child is untracked and safe), so it surfaces the hazard as
+    /// <see cref="AnomalyKind.TargetIsHostChild"/> rather than refusing the attach.</summary>
+    private static void SurfaceHostChildReapRace(int processId, IDebugEventSink sink, string operation)
+    {
+        int? parent = Interop.ProcessParentage.ParentOf(processId);
+        if (parent != Environment.ProcessId) return;
+        sink.OnAnomaly(new EngineAnomaly(
+            DateTimeOffset.UtcNow, AnomalyKind.TargetIsHostChild, "mcp-request", operation,
+            Observed: $"target {processId} is a direct OS child of the debugger host {Environment.ProcessId}",
+            Expected: "an attached target is not the debugger host's child — the in-process PAL and a Process.Start-tracked BCL child record would both reap it (finding 87)",
+            Context: new Dictionary<string, string>
+            {
+                ["pid"] = processId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["hostPid"] = Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            }));
     }
 
     /// <summary>Attach to an existing process as an OWNED session — substrate takes
@@ -223,6 +248,7 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
         // Acquire Process handle BEFORE dbgshim attach — if the target exited between
         // caller's spawn and now, fail fast with ArgumentException rather than mid-attach.
         Process targetProcess = Process.GetProcessById(processId);
+        SurfaceHostChildReapRace(processId, sink, "AttachAndOwn");
         DbgShim dbgShim = DbgShim.Load();
         nint pUnknown = 0;
         try

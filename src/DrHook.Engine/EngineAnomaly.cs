@@ -14,6 +14,8 @@
 //   - UnexpectedHResult        — Quiesce / Detach / Terminate / Marshal.Release non-success HR
 //   - DepthClamped             — DebugSession.GetLocals/GetArguments clamped to MaxInspectionDepth
 //   - UnexpectedCleanupException — EngineSteppingSession.CleanupSession swallowed an exception
+//   - TargetStuckAtDispose     — Owned Dispose's Stage 1 SIGTERM timed out; escalated to SIGKILL
+//   - TargetIsHostChild        — Attach/AttachAndOwn target is a direct OS child of the debugger host (finding 87)
 //
 // New kinds are added as new substrate surprises surface. The discipline rule: each kind is a
 // named concept, not "Generic / Other" — and each emission site documents what would have to be
@@ -84,6 +86,17 @@ public enum AnomalyKind
     /// This is an actionable upstream signal — callers can investigate the target's
     /// implementation rather than tolerate the kill as silent default.</summary>
     TargetStuckAtDispose,
+
+    /// <summary>Attach / AttachAndOwn was handed a target whose OS parent is the debugger host itself
+    /// (finding 87). The CoreCLR PAL inside the in-process debug components polls
+    /// <c>wait4(pid, WNOHANG)</c> for exit detection and REAPS the target when it is our child; if the
+    /// host also started it via <see cref="System.Diagnostics.Process.Start()"/>, the BCL's own child
+    /// reaper then finds it gone — <c>Process.WaitForExit</c> never observes the exit, and at the next
+    /// SIGCHLD the runtime calls <c>Environment.FailFast("Error while reaping child. errno = 10")</c>,
+    /// terminating the host. Two reapers on one pid; whichever polls first wins. Not fatal by itself
+    /// (a child spawned via posix_spawn is untracked by the BCL and safe), so it is surfaced, not
+    /// refused: a host must not debug a target it started via System.Diagnostics.Process.</summary>
+    TargetIsHostChild,
 }
 
 /// <summary>A structured record of a substrate-correctness anomaly. Surfaced through

@@ -85,6 +85,11 @@ public sealed class AnomalyInjectionTest
             Assert.AreEqual("999", a.Context!["requested"],
                 $"DepthClamped 'requested' context = {a.Context["requested"]}; expected '999'.");
 
+            // Finding 87 topology assertion: the target runs under the /bin/sh parent, so it is NOT this
+            // host's child — no dual-reaper hazard, no TargetIsHostChild anomaly.
+            Assert.IsFalse(sink.Anomalies.Any(x => x.Kind == AnomalyKind.TargetIsHostChild),
+                "TargetIsHostChild fired — the MTP target is a direct child of the test host (finding 87).");
+
             // Layer 1 discipline assertion.
             bool exitedNaturally = bootstrap.WaitForExit(5000);
             Assert.IsTrue(exitedNaturally,
