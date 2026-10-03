@@ -70,7 +70,12 @@ internal static class TargetSpawn
     /// vstest.console then exits, the waiting testhost is reparented to launchd, and the bootstrap's process TREE no
     /// longer contains it — so the tree kill missed it (~3–4 orphans per suite run, 346 / 17 GB RSS over one day).
     /// A process group survives reparenting (observed: the orphans kept their original pgid), so a group kill reaches
-    /// every process the run started. `set -m` gives the background job its own group (pgid = its pid).</summary>
+    /// every process the run started. `set -m` gives the background job its own group (pgid = its pid).
+    ///
+    /// FINDING 91 — the `Process Id:` line <see cref="ExtractPid"/> parses is printed by vstest.console when it
+    /// LAUNCHES the testhost, before the testhost reaches its VSTEST_HOST_DEBUG hold. An attach that lands first makes
+    /// the hold return immediately (Debugger.IsAttached) with no Break — so never wait on that Break as the first
+    /// stop; force one (Pause).</summary>
     public static VstestRun Vstest(string targetProject, string? methodFilter = null)
     {
         ProcessStartInfo startInfo = new("/bin/sh")

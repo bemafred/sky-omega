@@ -116,11 +116,18 @@ public sealed class AnomalyInjectionTest
 
             using (DebugSession session = DebugSession.AttachAndOwn(testHostPid, sink))
             {
-                // VSTEST_HOST_DEBUG=1 halts testhost via Debugger.Break() → Break stop.
+                // FINDING 91 — do not wait for VSTEST_HOST_DEBUG's Break: vstest.console prints the testhost pid as
+                // soon as it LAUNCHES the testhost, so this attach can complete before the testhost reaches
+                // DebuggerBreakpoint.WaitForDebugger — which then sees Debugger.IsAttached, returns at once and never
+                // Breaks; the [Fact] runs to completion and the first stop is ProcessExited (deterministic when this
+                // test runs alone; masked inside the full suite, where the attach path is warm and usually loses the
+                // race). Force the stop instead: Pause works however early the attach landed. If the testhost WAS
+                // held, its Break may queue ahead of the Pause — either is a valid stop for the GetLocals injection.
+                session.Pause();
                 StopInfo? stop = session.WaitForStop(TimeSpan.FromSeconds(5));
-                Assert.IsNotNull(stop, "Stop did not arrive within 5s.");
-                Assert.IsTrue(stop!.Reason == StopReason.Break || stop.Reason == StopReason.Breakpoint,
-                    $"Expected Break or Breakpoint stop; got {stop.Reason}.");
+                Assert.IsNotNull(stop, "No stop within 5s of Pause.");
+                Assert.IsTrue(stop!.Reason == StopReason.Pause || stop.Reason == StopReason.Break,
+                    $"Expected Pause (or the held testhost's Break); got {stop.Reason}.");
 
                 _ = session.GetLocals(depth: 999);
 

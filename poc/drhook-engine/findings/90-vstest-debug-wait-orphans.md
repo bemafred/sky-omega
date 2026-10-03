@@ -35,14 +35,11 @@ process the run started, including the debug-waiting testhost. All six VSTest te
 
 - 5 consecutive full integration runs: 16/16 each, **0 orphaned testhosts** after every run (was ~3–4 per run).
 
-## Open (related, pre-existing, not fixed here)
+## Related
 
-- `AttachAndOwn_VstestTestHost_GetLocalsExcessiveDepth_DepthClampedAnomalyFires` **fails deterministically when run
-  in isolation** (first stop `ProcessExited`, not `Break`) yet passes inside the full suite; it fails the same way on
-  the session-start commit (`2ab2212`), so it predates the 2026-10-03 changes. A standalone replica showed the
-  VSTest debug hold is **racy** against attach (one run stopped on `Break`, another ran the test to completion).
-  **Hypothesis (unverified):** with two testhosts per run, the test sometimes attaches to the one that does not hold —
-  `ExtractPid` takes the first `Process Id:` line. To probe next.
+- The isolated failure of `AttachAndOwn_VstestTestHost_GetLocalsExcessiveDepth…` noted here was the
+  `VSTEST_HOST_DEBUG` attach race — root-caused and fixed in **finding 91** (the printed pid precedes the hold; an
+  early attach skips the Break). The two-testhost hypothesis was not the cause.
 
 ## References
 
