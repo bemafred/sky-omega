@@ -2084,15 +2084,16 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
     private void TryResumeForDetach()
     {
         const int S_FALSE = 1;
+        const int CORDBG_E_SUPERFLOUS_CONTINUE = unchecked((int)0x8013132F); // mscordbi's "already running" (finding 89)
         const int maxAttempts = 10;
         const int IntraSettleMs = 10;
         const int FinalSettleMs = 50;
         for (int attempt = 0; attempt < maxAttempts; attempt++)
         {
             int hr = _controller.Continue(0);
-            if (hr == S_FALSE)
+            if (hr == S_FALSE || hr == CORDBG_E_SUPERFLOUS_CONTINUE)
             {
-                Thread.Sleep(FinalSettleMs); // post-resume dispatch settles before Detach
+                Thread.Sleep(FinalSettleMs); // post-resume dispatch settles before the next substrate operation
                 return;
             }
             if (hr < 0)
@@ -2119,6 +2120,20 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
             Observed: $"controller.Continue returned S_OK {maxAttempts} times without reaching S_FALSE",
             Expected: "S_FALSE within bounded attempts (target running)",
             Context: new Dictionary<string, string> { ["maxAttempts"] = maxAttempts.ToString(System.Globalization.CultureInfo.InvariantCulture) }));
+    }
+
+    /// <summary>Detach a LIVE target from the synchronized state — the one detach sequence (finding 89 unified the
+    /// Borrowed Dispose path onto the one probe 62 validated for Owned leave-running). ICorDebug refuses to detach
+    /// while breakpoints are active (CORDBG_E_DETACH_FAILED_OUTSTANDING_BREAKPOINTS) or while the process is running
+    /// (CORDBG_E_PROCESS_NOT_SYNCHRONIZED); either failure leaks the CordbProcess and lets a later target exit
+    /// SEGV the host. So: synchronize (Quiesce — first, because Dispose can be reached with the target running and
+    /// breakpoint deactivation belongs on a synchronized process), deactivate breakpoints, then Detach — mscordbi
+    /// implicit-resumes the target on Detach, so it keeps running un-debugged.</summary>
+    private void DetachSynchronized()
+    {
+        Quiesce();
+        ClearBreakpoints();
+        Detach();
     }
 
     /// <summary>Synchronize the target before Detach so mscordbi's RC event thread is not
@@ -2196,12 +2211,10 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
             //     OUTSTANDING_* errors — evals (0x1c18) and steppers (0x1c19) — cannot be in flight at
             //     a stop: a func-eval is synchronous, and a stepper is consumed by the StepComplete
             //     that produced the stop.
-            // The target is synchronized at the stop we were called from; ClearBreakpoints + Quiesce
-            // keep it synchronized (finding 14: RC thread not mid-flush) and Detach then detaches fully
-            // — mscordbi implicit-resumes the target on Detach, so it runs free un-debugged.
-            ClearBreakpoints();
-            Quiesce();
-            Detach();
+            // The target is synchronized at the stop we were called from; DetachSynchronized keeps it
+            // synchronized (finding 14: RC thread not mid-flush) and Detach then detaches fully — mscordbi
+            // implicit-resumes the target on Detach, so it runs free un-debugged.
+            DetachSynchronized();
         }
 
         int terminateHr = _cordbg.Terminate();
@@ -2364,17 +2377,19 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
             // Stop() synchronizes the process: it blocks until any in-flight dispatch
             // completes and the debuggee is halted; Detach from the synchronized state is
             // the probe-05-validated safe path.
-            Quiesce();
-
-            if (!_ownsTarget)
-            {
-                // Borrowed alive: detach-leave-running (Probe 44 / finding 59 / dispatch-settle
-                // finding 65). Substrate explicitly resumes so target is RUNNING when mscordbi's
-                // Detach unwinds (avoids stopped-at-breakpoint state that widens the exit-race
-                // window per probe 12). Target keeps running un-debugged.
-                TryResumeForDetach();
-            }
-            Detach();
+            //
+            // FINDING 89: the Borrowed branch used to pre-resume here (TryResumeForDetach) so Detach would
+            // unwind against a RUNNING target (probe 12's exit-race recipe). But Detach REQUIRES a
+            // synchronized process: once the Continue counter reaches zero an idle target really is running
+            // (mscordbi answers the extra Continue with CORDBG_E_SUPERFLOUS_CONTINUE, not S_FALSE), Detach
+            // fails CORDBG_E_PROCESS_NOT_SYNCHRONIZED, the CordbProcess leaks, and when the target later
+            // exits mscordbi's ExitProcessWorkItem runs against our freed callback — SEGV of the HOST. It
+            // only "worked" for targets busy enough to re-synchronize on a fresh callback before Detach.
+            // Probe 62 found the same failure for the Owned leave-running path and fixed it THERE; this
+            // branch was the drifted copy. One sequence now serves both. A target that exits at the very
+            // instant of Detach is the residual narrow race; an already-exited target takes the dead-target
+            // branch above (finding 66).
+            DetachSynchronized();
         }
         int terminateHr = _cordbg.Terminate();
         if (terminateHr < 0)
