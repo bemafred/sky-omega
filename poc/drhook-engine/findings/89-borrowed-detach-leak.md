@@ -64,7 +64,12 @@ an already-exited target takes the dead-target branch (finding 66).
   exhausted" to **zero** anomalies beyond the expected `WorkerSilentBreak`.
 - New integration test `BorrowedIdleDetachTest` — **fails on the pre-fix engine** (verified: SEGV + the three
   HRESULTs on the Snapshot target), passes after.
-- Integration suite 16/16; `DrHook.Engine.Tests` 162/162; probe 88 confirmed; 50-run repeat gate (below).
+- Integration suite 16/16; `DrHook.Engine.Tests` 162/162; probe 88 confirmed.
+- **Repeat-run gate — PASSED (2026-10-03):** 50 consecutive full integration runs, **50/50 green (16/16 each)**,
+  after the teardown unification.
+- **Live, through the reconnected `drhook-mcp`:** `drhook_attach` TicTacToe → `drhook_capture_visual` →
+  `drhook_detach` (`uiLiveness: alive`, only the expected `WorkerSilentBreak`) → app closed → `drhook-mcp` still
+  running.
 
 ## References
 
