@@ -107,7 +107,8 @@ public sealed class PauseDisposeTest
 
         TimeSpan naturalExitTimeout = TimeSpan.FromMilliseconds(1000);
 
-        using Process dotnetTest = TargetSpawn.Vstest(targetProject, methodFilter: "RunBriefObservableWork");
+        using VstestRun run = TargetSpawn.Vstest(targetProject, methodFilter: "RunBriefObservableWork");
+        Process dotnetTest = run.Shell;
         try
         {
             int testHostPid = TargetSpawn.ExtractPid(dotnetTest, TimeSpan.FromSeconds(60));
@@ -137,7 +138,7 @@ public sealed class PauseDisposeTest
         }
         finally
         {
-            try { if (!dotnetTest.HasExited) dotnetTest.Kill(entireProcessTree: true); } catch { }
+            run.KillGroup(); // finding 90: the group kill also reaches a testhost orphaned while waiting for a debugger
         }
     }
 }

@@ -60,26 +60,50 @@ internal static class TargetSpawn
         return bootstrap;
     }
 
-    /// <summary>Spawn `dotnet test` against a Legacy VSTest target with VSTEST_HOST_DEBUG=1.
-    /// Optionally filters which test method(s) VSTest runs via
-    /// `--filter "FullyQualifiedName~<methodFilter>"`.</summary>
-    public static Process Vstest(string targetProject, string? methodFilter = null)
+    /// <summary>Spawn `dotnet test` against a Legacy VSTest target with VSTEST_HOST_DEBUG=1, as a job in its OWN
+    /// process group. Optionally filters which test method(s) VSTest runs via
+    /// `--filter "FullyQualifiedName~<methodFilter>"`. The caller owns the returned <see cref="VstestRun"/> and must
+    /// dispose it (typically via `using`) — disposal SIGKILLs the whole group.
+    ///
+    /// FINDING 90 — why a process group, not <c>Kill(entireProcessTree)</c>: during a run vstest.console can launch a
+    /// SECOND testhost, which inherits VSTEST_HOST_DEBUG=1 and parks forever waiting for a debugger nobody attaches.
+    /// vstest.console then exits, the waiting testhost is reparented to launchd, and the bootstrap's process TREE no
+    /// longer contains it — so the tree kill missed it (~3–4 orphans per suite run, 346 / 17 GB RSS over one day).
+    /// A process group survives reparenting (observed: the orphans kept their original pgid), so a group kill reaches
+    /// every process the run started. `set -m` gives the background job its own group (pgid = its pid).</summary>
+    public static VstestRun Vstest(string targetProject, string? methodFilter = null)
     {
-        string filterArg = methodFilter is null
-            ? string.Empty
-            : $" --filter \"FullyQualifiedName~{methodFilter}\"";
-        Process dotnetTest = new()
+        ProcessStartInfo startInfo = new("/bin/sh")
         {
-            StartInfo = new ProcessStartInfo("dotnet", $"test \"{targetProject}\" -c Release --no-build --nologo{filterArg}")
-            {
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                Environment = { ["VSTEST_HOST_DEBUG"] = "1" },
-            }
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            Environment = { ["VSTEST_HOST_DEBUG"] = "1" },
         };
-        dotnetTest.Start();
-        return dotnetTest;
+        startInfo.ArgumentList.Add("-c");
+        startInfo.ArgumentList.Add("set -m; dotnet \"$@\" & echo \"DRHOOK_PGID $!\"; wait $!");
+        startInfo.ArgumentList.Add("sh"); // $0
+        startInfo.ArgumentList.Add("test");
+        startInfo.ArgumentList.Add(targetProject);
+        startInfo.ArgumentList.Add("-c");
+        startInfo.ArgumentList.Add("Release");
+        startInfo.ArgumentList.Add("--no-build");
+        startInfo.ArgumentList.Add("--nologo");
+        if (methodFilter is not null)
+        {
+            startInfo.ArgumentList.Add("--filter");
+            startInfo.ArgumentList.Add($"FullyQualifiedName~{methodFilter}");
+        }
+        Process shell = Process.Start(startInfo)!;
+        string? first = shell.StandardOutput.ReadLine();
+        Match m = first is null ? Match.Empty : Regex.Match(first, @"^DRHOOK_PGID (\d+)$");
+        if (!m.Success)
+        {
+            try { shell.Kill(entireProcessTree: true); } catch { }
+            shell.Dispose();
+            throw new InvalidOperationException($"VSTest bootstrap did not report its process group (first line: '{first}').");
+        }
+        return new VstestRun(shell, int.Parse(m.Groups[1].Value, NumberStyles.Integer, CultureInfo.InvariantCulture));
     }
 
     /// <summary>Extract the target PID from stdout. Both MTP and VSTest print "Process Id: NNNN".</summary>
@@ -109,4 +133,39 @@ internal static class TargetSpawn
             $"Target did not print 'Process Id: NNNN' within {timeout.TotalSeconds}s — runner handshake failed.");
         return Volatile.Read(ref pid);
     }
+}
+
+/// <summary>A `dotnet test` run started by <see cref="TargetSpawn.Vstest"/>: the <see cref="Shell"/> whose exit mirrors
+/// `dotnet test`'s (read its stdout with <see cref="TargetSpawn.ExtractPid"/>, wait on it for natural exit), and the
+/// <see cref="ProcessGroup"/> holding every process the run started — including a testhost orphaned to launchd while
+/// waiting for a debugger (finding 90). <see cref="KillGroup"/> / <see cref="Dispose"/> SIGKILL the whole group.</summary>
+internal sealed class VstestRun : IDisposable
+{
+    private const int SIGKILL = 9;
+
+    public VstestRun(Process shell, int processGroup)
+    {
+        Shell = shell;
+        ProcessGroup = processGroup;
+    }
+
+    public Process Shell { get; }
+    public int ProcessGroup { get; }
+
+    /// <summary>SIGKILL every process in the run's group. Idempotent — an emptied group yields ESRCH, ignored.</summary>
+    public void KillGroup()
+    {
+        if (OperatingSystem.IsWindows()) { try { Shell.Kill(entireProcessTree: true); } catch { } return; }
+        _ = kill(-ProcessGroup, SIGKILL);
+    }
+
+    public void Dispose()
+    {
+        KillGroup();
+        try { if (!Shell.HasExited) Shell.Kill(); } catch { }
+        Shell.Dispose();
+    }
+
+    [System.Runtime.InteropServices.DllImport("libc", SetLastError = true)]
+    private static extern int kill(int pid, int sig);
 }

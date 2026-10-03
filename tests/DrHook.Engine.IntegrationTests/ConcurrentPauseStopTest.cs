@@ -107,7 +107,8 @@ public sealed class ConcurrentPauseStopTest
         string targetProject = IntegrationTargetPaths.VstestTargetProjectPath();
         Assert.IsTrue(File.Exists(targetProject), $"VSTest target csproj not found at {targetProject}.");
 
-        using Process dotnetTest = TargetSpawn.Vstest(targetProject, methodFilter: "RunThrowCatchLoop");
+        using VstestRun run = TargetSpawn.Vstest(targetProject, methodFilter: "RunThrowCatchLoop");
+        Process dotnetTest = run.Shell;
         try
         {
             int testHostPid = TargetSpawn.ExtractPid(dotnetTest, TimeSpan.FromSeconds(60));
@@ -129,7 +130,7 @@ public sealed class ConcurrentPauseStopTest
         }
         finally
         {
-            try { if (!dotnetTest.HasExited) dotnetTest.Kill(entireProcessTree: true); } catch { }
+            run.KillGroup(); // finding 90: the group kill also reaches a testhost orphaned while waiting for a debugger
         }
     }
 }
