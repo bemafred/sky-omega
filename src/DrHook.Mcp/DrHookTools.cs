@@ -302,7 +302,9 @@ public sealed class DrHookTools
         "runs on the stop's thread. Type/method names default to Avalonia; override the *Type / *Module / getter " +
         "params for WPF/WinUI (the chain is app-current → window getters → construct pixel-size + render-target " +
         "bitmap → render(window) → save(path)). Returns a caption with the capture trace plus the image. Requires a " +
-        "hypothesis: state what you expect the window to show before you look.")]
+        "hypothesis: state what you expect the window to show before you look. CHARACTERIZED LIMIT: low-risk, not " +
+        "zero-risk — in 1 of 41 observed captures the app's UI thread was left hung after detach (root cause " +
+        "unreproduced); if the app beachballs afterwards, sample it (`sample <pid> 3`) before killing it.")]
     public IEnumerable<ContentBlock> CaptureVisual(
         [Description("What you expect the rendered window to show. Required — state it before you look (epistemic discipline).")] string hypothesis,
         [Description("Image width in pixels (default 1024).")] int width = 1024,

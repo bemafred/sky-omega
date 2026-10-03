@@ -29,7 +29,7 @@ The substrate is `DrHook.Engine` — a BCL + P/Invoke + source-gen COM implement
 
 ## DrHook MCP Tools
 
-23 tools. Every state-changing operation and every inspection that reads target state takes a `hypothesis` parameter — state what you expect *before* you observe (Sky Omega epistemic discipline; ADR-010 Decision principle 5).
+25 tools. Every state-changing operation and every inspection that reads target state takes a `hypothesis` parameter — state what you expect *before* you observe (Sky Omega epistemic discipline; ADR-010 Decision principle 5).
 
 ### Session lifecycle
 
@@ -38,8 +38,8 @@ The substrate is `DrHook.Engine` — a BCL + P/Invoke + source-gen COM implement
 | `drhook_launch` | **Launches a NEW process** under debugger control (Owned session). | `drhook_step_run` |
 | `drhook_attach` | **Attaches to an already-running .NET process** by PID (Borrowed session — target survives the session). | `drhook_step_launch` |
 | `drhook_stop` | **Ends the session** — the normal finish. Borrowed: detaches, target keeps running. Owned: target asked to exit gracefully — SIGTERM → SIGKILL if it doesn't exit within the ~2s window (ADR-008). | `drhook_step_stop` → `drhook_detach` |
-| `drhook_detach` | Detaches and **leaves the target running** (deliberate). Borrowed: supported. Owned: not yet — pending finding **F-010-2** (the launched target is the debugger's child); returns an error pointing to `drhook_stop` / `drhook_kill`. | *(new — ADR-011 D1)* |
-| `drhook_kill` | **Forcibly terminates** the target — anomaly escape hatch, *not* normal cleanup; every call is worth investigating. Owned: SIGTERM brief-grace → SIGKILL (`DebugSession.Abandon`, ADR-008). Borrowed: not yet — pending finding **F-010-1**. | *(new — ADR-011 D1)* |
+| `drhook_detach` | Detaches and **leaves the target running** (deliberate). Borrowed: the target keeps running un-debugged. Owned: the launched target is detached cleanly (breakpoints deactivated first so it does not hang) and reparents to launchd (PPID=1) — F-010-2, closed. | *(new — ADR-011 D1)* |
+| `drhook_kill` | **Forcibly terminates** the target — anomaly escape hatch, *not* normal cleanup; every call is worth investigating. Owned: SIGTERM brief-grace (~200 ms) → SIGKILL (`DebugSession.Abandon`, ADR-008). Borrowed: SIGKILL of the attached target — a deliberate force (F-010-1, closed); the session tears down cleanly. | *(new — ADR-011 D1)* |
 
 `drhook_step_test` was **removed** in this rename (it only ever returned "not implemented") — see [What's NOT yet shipped](#whats-not-yet-shipped).
 
@@ -70,6 +70,8 @@ The substrate is `DrHook.Engine` — a BCL + P/Invoke + source-gen COM implement
 |------|---------------|-------------|
 | `drhook_locals` | Inspect locals + arguments at current stop. Depth parameter (≥ 2) expands object fields and arrays (SZARRAY). **Top frame only** — frame selection comes via ADR-010 Tier 2 (`drhook_frames` / `drhook_locals(frame=N)`). | `drhook_step_vars` |
 | `drhook_snapshot_image` | Render the CURRENT debug-state as a PNG **image** you can see — the same compact view `drhook-viz-console` shows (session, stop, call stack, source-on-step pane, locals/args, breakpoints), rasterized through the SHARED renderer so the image is exactly what a view shows. Returns a caption + the image. Requires a `hypothesis`. (ADR-012 visual snapshot.) | *(new)* |
+| `drhook_expand` | Lazily expand **one level** of an object or array at the current stop — the navigable replacement for deep `drhook_locals`. Name the variable as `drhook_locals` shows it (local, `this`, or parameter name) plus an optional `/`-separated child path (field names, `[i]` for array elements). Returns the node's immediate children, each flagged `hasChildren`. Bounded per call, so arbitrarily large graphs stay observable. | *(new)* |
+| `drhook_capture_visual` | Capture a **GUI debuggee's own rendered window** as a PNG — cooperation-free, by func-evaluating the target's framework render APIs at the current stop (nothing added to the target). Precondition: stopped **on the UI thread** (break at a timer tick / event handler, continue to it). Defaults target Avalonia; override the type/module/getter params for WPF/WinUI. **Characterized limit:** in 1 of 41 observed captures the app's UI thread was left hung after detach (macOS beachball); root cause unreproduced — see the pitfall below. (ADR-012 Q8 (a).) | *(new)* |
 
 ### Observation (no session required)
 
@@ -124,7 +126,7 @@ Layered like Mercury's `Mercury.Abstractions ← Mercury.Sparql.Tool ← Mercury
 
 **Server side:** `DrHook.Engine/Transport/DebugStateServer` publishes a snapshot after each stop and the delta stream throughout; `EngineSteppingSession` wires it as a 4th `CompositeEventSink` member. The server **never calls into `DebugSession`** — the request-thread *driver* captures the immutable snapshot after each stop and pushes it, so there is no transport↔stepping concurrency hazard. Best-effort throughout: a transport fault never breaks a debug response.
 
-**Not yet:** the `(hypothesis, observation)` braid recorded in the model (Phase 3), a full TUI (Phase 4), command-in / control (Phase 5), the Avalonia GUI sibling (Phase 6).
+**Shipped since Phase 2:** source-on-step + typed value rendering in the console view (Phase 4 approach), the `(hypothesis, observation)` braid as a delta kind rendered inline (Phase 3), and `DrHook.Capture` persisting the braid to a Mercury store. **Not yet:** the full TUI dashboard (Phase 4), command-in / control (Phase 5), the Avalonia GUI sibling (Phase 6).
 
 ## What's NOT yet shipped
 
@@ -135,8 +137,6 @@ Substrate work is required before these surfaces become functional:
 - **Set next statement.** ICorDebug `SetIP` is not exposed at the substrate level. ADR-010 Tier 3.
 - **Data breakpoints.** Not in the substrate today; ICorDebug support level is an Open Question per ADR-010 §Open. ADR-010 Tier 3.
 - **Run to cursor.** Composable from existing primitives (`SetBreakpointAtLine` + `Resume` + remove-on-hit); not yet packaged as a tool. ADR-010 Tier 2.
-- **Owned detach-and-leave-running** — `drhook_detach` on an Owned (`drhook_launch`) target is pending finding **F-010-2** (the launched target is currently the debugger's child); returns an error meanwhile. Use `drhook_stop` (graceful end) or `drhook_kill` (force).
-- **Borrowed force-kill** — `drhook_kill` on a Borrowed (`drhook_attach`) target is pending finding **F-010-1** (the substrate doesn't own an attached target's lifecycle); returns an error meanwhile. Use `drhook_detach`.
 - **Test-project launch.** `drhook_step_test` was removed in ADR-010 Tier 1 (it only returned "not implemented"). Replacement: ADR-010 Tier 3 lets `drhook_launch` accept a `.csproj` target and dispatches MTP / VSTest internally. Until then, attach to the testhost child with `drhook_attach`.
 - **Multi-session.** `EngineSteppingSession` is a DI singleton; only one debug session per MCP server. Substrate's `DebugSession` is per-session; the singleton is the MCP-layer constraint. ADR-010 §Open Question 9.
 - **Cross-platform.** Only macOS/arm64 is exercised. ADR-007 Phase 9 (Open).
@@ -256,6 +256,8 @@ Before scripting around a tool, read its flags — `--help`, or `/?` on Windows.
 - **One debugger process debugs ONE runtime version — never mix net10 and net11 targets in a session.** A DrHook debugger process loads the debug components (`mscordbi` + DAC) of the *first* target's runtime version, **process-globally and persisting across session end**; a later target on a *different* runtime version fails with `HRESULT 0x80131C3C` (`CORDBG_E_DEBUG_COMPONENT_MISSING`). This bites because the substrate targets **net10.0** but a file-based app (`dotnet run x.cs`) under the SDK 11 preview builds **net11.0** — so debugging a file-based app (net11) and then a net10 target (a single-file app, a net10 project) mixes versions and the second fails. **Workaround:** keep every target in a session on one runtime version (pin file-based probes with `#:property TargetFramework=net10.0`, or use a net10 project), or **reconnect the MCP when you switch target runtime version**. (Proven root cause + the `lsof`/two-version reproduction: `poc/drhook-engine/findings/86-debugger-locked-to-one-runtime-version.md`. The earlier "single-file fails via MCP" framing here was a misdiagnosis — single-file was just a net10 target debugged after net11.)
 
 - **Never debug a target your own process started with `Process.Start` — two reapers, and the host FailFasts.** Once attached, the CoreCLR PAL inside the in-process debug components polls `wait4(pid, WNOHANG)` and **reaps the target if it is the host's child**; the BCL reaps its `Process.Start` children too. When the PAL wins, `WaitForExit` never sees the exit and the runtime later kills the host with `Error while reaping child. errno = 10`. `drhook-mcp` is safe (it launches via `posix_spawn`, untracked by the BCL); the hazard is for any host that spawns *and* debugs — test harnesses, drivers, embedders. Start such targets under a parent (`/bin/sh -c '"$0" "$@" & wait $!'`, as `TargetSpawn.Mtp` does), or use `DebugSession.Launch`. `Attach`/`AttachAndOwn` surface the condition as the **`TargetIsHostChild`** anomaly. (`poc/drhook-engine/findings/87-dual-reaper-race.md`.)
+
+- **`drhook_capture_visual` can — rarely — leave the captured app hung.** In 1 of 41 observed captures (2026-06-29) the app's UI thread was left deadlocked after detach: alive, but beachballing, and it had to be SIGKILLed. Every individual step (getter chain, Render, Save, detach) was shown safe in isolation, the MCP path and a direct poc path both ran clean, and a 30-capture catch-loop never reproduced it — so the root cause is unread (no stuck stack was ever captured). Treat a capture as **low-risk, not zero-risk**: prefer a target you can restart, and **if the app beachballs afterwards, sample it before killing it** (`sample <pid> 3`) — the stuck stack is the only path to the root cause.
 
 - **The launch's initial breakpoint isn't `drhook_break_remove`-able.** It is engine-registered (appears in `drhook_break_list`) but not in the MCP layer's removable set, so `drhook_break_remove` returns "not tracked at the MCP layer". Choose the launch's initial `line` deliberately — if you need a *conditional* breakpoint at that line, launch at a different one-shot line rather than trying to remove the initial one.
 
