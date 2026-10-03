@@ -10,7 +10,6 @@
 using System;
 using System.Globalization;
 using System.IO;
-using System.Runtime.InteropServices;
 
 namespace SkyOmega.DrHook.Engine.Interop;
 
@@ -28,7 +27,7 @@ internal static unsafe class ProcessParentage
         if (OperatingSystem.IsMacOS())
         {
             byte* info = stackalloc byte[ProcBsdInfoSize];
-            int read = proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, info, ProcBsdInfoSize);
+            int read = LibProc.proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, info, ProcBsdInfoSize);
             return read == ProcBsdInfoSize ? (int)*(uint*)(info + PbiPpidOffset) : null;
         }
         if (OperatingSystem.IsLinux())
@@ -46,7 +45,4 @@ internal static unsafe class ProcessParentage
         }
         return null;
     }
-
-    [DllImport("libc", SetLastError = true, EntryPoint = "proc_pidinfo")]
-    private static extern int proc_pidinfo(int pid, int flavor, ulong arg, byte* buffer, int buffersize);
 }
