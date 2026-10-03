@@ -93,8 +93,8 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
         BreakpointInfo Info, nint Module, nint Function, nint Breakpoint,
         BreakpointPolicy? Policy = null)
     {
-        /// <summary>Running hit count, incremented on each callback for this breakpoint. Mutable;
-        /// only the pump's worker thread touches it (the worker is single-threaded — no lock needed).</summary>
+        /// <summary>Running hit count, incremented on each stop at this breakpoint (policy or not) by
+        /// <see cref="WaitForStop"/> on the caller thread — the caller/pump alternation keeps it single-writer.</summary>
         public int HitCount { get; set; }
     }
     private readonly List<BreakpointEntry> _breakpoints = new();
@@ -531,11 +531,12 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
             if (stop.Reason == StopReason.Breakpoint)
             {
                 BreakpointEntry? entry = FindBreakpointEntry(_pump.LastBreakpointPointer);
+                // Count EVERY hit here, policy or not (dogfood finding 2026-10-03: a policy-less breakpoint read
+                // hits=0 on the dashboard while stopped at it — the count was only kept inside policy evaluation).
+                if (entry is not null) entry.HitCount++;
                 if (entry?.Policy is null) return stop;
 
-                int hits = entry.HitCount;
-                PolicyOutcome outcome = EvaluatePolicy(entry.Policy, ref hits);
-                entry.HitCount = hits;
+                PolicyOutcome outcome = EvaluatePolicy(entry.Policy, entry.HitCount);
                 switch (outcome)
                 {
                     case PolicyOutcome.Resume: _pump.Resume(); continue;
@@ -552,11 +553,11 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
                 ExceptionFilterInfo? match = FindMatchingExceptionFilter(stop.ExceptionKind);
                 if (match is null) { _pump.Resume(); continue; }
 
-                if (_exceptionFilterState.TryGetValue(match.Id, out ExceptionFilterState? state) && state.Policy is not null)
+                ExceptionFilterState state = _exceptionFilterState[match.Id];
+                state.HitCount++; // every matching hit, policy or not
+                if (state.Policy is not null)
                 {
-                    int hits = state.HitCount;
-                    PolicyOutcome outcome = EvaluatePolicy(state.Policy, ref hits);
-                    state.HitCount = hits;
+                    PolicyOutcome outcome = EvaluatePolicy(state.Policy, state.HitCount);
                     switch (outcome)
                     {
                         case PolicyOutcome.Resume: _pump.Resume(); continue;
@@ -717,9 +718,9 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
     /// Invoked from <see cref="WaitForStop"/>'s caller-thread evaluation path for both breakpoint and
     /// exception-filter locations, so the fault path and best-effort logging behave identically
     /// across location kinds.</summary>
-    private PolicyOutcome EvaluatePolicy(BreakpointPolicy policy, ref int hitCount)
+    // hitCount is this hit's ordinal, already counted by the caller (WaitForStop counts every hit, policy or not).
+    private PolicyOutcome EvaluatePolicy(BreakpointPolicy policy, int hitCount)
     {
-        hitCount++;
         IEvalContext context = new EvalContext(GetLocals(), GetArguments());
 
         if (policy.HitCount is { } gate && !gate.Admits(hitCount)) return PolicyOutcome.Resume;
@@ -1960,8 +1961,7 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
         ArgumentNullException.ThrowIfNull(typeName);
         int id = ++_nextExceptionFilterId;
         _exceptionFilters.Add(new ExceptionFilterInfo(id, typeName, phaseFilter));
-        if (policy is not null)
-            _exceptionFilterState[id] = new ExceptionFilterState { Policy = policy };
+        _exceptionFilterState[id] = new ExceptionFilterState { Policy = policy }; // every filter keeps a hit count
         return id;
     }
 

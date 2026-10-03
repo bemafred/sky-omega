@@ -109,6 +109,9 @@ public sealed class CaptureStateSnapshotTest
             // the armed breakpoint travels in the snapshot, at its line
             BreakpointStatus bp = snap.Breakpoints.Single(b => b.Info.Id == bpId);
             Assert.AreEqual(markerLine, ((LineBreakpointInfo)bp.Info).Line);
+            // A policy-less breakpoint counts its hits too (dogfood finding 2026-10-03: the dashboard read hits=0
+            // while stopped at it — the count lived only inside policy evaluation).
+            Assert.AreEqual(1, bp.HitCount, "The breakpoint we are stopped at should have counted this hit.");
 
             // the tap observed the unified delta stream as a peer consumer (lifecycle events fired)
             Assert.IsTrue(tap.Peek().Deltas.Any(d => d.Kind == DebugStateDeltaKind.Event), "The tap should have captured lifecycle deltas.");
