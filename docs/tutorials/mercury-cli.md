@@ -528,7 +528,9 @@ To back up a store, copy the entire directory while Mercury is not running:
 
 ```bash
 # Stop mercury first, then:
-cp -r ~/Library/SkyOmega/stores/cli/ ~/backups/cli-backup-$(date +%Y%m%d)/
+STORES=~/Library/SkyOmega/stores         # macOS
+# STORES=~/.local/share/SkyOmega/stores  # Linux
+cp -r "$STORES/cli/" ~/backups/cli-backup-$(date +%Y%m%d)/
 ```
 
 ### Fresh start
@@ -536,7 +538,9 @@ cp -r ~/Library/SkyOmega/stores/cli/ ~/backups/cli-backup-$(date +%Y%m%d)/
 To start with a clean store, delete the store directory:
 
 ```bash
-rm -rf ~/Library/SkyOmega/stores/cli/
+STORES=~/Library/SkyOmega/stores         # macOS
+# STORES=~/.local/share/SkyOmega/stores  # Linux
+rm -rf "${STORES:?}/cli/"
 ```
 
 The next time you run `mercury`, a fresh store is created automatically.

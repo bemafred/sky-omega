@@ -113,6 +113,8 @@ directory:
 | Linux | `~/.local/share/SkyOmega/stores/` | `~/.local/share/SkyOmega/stores/cli/` | `~/.local/share/SkyOmega/stores/mcp/` |
 | Windows | `%LOCALAPPDATA%\SkyOmega\stores\` | `%LOCALAPPDATA%\SkyOmega\stores\cli\` | `%LOCALAPPDATA%\SkyOmega\stores\mcp\` |
 
+On Linux, `$XDG_DATA_HOME` replaces `~/.local/share` when it is set.
+
 The store directory is created automatically on first use. It contains
 memory-mapped B+Tree indexes, an atom store, and a write-ahead log.
 
@@ -241,7 +243,9 @@ mercury --no-http
 If Mercury fails to open a store, check directory permissions:
 
 ```bash
-ls -la ~/Library/SkyOmega/stores/cli/
+STORES=~/Library/SkyOmega/stores         # macOS
+# STORES=~/.local/share/SkyOmega/stores  # Linux
+ls -la "$STORES/cli/"
 ```
 
 The store directory and its contents must be readable and writable by your user.
@@ -252,7 +256,9 @@ If Mercury fails to open a store after a major upgrade, the store format may
 have changed. Back up the old store and start fresh:
 
 ```bash
-mv ~/Library/SkyOmega/stores/cli/ ~/Library/SkyOmega/stores/cli-backup/
+STORES=~/Library/SkyOmega/stores         # macOS
+# STORES=~/.local/share/SkyOmega/stores  # Linux
+mv "$STORES/cli/" "$STORES/cli-backup/"
 mercury   # creates a fresh store
 ```
 

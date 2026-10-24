@@ -24,7 +24,8 @@ for (int i = 0; i < args.Length; i++)
             Usage: drhook-capture [socket-path] [--store <dir>]
 
               socket-path    the rendezvous socket (default: the well-known per-host path)
-              --store <dir>  the capture store directory (default: ~/Library/SkyOmega/stores/drhook)
+              --store <dir>  the capture store directory (default: <stores>/drhook — macOS ~/Library/SkyOmega/stores,
+                             Linux ~/.local/share/SkyOmega/stores, Windows %LOCALAPPDATA%\SkyOmega\stores)
               -h, --help     show this help
 
             Connects to a DrHook debug-state transport and persists each snapshot/delta — including the

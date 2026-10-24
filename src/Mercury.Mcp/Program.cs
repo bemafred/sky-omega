@@ -94,9 +94,14 @@ if (showHelp)
           --enable-http-updates   Allow SPARQL UPDATE via HTTP
 
         Examples:
-          mercury-mcp                          # Persistent store at ~/Library/SkyOmega/stores/mcp/
+          mercury-mcp                          # Persistent per-user store (see below)
           mercury-mcp ./mydata                 # Custom store path
           mercury-mcp -p 3031 --enable-http-updates
+
+        Default store:
+          macOS     ~/Library/SkyOmega/stores/mcp/
+          Linux     $XDG_DATA_HOME/SkyOmega/stores/mcp/ (unset: ~/.local/share/SkyOmega/stores/mcp/)
+          Windows   %LOCALAPPDATA%\SkyOmega\stores\mcp\
 
         The MCP server exposes:
           - MCP protocol on stdin/stdout (for Claude)

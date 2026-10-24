@@ -17,11 +17,15 @@ Mercury can run multiple instances simultaneously, each with its own store:
 
 | Instance | Default port | Store path | Pipe name |
 |----------|-------------|------------|-----------|
-| `mercury` (CLI) | 3031 | `~/Library/SkyOmega/stores/cli/` | `mercury-cli` |
-| `mercury-mcp` (MCP) | 3030 | `~/Library/SkyOmega/stores/mcp/` | `mercury-mcp` |
+| `mercury` (CLI) | 3031 | `<stores>/cli/` | `mercury-cli` |
+| `mercury-mcp` (MCP) | 3030 | `<stores>/mcp/` | `mercury-mcp` |
 
 Each instance exposes a SPARQL HTTP endpoint. This means any instance can
 query any other instance using the SPARQL SERVICE clause.
+
+`<stores>` is the per-platform store directory: `~/Library/SkyOmega/stores/` on
+macOS, `~/.local/share/SkyOmega/stores/` on Linux, `%LOCALAPPDATA%\SkyOmega\stores\`
+on Windows (see [Store Locations](installation-and-tools.md)).
 
 ---
 

@@ -181,7 +181,8 @@ This loads the file into the same store that Claude reads and writes.
 Point the CLI directly at the MCP store directory:
 
 ```bash
-mercury ~/Library/SkyOmega/stores/mcp/
+mercury ~/Library/SkyOmega/stores/mcp/          # macOS
+mercury ~/.local/share/SkyOmega/stores/mcp/      # Linux
 ```
 
 Then load as above. Note: the MCP server must not be running when you open
@@ -402,7 +403,9 @@ memory-mapped B+Tree indexes, an atom store, and a write-ahead log.
 To start fresh, stop the MCP server and delete the store directory:
 
 ```bash
-rm -rf ~/Library/SkyOmega/stores/mcp/
+STORES=~/Library/SkyOmega/stores         # macOS
+# STORES=~/.local/share/SkyOmega/stores  # Linux
+rm -rf "${STORES:?}/mcp/"
 ```
 
 ---

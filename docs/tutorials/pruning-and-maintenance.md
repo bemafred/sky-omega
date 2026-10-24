@@ -191,14 +191,18 @@ back up first:
 
 ```bash
 # Stop Mercury first, then copy the store directory
-cp -r ~/Library/SkyOmega/stores/cli/ ~/backups/cli-$(date +%Y%m%d)/
+STORES=~/Library/SkyOmega/stores         # macOS
+# STORES=~/.local/share/SkyOmega/stores  # Linux
+cp -r "$STORES/cli/" ~/backups/cli-$(date +%Y%m%d)/
 ```
 
 For MCP stores:
 
 ```bash
 # Stop mercury-mcp first
-cp -r ~/Library/SkyOmega/stores/mcp/ ~/backups/mcp-$(date +%Y%m%d)/
+STORES=~/Library/SkyOmega/stores         # macOS
+# STORES=~/.local/share/SkyOmega/stores  # Linux
+cp -r "$STORES/mcp/" ~/backups/mcp-$(date +%Y%m%d)/
 ```
 
 Alternatively, use the dry-run flag to preview the effect before committing.

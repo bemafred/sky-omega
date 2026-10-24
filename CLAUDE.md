@@ -74,13 +74,21 @@ dotnet tool install -g SkyOmega.Mercury.Mcp --add-source ./nupkg
 
 | Command | Description |
 |---------|-------------|
-| `mercury` | SPARQL CLI with persistent store at `~/Library/SkyOmega/stores/cli/` |
-| `mercury-mcp` | MCP server for Claude with persistent store at `~/Library/SkyOmega/stores/mcp/` |
+| `mercury` | SPARQL CLI with persistent store at `<stores>/cli/` |
+| `mercury-mcp` | MCP server for Claude with persistent store at `<stores>/mcp/` |
 | `mercury-sparql` | SPARQL query engine demo |
 | `mercury-turtle` | Turtle parser demo |
 | `drhook-mcp` | MCP server for .NET runtime inspection (EventPipe + ICorDebug via `DrHook.Engine`, BCL + P/Invoke + per-RID `libdbgshim`) |
 
 All tools support `-v`/`--version`.
+
+`<stores>` is resolved per platform by `MercuryPaths.Store` (`src/Mercury.Runtime/IO/MercuryPaths.cs`):
+
+| Platform | `<stores>` |
+|----------|------------|
+| macOS | `~/Library/SkyOmega/stores/` |
+| Linux/WSL | `$XDG_DATA_HOME/SkyOmega/stores/`, i.e. `~/.local/share/SkyOmega/stores/` when `XDG_DATA_HOME` is unset |
+| Windows | `%LOCALAPPDATA%\SkyOmega\stores\` |
 
 ### MCP Integration
 
@@ -108,7 +116,7 @@ Recall is recognition, not search. **The `lucy` skill is the recall method** —
 
 ### Semantic Memory
 
-Mercury MCP provides persistent semantic memory across sessions. The store at `~/Library/SkyOmega/stores/mcp/` survives between sessions — what you write, future sessions can query.
+Mercury MCP provides persistent semantic memory across sessions. The store at `<stores>/mcp/` (see [Global Tools](#global-tools) for the per-platform path) survives between sessions — what you write, future sessions can query.
 
 **At session start:** check what's in memory. If `mercury_stats` reports zero quads, follow the bootstrap procedure in [MERCURY.md](MERCURY.md) to load foundational knowledge from `docs/knowledge/bootstrap.ttl`.
 
