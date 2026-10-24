@@ -164,18 +164,23 @@ curl -G http://localhost:3031/sparql \
 
 The repository includes a bootstrap knowledge graph at
 `docs/knowledge/bootstrap.ttl`. Load it into your store using the SPARQL
-LOAD command. File URIs must use absolute paths:
+LOAD command, into its own named graph. File URIs must use absolute paths:
 
 ```sparql
-LOAD <file:///absolute/path/to/sky-omega/docs/knowledge/bootstrap.ttl>
+LOAD <file:///absolute/path/to/sky-omega/docs/knowledge/bootstrap.ttl> INTO GRAPH <urn:sky-omega:bootstrap>
 ```
 
-Replace `/absolute/path/to/sky-omega` with the actual path to your clone.
-For example, on macOS:
+Replace `/absolute/path/to/sky-omega` with the actual path to your clone:
 
-```sparql
-LOAD <file:///Users/you/src/sky-omega/docs/knowledge/bootstrap.ttl>
-```
+| Platform | Example URI |
+|----------|-------------|
+| macOS | `file:///Users/you/src/sky-omega/docs/knowledge/bootstrap.ttl` |
+| Linux/WSL | `file:///home/you/src/sky-omega/docs/knowledge/bootstrap.ttl` |
+| Windows | `file:///C:/Users/you/src/sky-omega/docs/knowledge/bootstrap.ttl` |
+
+`INTO GRAPH` keeps the bootstrap separate from your own data. Queries over
+the default graph won't see it, so name the graph when you query it (or use
+`GRAPH ?g { … }` to search every named graph).
 
 ### Verify the loaded data
 
@@ -183,20 +188,24 @@ Query the components defined in the bootstrap graph:
 
 ```sparql
 SELECT ?component ?label ?role WHERE {
-  ?component <urn:sky-omega:partOf> <urn:sky-omega:data:sky-omega> ;
-             <http://www.w3.org/2000/01/rdf-schema#label> ?label ;
-             <urn:sky-omega:role> ?role .
+  GRAPH <urn:sky-omega:bootstrap> {
+    ?component <urn:sky-omega:partOf> <urn:sky-omega:data:sky-omega> ;
+               <http://www.w3.org/2000/01/rdf-schema#label> ?label ;
+               <urn:sky-omega:role> ?role .
+  }
 }
 ```
 
 You should see Mercury, Lucy, James, Mira, and Minerva listed with their
 roles.
 
-Check the total triple count:
+Check the triple count in the bootstrap graph (it should be 71):
 
 ```
-cli> :count
+cli> :count GRAPH <urn:sky-omega:bootstrap> { ?s ?p ?o }
 ```
+
+A plain `:count` counts only the default graph, so it shows 0 here.
 
 ---
 

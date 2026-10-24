@@ -212,23 +212,28 @@ docs/knowledge/
 
 ### Bootstrap — First Session with an Empty Store
 
-If `mercury_stats` shows zero quads, load the bootstrap knowledge. From the repository root:
+If `mercury_stats` shows zero quads, load the bootstrap knowledge into its own named graph:
 
 ```sparql
-LOAD <file:///Users/you/src/sky-omega/docs/knowledge/bootstrap.ttl>
+LOAD <file:///{repo_root}/docs/knowledge/bootstrap.ttl> INTO GRAPH <urn:sky-omega:bootstrap>
 ```
 
-Replace the path with your actual repository root. To find it: the directory containing `CLAUDE.md` and `SkyOmega.sln`.
+**Always use `INTO GRAPH`.** Without it, the triples land in the default graph. Recall only queries the `GRAPH ?g { … }` union, so it would never see them. If a store was already bootstrapped into the default graph, fix it with `MOVE DEFAULT TO <urn:sky-omega:bootstrap>`.
+
+`{repo_root}` is the absolute path of the directory containing `CLAUDE.md` and `SkyOmega.sln`. The URI takes a different form on each platform:
+
+| Platform | Example URI |
+|----------|-------------|
+| macOS | `file:///Users/you/src/sky-omega/docs/knowledge/bootstrap.ttl` |
+| Linux/WSL | `file:///home/you/src/sky-omega/docs/knowledge/bootstrap.ttl` |
+| Windows | `file:///C:/Users/you/src/sky-omega/docs/knowledge/bootstrap.ttl` |
 
 Alternatively, use the CLI tool for direct file loading:
 
 ```bash
 mercury -a mcp
 ```
-Then in the attached session:
-```sparql
-LOAD <file:///Users/you/src/sky-omega/docs/knowledge/bootstrap.ttl>
-```
+Then in the attached session, run the same `LOAD … INTO GRAPH <urn:sky-omega:bootstrap>` statement.
 
 This provides grounded context: component definitions, EEE methodology as queryable structure, core architectural principles. It is a seed, not a schema.
 

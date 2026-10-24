@@ -40,11 +40,13 @@ Each arrow is a curation step. Each step loses detail and gains generality.
 
 ## Loading Shared Knowledge
 
-On first session with an empty store, load the bootstrap:
+On first session with an empty store, load the bootstrap into its own named graph:
 
 ```sparql
-LOAD <file:///path/to/docs/knowledge/bootstrap.ttl>
+LOAD <file:///path/to/docs/knowledge/bootstrap.ttl> INTO GRAPH <urn:sky-omega:bootstrap>
 ```
+
+Use `INTO GRAPH`: recall queries the `GRAPH ?g { … }` union, so triples in the default graph are never recalled. See the Bootstrap section of [MERCURY.md](../../MERCURY.md) for per-platform paths.
 
 Other files are loaded deliberately when relevant — not automatically.
 

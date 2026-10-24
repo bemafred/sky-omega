@@ -152,13 +152,20 @@ The bootstrap file lives at `docs/knowledge/bootstrap.ttl` in the repository.
 
 When Claude reads CLAUDE.md (which references MERCURY.md), it finds the
 bootstrap instructions. Claude checks `mercury_stats` and, if the store is
-empty, loads the bootstrap:
+empty, loads the bootstrap into its own named graph:
 
 ```sparql
-LOAD <file:///Users/you/src/sky-omega/docs/knowledge/bootstrap.ttl>
+LOAD <file:///Users/you/src/sky-omega/docs/knowledge/bootstrap.ttl> INTO GRAPH <urn:sky-omega:bootstrap>
 ```
 
-Replace `/Users/you/src/sky-omega` with the actual path to your clone.
+Replace `/Users/you/src/sky-omega` with the actual path to your clone, e.g.
+`/home/you/src/sky-omega` on Linux or `C:/Users/you/src/sky-omega` on
+Windows (`file:///C:/Users/...`).
+
+**Always use `INTO GRAPH`.** Memory recall queries the `GRAPH ?g { … }`
+union of named graphs, so triples loaded into the default graph are never
+recalled. A store that was already bootstrapped without it can be repaired
+with `MOVE DEFAULT TO <urn:sky-omega:bootstrap>`.
 
 ### Path 2: Manual via CLI attachment
 
@@ -171,7 +178,7 @@ mercury -a mcp
 Then at the `mcp>` prompt:
 
 ```sparql
-LOAD <file:///Users/you/src/sky-omega/docs/knowledge/bootstrap.ttl>
+LOAD <file:///Users/you/src/sky-omega/docs/knowledge/bootstrap.ttl> INTO GRAPH <urn:sky-omega:bootstrap>
 ```
 
 This loads the file into the same store that Claude reads and writes.
@@ -198,9 +205,11 @@ PREFIX sky: <urn:sky-omega:>
 PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
 
 SELECT ?component ?label ?role WHERE {
-  ?component sky:partOf <urn:sky-omega:data:sky-omega> ;
-    rdfs:label ?label ;
-    sky:role ?role .
+  GRAPH <urn:sky-omega:bootstrap> {
+    ?component sky:partOf <urn:sky-omega:data:sky-omega> ;
+      rdfs:label ?label ;
+      sky:role ?role .
+  }
 }
 ```
 
