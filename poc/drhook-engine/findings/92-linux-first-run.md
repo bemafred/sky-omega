@@ -87,6 +87,23 @@ ordering only.
 - **Mac (macOS 27, M5):** engine units 167/167; integration suite 5 × 16/16, 0 leaked processes. Solution builds with
   0 warnings.
 
+## Follow-up: the per-test timeout leaked the abandoned test's targets
+
+Found right after `162fc43`, by a process check on the Mac: an MTP target 56 minutes old, still waiting on `--debug`.
+When MSTest abandons a test at its timeout, the test's own `using` / `finally` cleanup never runs, so whatever it
+spawned outlives the run: an MTP target with `--debug`, a VSTest testhost under `VSTEST_HOST_DEBUG` (both wait for a
+debugger forever), or BorrowedIdleDetachTest's idle target. Reproduced on both machines by setting the limit to
+300–1500 ms. The timeout turned a hang into a failure but made it leak.
+
+**Fix:** every spawn the harness makes runs in its own process group (bash `set -m`; the MTP spawn and
+BorrowedIdleDetachTest now do what the VSTest spawn already did), and records it in `SpawnedProcessGroups`. Its
+`[AssemblyCleanup]`, which still runs after an abandoned test, SIGKILLs every recorded group. **Validated:** the
+abandon-at-timeout repro leaks nothing on either machine (3 spawn shapes × 3 limits); full suite 5 × 16/16 on each,
+0 leaked processes.
+
+The leak check itself had a blind spot worth recording: it matched `testhost`/`vstest` only, so MTP targets and the
+`dotnet`-named snapshot target never showed up. The checks now match every target the harness spawns.
+
 ## Open
 
 - **One unreproduced failure.** In run 3 of the first five full runs on zbook, `CaptureState_AtBreakpoint` got no

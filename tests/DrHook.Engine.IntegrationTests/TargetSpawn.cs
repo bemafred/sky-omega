@@ -13,13 +13,14 @@
 // wait4(pid, WNOHANG) and reaps the target if it is our child; the BCL also tracks every
 // Process.Start child and reaps it on SIGCHLD. Two reapers on one pid: when the PAL wins,
 // bootstrap.WaitForExit never sees the exit and the runtime later FailFasts the whole test host
-// ("Error while reaping child. errno = 10"). So MTP targets run under a /bin/sh parent — the shell is
+// ("Error while reaping child. errno = 10"). So MTP targets run under a shell parent (bash) — the shell is
 // the BCL-tracked child, the target is its child (the PAL's wait4 gets ECHILD, harmless), and the
 // shell's `wait` makes its exit mirror the target's. VSTest already has this shape: the attached
 // testhost is a child of `dotnet test`, not of this host. It also matches production attach, where
 // the debuggee is never the debugger's own child.
 
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.Text.RegularExpressions;
@@ -32,22 +33,24 @@ internal static class TargetSpawn
 {
     /// <summary>Spawn an MTP integration target with --debug. Optionally filters which test
     /// method(s) MTP runs via `--filter FullyQualifiedName~<methodFilter>`. Returns the bootstrap
-    /// Process — the /bin/sh parent, whose exit mirrors the target's (see TOPOLOGY above); the target
+    /// Process — the bash parent, whose exit mirrors the target's (see TOPOLOGY above); the target
     /// pid comes from <see cref="ExtractPid"/>. Caller is responsible for disposing it (typically via
-    /// `using`).</summary>
+    /// `using`). The target runs in its own process group, recorded in <see cref="SpawnedProcessGroups"/>
+    /// so it is killed even if the test is abandoned at its timeout.</summary>
     public static Process Mtp(string targetExe, string? methodFilter = null)
     {
-        // `"$0" "$@" & wait $!` — the target runs as the shell's background child (not exec'd, so it
-        // is never this host's child), and the shell exits with the target's status. Arguments pass
-        // positionally, so no quoting of paths or filters.
-        ProcessStartInfo startInfo = new("/bin/sh")
+        // `set -m; "$0" "$@" & echo "DRHOOK_PGID $!"; wait $!` — the target runs as the shell's background
+        // job (not exec'd, so it is never this host's child) in its own process group, the shell reports that
+        // group, and exits with the target's status. Arguments pass positionally, so no quoting of paths or
+        // filters. bash, not /bin/sh: dash refuses `set -m` without a terminal (see Vstest below).
+        ProcessStartInfo startInfo = new("/bin/bash")
         {
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
         };
         startInfo.ArgumentList.Add("-c");
-        startInfo.ArgumentList.Add("\"$0\" \"$@\" & wait $!");
+        startInfo.ArgumentList.Add("set -m; \"$0\" \"$@\" & echo \"DRHOOK_PGID $!\"; wait $!");
         startInfo.ArgumentList.Add(targetExe);
         startInfo.ArgumentList.Add("--debug");
         if (methodFilter is not null)
@@ -57,6 +60,15 @@ internal static class TargetSpawn
         }
         Process bootstrap = new() { StartInfo = startInfo };
         bootstrap.Start();
+        string? first = bootstrap.StandardOutput.ReadLine();
+        Match m = first is null ? Match.Empty : Regex.Match(first, @"^DRHOOK_PGID (\d+)$");
+        if (!m.Success)
+        {
+            try { bootstrap.Kill(entireProcessTree: true); } catch { }
+            bootstrap.Dispose();
+            throw new InvalidOperationException($"MTP bootstrap did not report its process group (first line: '{first}').");
+        }
+        SpawnedProcessGroups.Register(int.Parse(m.Groups[1].Value, NumberStyles.Integer, CultureInfo.InvariantCulture));
         return bootstrap;
     }
 
@@ -113,7 +125,9 @@ internal static class TargetSpawn
             shell.Dispose();
             throw new InvalidOperationException($"VSTest bootstrap did not report its process group (first line: '{first}').");
         }
-        return new VstestRun(shell, int.Parse(m.Groups[1].Value, NumberStyles.Integer, CultureInfo.InvariantCulture));
+        int processGroup = int.Parse(m.Groups[1].Value, NumberStyles.Integer, CultureInfo.InvariantCulture);
+        SpawnedProcessGroups.Register(processGroup);
+        return new VstestRun(shell, processGroup);
     }
 
     /// <summary>Extract the target PID from stdout. Both MTP and VSTest print "Process Id: NNNN".</summary>
@@ -174,6 +188,38 @@ internal sealed class VstestRun : IDisposable
         KillGroup();
         try { if (!Shell.HasExited) Shell.Kill(); } catch { }
         Shell.Dispose();
+    }
+
+    [System.Runtime.InteropServices.DllImport("libc", SetLastError = true)]
+    private static extern int kill(int pid, int sig);
+}
+
+/// <summary>Every process group the harness started, killed at the end of the run. A test's own `using` cleanup
+/// does not run when MSTest abandons it at its timeout (testconfig.json): the test thread is left behind and the
+/// target it spawned — an MTP target with `--debug` or a VSTest testhost under VSTEST_HOST_DEBUG, both waiting for
+/// a debugger forever — would outlive the run (observed: an abandoned VSTest test left vstest.console + testhost
+/// running). [AssemblyCleanup] still runs after an abandoned test, so it reaps them. A group already gone yields
+/// ESRCH, ignored.</summary>
+[TestClass]
+public static class SpawnedProcessGroups
+{
+    private const int SIGKILL = 9;
+    private static readonly object s_lock = new();
+    private static readonly List<int> s_groups = new();
+
+    internal static void Register(int processGroup)
+    {
+        lock (s_lock) s_groups.Add(processGroup);
+    }
+
+    [AssemblyCleanup]
+    public static void KillAll()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        int[] groups;
+        lock (s_lock) { groups = s_groups.ToArray(); s_groups.Clear(); }
+        foreach (int group in groups)
+            _ = kill(-group, SIGKILL);
     }
 
     [System.Runtime.InteropServices.DllImport("libc", SetLastError = true)]

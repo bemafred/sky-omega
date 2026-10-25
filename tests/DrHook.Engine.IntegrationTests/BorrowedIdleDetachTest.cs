@@ -14,7 +14,7 @@
 // Two assertions: the deterministic one — Detach and Terminate report no UnexpectedHResult; and the
 // consequential one — the target is killed and this test host keeps running (a regression SEGVs the whole run).
 //
-// Topology (finding 87): the target runs under a /bin/sh parent, never as this host's Process.Start child.
+// Topology (finding 87): the target runs under a shell parent, never as this host's Process.Start child.
 
 using System;
 using System.Diagnostics;
@@ -38,20 +38,23 @@ public sealed class BorrowedIdleDetachTest
         string targetDll = IntegrationTargetPaths.SnapshotTargetDll();
         Assert.IsTrue(File.Exists(targetDll), $"Snapshot target not found at {targetDll}.");
 
-        // `dotnet <dll> & echo $!; wait $!` — the shell reports the target's pid on stdout and stays its parent.
-        var startInfo = new ProcessStartInfo("/bin/sh")
+        // `set -m; dotnet <dll> & echo $!; wait $!` — the shell reports the target's pid on stdout and stays its
+        // parent. The target runs in its own process group (pgid = its pid), recorded so it is killed even if this
+        // test is abandoned at its timeout; bash, since dash refuses `set -m` without a terminal.
+        var startInfo = new ProcessStartInfo("/bin/bash")
         {
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
         };
         startInfo.ArgumentList.Add("-c");
-        startInfo.ArgumentList.Add("dotnet \"$0\" > /dev/null 2>&1 & echo $!; wait $!");
+        startInfo.ArgumentList.Add("set -m; dotnet \"$0\" > /dev/null 2>&1 & echo $!; wait $!");
         startInfo.ArgumentList.Add(targetDll);
         using Process shell = Process.Start(startInfo)!;
         try
         {
             int pid = int.Parse(shell.StandardOutput.ReadLine()!, CultureInfo.InvariantCulture);
+            SpawnedProcessGroups.Register(pid);
             Thread.Sleep(1500); // the target's runtime is up and it is looping in Thread.Sleep — idle to a debugger
 
             var sink = new BoundedAnomalySink(64);
