@@ -281,7 +281,10 @@ The repo has **two kinds** of test project, and on the .NET 10 SDK they run by *
 | Project | Command | Count |
 |---------|---------|-------|
 | Mercury (W3C conformance + unit) | `dotnet test tests/Mercury.Tests/Mercury.Tests.csproj` | ~4,700 |
-| DrHook.Engine (unit) | `dotnet test tests/DrHook.Engine.Tests/DrHook.Engine.Tests.csproj` | 130 |
+| DrHook.Engine (unit) | `dotnet test tests/DrHook.Engine.Tests/DrHook.Engine.Tests.csproj` | 167 |
+| DrHook.Viz | `dotnet test tests/DrHook.Viz.Tests/DrHook.Viz.Tests.csproj` | 42 |
+| DrHook.Wire | `dotnet test tests/DrHook.Wire.Tests/DrHook.Wire.Tests.csproj` | 5 |
+| DrHook.Capture | `dotnet test tests/DrHook.Capture.Tests/DrHook.Capture.Tests.csproj` | 1 |
 | Mercury.Solid | `dotnet test tests/Mercury.Solid.Tests/Mercury.Solid.Tests.csproj` | — |
 | SkyOmega.Bcl | `dotnet test tests/SkyOmega.Bcl.Tests/SkyOmega.Bcl.Tests.csproj` | — |
 
