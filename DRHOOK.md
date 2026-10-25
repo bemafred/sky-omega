@@ -285,8 +285,8 @@ The repo has **two kinds** of test project, and on the .NET 10 SDK they run by *
 | DrHook.Viz | `dotnet test tests/DrHook.Viz.Tests/DrHook.Viz.Tests.csproj` | 42 |
 | DrHook.Wire | `dotnet test tests/DrHook.Wire.Tests/DrHook.Wire.Tests.csproj` | 5 |
 | DrHook.Capture | `dotnet test tests/DrHook.Capture.Tests/DrHook.Capture.Tests.csproj` | 1 |
-| Mercury.Solid | `dotnet test tests/Mercury.Solid.Tests/Mercury.Solid.Tests.csproj` | — |
-| SkyOmega.Bcl | `dotnet test tests/SkyOmega.Bcl.Tests/SkyOmega.Bcl.Tests.csproj` | — |
+| Mercury.Solid | `dotnet test tests/Mercury.Solid.Tests/Mercury.Solid.Tests.csproj` | 25 |
+| SkyOmega.Bcl | `dotnet test tests/SkyOmega.Bcl.Tests/SkyOmega.Bcl.Tests.csproj` | 12 |
 
 Mercury's W3C suites need the test-data submodules first: `./tools/update-submodules.sh`. Run one test with `--filter "FullyQualifiedName~SomeName"`.
 
