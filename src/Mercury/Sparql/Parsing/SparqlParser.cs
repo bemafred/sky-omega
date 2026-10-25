@@ -328,6 +328,12 @@ internal ref partial struct SparqlParser
             break;
         }
 
+        // The whole request must be consumed. Anything left over is not part of [29] Update,
+        // so it is a syntax error, never content to drop (ADR-046).
+        SkipWhitespace();
+        if (!IsAtEnd())
+            throw new SparqlParseException($"Expected ';' or end of update request at position {_position}");
+
         return operations.ToArray();
     }
 

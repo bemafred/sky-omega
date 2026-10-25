@@ -20,7 +20,8 @@ internal static class TestSessionHelper
     {
         return new ReplSession(
             executeQuery: sparql => ExecuteQuery(store, sparql),
-            executeUpdate: sparql => ExecuteUpdate(store, sparql),
+            // The production facade itself, not a copy of it (ADR-046: the copy drifted).
+            executeUpdate: sparql => SparqlEngine.Update(store, sparql),
             getStatistics: () => GetStatistics(store),
             getNamedGraphs: () => GetNamedGraphs(store));
     }
@@ -190,45 +191,6 @@ internal static class TestSessionHelper
             ParseTime = parseTime,
             ExecutionTime = sw.Elapsed
         };
-    }
-
-    private static UpdateResult ExecuteUpdate(QuadStore store, string sparql)
-    {
-        var sw = Stopwatch.StartNew();
-
-        try
-        {
-            var parser = new SparqlParser(sparql.AsSpan());
-            UpdateOperation parsed;
-
-            try
-            {
-                parsed = parser.ParseUpdate();
-            }
-            catch (SparqlParseException ex)
-            {
-                return new UpdateResult { Success = false, ErrorMessage = ex.Message, ParseTime = sw.Elapsed };
-            }
-
-            var parseTime = sw.Elapsed;
-            sw.Restart();
-
-            var executor = new UpdateExecutor(store, sparql.AsSpan(), parsed);
-            var result = executor.Execute();
-
-            return new UpdateResult
-            {
-                Success = result.Success,
-                AffectedCount = result.AffectedCount,
-                ErrorMessage = result.ErrorMessage,
-                ParseTime = parseTime,
-                ExecutionTime = sw.Elapsed
-            };
-        }
-        catch (Exception ex)
-        {
-            return new UpdateResult { Success = false, ErrorMessage = ex.Message, ParseTime = sw.Elapsed };
-        }
     }
 
     private static StoreStatistics GetStatistics(QuadStore store)

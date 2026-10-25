@@ -48,7 +48,7 @@
 | [ADR-043](ADR-043-metric-emission-decoupling.md) | Metric Emission Decoupling — Bounded Staleness for Live Observability under Shared-Disk Pressure | Completed (1.7.74, 2026-05-17) |
 | [ADR-044](ADR-044-sparql-update-literal-canonicalization.md) | SPARQL UPDATE Literal Escape Canonicalization — Atom-Store Identity Across Ingestion Paths | Completed (1.7.73, 2026-05-17) |
 | [ADR-045](ADR-045-graph-clause-feature-parity.md) | One Pattern Path — Eliminate the Divergent GRAPH Parse/Execution Path (a default graph is also a graph) | Completed (2026-06-11) |
-| [ADR-046](ADR-046-multi-operation-update-facade.md) | Multi-operation SPARQL UPDATE at the Engine Facade (one update path; single = N=1) | Accepted (2026-06-06) |
+| [ADR-046](ADR-046-multi-operation-update-facade.md) | Multi-operation SPARQL UPDATE at the Engine Facade (one update path; single = N=1) | Completed (2026-10-25) |
 | [ADR-047](ADR-047-default-path-cutover.md) | One Execution Path — Route the Default Query Path Through the Unified Tree Executor (complete the ADR-045 cutover) | Completed (2026-06-19) |
 | [ADR-048](ADR-048-service-federation-efficiency.md) | Efficient SERVICE Federation — Bound the Response, Don't Pull the Relation (VALUES bound-join + bounded acceptance; temp-store join-back rejected as a divergence) | Accepted (2026-06-19) |
 | [ADR-049](ADR-049-unified-expression-evaluator.md) | One SPARQL Expression Evaluator — FILTER and BIND share `[110] Expression` (spec-mandated unification; fixed FILTER-arithmetic and BIND-`\|\|` conformance gaps; BindExpressionEvaluator deleted, divergence S2 closed) | Completed (2026-06-21) |

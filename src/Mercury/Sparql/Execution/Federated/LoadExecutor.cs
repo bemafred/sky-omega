@@ -149,6 +149,22 @@ internal sealed class LoadExecutor : IDisposable
         QuadStore store,
         CancellationToken ct = default)
     {
+        var result = await LoadAsync(sourceUri, destinationGraph, store, ct).ConfigureAwait(false);
+
+        // SILENT suppresses every failure: the ones a load reports (file not found, size or
+        // triple limit) as well as the ones it throws. The load rolls its own batch back, so a
+        // suppressed failure leaves the store unchanged.
+        return silent && !result.Success
+            ? new UpdateResult { Success = true, AffectedCount = 0 }
+            : result;
+    }
+
+    private async ValueTask<UpdateResult> LoadAsync(
+        string sourceUri,
+        string? destinationGraph,
+        QuadStore store,
+        CancellationToken ct)
+    {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
         var graphStr = string.IsNullOrEmpty(destinationGraph) ? null : destinationGraph;
@@ -226,11 +242,6 @@ internal sealed class LoadExecutor : IDisposable
                 store.RollbackBatch();
                 throw;
             }
-        }
-        catch (Exception) when (silent)
-        {
-            // SILENT modifier - suppress errors
-            return new UpdateResult { Success = true, AffectedCount = 0 };
         }
         catch (HttpRequestException ex)
         {

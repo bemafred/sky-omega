@@ -352,6 +352,18 @@ public class ReplSessionTests : IDisposable
     }
 
     [Fact]
+    public void Execute_TwoOperationUpdate_AppliesBoth()
+    {
+        // ADR-046: the REPL runs the same facade as the CLI, so a ';' sequence applies in full.
+        var result = _session.Execute(
+            "INSERT DATA { <http://ex.org/s1> <http://ex.org/p> <http://ex.org/o> } ; INSERT DATA { <http://ex.org/s2> <http://ex.org/p> <http://ex.org/o> }");
+
+        Assert.Equal(ExecutionResultKind.Update, result.Kind);
+        Assert.True(result.Success, result.Message);
+        Assert.Equal(2, result.AffectedCount);
+    }
+
+    [Fact]
     public void Execute_InvalidUpdate_ReturnsError()
     {
         var result = _session.Execute("INSERT DATA { invalid syntax }");

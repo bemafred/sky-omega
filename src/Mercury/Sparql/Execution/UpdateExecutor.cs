@@ -90,8 +90,12 @@ internal class UpdateExecutor
     }
 
     /// <summary>
-    /// Execute a sequence of update operations.
-    /// Operations are executed in order; if any fails (and is not SILENT), execution stops.
+    /// Execute a sequence of update operations — the one path for every update request (ADR-046);
+    /// a single operation is a sequence of length 1.
+    /// Operations run in order. A failing operation stops the sequence; a SILENT operation
+    /// reports its own failure as success, so it does not stop it. Each operation commits on
+    /// its own, so operations before a failure keep their effects: the request is sequential
+    /// with abort, not all-or-nothing.
     /// </summary>
     /// <param name="store">The quad store.</param>
     /// <param name="source">The original source string containing all operations.</param>
@@ -109,19 +113,22 @@ internal class UpdateExecutor
 
         var totalAffected = 0;
 
-        foreach (var op in operations)
+        for (int i = 0; i < operations.Length; i++)
         {
-            var executor = new UpdateExecutor(store, source, op, loadExecutor);
+            QueryCancellation.ThrowIfCancellationRequested();
+
+            var executor = new UpdateExecutor(store, source, operations[i], loadExecutor);
             var result = executor.Execute();
 
             if (!result.Success)
             {
-                // Return error immediately unless SILENT
                 return new UpdateResult
                 {
                     Success = false,
                     AffectedCount = totalAffected,
-                    ErrorMessage = result.ErrorMessage
+                    ErrorMessage = operations.Length == 1
+                        ? result.ErrorMessage
+                        : $"Update operation {i + 1} of {operations.Length} failed; operations after it were not run: {result.ErrorMessage}"
                 };
             }
 

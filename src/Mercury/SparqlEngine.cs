@@ -165,11 +165,13 @@ public static class SparqlEngine
         try
         {
             var parser = new SparqlParser(sparql.AsSpan());
-            UpdateOperation parsed;
+            UpdateOperation[] operations;
 
+            // ADR-046: a request is a ';'-separated sequence ([29] Update). Parse all of it
+            // before running any of it, so a syntax error anywhere executes nothing.
             try
             {
-                parsed = parser.ParseUpdate();
+                operations = parser.ParseUpdateSequence();
             }
             catch (SparqlParseException ex)
             {
@@ -183,8 +185,7 @@ public static class SparqlEngine
             try
             {
                 using var loadExecutor = new LoadExecutor();
-                var executor = new UpdateExecutor(store, sparql.AsSpan(), parsed, loadExecutor);
-                var result = executor.Execute();
+                var result = UpdateExecutor.ExecuteSequence(store, sparql.AsSpan(), operations, loadExecutor);
 
                 return new UpdateResult
                 {

@@ -167,6 +167,138 @@ public class SparqlEngineTests : PooledStoreTestBase
         Assert.NotNull(result.ErrorMessage);
     }
 
+    // ADR-046: a request is a ';'-separated sequence of operations ([29] Update).
+    // These tests drive the facade every production surface uses (MCP, HTTP, CLI),
+    // not the library sequence methods the W3C harness calls directly.
+
+    [Fact]
+    public void Update_TwoInserts_AppliesBoth()
+    {
+        var result = SparqlEngine.Update(Store,
+            "INSERT DATA { <http://ex/a> <http://ex/p> \"1\" } ; INSERT DATA { <http://ex/b> <http://ex/p> \"2\" }");
+
+        Assert.True(result.Success, result.ErrorMessage);
+        Assert.Equal(2, result.AffectedCount);
+        Assert.True(SparqlEngine.Query(Store, "ASK { <http://ex/a> <http://ex/p> \"1\" }").AskResult);
+        Assert.True(SparqlEngine.Query(Store, "ASK { <http://ex/b> <http://ex/p> \"2\" }").AskResult);
+    }
+
+    [Fact]
+    public void Update_DeleteThenInsertInNamedGraph_AppliesBoth()
+    {
+        // The live repro from 2026-06-06 and again on zbook 2026-10-24: only the DELETE ran.
+        Store.AddCurrent("<http://ex/s>", "<http://ex/status>", "\"old\"", "<http://ex/g>");
+
+        var result = SparqlEngine.Update(Store, """
+            DELETE DATA { GRAPH <http://ex/g> { <http://ex/s> <http://ex/status> "old" } } ;
+            INSERT DATA { GRAPH <http://ex/g> { <http://ex/s> <http://ex/status> "new" . <http://ex/s> <http://ex/note> "x" } }
+            """);
+
+        Assert.True(result.Success, result.ErrorMessage);
+        Assert.Equal(3, result.AffectedCount);
+        Assert.False(SparqlEngine.Query(Store, "ASK { GRAPH <http://ex/g> { <http://ex/s> <http://ex/status> \"old\" } }").AskResult);
+        Assert.True(SparqlEngine.Query(Store, "ASK { GRAPH <http://ex/g> { <http://ex/s> <http://ex/status> \"new\" } }").AskResult);
+        Assert.True(SparqlEngine.Query(Store, "ASK { GRAPH <http://ex/g> { <http://ex/s> <http://ex/note> \"x\" } }").AskResult);
+    }
+
+    [Fact]
+    public void Update_PrefixDeclaredBeforeLaterOperation_ResolvesInThatOperation()
+    {
+        var result = SparqlEngine.Update(Store, """
+            PREFIX a: <http://ex/a/>
+            INSERT DATA { a:s a:p "1" } ;
+            PREFIX b: <http://ex/b/>
+            INSERT DATA { b:s a:p "2" }
+            """);
+
+        Assert.True(result.Success, result.ErrorMessage);
+        Assert.Equal(2, result.AffectedCount);
+        Assert.True(SparqlEngine.Query(Store, "ASK { <http://ex/a/s> <http://ex/a/p> \"1\" }").AskResult);
+        Assert.True(SparqlEngine.Query(Store, "ASK { <http://ex/b/s> <http://ex/a/p> \"2\" }").AskResult);
+    }
+
+    [Fact]
+    public void Update_SemicolonInsideLiteral_IsNotASeparator()
+    {
+        var result = SparqlEngine.Update(Store,
+            "INSERT DATA { <http://ex/s> <http://ex/p> \"a ; b\" } ; INSERT DATA { <http://ex/s> <http://ex/q> \"c\" }");
+
+        Assert.True(result.Success, result.ErrorMessage);
+        Assert.Equal(2, result.AffectedCount);
+        Assert.True(SparqlEngine.Query(Store, "ASK { <http://ex/s> <http://ex/p> \"a ; b\" }").AskResult);
+        Assert.True(SparqlEngine.Query(Store, "ASK { <http://ex/s> <http://ex/q> \"c\" }").AskResult);
+    }
+
+    [Fact]
+    public void Update_FailingMiddleOperation_AbortsTheRest()
+    {
+        // Spec: failure of an operation aborts the operations after it.
+        // Operations before it have already taken effect (sequential, not all-or-nothing).
+        var result = SparqlEngine.Update(Store, """
+            INSERT DATA { <http://ex/first> <http://ex/p> "1" } ;
+            LOAD <file:///nonexistent-adr046/missing.ttl> ;
+            INSERT DATA { <http://ex/third> <http://ex/p> "3" }
+            """);
+
+        Assert.False(result.Success);
+        Assert.NotNull(result.ErrorMessage);
+        Assert.Contains("operation 2 of 3", result.ErrorMessage);
+        Assert.Equal(1, result.AffectedCount);
+        Assert.True(SparqlEngine.Query(Store, "ASK { <http://ex/first> <http://ex/p> \"1\" }").AskResult);
+        Assert.False(SparqlEngine.Query(Store, "ASK { <http://ex/third> <http://ex/p> \"3\" }").AskResult);
+    }
+
+    [Fact]
+    public void Update_SilentFailingMiddleOperation_ContinuesWithTheRest()
+    {
+        var result = SparqlEngine.Update(Store, """
+            INSERT DATA { <http://ex/first> <http://ex/p> "1" } ;
+            LOAD SILENT <file:///nonexistent-adr046/missing.ttl> ;
+            INSERT DATA { <http://ex/third> <http://ex/p> "3" }
+            """);
+
+        Assert.True(result.Success, result.ErrorMessage);
+        Assert.Equal(2, result.AffectedCount);
+        Assert.True(SparqlEngine.Query(Store, "ASK { <http://ex/first> <http://ex/p> \"1\" }").AskResult);
+        Assert.True(SparqlEngine.Query(Store, "ASK { <http://ex/third> <http://ex/p> \"3\" }").AskResult);
+    }
+
+    [Fact]
+    public void Update_SyntaxErrorInLaterOperation_ExecutesNothing()
+    {
+        // The whole request parses before anything executes.
+        var result = SparqlEngine.Update(Store,
+            "INSERT DATA { <http://ex/a> <http://ex/p> \"1\" } ; INSERT DATAA { <http://ex/b> <http://ex/p> \"2\" }");
+
+        Assert.False(result.Success);
+        Assert.NotNull(result.ErrorMessage);
+        Assert.False(SparqlEngine.Query(Store, "ASK { <http://ex/a> <http://ex/p> \"1\" }").AskResult);
+    }
+
+    [Fact]
+    public void Update_MissingSeparatorBetweenOperations_IsAParseError()
+    {
+        // Without ';' the second operation is not part of the grammar. It must be
+        // rejected, never silently dropped.
+        var result = SparqlEngine.Update(Store,
+            "INSERT DATA { <http://ex/a> <http://ex/p> \"1\" } INSERT DATA { <http://ex/b> <http://ex/p> \"2\" }");
+
+        Assert.False(result.Success);
+        Assert.NotNull(result.ErrorMessage);
+        Assert.False(SparqlEngine.Query(Store, "ASK { <http://ex/a> <http://ex/p> \"1\" }").AskResult);
+        Assert.False(SparqlEngine.Query(Store, "ASK { <http://ex/b> <http://ex/p> \"2\" }").AskResult);
+    }
+
+    [Fact]
+    public void Update_EmptyRequest_SucceedsWithNothingAffected()
+    {
+        // [29] Update ::= Prologue ( Update1 ( ';' Update )? )? — a bare prologue is a valid request.
+        var result = SparqlEngine.Update(Store, "PREFIX ex: <http://ex/>");
+
+        Assert.True(result.Success, result.ErrorMessage);
+        Assert.Equal(0, result.AffectedCount);
+    }
+
     [Fact]
     public void Explain_WithoutStore_ReturnsText()
     {

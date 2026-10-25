@@ -2,7 +2,7 @@
 
 ## Status
 
-**Status:** Accepted — 2026-06-06 (Proposed → Accepted same day; approach approved in the same design review as [ADR-045](ADR-045-graph-clause-feature-parity.md). Engineering pending.)
+**Status:** Completed — 2026-10-25 (Proposed → Accepted 2026-06-06 in the same design review as [ADR-045](ADR-045-graph-clause-feature-parity.md); implemented 1.8.12 after the bug recurred on a freshly bootstrapped Linux instance on 2026-10-24.)
 
 Surfaced while updating Mercury semantic memory: a single `DELETE DATA { … } ; INSERT DATA { … }` request applied only the DELETE and silently dropped the INSERT. Distinct root cause from [ADR-045](ADR-045-graph-clause-feature-parity.md) (not GRAPH-related) — but surfaced in the same dogfood session.
 
@@ -79,6 +79,20 @@ Single-operation `ParseUpdate()`/`Execute()` may remain as internal fast paths, 
 2. Abort semantics test: a failing middle (non-SILENT) operation aborts the rest, per spec.
 3. Re-run the live MCP repro (`DELETE DATA … ; INSERT DATA …`) and confirm both take effect.
 4. Full W3C Update suite remains 94/94; add at least one evaluation test routed through the facade (not only `ExecuteSequence`).
+
+## Implementation (1.8.12, 2026-10-25)
+
+The bug recurred on 2026-10-24, while bootstrapping Mercury on a new Ubuntu LTS rig (`zbook`): a chained update applied only its first operation, as on 2026-06-06. That was the second independent dogfood hit.
+
+1. **Facade re-pointed.** `SparqlEngine.Update` parses with `ParseUpdateSequence()` and runs `UpdateExecutor.ExecuteSequence(...)` with its `LoadExecutor`. The whole request parses before anything executes, so a syntax error in any operation executes nothing.
+2. **REPL parity by unification, not a second patch.** `TestSessionHelper` had its own copy of the facade, and that copy carried the same mis-wire. It now calls `SparqlEngine.Update` directly, so the copy is gone.
+3. **Trailing content is a syntax error.** `ParseUpdateSequence` used to stop at the first operation not followed by `;` and drop the rest without a word (`INSERT DATA {…} INSERT DATA {…}`). Without this fix, the new path would have kept a silent-drop case. It now throws `Expected ';' or end of update request at position N`.
+4. **Atomicity posture: sequential with abort.** Operations run in order, and each commits on its own. A failing non-SILENT operation stops the sequence, and the operations before it keep their effects. The error names the operation: `Update operation 2 of 3 failed; operations after it were not run: …`. That meets the MUST (sequential effects, failure aborts the rest). All-or-nothing, the spec's SHOULD, is not offered: an outer batch spanning operations would have to let a later `WHERE` see earlier uncommitted writes, and the batch layer does not provide that today. Cancellation is checked between operations.
+5. **Found by the new tests: `LOAD SILENT` was not silent.** `LoadExecutor` applied SILENT only to thrown exceptions, so a reported failure (file not found, size or triple limit) still failed the operation and would have aborted the sequence. `ExecuteAsync` now applies SILENT around the whole load, to reported and thrown failures alike.
+
+**Validation:** 10 facade tests in `SparqlEngineTests` (`Update_*`) and 1 REPL test drive the production entry point. They cover two inserts, the live `DELETE;INSERT` repro in a named graph, a prologue between operations, `;` inside a literal, abort on a failing middle operation, SILENT continuing, a syntax error in a later operation, a missing separator, and an empty request. All 10 failed before the fix. Mercury.Tests 4722/4722 (6 environment skips), W3C Update suite green, Mercury.Solid.Tests 25/25, solution builds with 0 warnings. The live repro through the `mercury` CLI reports `3 triples affected`, and both writes land.
+
+**Open:** both REPL front-ends (`ReplSession`, `mercury-sparql`) use a line-ending `;` as "execute now". A multi-line request whose operations are separated at line ends therefore runs as several requests. Nothing is lost, but the request is not one request, and that is a surface-design question for those front-ends.
 
 ## References
 
