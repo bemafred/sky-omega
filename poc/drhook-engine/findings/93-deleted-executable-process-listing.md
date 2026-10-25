@@ -1,7 +1,7 @@
 # Finding 93 — A .NET process whose executable was deleted breaks process listing on Linux
 
 **Date:** 2026-10-25
-**Status:** Root cause **PROVEN** on zbook (Ubuntu 26.04.1 LTS, x86_64, distro-built .NET 10.0.13); **open, not fixed**.
+**Status:** Root cause **PROVEN** on zbook (Ubuntu 26.04.1 LTS, x86_64, distro-built .NET 10.0.13); **fixed** on Linux, macOS unverified.
 Linux data point for [ADR-007](../../../docs/adrs/drhook/ADR-007-teardown-concurrency-test-debug.md) Phase 9. Not
 covered by [finding 92](92-linux-first-run.md).
 
@@ -53,17 +53,31 @@ anything) already threw because of it, and `drhook_processes` left the stale ser
 
 The integration suite passed 16/16 the same day only because no such process happened to be running then.
 
-## Fix direction
+## Fix
 
-- Read the version in its own `try` and catch `IOException` (`FileNotFoundException` derives from it): keep the process
-  in the list with an unknown version instead of throwing or dropping it.
-- Report the executable as stale. Strip the ` (deleted)` suffix from the path, or add a flag, so an operator can see
-  that a target is running an old build.
-- Merge the two listing implementations, or at least give them the same handling.
-- Add a test that runs a target, deletes its executable, and checks it still appears in both listings.
+- **One per-process read, shared by both listings.** `ProcessIdentity.TryRead`
+  (`src/DrHook.Engine/Observation/ProcessIdentity.cs`) skips only a process that has exited. It strips the
+  ` (deleted)` suffix (Linux only), treats a main module whose file no longer exists as deleted on every platform,
+  and reads the version only from a file that still exists, catching `IOException` and `UnauthorizedAccessException`.
+  A main module that can't be read at all (access denied) keeps the process, with no path.
+- **The process stays listed and is marked.** `DotnetProcess` and the `drhook_processes` row gain `ExecutableDeleted`
+  (`"executableDeleted"` in the JSON); the version is null, or `"unknown"` in the tool.
+- **One listing.** `ProcessAttacher.ListDotNetProcessesAsync` now maps `ProcessInspector.ListDotnetProcesses`. Its own
+  copy, with the bare `catch`, is gone. The MCP tool also gets the bounded discovery from DBG-PI-1 (finding 59).
+
+## Validation
+
+- `DeletedExecutableListingTest` (integration) runs a private copy of the snapshot target, deletes the copy's
+  apphost, and checks both listings. Against the old code it fails with the original
+  `FileNotFoundException: ... (deleted)`. With the fix it passes, and the full suite passed 17/17 three times on zbook
+  with no leftover processes.
+- Seven unit tests in `ProcessInspectorTests` cover the suffix parsing, a pid that isn't running, and self.
+- The stale local-source `drhook-mcp` server that started this finding is now listed with
+  `ExecutableDeleted = True` instead of making the listing throw.
 
 ## Open
 
-- **macOS is unverified.** macOS has no ` (deleted)` path. A rebuild that replaces the file probably makes the listing
-  report the *new* file's version rather than throw. Deleting the executable without replacing it is expected to
-  throw the same way, but nobody has checked.
+- **macOS is unverified.** macOS has no ` (deleted)` path, so the fix relies on the missing-file check there. On macOS
+  the integration test only checks that the process is listed. Whether a deleted main module is marked has not been
+  checked. A rebuild that writes a new file at the same path probably shows the *new* file's version, and that case
+  isn't detected on macOS.

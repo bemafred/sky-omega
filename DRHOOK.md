@@ -260,7 +260,7 @@ Before scripting around a tool, read its flags — `--help`, or `/?` on Windows.
 
 - **End sessions cleanly — `drhook_stop`, not `drhook_kill`.** A well-behaved target ends by running to completion (`drhook_continue` past the last breakpoint → `processExited`) or via `drhook_stop` (graceful SIGTERM-with-grace). **`drhook_kill` is the anomaly escape hatch** — every kill is worth investigating, because it means the target was *stuck*. Do not reach for `drhook_kill` to reset a demo or switch targets; `drhook_stop` does that cleanly. Only one session is active at a time (`drhook_launch`/`drhook_attach` refuse with "a stepping session is already active — use drhook_stop first").
 
-- **Process hygiene — check for orphans, clean them up.** A *failed* `drhook_launch` can leave the spawned target orphaned (dbgshim spawns it suspended, then the launch errors before cleanup); a session you don't end cleanly leaks one too. Periodically run `drhook_processes` and scan for orphaned debuggee targets (your `*-target` / apphost names, or unnamed suspended/`<defunct>` processes) and `kill <pid>` the strays from a shell. Leaked targets hold FDs and memory. (Reap `<defunct>` zombies by letting the parent exit; `kill` only the live `S`/`T`-state strays.)
+- **Process hygiene — check for orphans, clean them up.** A *failed* `drhook_launch` can leave the spawned target orphaned (dbgshim spawns it suspended, then the launch errors before cleanup); a session you don't end cleanly leaks one too. Periodically run `drhook_processes` and scan for orphaned debuggee targets (your `*-target` / apphost names, or unnamed suspended/`<defunct>` processes) and `kill <pid>` the strays from a shell. A target still running a build you have since rebuilt or deleted shows `"executableDeleted": true` (finding 93). Leaked targets hold FDs and memory. (Reap `<defunct>` zombies by letting the parent exit; `kill` only the live `S`/`T`-state strays.)
 
 - **One debugger process debugs ONE runtime version — never mix net10 and net11 targets in a session.** A DrHook debugger process loads the debug components (`mscordbi` + DAC) of the *first* target's runtime version, **process-globally and persisting across session end**; a later target on a *different* runtime version fails with `HRESULT 0x80131C3C` (`CORDBG_E_DEBUG_COMPONENT_MISSING`). This bites because the substrate targets **net10.0** but a file-based app (`dotnet run x.cs`) under the SDK 11 preview builds **net11.0** — so debugging a file-based app (net11) and then a net10 target (a single-file app, a net10 project) mixes versions and the second fails. **Workaround:** keep every target in a session on one runtime version (pin file-based probes with `#:property TargetFramework=net10.0`, or use a net10 project), or **reconnect the MCP when you switch target runtime version**. (Proven root cause + the `lsof`/two-version reproduction: `poc/drhook-engine/findings/86-debugger-locked-to-one-runtime-version.md`. The earlier "single-file fails via MCP" framing here was a misdiagnosis — single-file was just a net10 target debugged after net11.)
 
@@ -281,7 +281,7 @@ The repo has **two kinds** of test project, and on the .NET 10 SDK they run by *
 | Project | Command | Count |
 |---------|---------|-------|
 | Mercury (W3C conformance + unit) | `dotnet test tests/Mercury.Tests/Mercury.Tests.csproj` | ~4,700 |
-| DrHook.Engine (unit) | `dotnet test tests/DrHook.Engine.Tests/DrHook.Engine.Tests.csproj` | 167 |
+| DrHook.Engine (unit) | `dotnet test tests/DrHook.Engine.Tests/DrHook.Engine.Tests.csproj` | 174 |
 | DrHook.Viz | `dotnet test tests/DrHook.Viz.Tests/DrHook.Viz.Tests.csproj` | 42 |
 | DrHook.Wire | `dotnet test tests/DrHook.Wire.Tests/DrHook.Wire.Tests.csproj` | 5 |
 | DrHook.Capture | `dotnet test tests/DrHook.Capture.Tests/DrHook.Capture.Tests.csproj` | 1 |
@@ -306,7 +306,7 @@ dotnet build tests/DrHook.Engine.IntegrationTests/DrHook.Engine.IntegrationTests
 #   --output Detailed                            # verbose
 ```
 
-These are the **16** substrate-correctness integration tests (ADR-007 Phase 8), validated on macOS-arm64 and Linux x64 (glibc). Each has a 120 s limit (`testconfig.json`), so a hang fails with the test's name instead of stalling the run. `DrHook.Engine.IntegrationTargets.{Mtp,Vstest}` are their *targets*, not test projects — don't run them directly.
+These are the **17** integration tests: the 16 substrate-correctness tests (ADR-007 Phase 8), validated on macOS-arm64 and Linux x64 (glibc), plus the process-listing test for a deleted executable ([finding 93](poc/drhook-engine/findings/93-deleted-executable-process-listing.md)), validated on Linux only so far. Each has a 120 s limit (`testconfig.json`), so a hang fails with the test's name instead of stalling the run. `DrHook.Engine.IntegrationTargets.{Mtp,Vstest}` are their *targets*, not test projects — don't run them directly.
 
 > **Whole-solution caveat.** `dotnet test SkyOmega.sln` trips the same VSTest error on the MTP project (it is in the solution). Run the standard projects individually (above) and the integration suite via its executable.
 

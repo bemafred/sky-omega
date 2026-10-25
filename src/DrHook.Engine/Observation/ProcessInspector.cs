@@ -21,8 +21,12 @@ using Microsoft.Diagnostics.NETCore.Client;
 
 namespace SkyOmega.DrHook.Engine.Observation;
 
-/// <summary>A discovered .NET process available for diagnostic attachment.</summary>
-public sealed record DotnetProcess(int Pid, string Name, string? MainModulePath, string? FileVersion);
+/// <summary>A discovered .NET process available for diagnostic attachment.
+/// <see cref="ExecutableDeleted"/> is true when the file the process started from has been deleted or
+/// replaced since (a rebuild does this): the process is running an old build, its
+/// <see cref="MainModulePath"/> is where that file was, and <see cref="FileVersion"/> is null (finding 93).</summary>
+public sealed record DotnetProcess(
+    int Pid, string Name, string? MainModulePath, string? FileVersion, bool ExecutableDeleted = false);
 
 /// <summary>A point-in-time snapshot of a process's BCL-observable metrics.</summary>
 public sealed record ProcessSnapshot(
@@ -60,28 +64,16 @@ public static class ProcessInspector
         => GetPublishedProcessesBounded().Contains(pid);
 
     /// <summary>List discovered .NET processes with basic identity. Processes that exit
-    /// between discovery and inspection are skipped. Bounded by
+    /// between discovery and inspection are skipped; a process whose executable was deleted
+    /// is kept, with <see cref="DotnetProcess.ExecutableDeleted"/> set. Bounded by
     /// <see cref="DefaultDiscoveryTimeoutMs"/>; returns empty on timeout.</summary>
     public static IReadOnlyList<DotnetProcess> ListDotnetProcesses()
     {
         List<DotnetProcess> result = new();
         foreach (int pid in GetPublishedProcessesBounded())
         {
-            try
-            {
-                using Process proc = Process.GetProcessById(pid);
-                ProcessModule? mainModule = proc.MainModule;
-                result.Add(new DotnetProcess(
-                    pid,
-                    proc.ProcessName,
-                    mainModule?.FileName,
-                    mainModule?.FileVersionInfo.FileVersion));
-            }
-            catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
-            {
-                // Process exited between discovery and inspection, or its main module is
-                // inaccessible — skip it.
-            }
+            if (ProcessIdentity.TryRead(pid) is { } id)
+                result.Add(new DotnetProcess(id.Pid, id.Name, id.ExecutablePath, id.FileVersion, id.ExecutableDeleted));
         }
         return result;
     }
