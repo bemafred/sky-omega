@@ -6,7 +6,7 @@ The substrate is `DrHook.Engine` — a BCL + P/Invoke + source-gen COM implement
 
 > **Surface-redesign note (2026-05-31):** the MCP tool names below are the **post-rename** surface shipped by [ADR-010](docs/adrs/drhook/ADR-010-mcp-tool-surface-redesign.md) (Accepted) Tier 1. Names now follow established IDE-debugger convention (`launch` starts a new process, `attach` connects to a running one) and agree with the substrate's own `DebugSession.Launch` / `.Attach` vocabulary. The previous `drhook_step_*` names are shown in the "Former name" column for one transition cycle. Capabilities are unchanged from before the rename.
 >
-> **Production-suitability status:** substrate-correctness on macOS-arm64 is CI-enforced via [ADR-008](docs/adrs/drhook/ADR-008-process-lifecycle-discipline.md) (Completed) + [ADR-007](docs/adrs/drhook/ADR-007-teardown-concurrency-test-debug.md) Phases 1, 2, 8 (Complete). 12/12 integration tests pass reliably. Cross-platform validation is ADR-007 Phase 9 (Open). Use with care under test runners on platforms other than macOS-arm64.
+> **Production-suitability status:** substrate-correctness on macOS-arm64 is CI-enforced via [ADR-008](docs/adrs/drhook/ADR-008-process-lifecycle-discipline.md) (Completed) + [ADR-007](docs/adrs/drhook/ADR-007-teardown-concurrency-test-debug.md) Phases 1, 2, 8 (Complete). The 16 integration tests pass reliably on macOS-arm64, and since 2026-10-25 on Linux x64 too (Ubuntu 26.04 / glibc, distro-built .NET — 69 of 70 full runs, [finding 92](poc/drhook-engine/findings/92-linux-first-run.md)). The rest of cross-platform validation (Windows, linux-arm64, musl) is ADR-007 Phase 9 (Open); launch on musl is refused until its libc types are measured.
 
 ## When to Use DrHook
 
@@ -303,7 +303,7 @@ dotnet build tests/DrHook.Engine.IntegrationTests/DrHook.Engine.IntegrationTests
 #   --output Detailed                            # verbose
 ```
 
-These are the **12** substrate-correctness integration tests (ADR-007 Phase 8), macOS/arm64-only today (Phase 9 Open). `DrHook.Engine.IntegrationTargets.{Mtp,Vstest}` are their *targets*, not test projects — don't run them directly.
+These are the **16** substrate-correctness integration tests (ADR-007 Phase 8), validated on macOS-arm64 and Linux x64 (glibc). Each has a 120 s limit (`testconfig.json`), so a hang fails with the test's name instead of stalling the run. `DrHook.Engine.IntegrationTargets.{Mtp,Vstest}` are their *targets*, not test projects — don't run them directly.
 
 > **Whole-solution caveat.** `dotnet test SkyOmega.sln` trips the same VSTest error on the MTP project (it is in the solution). Run the standard projects individually (above) and the integration suite via its executable.
 

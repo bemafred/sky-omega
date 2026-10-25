@@ -121,6 +121,15 @@ public sealed class PauseDisposeTest
                 session.Pause();
                 StopInfo? stop = session.WaitForStop(TimeSpan.FromSeconds(3));
                 Assert.IsNotNull(stop, "Pause stop did not arrive within 3s.");
+                if (stop!.Reason == StopReason.Break)
+                {
+                    // Finding 91, the other ordering: the attach landed AFTER the testhost reached its
+                    // VSTEST_HOST_DEBUG hold, so the hold's Break queued ahead of the Pause (the norm on zbook,
+                    // the exception on the Mac). Consume it and await the Pause this test is about.
+                    session.Resume();
+                    stop = session.WaitForStop(TimeSpan.FromSeconds(3));
+                    Assert.IsNotNull(stop, "Pause stop did not arrive within 3s after consuming the hold's Break.");
+                }
                 Assert.AreEqual(StopReason.Pause, stop!.Reason);
             }
 

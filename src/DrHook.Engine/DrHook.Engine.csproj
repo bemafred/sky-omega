@@ -26,7 +26,8 @@
     <!--
       libdbgshim (the native shim to ICorDebug) is a native runtime-substrate asset per the
       ADR-009 clarification, NOT a managed dependency. We bundle it via per-RID NuGet packages
-      (Microsoft.Diagnostics.DbgShim.<rid>), referenced CONDITIONALLY on the dev's SDK RID so
+      (Microsoft.Diagnostics.DbgShim.<rid>), referenced CONDITIONALLY on the dev's SDK portable RID (NETCoreSdkPortableRuntimeIdentifier:
+      a distro-built SDK reports e.g. ubuntu.26.04-x64 as its RID, but the packages are portable-RID) so
       local builds stay lean (one ~1.5 MB native asset, not all six). The native asset deploys
       to bin/<config>/<tfm>/runtimes/<rid>/native/libdbgshim.dylib and is found at runtime by
       Interop/DbgShim.cs via AppContext.BaseDirectory.
@@ -41,13 +42,13 @@
       coarse all-RIDs fetch (the meta pulls every platform's asset, ~10 MB total).
     -->
     <ItemGroup>
-        <PackageReference Include="Microsoft.Diagnostics.DbgShim.osx-arm64"      Version="9.0.*" Condition="'$(NETCoreSdkRuntimeIdentifier)' == 'osx-arm64'" />
-        <PackageReference Include="Microsoft.Diagnostics.DbgShim.osx-x64"        Version="9.0.*" Condition="'$(NETCoreSdkRuntimeIdentifier)' == 'osx-x64'" />
-        <PackageReference Include="Microsoft.Diagnostics.DbgShim.linux-x64"      Version="9.0.*" Condition="'$(NETCoreSdkRuntimeIdentifier)' == 'linux-x64'" />
-        <PackageReference Include="Microsoft.Diagnostics.DbgShim.linux-arm64"    Version="9.0.*" Condition="'$(NETCoreSdkRuntimeIdentifier)' == 'linux-arm64'" />
-        <PackageReference Include="Microsoft.Diagnostics.DbgShim.linux-musl-x64" Version="9.0.*" Condition="'$(NETCoreSdkRuntimeIdentifier)' == 'linux-musl-x64'" />
-        <PackageReference Include="Microsoft.Diagnostics.DbgShim.win-x64"        Version="9.0.*" Condition="'$(NETCoreSdkRuntimeIdentifier)' == 'win-x64'" />
-        <PackageReference Include="Microsoft.Diagnostics.DbgShim.win-arm64"      Version="9.0.*" Condition="'$(NETCoreSdkRuntimeIdentifier)' == 'win-arm64'" />
+        <PackageReference Include="Microsoft.Diagnostics.DbgShim.osx-arm64"      Version="9.0.*" Condition="'$(NETCoreSdkPortableRuntimeIdentifier)' == 'osx-arm64'" />
+        <PackageReference Include="Microsoft.Diagnostics.DbgShim.osx-x64"        Version="9.0.*" Condition="'$(NETCoreSdkPortableRuntimeIdentifier)' == 'osx-x64'" />
+        <PackageReference Include="Microsoft.Diagnostics.DbgShim.linux-x64"      Version="9.0.*" Condition="'$(NETCoreSdkPortableRuntimeIdentifier)' == 'linux-x64'" />
+        <PackageReference Include="Microsoft.Diagnostics.DbgShim.linux-arm64"    Version="9.0.*" Condition="'$(NETCoreSdkPortableRuntimeIdentifier)' == 'linux-arm64'" />
+        <PackageReference Include="Microsoft.Diagnostics.DbgShim.linux-musl-x64" Version="9.0.*" Condition="'$(NETCoreSdkPortableRuntimeIdentifier)' == 'linux-musl-x64'" />
+        <PackageReference Include="Microsoft.Diagnostics.DbgShim.win-x64"        Version="9.0.*" Condition="'$(NETCoreSdkPortableRuntimeIdentifier)' == 'win-x64'" />
+        <PackageReference Include="Microsoft.Diagnostics.DbgShim.win-arm64"      Version="9.0.*" Condition="'$(NETCoreSdkPortableRuntimeIdentifier)' == 'win-arm64'" />
     </ItemGroup>
 
     <ItemGroup>

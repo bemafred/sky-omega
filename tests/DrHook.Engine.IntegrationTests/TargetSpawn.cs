@@ -72,13 +72,18 @@ internal static class TargetSpawn
     /// A process group survives reparenting (observed: the orphans kept their original pgid), so a group kill reaches
     /// every process the run started. `set -m` gives the background job its own group (pgid = its pid).
     ///
+    /// That needs BASH, not /bin/sh: on Ubuntu /bin/sh is dash, which refuses `set -m` without a terminal
+    /// ("can't access tty; job control turned off") and leaves the job in the CALLER's group — the group kill
+    /// then hits a pgid that does not exist and every VSTest run leaks its tree (observed on zbook, 18 orphans
+    /// after one pass). bash gives the job its own group with or without a terminal, on macOS and Linux.
+    ///
     /// FINDING 91 — the `Process Id:` line <see cref="ExtractPid"/> parses is printed by vstest.console when it
     /// LAUNCHES the testhost, before the testhost reaches its VSTEST_HOST_DEBUG hold. An attach that lands first makes
     /// the hold return immediately (Debugger.IsAttached) with no Break — so never wait on that Break as the first
     /// stop; force one (Pause).</summary>
     public static VstestRun Vstest(string targetProject, string? methodFilter = null)
     {
-        ProcessStartInfo startInfo = new("/bin/sh")
+        ProcessStartInfo startInfo = new("/bin/bash")
         {
             RedirectStandardOutput = true,
             RedirectStandardError = true,

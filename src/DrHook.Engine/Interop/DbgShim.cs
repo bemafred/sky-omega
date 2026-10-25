@@ -166,14 +166,15 @@ internal sealed unsafe class DbgShim : IDisposable
             OperatingSystem.IsWindows() ? "dbgshim.dll" :
             OperatingSystem.IsMacOS() ? "libdbgshim.dylib" :
                                         "libdbgshim.so";
-        string rid = RuntimeInformation.RuntimeIdentifier;
-
         // 2. Bundled via per-RID Microsoft.Diagnostics.DbgShim.<rid> package — the package's
         //    native asset deploys to bin/<config>/<tfm>/runtimes/<rid>/native/. PRIMARY path for
         //    production and dev once the engine is referenced as a PackageReference.
-        string runtimesNative = Path.Combine(AppContext.BaseDirectory, "runtimes", rid, "native", libName);
-        tried.Add(runtimesNative + "  (app base — runtimes/<rid>/native)");
-        if (File.Exists(runtimesNative)) { searched = string.Join('\n', tried); return runtimesNative; }
+        foreach (string rid in CandidateRids())
+        {
+            string runtimesNative = Path.Combine(AppContext.BaseDirectory, "runtimes", rid, "native", libName);
+            tried.Add(runtimesNative + "  (app base — runtimes/<rid>/native)");
+            if (File.Exists(runtimesNative)) { searched = string.Join('\n', tried); return runtimesNative; }
+        }
 
         // 3. Bundled directly at AppContext.BaseDirectory — rare layout (some packaging
         //    strategies flatten native assets next to the assembly), kept as a safety net.
@@ -199,20 +200,56 @@ internal sealed unsafe class DbgShim : IDisposable
     private static string? FindInNuGetCache(string libName, List<string> tried)
     {
         string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        string rid = RuntimeInformation.RuntimeIdentifier;
-        string pkgRoot = Path.Combine(home, ".nuget", "packages", $"microsoft.diagnostics.dbgshim.{rid}");
-        tried.Add(pkgRoot + "/*/runtimes/" + rid + "/native/  (nuget cache)");
-        if (!Directory.Exists(pkgRoot))
-            return null;
-
-        string? best = null;
-        foreach (string versionDir in Directory.EnumerateDirectories(pkgRoot))
+        foreach (string rid in CandidateRids())
         {
-            string candidate = Path.Combine(versionDir, "runtimes", rid, "native", libName);
-            if (File.Exists(candidate) && (best is null || string.CompareOrdinal(versionDir, best) > 0))
-                best = candidate;
+            string pkgRoot = Path.Combine(home, ".nuget", "packages", $"microsoft.diagnostics.dbgshim.{rid}");
+            tried.Add(pkgRoot + "/*/runtimes/" + rid + "/native/  (nuget cache)");
+            if (!Directory.Exists(pkgRoot))
+                continue;
+
+            string? best = null;
+            foreach (string versionDir in Directory.EnumerateDirectories(pkgRoot))
+            {
+                string candidate = Path.Combine(versionDir, "runtimes", rid, "native", libName);
+                if (File.Exists(candidate) && (best is null || string.CompareOrdinal(versionDir, best) > 0))
+                    best = candidate;
+            }
+            if (best is not null) return best;
         }
-        return best;
+        return null;
+    }
+
+    /// <summary>The RIDs whose native assets can serve this host, most specific first: the RID the
+    /// runtime reports, then the portable RID. They differ on a distro-built .NET — Ubuntu's own SDK
+    /// reports <c>ubuntu.26.04-x64</c> — while the DbgShim NuGet ships only portable RIDs
+    /// (<c>linux-x64</c>, <c>osx-arm64</c>, …), so probing the reported RID alone finds nothing there.</summary>
+    internal static IEnumerable<string> CandidateRids()
+    {
+        string reported = RuntimeInformation.RuntimeIdentifier;
+        yield return reported;
+        string portable = PortableRid();
+        if (!string.Equals(portable, reported, StringComparison.Ordinal))
+            yield return portable;
+    }
+
+    /// <summary>This host's portable RID: OS family (<c>win</c> / <c>osx</c> / <c>linux</c> /
+    /// <c>linux-musl</c>) plus process architecture.</summary>
+    internal static string PortableRid()
+    {
+        string os =
+            OperatingSystem.IsWindows() ? "win" :
+            OperatingSystem.IsMacOS() ? "osx" :
+            LinuxLibc.IsMusl ? "linux-musl" :
+                                "linux";
+        string arch = RuntimeInformation.ProcessArchitecture switch
+        {
+            Architecture.X64 => "x64",
+            Architecture.Arm64 => "arm64",
+            Architecture.X86 => "x86",
+            Architecture.Arm => "arm",
+            Architecture other => other.ToString().ToLowerInvariant(),
+        };
+        return os + "-" + arch;
     }
 
     /// <summary>Launch a process under debug control using dbgshim's RegisterForRuntimeStartup flow:

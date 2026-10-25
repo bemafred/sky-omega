@@ -50,7 +50,16 @@ public sealed class CaptureStateSnapshotTest
         try
         {
             StopInfo? hold = session.WaitForStop(TimeSpan.FromSeconds(20));
-            Assert.IsNotNull(hold, "No hold-gate stop within 20s.");
+            if (hold is null)
+            {
+                // Say what the engine DID receive, so a missing hold is diagnosable from the failure alone.
+                string received = string.Join(", ", tap.Peek().Deltas.Select(d =>
+                    d.EventName ?? d.Anomaly?.Kind.ToString() ?? (d.Console is { } c ? $"console:{c.Text.Trim()}" : d.Kind.ToString())));
+                string targetState = OperatingSystem.IsLinux() && File.Exists($"/proc/{pid}/stat")
+                    ? File.ReadAllText($"/proc/{pid}/stat").Split(')')[^1].Trim().Split(' ')[0]
+                    : (System.Diagnostics.Process.GetProcesses().Any(p => p.Id == pid) ? "alive" : "gone");
+                Assert.Fail($"No hold-gate stop within 20s. Target {pid} state: {targetState}. Received: [{received}].");
+            }
             Assert.AreEqual(StopReason.EntryModuleLoaded, hold!.Reason, "First stop should be the entry-module hold-gate.");
 
             int bpId = session.SetBreakpointAtLine(EntryModule, "Program.cs", markerLine);

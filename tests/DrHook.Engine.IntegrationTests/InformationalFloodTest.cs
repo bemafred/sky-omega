@@ -99,6 +99,16 @@ public sealed class InformationalFloodTest
 
             using (DebugSession session = DebugSession.AttachAndOwn(testHostPid, sink))
             {
+                // Finding 91: whether the VSTEST_HOST_DEBUG hold Breaks depends on who wins the race — an attach
+                // that lands first skips it (the norm on the Mac), one that lands after the testhost reached its
+                // wait gets the Break (the norm on zbook). Resume the Break if it comes, so in both orderings the
+                // target is running with no stop pending: the no-stops target this test's hypothesis needs.
+                StopInfo? hold = session.WaitForStop(TimeSpan.FromSeconds(1));
+                if (hold is not null)
+                {
+                    Assert.AreEqual(StopReason.Break, hold.Reason, "The only stop this target can produce is the VSTEST_HOST_DEBUG hold's Break.");
+                    session.Resume();
+                }
                 Thread.Sleep(TimeSpan.FromMilliseconds(500));
             }
 
