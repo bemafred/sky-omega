@@ -22,11 +22,11 @@ dotnet build -c Release
 # Run tests (Microsoft.Testing.Platform — xunit.v3 / MSTest.Sdk)
 dotnet test
 
-# Run specific test
-dotnet test --filter "FullyQualifiedName~BasicSelect"
-
 # Run one project
 dotnet test --project tests/Mercury.Tests
+
+# Run specific test (name the project: under MTP a project matching zero tests exits 8 and fails the run)
+dotnet test --project tests/Mercury.Tests --filter "FullyQualifiedName~BasicSelect"
 
 # Run benchmarks (BenchmarkDotNet)
 dotnet run --project benchmarks/Mercury.Benchmarks -c Release

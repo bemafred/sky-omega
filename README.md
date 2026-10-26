@@ -180,14 +180,14 @@ Mercury is a full SPARQL 1.1 + RDF stack. Every standard listed below is impleme
 
 | Claim                            | Evidence              | Command to Verify                            |
 |----------------------------------|-----------------------|----------------------------------------------|
-| 100% W3C SPARQL 1.1 Query        | 421 passing tests     | `dotnet test --filter "W3C.Sparql.Query"`    |
-| 100% W3C SPARQL 1.1 Update       | 94 passing tests      | `dotnet test --filter "W3C.Sparql.Update"`   |
-| 100% W3C SPARQL 1.1 Syntax       | 103 passing tests     | `dotnet test --filter "W3C.Sparql.Syntax"`   |
-| 100% W3C Turtle / TriG / N-Triples / N-Quads / RDF-XML | 984 passing tests | `dotnet test --filter "W3C"` |
-| 100% W3C JSON-LD 1.1             | 461 passing tests (6 intentional skips: legacy 1.0, generalized RDF) | `dotnet test --filter "W3C.JsonLd"` |
+| 100% W3C SPARQL 1.1 Query        | 225 passing evaluation tests (every test in the 1.1 query manifest) | `dotnet test --project tests/Mercury.Tests --filter "FullyQualifiedName~Sparql11_QueryEval"` |
+| 100% W3C SPARQL 1.1 Update       | 94 passing tests      | `dotnet test --project tests/Mercury.Tests --filter "FullyQualifiedName~Sparql11_UpdateEval"` |
+| 100% W3C SPARQL 1.1 Syntax       | 103 passing tests     | `dotnet test --project tests/Mercury.Tests --filter "FullyQualifiedName~Sparql11_PositiveSyntax\|FullyQualifiedName~Sparql11_NegativeSyntax"` |
+| 100% W3C Turtle / TriG / N-Triples / N-Quads / RDF-XML | 984 passing tests | `dotnet test --project tests/Mercury.Tests --filter "FullyQualifiedName~TurtleConformanceTests\|FullyQualifiedName~TriGConformanceTests\|FullyQualifiedName~NTriplesConformanceTests\|FullyQualifiedName~NQuadsConformanceTests\|FullyQualifiedName~RdfXmlConformanceTests"` |
+| 100% W3C JSON-LD 1.1             | 461 passing tests (6 intentional skips: legacy 1.0, generalized RDF) | `dotnet test --project tests/Mercury.Tests --filter "FullyQualifiedName~JsonLdConformanceTests"` |
 | SPARQL HTTP endpoint             | `mercury` CLI         | `mercury -m` then visit `http://localhost:3031/sparql` |
 | Zero external runtime deps       | Mercury.csproj        | `grep PackageReference src/Mercury/*.csproj` |
-| 4,463 Mercury tests passing      | Test suite            | `dotnet test`                                |
+| 4,722 Mercury tests passing      | Test suite (6 intentional skips) | `dotnet test --project tests/Mercury.Tests` |
 | AI-assisted development          | Git history           | `git log --oneline \| grep "Co-Authored-By"` |
 | Development velocity             | ~197K lines           | See [STATISTICS.md](STATISTICS.md)           |
 

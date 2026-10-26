@@ -167,8 +167,10 @@ See [ADR-010](docs/adrs/mercury/ADR-010-w3c-test-suite-integration.md) for integ
 | Format | Passing | Total | Coverage | Skipped |
 |--------|--------:|------:|---------:|---------|
 | JSON-LD 1.1 | 461 | 467 | **100%** | 6: JSON-LD 1.0 legacy (4), generalized RDF (2) |
-| SPARQL 1.1 Query | 421 | 421 | **100%** | — |
-| **Extended Total** | **882** | **888** | **99%** | |
+| SPARQL 1.1 Query | 225 | 225 | **100%** | — |
+| **Extended Total** | **686** | **692** | **99%** | |
+
+SPARQL 1.1 Query counts the evaluation tests in the W3C 1.1 query manifest (`FullyQualifiedName~Sparql11_QueryEval`). Earlier entries in this file give it as 421; no filter or manifest produces that number, and the closest match is the whole SPARQL conformance class (225 evaluation + 103 syntax + 94 update = 422 today). Corrected 2026-10-26.
 
 ### Skipped Test Categories
 
@@ -182,9 +184,9 @@ See [ADR-010](docs/adrs/mercury/ADR-010-w3c-test-suite-integration.md) for integ
 | Metric | Value |
 |--------|-------|
 | **Core conformance** | 100% (1,181/1,181) |
-| **SPARQL 1.1 Query** | 100% (421/421) |
+| **SPARQL 1.1 Query** | 100% (225/225) |
 | **SPARQL 1.1 Update** | 100% (94/94) |
-| **With optional extensions** | 99% (2,063/2,069) |
+| **With optional extensions** | 99% (1,867/1,873) |
 | **Remaining gaps** | 0 (all high-complexity gaps resolved) |
 
 ## NCrunch (Windows) Compatibility
