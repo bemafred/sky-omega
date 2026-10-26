@@ -218,7 +218,7 @@ SkyOmega.sln
 │   │   ├── Storage/         # B+Tree indexes, atom storage, WAL
 │   │   └── Turtle/          # Streaming RDF Turtle parser
 │   ├── Mercury.Abstractions/ # Shared interfaces and types (RdfFormat, Results)
-│   ├── Mercury.Runtime/     # Runtime utilities (BTreeFile, CrossProcessStoreGate, DiskSpaceGuard, PageCache, ProcessMemoryProbe, TempPath)
+│   ├── Mercury.Runtime/     # Runtime utilities (BTreeFile, CrossProcessStoreGate, DiskSpaceGuard, PageCache, ProcessMemoryProbe, SparseFile, TempPath)
 │   ├── Mercury.Cli/         # Mercury CLI tool (persistent store)
 │   ├── Mercury.Cli.Sparql/  # SPARQL engine CLI (thin shim over Mercury.Sparql.Tool)
 │   ├── Mercury.Cli.Turtle/  # Turtle parser CLI (thin shim over Mercury.Turtle.Tool)

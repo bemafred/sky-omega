@@ -51,8 +51,8 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
             : TemporalKey.CompareEntityFirst;
 
         // In bulk mode, pre-size the file to 256 GB so AllocatePage can extend the
-        // underlying file via SetLength without ever needing to remap. Sparse-file
-        // behavior (APFS, ZFS, NTFS) means disk usage tracks actual touched pages.
+        // underlying file via SetLength without ever needing to remap. The file is
+        // sparse (SparseFile.SetLength), so disk usage tracks actual touched pages.
         // macOS per-process VM ceiling is ~64 TB so 256 GB per index leaves comfortable
         // headroom for full Wikidata. Cognitive mode keeps the original initial — small
         // stores never grow past it, large cognitive stores stay rare.

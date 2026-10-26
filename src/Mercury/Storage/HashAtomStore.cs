@@ -10,6 +10,7 @@ using System.Text;
 using System.Threading;
 using SkyOmega.Mercury.Abstractions;
 using SkyOmega.Mercury.Diagnostics;
+using SkyOmega.Mercury.Runtime;
 using SkyOmega.Mercury.Runtime.Buffers;
 
 namespace SkyOmega.Mercury.Storage;
@@ -182,7 +183,7 @@ internal sealed unsafe class HashAtomStore : IAtomStore
 
         if (_dataFile.Length == 0)
         {
-            _dataFile.SetLength(initialDataSize);
+            SparseFile.SetLength(_dataFile, initialDataSize);
         }
         _dataCapacity = _dataFile.Length;
 
@@ -202,7 +203,7 @@ internal sealed unsafe class HashAtomStore : IAtomStore
         );
 
         // In bulk mode, pre-size the hash table to 256M buckets so it never overflows
-        // during Wikidata-scale ingests. APFS/ZFS/NTFS sparse-file semantics mean physical
+        // during Wikidata-scale ingests. The file is sparse (SparseFile.SetLength), so physical
         // disk usage tracks only touched buckets — the 8 GB virtual file is cheap.
         // Mirrors the sparse-mmap pattern used by TemporalQuadIndex in bulk mode.
         var requestedCapacity = bulkMode
@@ -214,7 +215,7 @@ internal sealed unsafe class HashAtomStore : IAtomStore
         {
             _hashTableSize = requestedCapacity;
             indexSize = _hashTableSize * sizeof(HashBucket);
-            _indexFile.SetLength(indexSize);
+            SparseFile.SetLength(_indexFile, indexSize);
         }
         else
         {
@@ -237,7 +238,7 @@ internal sealed unsafe class HashAtomStore : IAtomStore
         _offsetCapacity = initialOffsetCapacity;
         if (_offsetFile.Length == 0)
         {
-            _offsetFile.SetLength(_offsetCapacity * sizeof(long));
+            SparseFile.SetLength(_offsetFile, _offsetCapacity * sizeof(long));
         }
         else
         {
@@ -690,7 +691,7 @@ internal sealed unsafe class HashAtomStore : IAtomStore
                 // region never transiently exceeds file length.
 
                 // 1. Extend the underlying file length (tracked capacity mirrors it)
-                _dataFile.SetLength(newSize);
+                SparseFile.SetLength(_dataFile, newSize);
                 _dataCapacity = newSize;
                 emittedNewSize = newSize;
 
@@ -761,7 +762,7 @@ internal sealed unsafe class HashAtomStore : IAtomStore
                 // region never transiently exceeds file length.
 
                 // 1. Extend the underlying file length
-                _offsetFile.SetLength(newCapacity * sizeof(long));
+                SparseFile.SetLength(_offsetFile, newCapacity * sizeof(long));
 
                 // 2. Create new map and accessor over the extended file
                 var newMap = MemoryMappedFile.CreateFromFile(
@@ -853,7 +854,7 @@ internal sealed unsafe class HashAtomStore : IAtomStore
                     bufferSize: 4096,
                     FileOptions.RandomAccess))
                 {
-                    newFile.SetLength(newIndexBytes);
+                    SparseFile.SetLength(newFile, newIndexBytes);
 
                     using var newMap = MemoryMappedFile.CreateFromFile(
                         newFile,

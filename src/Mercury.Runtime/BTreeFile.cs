@@ -123,7 +123,7 @@ public sealed unsafe class BTreeFile : IDisposable
             ? Math.Max(initialSizeBytes, bulkModeFloor)
             : initialSizeBytes;
         if (_fileStream.Length == 0)
-            _fileStream.SetLength(actualInitialSize);
+            SparseFile.SetLength(_fileStream, actualInitialSize);
         _fileCapacity = _fileStream.Length;
 
         _mmapFile = MemoryMappedFile.CreateFromFile(
@@ -213,7 +213,7 @@ public sealed unsafe class BTreeFile : IDisposable
                 if (requiredSize > _fileCapacity)
                 {
                     var newSize = Math.Max(_fileCapacity * 2, requiredSize);
-                    _fileStream.SetLength(newSize);
+                    SparseFile.SetLength(_fileStream, newSize);
                     _fileCapacity = newSize;
                 }
             }

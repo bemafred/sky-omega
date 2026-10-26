@@ -7,6 +7,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
+using SkyOmega.Mercury.Runtime;
 using SkyOmega.Mercury.Runtime.Buffers;
 
 namespace SkyOmega.Mercury.Storage;
@@ -113,7 +114,7 @@ internal sealed unsafe class TrigramIndex : IDisposable
         var hashSize = (long)HashTableBuckets * sizeof(HashBucket);
         if (_hashFile.Length == 0)
         {
-            _hashFile.SetLength(hashSize);
+            SparseFile.SetLength(_hashFile, hashSize);
         }
 
         // Open/create posting file
@@ -128,7 +129,7 @@ internal sealed unsafe class TrigramIndex : IDisposable
 
         if (_postingFile.Length == 0)
         {
-            _postingFile.SetLength(InitialPostingSize);
+            SparseFile.SetLength(_postingFile, InitialPostingSize);
         }
 
         // Memory-map files
@@ -754,7 +755,7 @@ internal sealed unsafe class TrigramIndex : IDisposable
             // TemporalQuadIndex). Same fix: SetLength → map → swap → unmap old.
 
             // 1. Extend the underlying file length
-            _postingFile.SetLength(newSize);
+            SparseFile.SetLength(_postingFile, newSize);
 
             // 2. Create new map and accessor over the extended file
             var newMap = MemoryMappedFile.CreateFromFile(
