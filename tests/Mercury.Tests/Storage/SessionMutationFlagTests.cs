@@ -143,15 +143,15 @@ public class SessionMutationFlagTests : IDisposable
         using var readOnly = new QuadStore(dir);
         Assert.False(readOnly.SessionMutated);
 
-        var result = SparqlEngine.Query(readOnly, "SELECT ?s ?o WHERE { ?s <http://ex/knows> ?o }");
+        var result = SparqlEngine.Query(readOnly, "SELECT ?s ?o WHERE { ?s <http://ex/knows> ?o }", TestContext.Current.CancellationToken);
         Assert.True(result.Success, result.ErrorMessage);
         Assert.False(readOnly.SessionMutated);
 
-        var count = SparqlEngine.Query(readOnly, "SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?o }");
+        var count = SparqlEngine.Query(readOnly, "SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?o }", TestContext.Current.CancellationToken);
         Assert.True(count.Success);
         Assert.False(readOnly.SessionMutated);
 
-        var ask = SparqlEngine.Query(readOnly, "ASK { ?s ?p ?o }");
+        var ask = SparqlEngine.Query(readOnly, "ASK { ?s ?p ?o }", TestContext.Current.CancellationToken);
         Assert.True(ask.Success);
         Assert.False(readOnly.SessionMutated);
 
@@ -182,7 +182,7 @@ public class SessionMutationFlagTests : IDisposable
         // After reopen, no replay happens (Reference has no WAL) — flag is false.
         Assert.False(readOnly.SessionMutated);
 
-        var result = SparqlEngine.Query(readOnly, "SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?o }");
+        var result = SparqlEngine.Query(readOnly, "SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?o }", TestContext.Current.CancellationToken);
         Assert.True(result.Success);
         Assert.False(readOnly.SessionMutated);
     }
@@ -243,8 +243,7 @@ public class SessionMutationFlagTests : IDisposable
             var stats = second.GetStatistics();
             Assert.Equal(2, stats.QuadCount);
 
-            var result = SparqlEngine.Query(second,
-                "SELECT ?o WHERE { <http://ex/alice> <http://ex/knows> ?o }");
+            var result = SparqlEngine.Query(second, "SELECT ?o WHERE { <http://ex/alice> <http://ex/knows> ?o }", TestContext.Current.CancellationToken);
             Assert.True(result.Success, result.ErrorMessage);
             Assert.NotNull(result.Rows);
             Assert.Equal(2, result.Rows!.Count);

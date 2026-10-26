@@ -41,8 +41,7 @@ public class PropertyPathRegressionTests : IDisposable
         store.AddCurrent("<http://ex/Q1>", "<http://ex/P31>", "<http://ex/Q2>");
         store.AddCurrent("<http://ex/Q2>", "<http://ex/P279>", "<http://ex/Q3>");
 
-        var result = SparqlEngine.Query(store,
-            "SELECT * WHERE { ?x (<http://ex/P31>/(<http://ex/P279>)*) <http://ex/Q3> }");
+        var result = SparqlEngine.Query(store, "SELECT * WHERE { ?x (<http://ex/P31>/(<http://ex/P279>)*) <http://ex/Q3> }", TestContext.Current.CancellationToken);
 
         // The query should at minimum NOT crash. Result correctness is a separate concern;
         // this test is the regression marker for the planner crash.

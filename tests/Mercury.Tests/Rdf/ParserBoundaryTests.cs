@@ -1,7 +1,6 @@
 using System.Text;
 using SkyOmega.Mercury.Rdf.Turtle;
 using Xunit;
-using Xunit.Abstractions;
 
 namespace SkyOmega.Mercury.Tests.Rdf;
 
@@ -42,7 +41,7 @@ public class ParserBoundaryTests
         await parser.ParseAsync((s, p, o) =>
         {
             triples.Add((s.ToString(), p.ToString(), o.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         foreach (var (s, p, o) in triples)
             _output.WriteLine($"  {s} {p} {o}");
@@ -78,7 +77,7 @@ public class ParserBoundaryTests
         await parser.ParseAsync((s, p, o) =>
         {
             triples.Add((s.ToString(), p.ToString(), o.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         foreach (var (s, p, o) in triples)
             _output.WriteLine($"  {s} {p} {o}");

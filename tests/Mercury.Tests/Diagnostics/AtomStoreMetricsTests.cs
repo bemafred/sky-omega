@@ -216,7 +216,7 @@ public class AtomStoreMetricsTests : IDisposable
 
         for (int i = 0; i < 30; i++) store.AddCurrent("s" + i, "p", "o" + i);
 
-        await Task.Delay(250);
+        await Task.Delay(250, TestContext.Current.CancellationToken);
         jsonl.Flush();
 
         buffer.Position = 0;

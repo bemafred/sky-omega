@@ -2,7 +2,6 @@
 
 using SkyOmega.Mercury.NTriples;
 using Xunit;
-using Xunit.Abstractions;
 
 namespace SkyOmega.Mercury.Tests.W3C;
 
@@ -19,12 +18,12 @@ public class NTriplesConformanceTests
         _output = output;
     }
 
-    [SkippableTheory]
+    [Theory]
     [MemberData(nameof(GetNTriples11PositiveSyntaxTests))]
     public async Task NTriples11_PositiveSyntax(W3CTestCase test)
     {
-        Skip.IfNot(W3CTestContext.IsAvailable, "W3C test suite not available");
-        Skip.IfNot(File.Exists(test.ActionPath), $"Test file not found: {test.ActionPath}");
+        Assert.SkipUnless(W3CTestContext.IsAvailable, "W3C test suite not available");
+        Assert.SkipUnless(File.Exists(test.ActionPath), $"Test file not found: {test.ActionPath}");
 
         _output.WriteLine($"Test: {test.Name}");
         _output.WriteLine($"File: {test.ActionPath}");
@@ -38,17 +37,17 @@ public class NTriplesConformanceTests
         await parser.ParseAsync((s, p, o) =>
         {
             triples.Add((s.ToString(), p.ToString(), o.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         _output.WriteLine($"Parsed {triples.Count} triples");
     }
 
-    [SkippableTheory]
+    [Theory]
     [MemberData(nameof(GetNTriples11NegativeSyntaxTests))]
     public async Task NTriples11_NegativeSyntax(W3CTestCase test)
     {
-        Skip.IfNot(W3CTestContext.IsAvailable, "W3C test suite not available");
-        Skip.IfNot(File.Exists(test.ActionPath), $"Test file not found: {test.ActionPath}");
+        Assert.SkipUnless(W3CTestContext.IsAvailable, "W3C test suite not available");
+        Assert.SkipUnless(File.Exists(test.ActionPath), $"Test file not found: {test.ActionPath}");
 
         _output.WriteLine($"Test: {test.Name}");
         _output.WriteLine($"File: {test.ActionPath}");
@@ -59,7 +58,7 @@ public class NTriplesConformanceTests
 
         var exception = await Assert.ThrowsAnyAsync<Exception>(async () =>
         {
-            await parser.ParseAsync((s, p, o) => { });
+            await parser.ParseAsync((s, p, o) => { }, TestContext.Current.CancellationToken);
         });
 
         _output.WriteLine($"Expected error: {exception.Message}");

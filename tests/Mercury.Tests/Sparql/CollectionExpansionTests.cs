@@ -57,7 +57,7 @@ public class CollectionExpansionTests : IDisposable
     [InlineData("GRAPH path", "SELECT ?a ?b ?c WHERE { GRAPH <urn:g> { <urn:s> <urn:p> ( ?a ?b ?c ) } }")]
     public void Collection_MatchesTheListStructure(string name, string query)
     {
-        var result = SparqlEngine.Query(_store, query);
+        var result = SparqlEngine.Query(_store, query, TestContext.Current.CancellationToken);
         Assert.True(result.Success, $"[{name}] {result.ErrorMessage}");
         var row = Assert.Single(result.Rows!);
         Assert.Equal("\"1\"", row["a"]);
@@ -70,7 +70,7 @@ public class CollectionExpansionTests : IDisposable
     [InlineData("GRAPH path", "SELECT ?x WHERE { GRAPH <urn:g> { ?x <urn:p> () } }")]
     public void EmptyCollection_IsRdfNil(string name, string query)
     {
-        var result = SparqlEngine.Query(_store, query);
+        var result = SparqlEngine.Query(_store, query, TestContext.Current.CancellationToken);
         Assert.True(result.Success, $"[{name}] {result.ErrorMessage}");
         Assert.Equal("<urn:e>", Assert.Single(result.Rows!)["x"]);
     }

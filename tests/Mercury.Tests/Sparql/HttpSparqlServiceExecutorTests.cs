@@ -193,7 +193,7 @@ public class HttpSparqlServiceExecutorTests
         executor.Dispose();
 
         await Assert.ThrowsAsync<ObjectDisposedException>(
-            () => executor.ExecuteSelectAsync("http://example.org/sparql", "SELECT * WHERE { ?s ?p ?o }").AsTask());
+            () => executor.ExecuteSelectAsync("http://example.org/sparql", "SELECT * WHERE { ?s ?p ?o }", TestContext.Current.CancellationToken).AsTask());
     }
 
     [Fact]
@@ -203,7 +203,7 @@ public class HttpSparqlServiceExecutorTests
         executor.Dispose();
 
         await Assert.ThrowsAsync<ObjectDisposedException>(
-            () => executor.ExecuteAskAsync("http://example.org/sparql", "ASK WHERE { ?s ?p ?o }").AsTask());
+            () => executor.ExecuteAskAsync("http://example.org/sparql", "ASK WHERE { ?s ?p ?o }", TestContext.Current.CancellationToken).AsTask());
     }
 
     [Fact]
@@ -268,7 +268,7 @@ public class HttpSparqlServiceExecutorTests
         using var httpClient = new HttpClient(handler);
         using var executor = new HttpSparqlServiceExecutor(httpClient);
 
-        var results = await executor.ExecuteSelectAsync("http://example.org/sparql", "SELECT * WHERE { ?s ?p ?o }");
+        var results = await executor.ExecuteSelectAsync("http://example.org/sparql", "SELECT * WHERE { ?s ?p ?o }", TestContext.Current.CancellationToken);
 
         Assert.Empty(results);
     }
@@ -293,7 +293,7 @@ public class HttpSparqlServiceExecutorTests
         using var httpClient = new HttpClient(handler);
         using var executor = new HttpSparqlServiceExecutor(httpClient);
 
-        var results = await executor.ExecuteSelectAsync("http://example.org/sparql", "SELECT ?s WHERE { ?s ?p ?o }");
+        var results = await executor.ExecuteSelectAsync("http://example.org/sparql", "SELECT ?s WHERE { ?s ?p ?o }", TestContext.Current.CancellationToken);
 
         Assert.Single(results);
         Assert.True(results[0].TryGetBinding("s", out var binding));
@@ -321,7 +321,7 @@ public class HttpSparqlServiceExecutorTests
         using var httpClient = new HttpClient(handler);
         using var executor = new HttpSparqlServiceExecutor(httpClient);
 
-        var results = await executor.ExecuteSelectAsync("http://example.org/sparql", "SELECT ?name WHERE { ?s :name ?name }");
+        var results = await executor.ExecuteSelectAsync("http://example.org/sparql", "SELECT ?name WHERE { ?s :name ?name }", TestContext.Current.CancellationToken);
 
         Assert.Single(results);
         var binding = results[0].GetBinding("name");
@@ -349,7 +349,7 @@ public class HttpSparqlServiceExecutorTests
         using var httpClient = new HttpClient(handler);
         using var executor = new HttpSparqlServiceExecutor(httpClient);
 
-        var results = await executor.ExecuteSelectAsync("http://example.org/sparql", "SELECT ?label WHERE { ?s :label ?label }");
+        var results = await executor.ExecuteSelectAsync("http://example.org/sparql", "SELECT ?label WHERE { ?s :label ?label }", TestContext.Current.CancellationToken);
 
         Assert.Single(results);
         var binding = results[0].GetBinding("label");
@@ -378,7 +378,7 @@ public class HttpSparqlServiceExecutorTests
         using var httpClient = new HttpClient(handler);
         using var executor = new HttpSparqlServiceExecutor(httpClient);
 
-        var results = await executor.ExecuteSelectAsync("http://example.org/sparql", "SELECT ?age WHERE { ?s :age ?age }");
+        var results = await executor.ExecuteSelectAsync("http://example.org/sparql", "SELECT ?age WHERE { ?s :age ?age }", TestContext.Current.CancellationToken);
 
         Assert.Single(results);
         var binding = results[0].GetBinding("age");
@@ -407,7 +407,7 @@ public class HttpSparqlServiceExecutorTests
         using var httpClient = new HttpClient(handler);
         using var executor = new HttpSparqlServiceExecutor(httpClient);
 
-        var results = await executor.ExecuteSelectAsync("http://example.org/sparql", "SELECT ?b WHERE { ?b :p :o }");
+        var results = await executor.ExecuteSelectAsync("http://example.org/sparql", "SELECT ?b WHERE { ?b :p :o }", TestContext.Current.CancellationToken);
 
         Assert.Single(results);
         var binding = results[0].GetBinding("b");
@@ -439,7 +439,7 @@ public class HttpSparqlServiceExecutorTests
         using var httpClient = new HttpClient(handler);
         using var executor = new HttpSparqlServiceExecutor(httpClient);
 
-        var results = await executor.ExecuteSelectAsync("http://example.org/sparql", "SELECT * WHERE { ?s ?p ?o }");
+        var results = await executor.ExecuteSelectAsync("http://example.org/sparql", "SELECT * WHERE { ?s ?p ?o }", TestContext.Current.CancellationToken);
 
         Assert.Single(results);
         Assert.Equal(3, results[0].Count);
@@ -470,7 +470,7 @@ public class HttpSparqlServiceExecutorTests
         using var httpClient = new HttpClient(handler);
         using var executor = new HttpSparqlServiceExecutor(httpClient);
 
-        var results = await executor.ExecuteSelectAsync("http://example.org/sparql", "SELECT ?name WHERE { ?s :name ?name }");
+        var results = await executor.ExecuteSelectAsync("http://example.org/sparql", "SELECT ?name WHERE { ?s :name ?name }", TestContext.Current.CancellationToken);
 
         Assert.Equal(3, results.Count);
         Assert.Equal("Alice", results[0].GetBinding("name").Value);
@@ -500,7 +500,7 @@ public class HttpSparqlServiceExecutorTests
         using var httpClient = new HttpClient(handler);
         using var executor = new HttpSparqlServiceExecutor(httpClient);
 
-        var results = await executor.ExecuteSelectAsync("http://example.org/sparql", "SELECT ?s ?name WHERE { ?s a :Person . OPTIONAL { ?s :name ?name } }");
+        var results = await executor.ExecuteSelectAsync("http://example.org/sparql", "SELECT ?s ?name WHERE { ?s a :Person . OPTIONAL { ?s :name ?name } }", TestContext.Current.CancellationToken);
 
         Assert.Equal(2, results.Count);
         Assert.Equal(1, results[0].Count); // Only s bound
@@ -518,7 +518,7 @@ public class HttpSparqlServiceExecutorTests
         using var httpClient = new HttpClient(handler);
         using var executor = new HttpSparqlServiceExecutor(httpClient);
 
-        var results = await executor.ExecuteSelectAsync("http://example.org/sparql", "SELECT * WHERE { ?s ?p ?o }");
+        var results = await executor.ExecuteSelectAsync("http://example.org/sparql", "SELECT * WHERE { ?s ?p ?o }", TestContext.Current.CancellationToken);
 
         Assert.Empty(results);
     }
@@ -534,7 +534,7 @@ public class HttpSparqlServiceExecutorTests
         using var httpClient = new HttpClient(handler);
         using var executor = new HttpSparqlServiceExecutor(httpClient);
 
-        var results = await executor.ExecuteSelectAsync("http://example.org/sparql", "SELECT * WHERE { ?s ?p ?o }");
+        var results = await executor.ExecuteSelectAsync("http://example.org/sparql", "SELECT * WHERE { ?s ?p ?o }", TestContext.Current.CancellationToken);
 
         Assert.Empty(results);
     }
@@ -554,7 +554,7 @@ public class HttpSparqlServiceExecutorTests
         using var httpClient = new HttpClient(handler);
         using var executor = new HttpSparqlServiceExecutor(httpClient);
 
-        var result = await executor.ExecuteAskAsync("http://example.org/sparql", "ASK WHERE { ?s ?p ?o }");
+        var result = await executor.ExecuteAskAsync("http://example.org/sparql", "ASK WHERE { ?s ?p ?o }", TestContext.Current.CancellationToken);
 
         Assert.True(result);
     }
@@ -570,7 +570,7 @@ public class HttpSparqlServiceExecutorTests
         using var httpClient = new HttpClient(handler);
         using var executor = new HttpSparqlServiceExecutor(httpClient);
 
-        var result = await executor.ExecuteAskAsync("http://example.org/sparql", "ASK WHERE { ?s ?p ?o }");
+        var result = await executor.ExecuteAskAsync("http://example.org/sparql", "ASK WHERE { ?s ?p ?o }", TestContext.Current.CancellationToken);
 
         Assert.False(result);
     }
@@ -586,7 +586,7 @@ public class HttpSparqlServiceExecutorTests
         using var httpClient = new HttpClient(handler);
         using var executor = new HttpSparqlServiceExecutor(httpClient);
 
-        var result = await executor.ExecuteAskAsync("http://example.org/sparql", "ASK WHERE { ?s ?p ?o }");
+        var result = await executor.ExecuteAskAsync("http://example.org/sparql", "ASK WHERE { ?s ?p ?o }", TestContext.Current.CancellationToken);
 
         Assert.False(result);
     }
@@ -606,7 +606,7 @@ public class HttpSparqlServiceExecutorTests
         using var httpClient = new HttpClient(handler);
         using var executor = new HttpSparqlServiceExecutor(httpClient);
 
-        await executor.ExecuteSelectAsync("http://example.org/sparql", "SELECT * WHERE { ?s ?p ?o }");
+        await executor.ExecuteSelectAsync("http://example.org/sparql", "SELECT * WHERE { ?s ?p ?o }", TestContext.Current.CancellationToken);
 
         Assert.NotNull(handler.LastRequestUri);
         Assert.StartsWith("http://example.org/sparql?query=", handler.LastRequestUri);
@@ -624,7 +624,7 @@ public class HttpSparqlServiceExecutorTests
         using var httpClient = new HttpClient(handler);
         using var executor = new HttpSparqlServiceExecutor(httpClient);
 
-        await executor.ExecuteSelectAsync("http://example.org/sparql?default-graph-uri=http://example.org/graph", "SELECT * WHERE { ?s ?p ?o }");
+        await executor.ExecuteSelectAsync("http://example.org/sparql?default-graph-uri=http://example.org/graph", "SELECT * WHERE { ?s ?p ?o }", TestContext.Current.CancellationToken);
 
         Assert.NotNull(handler.LastRequestUri);
         Assert.Contains("default-graph-uri=", handler.LastRequestUri);
@@ -642,7 +642,7 @@ public class HttpSparqlServiceExecutorTests
         using var httpClient = new HttpClient(handler);
         using var executor = new HttpSparqlServiceExecutor(httpClient);
 
-        await executor.ExecuteSelectAsync("http://example.org/sparql", "SELECT * WHERE { ?s ?p ?o }");
+        await executor.ExecuteSelectAsync("http://example.org/sparql", "SELECT * WHERE { ?s ?p ?o }", TestContext.Current.CancellationToken);
 
         Assert.NotNull(handler.LastRequestUri);
         // Query should be URL encoded - spaces become + and braces should be encoded
@@ -669,7 +669,7 @@ public class HttpSparqlServiceExecutorTests
         using var executor = new HttpSparqlServiceExecutor(httpClient);
 
         var ex = await Assert.ThrowsAsync<SparqlServiceException>(
-            () => executor.ExecuteSelectAsync("http://example.org/sparql", "SELECT * WHERE { ?s ?p ?o }").AsTask());
+            () => executor.ExecuteSelectAsync("http://example.org/sparql", "SELECT * WHERE { ?s ?p ?o }", TestContext.Current.CancellationToken).AsTask());
 
         Assert.Contains("HTTP request", ex.Message);
         Assert.Equal("http://example.org/sparql", ex.EndpointUri);
@@ -688,7 +688,7 @@ public class HttpSparqlServiceExecutorTests
         using var executor = new HttpSparqlServiceExecutor(httpClient);
 
         var ex = await Assert.ThrowsAsync<SparqlServiceException>(
-            () => executor.ExecuteSelectAsync("http://example.org/sparql", "SELECT * WHERE { ?s ?p ?o }").AsTask());
+            () => executor.ExecuteSelectAsync("http://example.org/sparql", "SELECT * WHERE { ?s ?p ?o }", TestContext.Current.CancellationToken).AsTask());
 
         Assert.Contains("parse SPARQL results JSON", ex.Message);
     }
@@ -705,7 +705,7 @@ public class HttpSparqlServiceExecutorTests
         using var executor = new HttpSparqlServiceExecutor(httpClient);
 
         var ex = await Assert.ThrowsAsync<SparqlServiceException>(
-            () => executor.ExecuteSelectAsync("http://example.org/sparql", "SELECT * WHERE { ?s ?p ?o }").AsTask());
+            () => executor.ExecuteSelectAsync("http://example.org/sparql", "SELECT * WHERE { ?s ?p ?o }", TestContext.Current.CancellationToken).AsTask());
 
         Assert.Contains("HTTP request", ex.Message);
         Assert.NotNull(ex.InnerException);
@@ -724,7 +724,7 @@ public class HttpSparqlServiceExecutorTests
         using var executor = new HttpSparqlServiceExecutor(httpClient);
 
         var ex = await Assert.ThrowsAsync<SparqlServiceException>(
-            () => executor.ExecuteAskAsync("http://example.org/sparql", "ASK WHERE { ?s ?p ?o }").AsTask());
+            () => executor.ExecuteAskAsync("http://example.org/sparql", "ASK WHERE { ?s ?p ?o }", TestContext.Current.CancellationToken).AsTask());
 
         Assert.Equal("http://example.org/sparql", ex.EndpointUri);
         Assert.Equal("ASK WHERE { ?s ?p ?o }", ex.Query);
@@ -742,7 +742,7 @@ public class HttpSparqlServiceExecutorTests
         using var executor = new HttpSparqlServiceExecutor(httpClient);
 
         var ex = await Assert.ThrowsAsync<SparqlServiceException>(
-            () => executor.ExecuteAskAsync("http://example.org/sparql", "ASK WHERE { ?s ?p ?o }").AsTask());
+            () => executor.ExecuteAskAsync("http://example.org/sparql", "ASK WHERE { ?s ?p ?o }", TestContext.Current.CancellationToken).AsTask());
 
         Assert.Contains("parse SPARQL results JSON", ex.Message);
     }

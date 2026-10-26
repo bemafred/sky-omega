@@ -6,6 +6,7 @@
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
+    <OutputType>Exe</OutputType>
     <RootNamespace>SkyOmega.Mercury.Tests</RootNamespace>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <!-- Absolute paths to W3C test submodules, embedded at build time via AssemblyMetadata -->
@@ -32,10 +33,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.*" />
-    <PackageReference Include="xunit" Version="2.*" />
-    <PackageReference Include="xunit.runner.visualstudio" Version="2.*" />
-    <PackageReference Include="Xunit.SkippableFact" Version="1.*" />
+    <PackageReference Include="xunit.v3" Version="4.0.2" />
   </ItemGroup>
 
   <ItemGroup>

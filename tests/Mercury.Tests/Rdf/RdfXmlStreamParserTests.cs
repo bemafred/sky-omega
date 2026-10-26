@@ -35,7 +35,7 @@ public class RdfXmlStreamParserTests
         await parser.ParseAsync((s, p, o) =>
         {
             triples.Add((s.ToString(), p.ToString(), o.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         Assert.Single(triples);
         Assert.Equal("<http://example.org/subject>", triples[0].S);
@@ -64,7 +64,7 @@ public class RdfXmlStreamParserTests
         var parser = new RdfXmlStreamParser(stream);
 
         int count = 0;
-        await parser.ParseAsync((s, p, o) => count++);
+        await parser.ParseAsync((s, p, o) => count++, TestContext.Current.CancellationToken);
 
         Assert.Equal(3, count);
     }
@@ -93,7 +93,7 @@ public class RdfXmlStreamParserTests
         await parser.ParseAsync((s, p, o) =>
         {
             triples.Add((s.ToString(), p.ToString(), o.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         Assert.Equal(2, triples.Count);
 
@@ -134,7 +134,7 @@ public class RdfXmlStreamParserTests
         await parser.ParseAsync((s, p, o) =>
         {
             triples.Add((s.ToString(), p.ToString(), o.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         Assert.Single(triples);
         Assert.Equal("\"Hello World\"", triples[0].O);
@@ -161,7 +161,7 @@ public class RdfXmlStreamParserTests
         await parser.ParseAsync((s, p, o) =>
         {
             triples.Add((s.ToString(), p.ToString(), o.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         Assert.Single(triples);
         Assert.Contains("42", triples[0].O);
@@ -188,7 +188,7 @@ public class RdfXmlStreamParserTests
         await parser.ParseAsync((s, p, o) =>
         {
             triples.Add((s.ToString(), p.ToString(), o.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         Assert.Single(triples);
         Assert.Contains("Hello", triples[0].O);
@@ -219,7 +219,7 @@ public class RdfXmlStreamParserTests
         await parser.ParseAsync((s, p, o) =>
         {
             triples.Add((s.ToString(), p.ToString(), o.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         Assert.Single(triples);
         Assert.StartsWith("_:b1", triples[0].S);
@@ -245,7 +245,7 @@ public class RdfXmlStreamParserTests
         await parser.ParseAsync((s, p, o) =>
         {
             triples.Add((s.ToString(), p.ToString(), o.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         Assert.Single(triples);
         Assert.StartsWith("_:b", triples[0].S);
@@ -278,7 +278,7 @@ public class RdfXmlStreamParserTests
         await parser.ParseAsync((s, p, o) =>
         {
             triples.Add((s.ToString(), p.ToString(), o.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         // Should have 3 triples:
         // 1. subject -> address -> blank node
@@ -315,7 +315,7 @@ public class RdfXmlStreamParserTests
         await parser.ParseAsync((s, p, o) =>
         {
             triples.Add((s.ToString(), p.ToString(), o.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         Assert.Single(triples);
         Assert.Contains("XMLLiteral", triples[0].O);
@@ -349,7 +349,7 @@ public class RdfXmlStreamParserTests
         await parser.ParseAsync((s, p, o) =>
         {
             triples.Add((s.ToString(), p.ToString(), o.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         // Should have 2 triples:
         // 1. alice -> knows -> bob
@@ -391,7 +391,7 @@ public class RdfXmlStreamParserTests
         await parser.ParseAsync((s, p, o) =>
         {
             triples.Add((s.ToString(), p.ToString(), o.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         Assert.Single(triples);
         // The literal should contain decoded entities
@@ -420,7 +420,7 @@ public class RdfXmlStreamParserTests
         await parser.ParseAsync((s, p, o) =>
         {
             triples.Add((s.ToString(), p.ToString(), o.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         Assert.Single(triples);
         // &#233; is 'é'
@@ -444,7 +444,7 @@ public class RdfXmlStreamParserTests
         var parser = new RdfXmlStreamParser(stream);
 
         int count = 0;
-        await parser.ParseAsync((s, p, o) => count++);
+        await parser.ParseAsync((s, p, o) => count++, TestContext.Current.CancellationToken);
 
         Assert.Equal(0, count);
     }
@@ -469,7 +469,7 @@ public class RdfXmlStreamParserTests
         await parser.ParseAsync((s, p, o) =>
         {
             triples.Add((s.ToString(), p.ToString(), o.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         Assert.Single(triples);
         Assert.Equal("<http://example.org/o>", triples[0].O);
@@ -497,7 +497,7 @@ public class RdfXmlStreamParserTests
         await parser.ParseAsync((s, p, o) =>
         {
             triples.Add((s.ToString(), p.ToString(), o.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         Assert.Single(triples);
     }
@@ -526,7 +526,7 @@ public class RdfXmlStreamParserTests
         var parser = new RdfXmlStreamParser(stream, bufferSize: 4096); // Small buffer
 
         int count = 0;
-        await parser.ParseAsync((s, p, o) => count++);
+        await parser.ParseAsync((s, p, o) => count++, TestContext.Current.CancellationToken);
 
         Assert.Equal(1000, count);
     }
@@ -556,7 +556,7 @@ public class RdfXmlStreamParserTests
         await parser.ParseAsync((s, p, o) =>
         {
             triples.Add((s.ToString(), p.ToString(), o.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         Assert.Equal(2, triples.Count);
         Assert.Contains(triples, t => t.P.Contains("name") && t.O.Contains("Alice"));

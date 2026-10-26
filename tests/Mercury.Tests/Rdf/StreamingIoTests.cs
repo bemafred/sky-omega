@@ -117,9 +117,9 @@ public class StreamingIoTests : IDisposable
         Assert.Equal(1000, count);
 
         // Verify data is queryable — spot-check first and last triple
-        var q1 = SparqlEngine.Query(store, "ASK { <http://example.org/s0> <http://example.org/p> \"value-0\" }");
+        var q1 = SparqlEngine.Query(store, "ASK { <http://example.org/s0> <http://example.org/p> \"value-0\" }", TestContext.Current.CancellationToken);
         Assert.True(q1.AskResult);
-        var q2 = SparqlEngine.Query(store, "ASK { <http://example.org/s999> <http://example.org/p> \"value-999\" }");
+        var q2 = SparqlEngine.Query(store, "ASK { <http://example.org/s999> <http://example.org/p> \"value-999\" }", TestContext.Current.CancellationToken);
         Assert.True(q2.AskResult);
     }
 
@@ -161,7 +161,7 @@ public class StreamingIoTests : IDisposable
         await using (var output = File.Create(gzPath))
         await using (var gz = new GZipStream(output, CompressionLevel.Fastest))
         {
-            await input.CopyToAsync(gz);
+            await input.CopyToAsync(gz, TestContext.Current.CancellationToken);
         }
 
         var count = await RdfEngine.LoadFileAsync(store, gzPath);

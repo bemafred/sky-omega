@@ -73,7 +73,7 @@ public class RdfEngineTests : PooledStoreTestBase
 
         Assert.Equal(2, count);
 
-        var query = SparqlEngine.Query(Store, "ASK { <http://example.org/alice> <http://example.org/name> \"Alice\" }");
+        var query = SparqlEngine.Query(Store, "ASK { <http://example.org/alice> <http://example.org/name> \"Alice\" }", TestContext.Current.CancellationToken);
         Assert.True(query.AskResult);
     }
 
@@ -241,7 +241,7 @@ public class RdfEngineTests : PooledStoreTestBase
             var sb = new StringBuilder();
             for (int i = 0; i < 50; i++)
                 sb.Append($"<http://test/rdfengine/limit-file/s{i}> <http://ex/p> \"v{i}\" .\n");
-            await File.WriteAllTextAsync(path, sb.ToString());
+            await File.WriteAllTextAsync(path, sb.ToString(), TestContext.Current.CancellationToken);
 
             var count = await RdfEngine.LoadFileAsync(Store, path, limit: 15);
 
@@ -263,12 +263,12 @@ public class RdfEngineTests : PooledStoreTestBase
             var sb = new StringBuilder();
             for (int i = 0; i < 40; i++)
                 sb.Append($"<http://test/rdfengine/convert-limit/s{i}> <http://ex/p> \"v{i}\" .\n");
-            await File.WriteAllTextAsync(inPath, sb.ToString());
+            await File.WriteAllTextAsync(inPath, sb.ToString(), TestContext.Current.CancellationToken);
 
             var count = await RdfEngine.ConvertAsync(inPath, outPath, limit: 12);
             Assert.Equal(12, count);
 
-            var outputLines = (await File.ReadAllLinesAsync(outPath))
+            var outputLines = (await File.ReadAllLinesAsync(outPath, TestContext.Current.CancellationToken))
                 .Count(l => l.TrimEnd().EndsWith(" ."));
             Assert.Equal(12, outputLines);
         }
@@ -297,7 +297,7 @@ public class RdfEngineTests : PooledStoreTestBase
         await RdfEngine.ParseAsync(stream, RdfFormat.Turtle, (s, p, o) =>
         {
             triples.Add((s.ToString(), p.ToString(), o.ToString()));
-        });
+        }, ct: TestContext.Current.CancellationToken);
 
         Assert.Single(triples);
         Assert.Equal("<http://example.org/alice>", triples[0].Item1);
@@ -312,7 +312,7 @@ public class RdfEngineTests : PooledStoreTestBase
             """;
 
         await using var stream = new MemoryStream(Encoding.UTF8.GetBytes(nt));
-        var triples = await RdfEngine.ParseTriplesAsync(stream, RdfFormat.NTriples);
+        var triples = await RdfEngine.ParseTriplesAsync(stream, RdfFormat.NTriples, ct: TestContext.Current.CancellationToken);
 
         Assert.Equal(2, triples.Count);
         Assert.Equal("<http://ex/s1>", triples[0].Subject);

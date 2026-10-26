@@ -88,7 +88,7 @@ public class LoadExecutorTests : IDisposable
         using var client = new HttpClient(handler);
         using var executor = new LoadExecutor(client);
 
-        var result = await executor.ExecuteAsync(uri, null, false, store);
+        var result = await executor.ExecuteAsync(uri, null, false, store, TestContext.Current.CancellationToken);
 
         Assert.True(result.Success, result.ErrorMessage);
         Assert.Equal(1, result.AffectedCount);
@@ -112,7 +112,7 @@ public class LoadExecutorTests : IDisposable
         using var client = new HttpClient(handler);
         using var executor = new LoadExecutor(client);
 
-        var result = await executor.ExecuteAsync("http://example.org/data.ttl", null, false, store);
+        var result = await executor.ExecuteAsync("http://example.org/data.ttl", null, false, store, TestContext.Current.CancellationToken);
 
         Assert.True(result.Success);
         Assert.Equal(2, result.AffectedCount);
@@ -132,7 +132,7 @@ public class LoadExecutorTests : IDisposable
         using var client = new HttpClient(handler);
         using var executor = new LoadExecutor(client);
 
-        var result = await executor.ExecuteAsync("http://example.org/data.nt", null, false, store);
+        var result = await executor.ExecuteAsync("http://example.org/data.nt", null, false, store, TestContext.Current.CancellationToken);
 
         Assert.True(result.Success);
         Assert.Equal(3, result.AffectedCount);
@@ -157,7 +157,7 @@ public class LoadExecutorTests : IDisposable
         using var client = new HttpClient(handler);
         using var executor = new LoadExecutor(client);
 
-        var result = await executor.ExecuteAsync("http://example.org/data.rdf", null, false, store);
+        var result = await executor.ExecuteAsync("http://example.org/data.rdf", null, false, store, TestContext.Current.CancellationToken);
 
         Assert.True(result.Success);
         Assert.Equal(2, result.AffectedCount);
@@ -174,7 +174,7 @@ public class LoadExecutorTests : IDisposable
         using var client = new HttpClient(handler);
         using var executor = new LoadExecutor(client);
 
-        var result = await executor.ExecuteAsync("http://example.org/data.ttl", graphUri, false, store);
+        var result = await executor.ExecuteAsync("http://example.org/data.ttl", graphUri, false, store, TestContext.Current.CancellationToken);
 
         Assert.True(result.Success);
         Assert.Equal(1, result.AffectedCount);
@@ -212,7 +212,7 @@ public class LoadExecutorTests : IDisposable
         using var client = new HttpClient(handler);
         using var executor = new LoadExecutor(client);
 
-        var result = await executor.ExecuteAsync("http://example.org/missing.ttl", null, false, store);
+        var result = await executor.ExecuteAsync("http://example.org/missing.ttl", null, false, store, TestContext.Current.CancellationToken);
 
         Assert.False(result.Success);
         Assert.Contains("HTTP", result.ErrorMessage);
@@ -226,7 +226,7 @@ public class LoadExecutorTests : IDisposable
         using var client = new HttpClient(handler);
         using var executor = new LoadExecutor(client);
 
-        var result = await executor.ExecuteAsync("http://example.org/missing.ttl", null, silent: true, store);
+        var result = await executor.ExecuteAsync("http://example.org/missing.ttl", null, silent: true, store, ct: TestContext.Current.CancellationToken);
 
         Assert.True(result.Success);
         Assert.Equal(0, result.AffectedCount);
@@ -242,7 +242,7 @@ public class LoadExecutorTests : IDisposable
         using var client = new HttpClient(handler);
         using var executor = new LoadExecutor(client);
 
-        var result = await executor.ExecuteAsync("http://example.org/bad.ttl", null, false, store);
+        var result = await executor.ExecuteAsync("http://example.org/bad.ttl", null, false, store, TestContext.Current.CancellationToken);
 
         Assert.False(result.Success);
     }
@@ -257,7 +257,7 @@ public class LoadExecutorTests : IDisposable
         using var client = new HttpClient(handler);
         using var executor = new LoadExecutor(client);
 
-        var result = await executor.ExecuteAsync("http://example.org/bad.ttl", null, silent: true, store);
+        var result = await executor.ExecuteAsync("http://example.org/bad.ttl", null, silent: true, store, ct: TestContext.Current.CancellationToken);
 
         Assert.True(result.Success);
         Assert.Equal(0, result.AffectedCount);
@@ -283,7 +283,7 @@ public class LoadExecutorTests : IDisposable
         using var client = new HttpClient(handler);
         using var executor = new LoadExecutor(client, options);
 
-        var result = await executor.ExecuteAsync("http://example.org/large.ttl", null, false, store);
+        var result = await executor.ExecuteAsync("http://example.org/large.ttl", null, false, store, TestContext.Current.CancellationToken);
 
         Assert.False(result.Success);
         Assert.Contains("exceeds maximum", result.ErrorMessage);
@@ -308,7 +308,7 @@ public class LoadExecutorTests : IDisposable
         using var client = new HttpClient(handler);
         using var executor = new LoadExecutor(client, options);
 
-        var result = await executor.ExecuteAsync("http://example.org/data.ttl", null, false, store);
+        var result = await executor.ExecuteAsync("http://example.org/data.ttl", null, false, store, TestContext.Current.CancellationToken);
 
         Assert.False(result.Success);
         Assert.Contains("exceeded", result.ErrorMessage);
@@ -337,7 +337,7 @@ public class LoadExecutorTests : IDisposable
         using var client = new HttpClient(handler);
         using var executor = new LoadExecutor(client, options);
 
-        var result = await executor.ExecuteAsync("http://example.org/data.nt", null, false, store);
+        var result = await executor.ExecuteAsync("http://example.org/data.nt", null, false, store, TestContext.Current.CancellationToken);
 
         Assert.False(result.Success);
         Assert.Contains("limit", result.ErrorMessage, StringComparison.OrdinalIgnoreCase);
@@ -361,7 +361,7 @@ public class LoadExecutorTests : IDisposable
         using var client = new HttpClient(handler);
         using var executor = new LoadExecutor(client, options);
 
-        var result = await executor.ExecuteAsync("http://example.org/data.nt", null, false, store);
+        var result = await executor.ExecuteAsync("http://example.org/data.nt", null, false, store, TestContext.Current.CancellationToken);
 
         Assert.True(result.Success);
         Assert.Equal(5, result.AffectedCount);
@@ -415,7 +415,7 @@ public class LoadExecutorTests : IDisposable
         executor.Dispose();
 
         await Assert.ThrowsAsync<ObjectDisposedException>(async () =>
-            await executor.ExecuteAsync("http://example.org/data.ttl", null, false, store));
+            await executor.ExecuteAsync("http://example.org/data.ttl", null, false, store, TestContext.Current.CancellationToken));
     }
 
     [Fact]
@@ -524,7 +524,7 @@ public class LoadExecutorStressTests : IDisposable
         using var client = new HttpClient(handler);
         using var executor = new LoadExecutor(client, options);
 
-        var result = await executor.ExecuteAsync("http://stress.test/data.nt", null, false, store);
+        var result = await executor.ExecuteAsync("http://stress.test/data.nt", null, false, store, TestContext.Current.CancellationToken);
 
         // This SHOULD fail - we're intentionally exceeding the limit
         Assert.False(result.Success);
@@ -555,7 +555,7 @@ public class LoadExecutorStressTests : IDisposable
         using var client = new HttpClient(handler);
         using var executor = new LoadExecutor(client, options);
 
-        var result = await executor.ExecuteAsync("http://stress.test/data.nt", null, false, store);
+        var result = await executor.ExecuteAsync("http://stress.test/data.nt", null, false, store, TestContext.Current.CancellationToken);
 
         // This SHOULD fail - we're intentionally exceeding the limit
         Assert.False(result.Success);
@@ -583,7 +583,7 @@ public class LoadExecutorStressTests : IDisposable
         using var client = new HttpClient(handler);
         using var executor = new LoadExecutor(client);
 
-        var result = await executor.ExecuteAsync("http://stress.test/bad.ttl", null, false, store);
+        var result = await executor.ExecuteAsync("http://stress.test/bad.ttl", null, false, store, TestContext.Current.CancellationToken);
 
         // Should fail gracefully, not crash
         Assert.False(result.Success);
@@ -619,7 +619,7 @@ public class LoadExecutorStressTests : IDisposable
         using var client = new HttpClient(handler);
         using var executor = new LoadExecutor(client, options);
 
-        var result = await executor.ExecuteAsync("http://stress.test/nested.ttl", null, false, store);
+        var result = await executor.ExecuteAsync("http://stress.test/nested.ttl", null, false, store, TestContext.Current.CancellationToken);
 
         // Should either succeed or fail gracefully with a clear error
         // Deep nesting might hit parser limits
@@ -645,7 +645,7 @@ public class LoadExecutorStressTests : IDisposable
         using var client = new HttpClient(handler);
         using var executor = new LoadExecutor(client);
 
-        var result = await executor.ExecuteAsync("http://stress.test/longiri.ttl", null, false, store);
+        var result = await executor.ExecuteAsync("http://stress.test/longiri.ttl", null, false, store, TestContext.Current.CancellationToken);
 
         // Should succeed - 4KB is within parser buffer limits
         Assert.True(result.Success, result.ErrorMessage);
@@ -666,7 +666,7 @@ public class LoadExecutorStressTests : IDisposable
         using var client = new HttpClient(handler);
         using var executor = new LoadExecutor(client);
 
-        var result = await executor.ExecuteAsync("http://stress.test/huge.ttl", null, false, store);
+        var result = await executor.ExecuteAsync("http://stress.test/huge.ttl", null, false, store, TestContext.Current.CancellationToken);
 
         Assert.True(result.Success, result.ErrorMessage);
     }
@@ -686,7 +686,7 @@ public class LoadExecutorStressTests : IDisposable
         using var client = new HttpClient(handler);
         using var executor = new LoadExecutor(client);
 
-        var result = await executor.ExecuteAsync("http://stress.test/longliteral.ttl", null, false, store);
+        var result = await executor.ExecuteAsync("http://stress.test/longliteral.ttl", null, false, store, TestContext.Current.CancellationToken);
 
         // Should succeed - 4KB is within parser buffer limits
         Assert.True(result.Success, result.ErrorMessage);
@@ -706,7 +706,7 @@ public class LoadExecutorStressTests : IDisposable
         using var client = new HttpClient(handler);
         using var executor = new LoadExecutor(client);
 
-        var result = await executor.ExecuteAsync("http://stress.test/longliteral.ttl", null, false, store);
+        var result = await executor.ExecuteAsync("http://stress.test/longliteral.ttl", null, false, store, TestContext.Current.CancellationToken);
 
         Assert.True(result.Success, result.ErrorMessage);
     }
@@ -789,7 +789,7 @@ public class LoadExecutorStressTests : IDisposable
         using var client = new HttpClient(handler);
         using var executor = new LoadExecutor(client);
 
-        var result = await executor.ExecuteAsync("http://stress.test/empty.ttl", null, false, store);
+        var result = await executor.ExecuteAsync("http://stress.test/empty.ttl", null, false, store, TestContext.Current.CancellationToken);
 
         Assert.True(result.Success);
         Assert.Equal(0, result.AffectedCount);
@@ -811,7 +811,7 @@ public class LoadExecutorStressTests : IDisposable
         using var client = new HttpClient(handler);
         using var executor = new LoadExecutor(client);
 
-        var result = await executor.ExecuteAsync("http://stress.test/comments.ttl", null, false, store);
+        var result = await executor.ExecuteAsync("http://stress.test/comments.ttl", null, false, store, TestContext.Current.CancellationToken);
 
         Assert.True(result.Success);
         Assert.Equal(0, result.AffectedCount);
@@ -836,7 +836,7 @@ public class LoadExecutorStressTests : IDisposable
         using var client = new HttpClient(handler);
         using var executor = new LoadExecutor(client);
 
-        var result = await executor.ExecuteAsync("http://stress.test/unicode.ttl", null, false, store);
+        var result = await executor.ExecuteAsync("http://stress.test/unicode.ttl", null, false, store, TestContext.Current.CancellationToken);
 
         Assert.True(result.Success, result.ErrorMessage);
         Assert.Equal(5, result.AffectedCount);
@@ -856,7 +856,7 @@ public class LoadExecutorStressTests : IDisposable
         using var client = new HttpClient(handler);
         using var executor = new LoadExecutor(client);
 
-        var result = await executor.ExecuteAsync("http://stress.test/binary.ttl", null, false, store);
+        var result = await executor.ExecuteAsync("http://stress.test/binary.ttl", null, false, store, TestContext.Current.CancellationToken);
 
         // Should either succeed (parser handles it) or fail gracefully
         // Null bytes in string literals are technically invalid
@@ -893,11 +893,7 @@ public class LoadExecutorStressTests : IDisposable
             using var client = new HttpClient(handler);
             using var executor = new LoadExecutor(client, options);
 
-            var result = await executor.ExecuteAsync(
-                $"http://rapid.test/batch{i}.ttl",
-                $"http://rapid.test/graph{i}",
-                false,
-                store);
+            var result = await executor.ExecuteAsync($"http://rapid.test/batch{i}.ttl", $"http://rapid.test/graph{i}", false, store, TestContext.Current.CancellationToken);
 
             Assert.True(result.Success, $"Iteration {i} failed: {result.ErrorMessage}");
         }
@@ -922,7 +918,7 @@ public class LoadExecutorStressTests : IDisposable
         using var client = new HttpClient(handler);
         using var executor = new LoadExecutor(client, options);
 
-        var result = await executor.ExecuteAsync("http://unlimited.test/data.nt", null, false, store);
+        var result = await executor.ExecuteAsync("http://unlimited.test/data.nt", null, false, store, TestContext.Current.CancellationToken);
 
         Assert.True(result.Success, result.ErrorMessage);
         Assert.Equal(5000, result.AffectedCount);

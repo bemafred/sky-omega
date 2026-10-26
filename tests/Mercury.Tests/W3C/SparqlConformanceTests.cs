@@ -7,7 +7,6 @@ using SkyOmega.Mercury.Storage;
 using SkyOmega.Mercury.Rdf.Turtle;
 using SkyOmega.Mercury.Tests.Fixtures;
 using Xunit;
-using Xunit.Abstractions;
 
 namespace SkyOmega.Mercury.Tests.W3C;
 
@@ -27,15 +26,15 @@ public class SparqlConformanceTests
         _fixture = fixture;
     }
 
-    [SkippableTheory]
+    [Theory]
     [MemberData(nameof(GetPositiveSyntaxTests))]
     public void Sparql11_PositiveSyntax(string _, W3CTestCase test)
     {
-        Skip.IfNot(W3CTestContext.IsAvailable, "W3C test suite not available");
-        Skip.IfNot(File.Exists(test.ActionPath), $"Test file not found: {test.ActionPath}");
+        Assert.SkipUnless(W3CTestContext.IsAvailable, "W3C test suite not available");
+        Assert.SkipUnless(File.Exists(test.ActionPath), $"Test file not found: {test.ActionPath}");
 
         if (W3CTestContext.ShouldSkip(test.Id, out var reason))
-            Skip.If(true, reason);
+            Assert.SkipWhen(true, reason);
 
         _output.WriteLine($"Test: {test.Name}");
         _output.WriteLine($"File: {test.ActionPath}");
@@ -51,15 +50,15 @@ public class SparqlConformanceTests
         _output.WriteLine($"Parsed successfully: {parsed.Type}");
     }
 
-    [SkippableTheory]
+    [Theory]
     [MemberData(nameof(GetNegativeSyntaxTests))]
     public void Sparql11_NegativeSyntax(string _, W3CTestCase test)
     {
-        Skip.IfNot(W3CTestContext.IsAvailable, "W3C test suite not available");
-        Skip.IfNot(File.Exists(test.ActionPath), $"Test file not found: {test.ActionPath}");
+        Assert.SkipUnless(W3CTestContext.IsAvailable, "W3C test suite not available");
+        Assert.SkipUnless(File.Exists(test.ActionPath), $"Test file not found: {test.ActionPath}");
 
         if (W3CTestContext.ShouldSkip(test.Id, out var reason))
-            Skip.If(true, reason);
+            Assert.SkipWhen(true, reason);
 
         _output.WriteLine($"Test: {test.Name}");
         _output.WriteLine($"File: {test.ActionPath}");
@@ -78,32 +77,32 @@ public class SparqlConformanceTests
         _output.WriteLine($"Expected error: {exception.Message}");
     }
 
-    [SkippableTheory]
+    [Theory]
     [MemberData(nameof(GetQueryEvalTests))]
     public async Task Sparql11_QueryEval(string _, W3CTestCase test)
     {
-        Skip.IfNot(W3CTestContext.IsAvailable, "W3C test suite not available");
+        Assert.SkipUnless(W3CTestContext.IsAvailable, "W3C test suite not available");
 
         if (W3CTestContext.ShouldSkip(test.Id, out var reason))
-            Skip.If(true, reason);
+            Assert.SkipWhen(true, reason);
 
         // Skip tests that require features we haven't implemented yet
         if (test.Id.Contains("entailment", StringComparison.OrdinalIgnoreCase))
-            Skip.If(true, "Entailment tests not supported");
+            Assert.SkipWhen(true, "Entailment tests not supported");
         if (test.Id.Contains("service", StringComparison.OrdinalIgnoreCase))
-            Skip.If(true, "SERVICE tests require network access");
+            Assert.SkipWhen(true, "SERVICE tests require network access");
 
         _output.WriteLine($"Test: {test.Name}");
         _output.WriteLine($"Query: {test.ActionPath}");
         _output.WriteLine($"Data: {test.DataPath}");
         _output.WriteLine($"Result: {test.ResultPath}");
 
-        Skip.IfNot(File.Exists(test.ActionPath), $"Query file not found: {test.ActionPath}");
-        Skip.If(test.ResultPath == null, "No result file");
-        Skip.IfNot(File.Exists(test.ResultPath), $"Result file not found: {test.ResultPath}");
+        Assert.SkipUnless(File.Exists(test.ActionPath), $"Query file not found: {test.ActionPath}");
+        Assert.SkipWhen(test.ResultPath == null, "No result file");
+        Assert.SkipUnless(File.Exists(test.ResultPath), $"Result file not found: {test.ResultPath}");
 
         // Read the query
-        var query = await File.ReadAllTextAsync(test.ActionPath);
+        var query = await File.ReadAllTextAsync(test.ActionPath, TestContext.Current.CancellationToken);
         _output.WriteLine($"Query:\n{query}");
 
         // Create a temporary store and load data
@@ -910,14 +909,14 @@ public class SparqlConformanceTests
         }
     }
 
-    [SkippableTheory]
+    [Theory]
     [MemberData(nameof(GetUpdateEvalTests))]
     public async Task Sparql11_UpdateEval(string _, W3CTestCase test)
     {
-        Skip.IfNot(W3CTestContext.IsAvailable, "W3C test suite not available");
+        Assert.SkipUnless(W3CTestContext.IsAvailable, "W3C test suite not available");
 
         if (W3CTestContext.ShouldSkip(test.Id, out var reason))
-            Skip.If(true, reason);
+            Assert.SkipWhen(true, reason);
 
         _output.WriteLine($"Test: {test.Name}");
         _output.WriteLine($"Update: {test.ActionPath}");
@@ -925,10 +924,10 @@ public class SparqlConformanceTests
         _output.WriteLine($"ExpectedDefaultGraph: {test.ExpectedDefaultGraphPath}");
         _output.WriteLine($"ExpectedNamedGraphs: {test.ExpectedNamedGraphs?.Length ?? 0}");
 
-        Skip.IfNot(File.Exists(test.ActionPath), $"Update file not found: {test.ActionPath}");
+        Assert.SkipUnless(File.Exists(test.ActionPath), $"Update file not found: {test.ActionPath}");
 
         // Read the update query (.ru file)
-        var update = await File.ReadAllTextAsync(test.ActionPath);
+        var update = await File.ReadAllTextAsync(test.ActionPath, TestContext.Current.CancellationToken);
         _output.WriteLine($"Update:\n{update}");
 
         // Create a temporary store and load initial data
@@ -995,7 +994,7 @@ public class SparqlConformanceTests
         // Compare default graph state
         if (test.ExpectedDefaultGraphPath != null)
         {
-            Skip.IfNot(File.Exists(test.ExpectedDefaultGraphPath),
+            Assert.SkipUnless(File.Exists(test.ExpectedDefaultGraphPath),
                 $"Expected default graph file not found: {test.ExpectedDefaultGraphPath}");
 
             var expectedDefault = await ParseExpectedGraphAsync(test.ExpectedDefaultGraphPath);
@@ -1019,7 +1018,7 @@ public class SparqlConformanceTests
         {
             foreach (var (path, graphIri) in test.ExpectedNamedGraphs)
             {
-                Skip.IfNot(File.Exists(path),
+                Assert.SkipUnless(File.Exists(path),
                     $"Expected named graph file not found: {path}");
 
                 var expectedNamed = await ParseExpectedGraphAsync(path);

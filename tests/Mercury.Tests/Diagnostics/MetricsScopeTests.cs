@@ -107,7 +107,7 @@ public class MetricsScopeTests
                 using var outer = MetricsScope.Begin(listener, "thread-outer");
                 using var inner = MetricsScope.Begin(listener, "thread-inner");
                 Assert.Equal(outer.Id, inner.ParentId);
-            });
+            }, TestContext.Current.CancellationToken);
         }
         await Task.WhenAll(tasks);
 

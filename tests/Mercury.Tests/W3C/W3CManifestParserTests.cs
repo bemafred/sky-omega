@@ -9,15 +9,15 @@ namespace SkyOmega.Mercury.Tests.W3C;
 /// </summary>
 public class W3CManifestParserTests
 {
-    [SkippableFact]
+    [Fact]
     public async Task ParseNTriples11Manifest_ReturnsTests()
     {
-        Skip.IfNot(W3CTestContext.IsAvailable, "W3C test suite not available");
+        Assert.SkipUnless(W3CTestContext.IsAvailable, "W3C test suite not available");
 
         var parser = new W3CManifestParser();
         var manifestPath = W3CTestContext.GetManifestPath(W3CTestSuite.NTriples11);
 
-        var tests = await parser.ParseAsync(manifestPath);
+        var tests = await parser.ParseAsync(manifestPath, TestContext.Current.CancellationToken);
 
         Assert.NotEmpty(tests);
         Assert.All(tests, t => Assert.NotNull(t.ActionPath));
@@ -25,15 +25,15 @@ public class W3CManifestParserTests
         Assert.Contains(tests, t => t.Type == W3CTestType.NegativeSyntax);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task ParseTurtle11Manifest_ReturnsEvalTests()
     {
-        Skip.IfNot(W3CTestContext.IsAvailable, "W3C test suite not available");
+        Assert.SkipUnless(W3CTestContext.IsAvailable, "W3C test suite not available");
 
         var parser = new W3CManifestParser();
         var manifestPath = W3CTestContext.GetManifestPath(W3CTestSuite.Turtle11);
 
-        var tests = await parser.ParseAsync(manifestPath);
+        var tests = await parser.ParseAsync(manifestPath, TestContext.Current.CancellationToken);
 
         Assert.NotEmpty(tests);
 
@@ -44,15 +44,15 @@ public class W3CManifestParserTests
         Assert.All(evalTests, t => Assert.NotNull(t.ResultPath));
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task ParseTurtle12Manifest_IncludesTurtle11Tests()
     {
-        Skip.IfNot(W3CTestContext.IsAvailable, "W3C test suite not available");
+        Assert.SkipUnless(W3CTestContext.IsAvailable, "W3C test suite not available");
 
         var parser = new W3CManifestParser();
         var turtle12Path = W3CTestContext.GetManifestPath(W3CTestSuite.Turtle12);
 
-        var tests = await parser.ParseAsync(turtle12Path);
+        var tests = await parser.ParseAsync(turtle12Path, TestContext.Current.CancellationToken);
 
         // Turtle 1.2 manifest includes Turtle 1.1 tests via mf:include
         Assert.NotEmpty(tests);
@@ -62,45 +62,45 @@ public class W3CManifestParserTests
         Assert.True(manifestPaths.Count >= 2, "Expected tests from multiple manifests due to mf:include");
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task ParseNQuads11Manifest_ReturnsTests()
     {
-        Skip.IfNot(W3CTestContext.IsAvailable, "W3C test suite not available");
+        Assert.SkipUnless(W3CTestContext.IsAvailable, "W3C test suite not available");
 
         var parser = new W3CManifestParser();
         var manifestPath = W3CTestContext.GetManifestPath(W3CTestSuite.NQuads11);
 
-        var tests = await parser.ParseAsync(manifestPath);
+        var tests = await parser.ParseAsync(manifestPath, TestContext.Current.CancellationToken);
 
         Assert.NotEmpty(tests);
         Assert.Contains(tests, t => t.Type == W3CTestType.PositiveSyntax);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task ParseTriG11Manifest_ReturnsTests()
     {
-        Skip.IfNot(W3CTestContext.IsAvailable, "W3C test suite not available");
+        Assert.SkipUnless(W3CTestContext.IsAvailable, "W3C test suite not available");
 
         var parser = new W3CManifestParser();
         var manifestPath = W3CTestContext.GetManifestPath(W3CTestSuite.TriG11);
 
-        var tests = await parser.ParseAsync(manifestPath);
+        var tests = await parser.ParseAsync(manifestPath, TestContext.Current.CancellationToken);
 
         Assert.NotEmpty(tests);
         Assert.Contains(tests, t => t.Type == W3CTestType.PositiveSyntax);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task ParseSparql11Manifest_ReturnsQueryTests()
     {
-        Skip.IfNot(W3CTestContext.IsAvailable, "W3C test suite not available");
+        Assert.SkipUnless(W3CTestContext.IsAvailable, "W3C test suite not available");
 
         // Check if the SPARQL manifest exists (may be in a different location)
         var aggregatesManifest = Path.Combine(W3CTestContext.TestsRoot, "sparql", "sparql11", "aggregates", "manifest.ttl");
-        Skip.IfNot(File.Exists(aggregatesManifest), "SPARQL aggregates manifest not found");
+        Assert.SkipUnless(File.Exists(aggregatesManifest), "SPARQL aggregates manifest not found");
 
         var parser = new W3CManifestParser();
-        var tests = await parser.ParseAsync(aggregatesManifest);
+        var tests = await parser.ParseAsync(aggregatesManifest, TestContext.Current.CancellationToken);
 
         Assert.NotEmpty(tests);
         Assert.Contains(tests, t => t.Type == W3CTestType.QueryEval);
@@ -110,15 +110,15 @@ public class W3CManifestParserTests
         Assert.NotEmpty(evalTests);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task ParseSparql11QueryManifest_IncludesCastTests()
     {
-        Skip.IfNot(W3CTestContext.IsAvailable, "W3C test suite not available");
+        Assert.SkipUnless(W3CTestContext.IsAvailable, "W3C test suite not available");
 
         var parser = new W3CManifestParser();
         var manifestPath = W3CTestContext.GetManifestPath(W3CTestSuite.Sparql11Query);
 
-        var tests = await parser.ParseAsync(manifestPath);
+        var tests = await parser.ParseAsync(manifestPath, TestContext.Current.CancellationToken);
 
         // Find cast tests
         var castTests = tests.Where(t =>
@@ -130,15 +130,15 @@ public class W3CManifestParserTests
         Assert.Equal(6, castTests.Count); // cast-bool, cast-int, cast-float, cast-double, cast-decimal, cast-string
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task TestCase_HasCorrectProperties()
     {
-        Skip.IfNot(W3CTestContext.IsAvailable, "W3C test suite not available");
+        Assert.SkipUnless(W3CTestContext.IsAvailable, "W3C test suite not available");
 
         var parser = new W3CManifestParser();
         var manifestPath = W3CTestContext.GetManifestPath(W3CTestSuite.NTriples11);
 
-        var tests = await parser.ParseAsync(manifestPath);
+        var tests = await parser.ParseAsync(manifestPath, TestContext.Current.CancellationToken);
         var test = tests.FirstOrDefault(t => !string.IsNullOrEmpty(t.Name));
 
         Assert.NotNull(test);
@@ -149,15 +149,15 @@ public class W3CManifestParserTests
         Assert.NotEqual(W3CTestType.Unknown, test.Type);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task TestCase_IsPositive_ReturnsCorrectly()
     {
-        Skip.IfNot(W3CTestContext.IsAvailable, "W3C test suite not available");
+        Assert.SkipUnless(W3CTestContext.IsAvailable, "W3C test suite not available");
 
         var parser = new W3CManifestParser();
         var manifestPath = W3CTestContext.GetManifestPath(W3CTestSuite.NTriples11);
 
-        var tests = await parser.ParseAsync(manifestPath);
+        var tests = await parser.ParseAsync(manifestPath, TestContext.Current.CancellationToken);
 
         var positiveTests = tests.Where(t => t.IsPositive).ToList();
         var negativeTests = tests.Where(t => t.IsNegative).ToList();
@@ -168,15 +168,15 @@ public class W3CManifestParserTests
         Assert.All(negativeTests, t => Assert.False(t.IsPositive));
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task ActionPaths_AreResolved()
     {
-        Skip.IfNot(W3CTestContext.IsAvailable, "W3C test suite not available");
+        Assert.SkipUnless(W3CTestContext.IsAvailable, "W3C test suite not available");
 
         var parser = new W3CManifestParser();
         var manifestPath = W3CTestContext.GetManifestPath(W3CTestSuite.NTriples11);
 
-        var tests = await parser.ParseAsync(manifestPath);
+        var tests = await parser.ParseAsync(manifestPath, TestContext.Current.CancellationToken);
         var firstTest = tests.FirstOrDefault();
 
         Assert.NotNull(firstTest);
@@ -187,15 +187,15 @@ public class W3CManifestParserTests
             $"Test file should exist: {firstTest.ActionPath}");
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task ResultPaths_AreResolved_ForEvalTests()
     {
-        Skip.IfNot(W3CTestContext.IsAvailable, "W3C test suite not available");
+        Assert.SkipUnless(W3CTestContext.IsAvailable, "W3C test suite not available");
 
         var parser = new W3CManifestParser();
         var manifestPath = W3CTestContext.GetManifestPath(W3CTestSuite.Turtle11);
 
-        var tests = await parser.ParseAsync(manifestPath);
+        var tests = await parser.ParseAsync(manifestPath, TestContext.Current.CancellationToken);
         var evalTest = tests.FirstOrDefault(t => t.Type == W3CTestType.PositiveEval);
 
         Assert.NotNull(evalTest);
@@ -222,26 +222,24 @@ public class W3CManifestParserTests
         Assert.False(W3CTestContext.ShouldSkip("nt-syntax-uri-01", out _));
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task LoadTestCasesAsync_FiltersbyType()
     {
-        Skip.IfNot(W3CTestContext.IsAvailable, "W3C test suite not available");
+        Assert.SkipUnless(W3CTestContext.IsAvailable, "W3C test suite not available");
 
-        var positiveTests = await W3CTestContext.LoadTestCasesAsync(
-            W3CTestSuite.NTriples11,
-            W3CTestType.PositiveSyntax);
+        var positiveTests = await W3CTestContext.LoadTestCasesAsync(W3CTestSuite.NTriples11, W3CTestType.PositiveSyntax, TestContext.Current.CancellationToken);
 
         Assert.NotEmpty(positiveTests);
         Assert.All(positiveTests, t => Assert.Equal(W3CTestType.PositiveSyntax, t.Type));
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task TestCountsAreReasonable()
     {
-        Skip.IfNot(W3CTestContext.IsAvailable, "W3C test suite not available");
+        Assert.SkipUnless(W3CTestContext.IsAvailable, "W3C test suite not available");
 
-        var ntTests = await W3CTestContext.LoadTestCasesAsync(W3CTestSuite.NTriples11);
-        var turtleTests = await W3CTestContext.LoadTestCasesAsync(W3CTestSuite.Turtle11);
+        var ntTests = await W3CTestContext.LoadTestCasesAsync(W3CTestSuite.NTriples11, cancellationToken: TestContext.Current.CancellationToken);
+        var turtleTests = await W3CTestContext.LoadTestCasesAsync(W3CTestSuite.Turtle11, cancellationToken: TestContext.Current.CancellationToken);
 
         // Based on W3C test suite sizes, we expect:
         // N-Triples: ~100+ tests

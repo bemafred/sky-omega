@@ -22,7 +22,7 @@ public class N3PatchParserTests
         using var parser = new N3PatchParser(stream);
 
         // Act
-        var result = await parser.ParseAsync();
+        var result = await parser.ParseAsync(TestContext.Current.CancellationToken);
 
         // Assert
         Assert.NotNull(result);

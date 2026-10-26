@@ -82,13 +82,11 @@ public class ReferenceRebuildTests : IDisposable
 
         Assert.Equal(4, store.GetStatistics().QuadCount);
         // All four SPARQL query patterns resolve correctly post-rebuild.
-        var allResult = SparqlEngine.Query(store,
-            "SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?o }");
+        var allResult = SparqlEngine.Query(store, "SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?o }", TestContext.Current.CancellationToken);
         Assert.True(allResult.Success);
         Assert.Contains("4", allResult.Rows![0].Values.First());
 
-        var predResult = SparqlEngine.Query(store,
-            "SELECT ?s ?o WHERE { ?s <http://ex/p1> ?o }");
+        var predResult = SparqlEngine.Query(store, "SELECT ?s ?o WHERE { ?s <http://ex/p1> ?o }", TestContext.Current.CancellationToken);
         Assert.Equal(3, predResult.Rows!.Count);
     }
 
@@ -145,12 +143,10 @@ public class ReferenceRebuildTests : IDisposable
             """);
 
         store.RebuildSecondaryIndexes();
-        var firstCount = SparqlEngine.Query(store,
-            "SELECT (COUNT(*) AS ?n) WHERE { ?s <http://ex/p> ?o }").Rows![0].Values.First();
+        var firstCount = SparqlEngine.Query(store, "SELECT (COUNT(*) AS ?n) WHERE { ?s <http://ex/p> ?o }", TestContext.Current.CancellationToken).Rows![0].Values.First();
 
         store.RebuildSecondaryIndexes();
-        var secondCount = SparqlEngine.Query(store,
-            "SELECT (COUNT(*) AS ?n) WHERE { ?s <http://ex/p> ?o }").Rows![0].Values.First();
+        var secondCount = SparqlEngine.Query(store, "SELECT (COUNT(*) AS ?n) WHERE { ?s <http://ex/p> ?o }", TestContext.Current.CancellationToken).Rows![0].Values.First();
 
         Assert.Equal(firstCount, secondCount);
     }
@@ -174,8 +170,7 @@ public class ReferenceRebuildTests : IDisposable
         using var reopened = new QuadStore(dir);
         Assert.Equal(StoreIndexState.Ready, reopened.IndexState);
 
-        var result = SparqlEngine.Query(reopened,
-            "SELECT ?s WHERE { ?s <http://ex/p> ?o }");
+        var result = SparqlEngine.Query(reopened, "SELECT ?s WHERE { ?s <http://ex/p> ?o }", TestContext.Current.CancellationToken);
         Assert.True(result.Success);
         Assert.Equal(2, result.Rows!.Count);
     }

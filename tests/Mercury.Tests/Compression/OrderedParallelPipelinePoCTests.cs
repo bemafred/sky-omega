@@ -32,7 +32,7 @@ public class OrderedParallelPipelinePoCTests
         {
             for (int i = 0; i < itemCount; i++) pipeline.Enqueue(i);
             pipeline.CompleteEnqueue();
-        });
+        }, TestContext.Current.CancellationToken);
 
         var results = new List<long>(itemCount);
         while (pipeline.TryDequeue(out var result))
@@ -54,7 +54,7 @@ public class OrderedParallelPipelinePoCTests
         {
             for (int i = 0; i < 3; i++) pipeline.Enqueue(i);
             pipeline.CompleteEnqueue();
-        });
+        }, TestContext.Current.CancellationToken);
 
         var results = new List<long>();
         while (pipeline.TryDequeue(out var result)) results.Add(result);
@@ -79,7 +79,7 @@ public class OrderedParallelPipelinePoCTests
         {
             for (int i = 0; i < itemCount; i++) pipeline.Enqueue(i);
             pipeline.CompleteEnqueue();
-        });
+        }, TestContext.Current.CancellationToken);
 
         var results = new List<long>(itemCount);
         while (pipeline.TryDequeue(out var result)) results.Add(result);
@@ -102,7 +102,7 @@ public class OrderedParallelPipelinePoCTests
         {
             for (int i = 0; i < 100; i++) pipeline.Enqueue(i);
             pipeline.CompleteEnqueue();
-        });
+        }, TestContext.Current.CancellationToken);
 
         var ex = Assert.Throws<InvalidOperationException>(() =>
         {
@@ -116,7 +116,7 @@ public class OrderedParallelPipelinePoCTests
     {
         var pipeline = new OrderedPipeline<int, long>(workers: 4, x => (long)x * x);
 
-        _ = Task.Run(() => pipeline.CompleteEnqueue());
+        _ = Task.Run(() => pipeline.CompleteEnqueue(), TestContext.Current.CancellationToken);
 
         Assert.False(pipeline.TryDequeue(out _));
     }

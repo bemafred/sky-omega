@@ -1,7 +1,6 @@
 using System.Runtime.CompilerServices;
 using SkyOmega.Mercury.Sparql.Execution;
 using Xunit;
-using Xunit.Abstractions;
 using SkyOmega.Mercury.Sparql.Execution.Operators;
 
 namespace SkyOmega.Mercury.Tests.Infrastructure;

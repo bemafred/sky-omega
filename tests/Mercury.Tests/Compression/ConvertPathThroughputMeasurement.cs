@@ -6,7 +6,6 @@ using SkyOmega.Mercury.Compression;
 using SkyOmega.Mercury.NTriples;
 using SkyOmega.Mercury.Rdf.Turtle;
 using Xunit;
-using Xunit.Abstractions;
 
 namespace SkyOmega.Mercury.Tests.Compression;
 

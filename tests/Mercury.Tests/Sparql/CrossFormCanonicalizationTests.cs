@@ -51,8 +51,7 @@ public class CrossFormCanonicalizationTests : PooledStoreTestBase
         // SPARQL INSERT DATA the same logical triple. After ADR-044, this also
         // produces the canonical 5-byte form → same atom ID, no new atoms interned
         // for the object position.
-        var insert = SparqlEngine.Update(Store,
-            "INSERT DATA { <http://ex/s> <http://ex/p> \"a\\\"b\" }");
+        var insert = SparqlEngine.Update(Store, "INSERT DATA { <http://ex/s> <http://ex/p> \"a\\\"b\" }", TestContext.Current.CancellationToken);
         Assert.True(insert.Success, insert.ErrorMessage);
 
         var afterSparql = SparqlEngine.GetStatistics(Store);
@@ -71,8 +70,7 @@ public class CrossFormCanonicalizationTests : PooledStoreTestBase
     {
         await LoadTurtle("<http://ex/s> <http://ex/p> \"a\\\"b\" .\n");
 
-        var query = SparqlEngine.Query(Store,
-            "SELECT ?s WHERE { ?s <http://ex/p> ?o FILTER(?o = \"a\\\"b\") }");
+        var query = SparqlEngine.Query(Store, "SELECT ?s WHERE { ?s <http://ex/p> ?o FILTER(?o = \"a\\\"b\") }", TestContext.Current.CancellationToken);
 
         Assert.True(query.Success, query.ErrorMessage);
         Assert.Single(query.Rows!);
@@ -83,8 +81,7 @@ public class CrossFormCanonicalizationTests : PooledStoreTestBase
     {
         await LoadTurtle("<http://ex/s> <http://ex/p> \"prefix \\\"escaped\\\" needle\" .\n");
 
-        var query = SparqlEngine.Query(Store,
-            "SELECT ?s WHERE { ?s <http://ex/p> ?o FILTER(CONTAINS(?o, \"\\\"escaped\\\" needle\")) }");
+        var query = SparqlEngine.Query(Store, "SELECT ?s WHERE { ?s <http://ex/p> ?o FILTER(CONTAINS(?o, \"\\\"escaped\\\" needle\")) }", TestContext.Current.CancellationToken);
 
         Assert.True(query.Success, query.ErrorMessage);
         Assert.Single(query.Rows!);
@@ -95,8 +92,7 @@ public class CrossFormCanonicalizationTests : PooledStoreTestBase
     {
         await LoadTurtle("<http://ex/s> <http://ex/p> \"\\\"opening quote inside\" .\n");
 
-        var query = SparqlEngine.Query(Store,
-            "SELECT ?s WHERE { ?s <http://ex/p> ?o FILTER(STRSTARTS(?o, \"\\\"opening\")) }");
+        var query = SparqlEngine.Query(Store, "SELECT ?s WHERE { ?s <http://ex/p> ?o FILTER(STRSTARTS(?o, \"\\\"opening\")) }", TestContext.Current.CancellationToken);
 
         Assert.True(query.Success, query.ErrorMessage);
         Assert.Single(query.Rows!);
@@ -107,8 +103,7 @@ public class CrossFormCanonicalizationTests : PooledStoreTestBase
     {
         await LoadTurtle("<http://ex/s> <http://ex/p> \"tail with quote\\\"\" .\n");
 
-        var query = SparqlEngine.Query(Store,
-            "SELECT ?s WHERE { ?s <http://ex/p> ?o FILTER(STRENDS(?o, \"quote\\\"\")) }");
+        var query = SparqlEngine.Query(Store, "SELECT ?s WHERE { ?s <http://ex/p> ?o FILTER(STRENDS(?o, \"quote\\\"\")) }", TestContext.Current.CancellationToken);
 
         Assert.True(query.Success, query.ErrorMessage);
         Assert.Single(query.Rows!);
@@ -119,8 +114,7 @@ public class CrossFormCanonicalizationTests : PooledStoreTestBase
     {
         await LoadTurtle("<http://ex/s> <http://ex/p> \"middle \\\"X\\\" middle\" .\n");
 
-        var query = SparqlEngine.Query(Store,
-            "SELECT ?s WHERE { ?s <http://ex/p> ?o FILTER(REGEX(?o, \"\\\"X\\\"\")) }");
+        var query = SparqlEngine.Query(Store, "SELECT ?s WHERE { ?s <http://ex/p> ?o FILTER(REGEX(?o, \"\\\"X\\\"\")) }", TestContext.Current.CancellationToken);
 
         Assert.True(query.Success, query.ErrorMessage);
         Assert.Single(query.Rows!);
@@ -135,8 +129,7 @@ public class CrossFormCanonicalizationTests : PooledStoreTestBase
 
         // SPARQL filter uses the \"-escape form for the same logical char. Both canonicalize
         // to the same 3-char content `a"b`.
-        var query = SparqlEngine.Query(Store,
-            "SELECT ?s WHERE { ?s <http://ex/p> ?o FILTER(?o = \"a\\\"b\") }");
+        var query = SparqlEngine.Query(Store, "SELECT ?s WHERE { ?s <http://ex/p> ?o FILTER(?o = \"a\\\"b\") }", TestContext.Current.CancellationToken);
 
         Assert.True(query.Success, query.ErrorMessage);
         Assert.Single(query.Rows!);
@@ -151,8 +144,7 @@ public class CrossFormCanonicalizationTests : PooledStoreTestBase
     {
         await LoadTurtle("<http://ex/s> <http://ex/p> \"a\\\"b\" .\n");
 
-        var query = SparqlEngine.Query(Store,
-            "SELECT ?s WHERE { ?s <http://ex/p> \"a\\\"b\" }");
+        var query = SparqlEngine.Query(Store, "SELECT ?s WHERE { ?s <http://ex/p> \"a\\\"b\" }", TestContext.Current.CancellationToken);
 
         Assert.True(query.Success, query.ErrorMessage);
         Assert.Single(query.Rows!);
@@ -167,14 +159,13 @@ public class CrossFormCanonicalizationTests : PooledStoreTestBase
     {
         await LoadTurtle("<http://ex/s> <http://ex/p> \"a\\\"b\" .\n");
 
-        var before = SparqlEngine.Query(Store, "SELECT * WHERE { ?s ?p ?o }");
+        var before = SparqlEngine.Query(Store, "SELECT * WHERE { ?s ?p ?o }", TestContext.Current.CancellationToken);
         Assert.Single(before.Rows!);
 
-        var delete = SparqlEngine.Update(Store,
-            "DELETE WHERE { <http://ex/s> <http://ex/p> \"a\\\"b\" }");
+        var delete = SparqlEngine.Update(Store, "DELETE WHERE { <http://ex/s> <http://ex/p> \"a\\\"b\" }", TestContext.Current.CancellationToken);
         Assert.True(delete.Success, delete.ErrorMessage);
 
-        var after = SparqlEngine.Query(Store, "SELECT * WHERE { ?s ?p ?o }");
+        var after = SparqlEngine.Query(Store, "SELECT * WHERE { ?s ?p ?o }", TestContext.Current.CancellationToken);
         Assert.Empty(after.Rows!);
     }
 
@@ -189,8 +180,7 @@ public class CrossFormCanonicalizationTests : PooledStoreTestBase
 
         // BIND a literal with escape syntax, then FILTER for equality to the stored value.
         // If BIND canonicalization is wired correctly, ?x and ?o both have canonical form.
-        var query = SparqlEngine.Query(Store,
-            "SELECT ?s WHERE { ?s <http://ex/p> ?o BIND(\"a\\\"b\" AS ?x) FILTER(?o = ?x) }");
+        var query = SparqlEngine.Query(Store, "SELECT ?s WHERE { ?s <http://ex/p> ?o BIND(\"a\\\"b\" AS ?x) FILTER(?o = ?x) }", TestContext.Current.CancellationToken);
 
         Assert.True(query.Success, query.ErrorMessage);
         Assert.Single(query.Rows!);
@@ -209,8 +199,7 @@ public class CrossFormCanonicalizationTests : PooledStoreTestBase
     {
         await LoadTurtle("<http://ex/s> <http://ex/p> \"a\\\"b\" .\n");
 
-        var query = SparqlEngine.Query(Store,
-            "SELECT ?s WHERE { { SELECT ?s ?o WHERE { ?s <http://ex/p> ?o FILTER(?o = \"a\\\"b\") } } }");
+        var query = SparqlEngine.Query(Store, "SELECT ?s WHERE { { SELECT ?s ?o WHERE { ?s <http://ex/p> ?o FILTER(?o = \"a\\\"b\") } } }", TestContext.Current.CancellationToken);
 
         Assert.True(query.Success, query.ErrorMessage);
         Assert.Single(query.Rows!);
@@ -221,8 +210,7 @@ public class CrossFormCanonicalizationTests : PooledStoreTestBase
     {
         await LoadTurtle("<http://ex/s> <http://ex/p> \"a\\\"b\" .\n");
 
-        var query = SparqlEngine.Query(Store,
-            "SELECT ?s WHERE { { SELECT ?s WHERE { ?s <http://ex/p> \"a\\\"b\" } } }");
+        var query = SparqlEngine.Query(Store, "SELECT ?s WHERE { { SELECT ?s WHERE { ?s <http://ex/p> \"a\\\"b\" } } }", TestContext.Current.CancellationToken);
 
         Assert.True(query.Success, query.ErrorMessage);
         Assert.Single(query.Rows!);
@@ -233,8 +221,7 @@ public class CrossFormCanonicalizationTests : PooledStoreTestBase
     {
         await LoadTurtle("<http://ex/s> <http://ex/p> \"a\\\"b\" .\n");
 
-        var query = SparqlEngine.Query(Store,
-            "ASK { ?s <http://ex/p> \"a\\\"b\" }");
+        var query = SparqlEngine.Query(Store, "ASK { ?s <http://ex/p> \"a\\\"b\" }", TestContext.Current.CancellationToken);
 
         Assert.True(query.Success, query.ErrorMessage);
         Assert.True(query.AskResult);
@@ -245,8 +232,7 @@ public class CrossFormCanonicalizationTests : PooledStoreTestBase
     {
         await LoadTurtle("<http://ex/s> <http://ex/p> \"a\\\"b\" .\n");
 
-        var query = SparqlEngine.Query(Store,
-            "CONSTRUCT { ?s <http://ex/derived> \"yes\" } WHERE { ?s <http://ex/p> \"a\\\"b\" }");
+        var query = SparqlEngine.Query(Store, "CONSTRUCT { ?s <http://ex/derived> \"yes\" } WHERE { ?s <http://ex/p> \"a\\\"b\" }", TestContext.Current.CancellationToken);
 
         Assert.True(query.Success, query.ErrorMessage);
         Assert.NotNull(query.Triples);

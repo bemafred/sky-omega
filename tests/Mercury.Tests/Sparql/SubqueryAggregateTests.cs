@@ -9,7 +9,6 @@ using SkyOmega.Mercury.Sparql.Patterns;
 using SkyOmega.Mercury.Storage;
 using SkyOmega.Mercury.Rdf.Turtle;
 using Xunit;
-using Xunit.Abstractions;
 using SkyOmega.Mercury.Sparql.Execution.Operators;
 
 namespace SkyOmega.Mercury.Tests.Sparql;

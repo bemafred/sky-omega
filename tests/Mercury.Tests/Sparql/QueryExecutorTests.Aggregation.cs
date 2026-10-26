@@ -986,7 +986,7 @@ public partial class QueryExecutorTests
             await parser.ParseAsync((s, p, o) =>
             {
                 store.AddCurrent(s.ToString(), p.ToString(), o.ToString());
-            });
+            }, TestContext.Current.CancellationToken);
         }
 
         // Run COUNT DISTINCT query

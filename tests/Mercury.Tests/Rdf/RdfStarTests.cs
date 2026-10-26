@@ -131,7 +131,7 @@ public class RdfStarTests : PooledStoreTestBase
         await parser.ParseAsync((subject, predicate, obj) =>
         {
             triples.Add((subject.ToString(), predicate.ToString(), obj.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         // Should have same 6 triples as allocating path
         Assert.Equal(6, triples.Count);
@@ -355,7 +355,7 @@ public class RdfStarTests : PooledStoreTestBase
         await parser1.ParseAsync((subject, predicate, obj) =>
         {
             emittedTriples.Add((subject.ToString(), predicate.ToString(), obj.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         // Log all triples for debugging
         var triplesLog = string.Join("\n", emittedTriples.Select(t => $"  S={t.s} P={t.p} O={t.o}"));

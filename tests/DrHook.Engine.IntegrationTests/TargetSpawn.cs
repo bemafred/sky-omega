@@ -92,7 +92,12 @@ internal static class TargetSpawn
     /// FINDING 91 — the `Process Id:` line <see cref="ExtractPid"/> parses is printed by vstest.console when it
     /// LAUNCHES the testhost, before the testhost reaches its VSTEST_HOST_DEBUG hold. An attach that lands first makes
     /// the hold return immediately (Debugger.IsAttached) with no Break — so never wait on that Break as the first
-    /// stop; force one (Pause).</summary>
+    /// stop; force one (Pause).
+    ///
+    /// RUNNER ISOLATION — the repo-root global.json selects Microsoft.Testing.Platform, under which `dotnet test`
+    /// refuses a VSTest project. The target's folder carries its own global.json (SDK pin only, no test runner), and
+    /// `dotnet` resolves global.json from the WORKING DIRECTORY — so the run starts in the target's folder, where
+    /// `dotnet test` is the legacy VSTest runner this target exists to exercise.</summary>
     public static VstestRun Vstest(string targetProject, string? methodFilter = null)
     {
         ProcessStartInfo startInfo = new("/bin/bash")
@@ -100,6 +105,7 @@ internal static class TargetSpawn
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
+            WorkingDirectory = Path.GetDirectoryName(targetProject)!,
             Environment = { ["VSTEST_HOST_DEBUG"] = "1" },
         };
         startInfo.ArgumentList.Add("-c");
@@ -107,8 +113,10 @@ internal static class TargetSpawn
         startInfo.ArgumentList.Add("sh"); // $0
         startInfo.ArgumentList.Add("test");
         startInfo.ArgumentList.Add(targetProject);
+        // The target is a build dependency of this test project (ProjectReference), so it is built in the test's
+        // own configuration — read it off the test's bin path (.../bin/<config>/<tfm>/), never assume one.
         startInfo.ArgumentList.Add("-c");
-        startInfo.ArgumentList.Add("Release");
+        startInfo.ArgumentList.Add(new DirectoryInfo(AppContext.BaseDirectory).Parent!.Name);
         startInfo.ArgumentList.Add("--no-build");
         startInfo.ArgumentList.Add("--nologo");
         if (methodFilter is not null)

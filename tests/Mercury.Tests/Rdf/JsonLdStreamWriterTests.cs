@@ -418,7 +418,7 @@ public class JsonLdStreamWriterTests
         {
             parsed.Add(new RdfQuad(s.ToString(), p.ToString(), o.ToString(),
                 g.IsEmpty ? null : g.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         Assert.Equal(3, parsed.Count);
         Assert.Contains(parsed, q => q.Subject == "<http://example.org/alice>" && q.Predicate == "<http://xmlns.com/foaf/0.1/name>");
@@ -447,7 +447,7 @@ public class JsonLdStreamWriterTests
         {
             parsed.Add(new RdfQuad(s.ToString(), p.ToString(), o.ToString(),
                 g.IsEmpty ? null : g.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         Assert.Single(parsed);
         Assert.Equal("<http://ex.org/graph1>", parsed[0].Graph);

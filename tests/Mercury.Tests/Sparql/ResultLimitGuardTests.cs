@@ -45,7 +45,7 @@ public class ResultLimitGuardTests : IDisposable
     [InlineData("GROUP BY (group explosion)", "SELECT ?s (COUNT(?o) AS ?c) WHERE { ?s <urn:p> ?o } GROUP BY ?s")]
     public void OverCap_FailsFastWithAClearError(string shape, string query)
     {
-        var result = SparqlEngine.Query(_store, query);
+        var result = SparqlEngine.Query(_store, query, TestContext.Current.CancellationToken);
 
         Assert.False(result.Success, $"[{shape}] expected the guard to trip");
         Assert.Contains("exceeded the maximum of 5 rows", result.ErrorMessage);
@@ -55,7 +55,7 @@ public class ResultLimitGuardTests : IDisposable
     public void OverCap_OnTheTreePath_AlsoFailsFast()
     {
         // The tree materializes its BGP intermediate before the drain too (the GRAPH path, and the cutover target).
-        var result = SparqlEngine.Query(_store, "SELECT ?s WHERE { ?s <urn:p> ?o }");
+        var result = SparqlEngine.Query(_store, "SELECT ?s WHERE { ?s <urn:p> ?o }", TestContext.Current.CancellationToken);
 
         Assert.False(result.Success);
         Assert.Contains("exceeded the maximum of 5 rows", result.ErrorMessage);
@@ -65,7 +65,7 @@ public class ResultLimitGuardTests : IDisposable
     public void UnderCap_Succeeds()
     {
         // LIMIT 3 keeps the result at or below the cap of 5 — no trip.
-        var result = SparqlEngine.Query(_store, "SELECT ?s WHERE { ?s <urn:p> ?o } LIMIT 3");
+        var result = SparqlEngine.Query(_store, "SELECT ?s WHERE { ?s <urn:p> ?o } LIMIT 3", TestContext.Current.CancellationToken);
 
         Assert.True(result.Success, result.ErrorMessage);
         Assert.Equal(3, result.Rows!.Count);
@@ -84,7 +84,7 @@ public class ResultLimitGuardTests : IDisposable
                 store.AddCurrentBatched($"<urn:s{i:D2}>", "<urn:p>", $"<urn:o{i:D2}>");
             store.CommitBatch();
 
-            var result = SparqlEngine.Query(store, "SELECT ?s WHERE { ?s <urn:p> ?o }");
+            var result = SparqlEngine.Query(store, "SELECT ?s WHERE { ?s <urn:p> ?o }", TestContext.Current.CancellationToken);
             Assert.True(result.Success, result.ErrorMessage);
             Assert.Equal(20, result.Rows!.Count);
         }

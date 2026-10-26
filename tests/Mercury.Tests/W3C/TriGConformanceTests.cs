@@ -3,7 +3,6 @@
 using SkyOmega.Mercury.TriG;
 using SkyOmega.Mercury.NQuads;
 using Xunit;
-using Xunit.Abstractions;
 
 namespace SkyOmega.Mercury.Tests.W3C;
 
@@ -20,12 +19,12 @@ public class TriGConformanceTests
         _output = output;
     }
 
-    [SkippableTheory]
+    [Theory]
     [MemberData(nameof(GetTriG11PositiveSyntaxTests))]
     public async Task TriG11_PositiveSyntax(W3CTestCase test)
     {
-        Skip.IfNot(W3CTestContext.IsAvailable, "W3C test suite not available");
-        Skip.IfNot(File.Exists(test.ActionPath), $"Test file not found: {test.ActionPath}");
+        Assert.SkipUnless(W3CTestContext.IsAvailable, "W3C test suite not available");
+        Assert.SkipUnless(File.Exists(test.ActionPath), $"Test file not found: {test.ActionPath}");
 
         _output.WriteLine($"Test: {test.Name}");
         _output.WriteLine($"File: {test.ActionPath}");
@@ -42,17 +41,17 @@ public class TriGConformanceTests
         await parser.ParseAsync((s, p, o, g) =>
         {
             quads.Add((s.ToString(), p.ToString(), o.ToString(), g.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         _output.WriteLine($"Parsed {quads.Count} quads");
     }
 
-    [SkippableTheory]
+    [Theory]
     [MemberData(nameof(GetTriG11NegativeSyntaxTests))]
     public async Task TriG11_NegativeSyntax(W3CTestCase test)
     {
-        Skip.IfNot(W3CTestContext.IsAvailable, "W3C test suite not available");
-        Skip.IfNot(File.Exists(test.ActionPath), $"Test file not found: {test.ActionPath}");
+        Assert.SkipUnless(W3CTestContext.IsAvailable, "W3C test suite not available");
+        Assert.SkipUnless(File.Exists(test.ActionPath), $"Test file not found: {test.ActionPath}");
 
         _output.WriteLine($"Test: {test.Name}");
         _output.WriteLine($"File: {test.ActionPath}");
@@ -66,20 +65,20 @@ public class TriGConformanceTests
 
         var exception = await Assert.ThrowsAnyAsync<Exception>(async () =>
         {
-            await parser.ParseAsync((s, p, o, g) => { });
+            await parser.ParseAsync((s, p, o, g) => { }, TestContext.Current.CancellationToken);
         });
 
         _output.WriteLine($"Expected error: {exception.Message}");
     }
 
-    [SkippableTheory]
+    [Theory]
     [MemberData(nameof(GetTriG11EvalTests))]
     public async Task TriG11_Eval(W3CTestCase test)
     {
-        Skip.IfNot(W3CTestContext.IsAvailable, "W3C test suite not available");
-        Skip.IfNot(File.Exists(test.ActionPath), $"Test file not found: {test.ActionPath}");
-        Skip.If(test.ResultPath == null, "No expected result file");
-        Skip.IfNot(File.Exists(test.ResultPath), $"Result file not found: {test.ResultPath}");
+        Assert.SkipUnless(W3CTestContext.IsAvailable, "W3C test suite not available");
+        Assert.SkipUnless(File.Exists(test.ActionPath), $"Test file not found: {test.ActionPath}");
+        Assert.SkipWhen(test.ResultPath == null, "No expected result file");
+        Assert.SkipUnless(File.Exists(test.ResultPath), $"Result file not found: {test.ResultPath}");
 
         _output.WriteLine($"Test: {test.Name}");
         _output.WriteLine($"Input: {test.ActionPath}");
@@ -98,7 +97,7 @@ public class TriGConformanceTests
             await parser.ParseAsync((s, p, o, g) =>
             {
                 actualQuads.Add((s.ToString(), p.ToString(), o.ToString(), g.ToString()));
-            });
+            }, TestContext.Current.CancellationToken);
         }
 
         // Parse the expected N-Quads output
@@ -110,7 +109,7 @@ public class TriGConformanceTests
             await parser.ParseAsync((s, p, o, g) =>
             {
                 expectedQuads.Add((s.ToString(), p.ToString(), o.ToString(), g.ToString()));
-            });
+            }, TestContext.Current.CancellationToken);
         }
 
         _output.WriteLine($"Actual: {actualQuads.Count} quads");

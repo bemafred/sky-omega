@@ -46,7 +46,7 @@ public class FilterPrefixedNameTests : IDisposable
     [InlineData("hyphenated PNAME inside GRAPH", "PREFIX ex: <http://ex/> SELECT ?x WHERE { GRAPH <urn:g> { ?x <urn:p> ?o FILTER(?o = ex:a-b-c) } }", "<urn:x>")]
     public void FilterComparand_PrefixedName_ResolvesWithHyphensAndDots(string name, string query, string expected)
     {
-        var result = SparqlEngine.Query(_store, query);
+        var result = SparqlEngine.Query(_store, query, TestContext.Current.CancellationToken);
         Assert.True(result.Success, $"[{name}] {result.ErrorMessage}");
         Assert.Equal(expected, Assert.Single(result.Rows!)["x"]);
     }
@@ -56,7 +56,7 @@ public class FilterPrefixedNameTests : IDisposable
     {
         // A genuine subtraction keeps whitespace around the operator; the prefixed-name tokenizer only consumes a
         // hyphen with no surrounding whitespace, so arithmetic is unaffected by the PN_LOCAL fix.
-        var result = SparqlEngine.Query(_store, "SELECT ?x WHERE { ?x <urn:p> ?o FILTER(10 - 3 = 7) }");
+        var result = SparqlEngine.Query(_store, "SELECT ?x WHERE { ?x <urn:p> ?o FILTER(10 - 3 = 7) }", TestContext.Current.CancellationToken);
         Assert.True(result.Success, result.ErrorMessage);
         Assert.NotEmpty(result.Rows!);
     }

@@ -32,11 +32,11 @@ public class RdfNumericConvergenceTests
 
         string ttlDecoded = null!;
         await using (var stream = new MemoryStream(Encoding.UTF8.GetBytes(triple)))
-            await new TurtleStreamParser(stream).ParseAsync((_, _, o) => ttlDecoded = o.ToString());
+            await new TurtleStreamParser(stream).ParseAsync((_, _, o) => ttlDecoded = o.ToString(), TestContext.Current.CancellationToken);
 
         string trigDecoded = null!;
         await using (var stream = new MemoryStream(Encoding.UTF8.GetBytes(triple)))
-            await new TriGStreamParser(stream).ParseAsync((_, _, o, _) => trigDecoded = o.ToString());
+            await new TriGStreamParser(stream).ParseAsync((_, _, o, _) => trigDecoded = o.ToString(), TestContext.Current.CancellationToken);
 
         // The SPARQL-side canonicalizer (used for VALUES / constant-object matching) must agree byte-for-byte.
         string sparqlCanonical = LiteralForm.CanonicalizeNumericOrBoolean(token.AsSpan(), out _).ToString();

@@ -209,7 +209,7 @@ public class QuadStorePoolTests : IDisposable
                 {
                     errors.Add(ex);
                 }
-            }));
+            }, TestContext.Current.CancellationToken));
         }
 
         await Task.WhenAll(tasks);

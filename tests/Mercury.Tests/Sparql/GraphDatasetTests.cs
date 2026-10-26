@@ -52,7 +52,7 @@ public class GraphDatasetTests : IDisposable
     [InlineData("FROM NAMED g1 + GRAPH g2 — not in the set, empty", "SELECT ?s FROM NAMED <urn:g1> WHERE { GRAPH <urn:g2> { ?s <urn:p> ?o } }", "s", "")]
     public void DatasetClauses_AreRespectedByTheUnifiedGraphPath(string name, string query, string variable, string expectedPipe)
     {
-        var result = SparqlEngine.Query(_store, query);
+        var result = SparqlEngine.Query(_store, query, TestContext.Current.CancellationToken);
         Assert.True(result.Success, $"[{name}] {result.ErrorMessage}");
 
         var actual = result.Rows!

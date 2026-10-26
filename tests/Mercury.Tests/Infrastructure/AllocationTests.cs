@@ -173,7 +173,7 @@ public class AllocationTests
         await using (var warmupStream = new MemoryStream(turtle))
         {
             var warmupParser = new TurtleStreamParser(warmupStream);
-            await warmupParser.ParseAsync((s, p, o) => { });
+            await warmupParser.ParseAsync((s, p, o) => { }, TestContext.Current.CancellationToken);
         }
 
         // Force GC
@@ -193,7 +193,7 @@ public class AllocationTests
                 tripleCount++;
                 // Access spans to ensure they're used (no allocation)
                 _ = subject.Length + predicate.Length + obj.Length;
-            });
+            }, TestContext.Current.CancellationToken);
         }
 
         var after = GC.GetAllocatedBytesForCurrentThread();
@@ -225,7 +225,7 @@ public class AllocationTests
         await using (var warmupStream = new MemoryStream(turtle))
         {
             var warmupParser = new TurtleStreamParser(warmupStream);
-            await foreach (var _ in warmupParser.ParseAsync()) { }
+            await foreach (var _ in warmupParser.ParseAsync(TestContext.Current.CancellationToken)) { }
         }
 
         GC.Collect();
@@ -238,7 +238,7 @@ public class AllocationTests
         await using (var stream = new MemoryStream(turtle))
         {
             var parser = new TurtleStreamParser(stream);
-            await foreach (var triple in parser.ParseAsync())
+            await foreach (var triple in parser.ParseAsync(TestContext.Current.CancellationToken))
             {
                 tripleCount++;
                 _ = triple.Subject.Length;

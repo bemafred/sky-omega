@@ -27,7 +27,7 @@ public class NQuadsStreamParserTests
         await parser.ParseAsync((s, p, o, g) =>
         {
             quads.Add((s.ToString(), p.ToString(), o.ToString(), g.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         Assert.Single(quads);
         Assert.Equal("<http://example.org/s>", quads[0].S);
@@ -48,7 +48,7 @@ public class NQuadsStreamParserTests
         await parser.ParseAsync((s, p, o, g) =>
         {
             quads.Add((s.ToString(), p.ToString(), o.ToString(), g.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         Assert.Single(quads);
         Assert.Equal("<http://example.org/s>", quads[0].S);
@@ -70,7 +70,7 @@ public class NQuadsStreamParserTests
         var parser = new NQuadsStreamParser(stream);
 
         int count = 0;
-        await parser.ParseAsync((s, p, o, g) => count++);
+        await parser.ParseAsync((s, p, o, g) => count++, TestContext.Current.CancellationToken);
 
         Assert.Equal(3, count);
     }
@@ -89,7 +89,7 @@ public class NQuadsStreamParserTests
         var parser = new NQuadsStreamParser(stream);
 
         int count = 0;
-        await parser.ParseAsync((s, p, o, g) => count++);
+        await parser.ParseAsync((s, p, o, g) => count++, TestContext.Current.CancellationToken);
 
         Assert.Equal(2, count);
     }
@@ -110,7 +110,7 @@ public class NQuadsStreamParserTests
         await parser.ParseAsync((s, p, o, g) =>
         {
             quads.Add((s.ToString(), p.ToString(), o.ToString(), g.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         Assert.Single(quads);
         Assert.Equal("_:graphB1", quads[0].G);
@@ -132,7 +132,7 @@ public class NQuadsStreamParserTests
         await parser.ParseAsync((s, p, o, g) =>
         {
             quads.Add((s.ToString(), p.ToString(), o.ToString(), g.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         Assert.Equal(3, quads.Count);
         Assert.Equal("<http://ex.org/g1>", quads[0].G);
@@ -156,7 +156,7 @@ public class NQuadsStreamParserTests
         await parser.ParseAsync((s, p, o, g) =>
         {
             quads.Add((s.ToString(), p.ToString(), o.ToString(), g.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         Assert.Single(quads);
         Assert.Equal("_:b1", quads[0].S);
@@ -174,7 +174,7 @@ public class NQuadsStreamParserTests
         await parser.ParseAsync((s, p, o, g) =>
         {
             quads.Add((s.ToString(), p.ToString(), o.ToString(), g.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         Assert.Single(quads);
         Assert.Equal("_:blank123", quads[0].O);
@@ -196,7 +196,7 @@ public class NQuadsStreamParserTests
         await parser.ParseAsync((s, p, o, g) =>
         {
             quads.Add((s.ToString(), p.ToString(), o.ToString(), g.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         Assert.Single(quads);
         Assert.Equal("\"Hello World\"", quads[0].O);
@@ -215,7 +215,7 @@ public class NQuadsStreamParserTests
         await parser.ParseAsync((s, p, o, g) =>
         {
             quads.Add((s.ToString(), p.ToString(), o.ToString(), g.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         Assert.Single(quads);
         Assert.Equal("\"42\"^^<http://www.w3.org/2001/XMLSchema#integer>", quads[0].O);
@@ -233,7 +233,7 @@ public class NQuadsStreamParserTests
         await parser.ParseAsync((s, p, o, g) =>
         {
             quads.Add((s.ToString(), p.ToString(), o.ToString(), g.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         Assert.Single(quads);
         Assert.Equal("\"Bonjour\"@fr", quads[0].O);
@@ -251,7 +251,7 @@ public class NQuadsStreamParserTests
         await parser.ParseAsync((s, p, o, g) =>
         {
             quads.Add((s.ToString(), p.ToString(), o.ToString(), g.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         Assert.Single(quads);
         Assert.Contains("\n", quads[0].O);
@@ -274,7 +274,7 @@ public class NQuadsStreamParserTests
         await parser.ParseAsync((s, p, o, g) =>
         {
             quads.Add((s.ToString(), p.ToString(), o.ToString(), g.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         Assert.Single(quads);
         Assert.Contains("café", quads[0].O);
@@ -296,7 +296,7 @@ public class NQuadsStreamParserTests
         var parser = new NQuadsStreamParser(stream);
 
         var quads = new List<RdfQuad>();
-        await foreach (var quad in parser.ParseAsync())
+        await foreach (var quad in parser.ParseAsync(TestContext.Current.CancellationToken))
         {
             quads.Add(quad);
         }
@@ -353,7 +353,7 @@ public class NQuadsStreamParserTests
         await using (var warmupStream = new MemoryStream(nquads))
         {
             var warmupParser = new NQuadsStreamParser(warmupStream);
-            await warmupParser.ParseAsync((s, p, o, g) => { });
+            await warmupParser.ParseAsync((s, p, o, g) => { }, TestContext.Current.CancellationToken);
         }
 
         GC.Collect();
@@ -370,7 +370,7 @@ public class NQuadsStreamParserTests
             {
                 quadCount++;
                 _ = s.Length + p.Length + o.Length + g.Length;
-            });
+            }, TestContext.Current.CancellationToken);
         }
 
         var after = GC.GetAllocatedBytesForCurrentThread();
@@ -394,7 +394,7 @@ public class NQuadsStreamParserTests
         var parser = new NQuadsStreamParser(stream);
 
         int count = 0;
-        await parser.ParseAsync((s, p, o, g) => count++);
+        await parser.ParseAsync((s, p, o, g) => count++, TestContext.Current.CancellationToken);
 
         Assert.Equal(0, count);
     }
@@ -412,7 +412,7 @@ public class NQuadsStreamParserTests
         var parser = new NQuadsStreamParser(stream);
 
         int count = 0;
-        await parser.ParseAsync((s, p, o, g) => count++);
+        await parser.ParseAsync((s, p, o, g) => count++, TestContext.Current.CancellationToken);
 
         Assert.Equal(0, count);
     }
@@ -434,7 +434,7 @@ public class NQuadsStreamParserTests
         var parser = new NQuadsStreamParser(stream, bufferSize: 4096);
 
         int count = 0;
-        await parser.ParseAsync((s, p, o, g) => count++);
+        await parser.ParseAsync((s, p, o, g) => count++, TestContext.Current.CancellationToken);
 
         Assert.Equal(10_000, count);
     }

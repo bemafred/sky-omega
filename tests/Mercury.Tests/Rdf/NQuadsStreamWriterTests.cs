@@ -227,11 +227,7 @@ public class NQuadsStreamWriterTests
         await using var sw = new StringWriter();
         await using var writer = new NQuadsStreamWriter(sw);
 
-        await writer.WriteQuadAsync(
-            "http://example.org/s".AsMemory(),
-            "http://example.org/p".AsMemory(),
-            "http://example.org/o".AsMemory(),
-            "http://example.org/g".AsMemory());
+        await writer.WriteQuadAsync("http://example.org/s".AsMemory(), "http://example.org/p".AsMemory(), "http://example.org/o".AsMemory(), "http://example.org/g".AsMemory(), TestContext.Current.CancellationToken);
 
         var result = sw.ToString();
         Assert.Contains("http://example.org/g", result);
@@ -243,11 +239,7 @@ public class NQuadsStreamWriterTests
         await using var sw = new StringWriter();
         await using var writer = new NQuadsStreamWriter(sw);
 
-        await writer.WriteQuadAsync(
-            "<http://example.org/s>",
-            "<http://example.org/p>",
-            "<http://example.org/o>",
-            "<http://example.org/g>");
+        await writer.WriteQuadAsync("<http://example.org/s>", "<http://example.org/p>", "<http://example.org/o>", "<http://example.org/g>", TestContext.Current.CancellationToken);
 
         var result = sw.ToString();
         Assert.Equal("<http://example.org/s> <http://example.org/p> <http://example.org/o> <http://example.org/g> .\n", result);
@@ -259,10 +251,7 @@ public class NQuadsStreamWriterTests
         await using var sw = new StringWriter();
         await using var writer = new NQuadsStreamWriter(sw);
 
-        await writer.WriteQuadAsync(
-            "<http://example.org/s>",
-            "<http://example.org/p>",
-            "<http://example.org/o>");
+        await writer.WriteQuadAsync("<http://example.org/s>", "<http://example.org/p>", "<http://example.org/o>", ct: TestContext.Current.CancellationToken);
 
         var result = sw.ToString();
         Assert.DoesNotContain("<http://example.org/g>", result);
@@ -330,7 +319,7 @@ public class NQuadsStreamWriterTests
         await parser.ParseAsync((s, p, o, g) =>
         {
             parsed.Add((s.ToString(), p.ToString(), o.ToString(), g.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         Assert.Equal(3, parsed.Count);
         Assert.Equal("<http://ex.org/s1>", parsed[0].S);

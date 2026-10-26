@@ -1,7 +1,6 @@
 // Licensed under the MIT License.
 
 using Xunit;
-using Xunit.Abstractions;
 using SkyOmega.Mercury.Rdf.Turtle;
 
 namespace SkyOmega.Mercury.Tests.W3C;
@@ -18,10 +17,10 @@ public class W3CManifestParserDiagnosticTests
         _output = output;
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task DiagnoseNTriplesManifest()
     {
-        Skip.IfNot(W3CTestContext.IsAvailable, "W3C test suite not available");
+        Assert.SkipUnless(W3CTestContext.IsAvailable, "W3C test suite not available");
 
         var manifestPath = W3CTestContext.GetManifestPath(W3CTestSuite.NTriples11);
         _output.WriteLine($"Manifest path: {manifestPath}");
@@ -60,7 +59,7 @@ public class W3CManifestParserDiagnosticTests
                 // Count mf:entries
                 if (p.Contains("entries"))
                     entriesCount++;
-            });
+            }, TestContext.Current.CancellationToken);
 
             _output.WriteLine($"\nTotal triples: {tripleCount}");
             _output.WriteLine($"Entries predicates: {entriesCount}");
@@ -74,7 +73,7 @@ public class W3CManifestParserDiagnosticTests
         // Now try the manifest parser
         _output.WriteLine("\n--- Using W3CManifestParser ---");
         var parser2 = new W3CManifestParser();
-        var tests = await parser2.ParseAsync(manifestPath);
+        var tests = await parser2.ParseAsync(manifestPath, TestContext.Current.CancellationToken);
         _output.WriteLine($"Tests found: {tests.Count}");
 
         foreach (var test in tests.Take(5))
@@ -84,10 +83,10 @@ public class W3CManifestParserDiagnosticTests
         }
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task DiagnoseTurtleManifest()
     {
-        Skip.IfNot(W3CTestContext.IsAvailable, "W3C test suite not available");
+        Assert.SkipUnless(W3CTestContext.IsAvailable, "W3C test suite not available");
 
         var manifestPath = W3CTestContext.GetManifestPath(W3CTestSuite.Turtle11);
         _output.WriteLine($"Manifest path: {manifestPath}");
@@ -126,7 +125,7 @@ public class W3CManifestParserDiagnosticTests
                 // Count mf:entries
                 if (p.Contains("entries"))
                     entriesCount++;
-            });
+            }, TestContext.Current.CancellationToken);
 
             _output.WriteLine($"\nTotal triples: {tripleCount}");
             _output.WriteLine($"Entries predicates: {entriesCount}");
@@ -140,7 +139,7 @@ public class W3CManifestParserDiagnosticTests
         // Now try the manifest parser
         _output.WriteLine("\n--- Using W3CManifestParser ---");
         var parser2 = new W3CManifestParser();
-        var tests = await parser2.ParseAsync(manifestPath);
+        var tests = await parser2.ParseAsync(manifestPath, TestContext.Current.CancellationToken);
         _output.WriteLine($"Tests found: {tests.Count}");
 
         foreach (var test in tests.Take(5))
@@ -150,10 +149,10 @@ public class W3CManifestParserDiagnosticTests
         }
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task DiagnoseSparqlAggregatesManifest()
     {
-        Skip.IfNot(W3CTestContext.IsAvailable, "W3C test suite not available");
+        Assert.SkipUnless(W3CTestContext.IsAvailable, "W3C test suite not available");
 
         var manifestPath = Path.Combine(W3CTestContext.TestsRoot, "sparql", "sparql11", "aggregates", "manifest.ttl");
         _output.WriteLine($"Manifest path: {manifestPath}");
@@ -205,7 +204,7 @@ public class W3CManifestParserDiagnosticTests
                 // Count QueryEvaluationTest
                 if (o.Contains("QueryEvaluationTest"))
                     queryEvalCount++;
-            });
+            }, TestContext.Current.CancellationToken);
 
             _output.WriteLine($"\nTotal triples: {tripleCount}");
             _output.WriteLine($"Entries predicates: {entriesCount}");
@@ -223,7 +222,7 @@ public class W3CManifestParserDiagnosticTests
         // Now try the manifest parser
         _output.WriteLine("\n--- Using W3CManifestParser ---");
         var parser2 = new W3CManifestParser();
-        var tests = await parser2.ParseAsync(manifestPath);
+        var tests = await parser2.ParseAsync(manifestPath, TestContext.Current.CancellationToken);
         _output.WriteLine($"Tests found: {tests.Count}");
 
         foreach (var test in tests.Take(10))

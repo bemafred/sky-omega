@@ -5,7 +5,6 @@ using SkyOmega.Mercury;
 using SkyOmega.Mercury.Runtime;
 using SkyOmega.Mercury.Storage;
 using Xunit;
-using Xunit.Abstractions;
 
 namespace SkyOmega.Mercury.Tests.Sparql;
 

@@ -1,7 +1,6 @@
 // Licensed under the MIT License.
 
 using Xunit;
-using Xunit.Abstractions;
 
 namespace SkyOmega.Mercury.Tests.W3C;
 

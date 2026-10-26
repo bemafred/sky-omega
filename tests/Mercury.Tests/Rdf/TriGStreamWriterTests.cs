@@ -296,12 +296,8 @@ public class TriGStreamWriterTests
         await using var sw = new StringWriter();
         await using var writer = new TriGStreamWriter(sw);
 
-        await writer.WriteQuadAsync(
-            "<http://example.org/s>",
-            "<http://example.org/p>",
-            "<http://example.org/o>",
-            "<http://example.org/g>");
-        await writer.FlushAsync();
+        await writer.WriteQuadAsync("<http://example.org/s>", "<http://example.org/p>", "<http://example.org/o>", "<http://example.org/g>", TestContext.Current.CancellationToken);
+        await writer.FlushAsync(TestContext.Current.CancellationToken);
 
         var result = sw.ToString();
         Assert.Contains("GRAPH <http://example.org/g>", result);
@@ -314,7 +310,7 @@ public class TriGStreamWriterTests
         await using var writer = new TriGStreamWriter(sw);
 
         writer.RegisterPrefix("ex", "http://example.org/");
-        await writer.WritePrefixesAsync();
+        await writer.WritePrefixesAsync(TestContext.Current.CancellationToken);
 
         var result = sw.ToString();
         Assert.Contains("@prefix ex: <http://example.org/>", result);
@@ -375,7 +371,7 @@ public class TriGStreamWriterTests
         await parser.ParseAsync((s, p, o, g) =>
         {
             parsed.Add((s.ToString(), p.ToString(), o.ToString(), g.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         Assert.Equal(3, parsed.Count);
         Assert.Contains(parsed, q => q.S == "<http://ex.org/s1>" && string.IsNullOrEmpty(q.G));

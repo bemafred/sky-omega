@@ -228,12 +228,9 @@ public class NTriplesStreamWriterTests
         using var sw = new StringWriter();
         await using var writer = new NTriplesStreamWriter(sw);
 
-        await writer.WriteTripleAsync(
-            "<http://example.org/subject>",
-            "<http://example.org/predicate>",
-            "<http://example.org/object>");
+        await writer.WriteTripleAsync("<http://example.org/subject>", "<http://example.org/predicate>", "<http://example.org/object>", TestContext.Current.CancellationToken);
 
-        await writer.FlushAsync();
+        await writer.FlushAsync(TestContext.Current.CancellationToken);
         var result = sw.ToString();
         Assert.Equal("<http://example.org/subject> <http://example.org/predicate> <http://example.org/object> .\n", result);
     }
@@ -244,11 +241,11 @@ public class NTriplesStreamWriterTests
         using var sw = new StringWriter();
         await using var writer = new NTriplesStreamWriter(sw);
 
-        await writer.WriteTripleAsync("<http://ex.org/s1>", "<http://ex.org/p>", "<http://ex.org/o1>");
-        await writer.WriteTripleAsync("<http://ex.org/s2>", "<http://ex.org/p>", "<http://ex.org/o2>");
-        await writer.WriteTripleAsync("<http://ex.org/s3>", "<http://ex.org/p>", "<http://ex.org/o3>");
+        await writer.WriteTripleAsync("<http://ex.org/s1>", "<http://ex.org/p>", "<http://ex.org/o1>", TestContext.Current.CancellationToken);
+        await writer.WriteTripleAsync("<http://ex.org/s2>", "<http://ex.org/p>", "<http://ex.org/o2>", TestContext.Current.CancellationToken);
+        await writer.WriteTripleAsync("<http://ex.org/s3>", "<http://ex.org/p>", "<http://ex.org/o3>", TestContext.Current.CancellationToken);
 
-        await writer.FlushAsync();
+        await writer.FlushAsync(TestContext.Current.CancellationToken);
         var result = sw.ToString();
         var lines = result.Split('\n', StringSplitOptions.RemoveEmptyEntries);
         Assert.Equal(3, lines.Length);
@@ -299,7 +296,7 @@ public class NTriplesStreamWriterTests
         await parser.ParseAsync((s, p, o) =>
         {
             triples.Add((s.ToString(), p.ToString(), o.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         // Verify
         Assert.Equal(3, triples.Count);
@@ -439,10 +436,7 @@ public class NTriplesStreamWriterTests
 
         using var sw = new StringWriter();
         await using var writer = new NTriplesStreamWriter(sw);
-        await writer.WriteTripleAsync(
-            "<http://ex/s>".AsMemory(),
-            "<http://ex/p>".AsMemory(),
-            literal.AsMemory());
+        await writer.WriteTripleAsync("<http://ex/s>".AsMemory(), "<http://ex/p>".AsMemory(), literal.AsMemory(), TestContext.Current.CancellationToken);
 
         var expected = "<http://ex/s> <http://ex/p> \"Entity[\\\"HistoricalCountry\\\", \\\"Belgium\\\"]\" .\n";
         Assert.Equal(expected, sw.ToString());
@@ -464,7 +458,7 @@ public class NTriplesStreamWriterTests
         var writer = new NTriplesStreamWriter(ntWriter);
         var ttlStream = new MemoryStream(Encoding.UTF8.GetBytes(turtle));
         var parser = new SkyOmega.Mercury.Rdf.Turtle.TurtleStreamParser(ttlStream);
-        await parser.ParseAsync((s, p, o) => writer.WriteTriple(s, p, o));
+        await parser.ParseAsync((s, p, o) => writer.WriteTriple(s, p, o), TestContext.Current.CancellationToken);
         writer.Flush();
         ntWriter.Flush();
         var ntText = Encoding.UTF8.GetString(ntMem.ToArray());
@@ -475,7 +469,7 @@ public class NTriplesStreamWriterTests
         var ntParser = new SkyOmega.Mercury.NTriples.NTriplesStreamParser(ntInput);
         var roundTripped = new List<(string S, string P, string O)>();
         await ntParser.ParseAsync((s, p, o) =>
-            roundTripped.Add((s.ToString(), p.ToString(), o.ToString())));
+            roundTripped.Add((s.ToString(), p.ToString(), o.ToString())), TestContext.Current.CancellationToken);
 
         Assert.Single(roundTripped);
         // Lexical value should survive the round trip unchanged

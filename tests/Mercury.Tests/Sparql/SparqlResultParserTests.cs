@@ -25,7 +25,7 @@ public class SparqlResultParserTests
 
         await using var stream = new MemoryStream(Encoding.UTF8.GetBytes(json));
         await using var parser = new SparqlJsonResultParser(stream);
-        await parser.ParseAsync();
+        await parser.ParseAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(3, parser.Variables.Count);
         Assert.Contains("s", parser.Variables);
@@ -50,7 +50,7 @@ public class SparqlResultParserTests
 
         await using var stream = new MemoryStream(Encoding.UTF8.GetBytes(json));
         await using var parser = new SparqlJsonResultParser(stream);
-        await parser.ParseAsync();
+        await parser.ParseAsync(TestContext.Current.CancellationToken);
 
         Assert.Single(parser.Rows);
         var row = parser.Rows[0];
@@ -74,7 +74,7 @@ public class SparqlResultParserTests
 
         await using var stream = new MemoryStream(Encoding.UTF8.GetBytes(json));
         await using var parser = new SparqlJsonResultParser(stream);
-        await parser.ParseAsync();
+        await parser.ParseAsync(TestContext.Current.CancellationToken);
 
         Assert.True(parser.IsAskResult);
         Assert.True(parser.BooleanResult);
@@ -90,7 +90,7 @@ public class SparqlResultParserTests
 
         await using var stream = new MemoryStream(Encoding.UTF8.GetBytes(json));
         await using var parser = new SparqlJsonResultParser(stream);
-        await parser.ParseAsync();
+        await parser.ParseAsync(TestContext.Current.CancellationToken);
 
         Assert.True(parser.IsAskResult);
         Assert.False(parser.BooleanResult);
@@ -110,7 +110,7 @@ public class SparqlResultParserTests
 
         await using var stream = new MemoryStream(Encoding.UTF8.GetBytes(json));
         await using var parser = new SparqlJsonResultParser(stream);
-        await parser.ParseAsync();
+        await parser.ParseAsync(TestContext.Current.CancellationToken);
 
         var value = parser.Rows[0].GetValue("s");
         Assert.NotNull(value);
@@ -133,7 +133,7 @@ public class SparqlResultParserTests
 
         await using var stream = new MemoryStream(Encoding.UTF8.GetBytes(json));
         await using var parser = new SparqlJsonResultParser(stream);
-        await parser.ParseAsync();
+        await parser.ParseAsync(TestContext.Current.CancellationToken);
 
         var value = parser.Rows[0].GetValue("s");
         Assert.NotNull(value);
@@ -155,7 +155,7 @@ public class SparqlResultParserTests
 
         await using var stream = new MemoryStream(Encoding.UTF8.GetBytes(json));
         await using var parser = new SparqlJsonResultParser(stream);
-        await parser.ParseAsync();
+        await parser.ParseAsync(TestContext.Current.CancellationToken);
 
         var value = parser.Rows[0].GetValue("name");
         Assert.NotNull(value);
@@ -180,7 +180,7 @@ public class SparqlResultParserTests
 
         await using var stream = new MemoryStream(Encoding.UTF8.GetBytes(json));
         await using var parser = new SparqlJsonResultParser(stream);
-        await parser.ParseAsync();
+        await parser.ParseAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(3, parser.Rows.Count);
     }
@@ -199,7 +199,7 @@ public class SparqlResultParserTests
 
         await using var stream = new MemoryStream(Encoding.UTF8.GetBytes(json));
         await using var parser = new SparqlJsonResultParser(stream);
-        await parser.ParseAsync();
+        await parser.ParseAsync(TestContext.Current.CancellationToken);
 
         var row = parser.Rows[0];
         Assert.True(row.IsBound("s"));
@@ -226,7 +226,7 @@ public class SparqlResultParserTests
 
         await using var stream = new MemoryStream(Encoding.UTF8.GetBytes(xml));
         await using var parser = new SparqlXmlResultParser(stream);
-        await parser.ParseAsync();
+        await parser.ParseAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(3, parser.Variables.Count);
         Assert.Contains("s", parser.Variables);
@@ -251,7 +251,7 @@ public class SparqlResultParserTests
 
         await using var stream = new MemoryStream(Encoding.UTF8.GetBytes(xml));
         await using var parser = new SparqlXmlResultParser(stream);
-        await parser.ParseAsync();
+        await parser.ParseAsync(TestContext.Current.CancellationToken);
 
         Assert.Single(parser.Rows);
         var value = parser.Rows[0].GetValue("name");
@@ -270,7 +270,7 @@ public class SparqlResultParserTests
 
         await using var stream = new MemoryStream(Encoding.UTF8.GetBytes(xml));
         await using var parser = new SparqlXmlResultParser(stream);
-        await parser.ParseAsync();
+        await parser.ParseAsync(TestContext.Current.CancellationToken);
 
         Assert.True(parser.IsAskResult);
         Assert.True(parser.BooleanResult);
@@ -293,7 +293,7 @@ public class SparqlResultParserTests
 
         await using var stream = new MemoryStream(Encoding.UTF8.GetBytes(xml));
         await using var parser = new SparqlXmlResultParser(stream);
-        await parser.ParseAsync();
+        await parser.ParseAsync(TestContext.Current.CancellationToken);
 
         var value = parser.Rows[0].GetValue("s");
         Assert.NotNull(value);
@@ -318,7 +318,7 @@ public class SparqlResultParserTests
 
         await using var stream = new MemoryStream(Encoding.UTF8.GetBytes(xml));
         await using var parser = new SparqlXmlResultParser(stream);
-        await parser.ParseAsync();
+        await parser.ParseAsync(TestContext.Current.CancellationToken);
 
         var value = parser.Rows[0].GetValue("s");
         Assert.NotNull(value);
@@ -342,7 +342,7 @@ public class SparqlResultParserTests
 
         await using var stream = new MemoryStream(Encoding.UTF8.GetBytes(xml));
         await using var parser = new SparqlXmlResultParser(stream);
-        await parser.ParseAsync();
+        await parser.ParseAsync(TestContext.Current.CancellationToken);
 
         var value = parser.Rows[0].GetValue("age");
         Assert.NotNull(value);
@@ -367,7 +367,7 @@ public class SparqlResultParserTests
 
         await using var stream = new MemoryStream(Encoding.UTF8.GetBytes(xml));
         await using var parser = new SparqlXmlResultParser(stream);
-        await parser.ParseAsync();
+        await parser.ParseAsync(TestContext.Current.CancellationToken);
 
         var value = parser.Rows[0].GetValue("name");
         Assert.NotNull(value);
@@ -386,7 +386,7 @@ public class SparqlResultParserTests
 
         await using var stream = new MemoryStream(Encoding.UTF8.GetBytes(csv));
         await using var parser = new SparqlCsvResultParser(stream);
-        await parser.ParseAsync();
+        await parser.ParseAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(2, parser.Variables.Count);
         Assert.Contains("name", parser.Variables);
@@ -400,7 +400,7 @@ public class SparqlResultParserTests
 
         await using var stream = new MemoryStream(Encoding.UTF8.GetBytes(csv));
         await using var parser = new SparqlCsvResultParser(stream);
-        await parser.ParseAsync();
+        await parser.ParseAsync(TestContext.Current.CancellationToken);
 
         Assert.Single(parser.Rows);
         var row = parser.Rows[0];
@@ -417,7 +417,7 @@ public class SparqlResultParserTests
 
         await using var stream = new MemoryStream(Encoding.UTF8.GetBytes(csv));
         await using var parser = new SparqlCsvResultParser(stream);
-        await parser.ParseAsync();
+        await parser.ParseAsync(TestContext.Current.CancellationToken);
 
         var desc = parser.Rows[0].GetValue("description");
         Assert.NotNull(desc);
@@ -431,7 +431,7 @@ public class SparqlResultParserTests
 
         await using var stream = new MemoryStream(Encoding.UTF8.GetBytes(csv));
         await using var parser = new SparqlCsvResultParser(stream);
-        await parser.ParseAsync();
+        await parser.ParseAsync(TestContext.Current.CancellationToken);
 
         var quote = parser.Rows[0].GetValue("quote");
         Assert.NotNull(quote);
@@ -445,7 +445,7 @@ public class SparqlResultParserTests
 
         await using var stream = new MemoryStream(Encoding.UTF8.GetBytes(csv));
         await using var parser = new SparqlCsvResultParser(stream);
-        await parser.ParseAsync();
+        await parser.ParseAsync(TestContext.Current.CancellationToken);
 
         var s = parser.Rows[0].GetValue("s");
         Assert.NotNull(s);
@@ -459,7 +459,7 @@ public class SparqlResultParserTests
 
         await using var stream = new MemoryStream(Encoding.UTF8.GetBytes(csv));
         await using var parser = new SparqlCsvResultParser(stream);
-        await parser.ParseAsync();
+        await parser.ParseAsync(TestContext.Current.CancellationToken);
 
         var s = parser.Rows[0].GetValue("s");
         Assert.NotNull(s);
@@ -473,7 +473,7 @@ public class SparqlResultParserTests
 
         await using var stream = new MemoryStream(Encoding.UTF8.GetBytes(csv));
         await using var parser = new SparqlCsvResultParser(stream);
-        await parser.ParseAsync();
+        await parser.ParseAsync(TestContext.Current.CancellationToken);
 
         var row = parser.Rows[0];
         Assert.True(row.IsBound("s"));
@@ -487,7 +487,7 @@ public class SparqlResultParserTests
 
         await using var stream = new MemoryStream(Encoding.UTF8.GetBytes(csv));
         await using var parser = new SparqlCsvResultParser(stream);
-        await parser.ParseAsync();
+        await parser.ParseAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(3, parser.Rows.Count);
     }
@@ -503,7 +503,7 @@ public class SparqlResultParserTests
 
         await using var stream = new MemoryStream(Encoding.UTF8.GetBytes(tsv));
         await using var parser = new SparqlCsvResultParser(stream, isTsv: true);
-        await parser.ParseAsync();
+        await parser.ParseAsync(TestContext.Current.CancellationToken);
 
         Assert.Equal(2, parser.Variables.Count);
         Assert.Contains("name", parser.Variables);
@@ -517,7 +517,7 @@ public class SparqlResultParserTests
 
         await using var stream = new MemoryStream(Encoding.UTF8.GetBytes(tsv));
         await using var parser = new SparqlCsvResultParser(stream, isTsv: true);
-        await parser.ParseAsync();
+        await parser.ParseAsync(TestContext.Current.CancellationToken);
 
         var s = parser.Rows[0].GetValue("s");
         Assert.NotNull(s);
@@ -532,7 +532,7 @@ public class SparqlResultParserTests
 
         await using var stream = new MemoryStream(Encoding.UTF8.GetBytes(tsv));
         await using var parser = new SparqlCsvResultParser(stream, isTsv: true);
-        await parser.ParseAsync();
+        await parser.ParseAsync(TestContext.Current.CancellationToken);
 
         var age = parser.Rows[0].GetValue("age");
         Assert.NotNull(age);
@@ -547,7 +547,7 @@ public class SparqlResultParserTests
 
         await using var stream = new MemoryStream(Encoding.UTF8.GetBytes(tsv));
         await using var parser = new SparqlCsvResultParser(stream, isTsv: true);
-        await parser.ParseAsync();
+        await parser.ParseAsync(TestContext.Current.CancellationToken);
 
         var name = parser.Rows[0].GetValue("name");
         Assert.NotNull(name);
@@ -604,7 +604,7 @@ public class SparqlResultParserTests
         await using var parser = new SparqlJsonResultParser(stream);
 
         var names = new List<string>();
-        await foreach (var row in parser.EnumerateAsync())
+        await foreach (var row in parser.EnumerateAsync(TestContext.Current.CancellationToken))
         {
             var value = row.GetValue("name");
             if (value != null)
@@ -633,7 +633,7 @@ public class SparqlResultParserTests
 
         await using var stream = new MemoryStream(Encoding.UTF8.GetBytes(json));
         await using var parser = new SparqlJsonResultParser(stream);
-        await parser.ParseAsync();
+        await parser.ParseAsync(TestContext.Current.CancellationToken);
 
         var row = parser.Rows[0];
         Assert.True(row.TryGetValue("?name", out var value));
@@ -657,7 +657,7 @@ public class SparqlResultParserTests
 
         await using var stream = new MemoryStream(Encoding.UTF8.GetBytes(json));
         await using var parser = new SparqlJsonResultParser(stream);
-        await parser.ParseAsync();
+        await parser.ParseAsync(TestContext.Current.CancellationToken);
 
         var row = parser.Rows[0];
         Assert.Equal(2, row.Count);

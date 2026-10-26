@@ -1,7 +1,6 @@
 using System.Text;
 using SkyOmega.Mercury.Rdf.Turtle;
 using Xunit;
-using Xunit.Abstractions;
 
 namespace SkyOmega.Mercury.Tests.Rdf;
 

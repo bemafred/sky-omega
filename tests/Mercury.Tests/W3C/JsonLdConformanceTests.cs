@@ -6,7 +6,6 @@ using System.Text.Json;
 using SkyOmega.Mercury.JsonLd;
 using SkyOmega.Mercury.NQuads;
 using Xunit;
-using Xunit.Abstractions;
 
 namespace SkyOmega.Mercury.Tests.W3C;
 
@@ -24,24 +23,24 @@ public class JsonLdConformanceTests
         _output = output;
     }
 
-    [SkippableTheory]
+    [Theory]
     [MemberData(nameof(GetToRdfPositiveTests))]
     public async Task ToRdf_PositiveEval(JsonLdTestCase test)
     {
-        Skip.IfNot(JsonLdTestContext.IsAvailable, "JSON-LD test suite not available");
-        Skip.IfNot(File.Exists(test.InputPath), $"Input file not found: {test.InputPath}");
+        Assert.SkipUnless(JsonLdTestContext.IsAvailable, "JSON-LD test suite not available");
+        Assert.SkipUnless(File.Exists(test.InputPath), $"Input file not found: {test.InputPath}");
         // PositiveSyntaxTest has no expected output file - just tests parsing succeeds
-        Skip.If(test.ExpectPath == null && !test.IsSyntaxTest, "No expected result file");
-        Skip.If(!test.IsSyntaxTest && !File.Exists(test.ExpectPath), $"Expected file not found: {test.ExpectPath}");
+        Assert.SkipWhen(test.ExpectPath == null && !test.IsSyntaxTest, "No expected result file");
+        Assert.SkipWhen(!test.IsSyntaxTest && !File.Exists(test.ExpectPath), $"Expected file not found: {test.ExpectPath}");
 
         // Skip tests requiring features not yet implemented
         if (test.Option?.SpecVersion == "json-ld-1.0")
         {
-            Skip.If(true, "JSON-LD 1.0 specific tests not supported");
+            Assert.SkipWhen(true, "JSON-LD 1.0 specific tests not supported");
         }
         if (test.Option?.ProduceGeneralizedRdf == true)
         {
-            Skip.If(true, "Generalized RDF not supported");
+            Assert.SkipWhen(true, "Generalized RDF not supported");
         }
 
         _output.WriteLine($"Test: {test.Name}");
@@ -77,14 +76,14 @@ public class JsonLdConformanceTests
                 // expandContext path is relative to tests directory (e.g., "toRdf/e077-context.jsonld")
                 var testsDir = Path.GetDirectoryName(testDir);  // Go up from toRdf to tests
                 var expandContextPath = Path.Combine(testsDir!, test.Option.ExpandContext);
-                var expandContextJson = await File.ReadAllTextAsync(expandContextPath);
+                var expandContextJson = await File.ReadAllTextAsync(expandContextPath, TestContext.Current.CancellationToken);
                 parser.ApplyExpandContext(expandContextJson);
             }
 
             await parser.ParseAsync((s, p, o, g) =>
             {
                 actualQuads.Add((s.ToString(), p.ToString(), o.ToString(), g.ToString()));
-            });
+            }, TestContext.Current.CancellationToken);
         }
 
         // For syntax tests, we just verify parsing succeeded (no exception)
@@ -103,7 +102,7 @@ public class JsonLdConformanceTests
             await parser.ParseAsync((s, p, o, g) =>
             {
                 expectedQuads.Add((s.ToString(), p.ToString(), o.ToString(), g.ToString()));
-            });
+            }, TestContext.Current.CancellationToken);
         }
 
         _output.WriteLine($"Actual: {actualQuads.Count} quads");
@@ -138,12 +137,12 @@ public class JsonLdConformanceTests
         Assert.Empty(extra);
     }
 
-    [SkippableTheory]
+    [Theory]
     [MemberData(nameof(GetToRdfNegativeTests))]
     public async Task ToRdf_NegativeEval(JsonLdTestCase test)
     {
-        Skip.IfNot(JsonLdTestContext.IsAvailable, "JSON-LD test suite not available");
-        Skip.IfNot(File.Exists(test.InputPath), $"Input file not found: {test.InputPath}");
+        Assert.SkipUnless(JsonLdTestContext.IsAvailable, "JSON-LD test suite not available");
+        Assert.SkipUnless(File.Exists(test.InputPath), $"Input file not found: {test.InputPath}");
 
         _output.WriteLine($"Test: {test.Name}");
         _output.WriteLine($"Input: {test.InputPath}");
@@ -170,7 +169,7 @@ public class JsonLdConformanceTests
 
         var exception = await Assert.ThrowsAnyAsync<Exception>(async () =>
         {
-            await parser.ParseAsync((s, p, o, g) => { });
+            await parser.ParseAsync((s, p, o, g) => { }, TestContext.Current.CancellationToken);
         });
 
         _output.WriteLine($"Actual error: {exception.Message}");

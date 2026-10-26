@@ -35,7 +35,7 @@ public class ValuesOnlyTests : IDisposable
     [Fact]
     public void SingleVariable_ReturnsEachRow()
     {
-        var result = SparqlEngine.Query(_store, "SELECT ?a WHERE { VALUES ?a { <urn:1> <urn:2> <urn:3> } }");
+        var result = SparqlEngine.Query(_store, "SELECT ?a WHERE { VALUES ?a { <urn:1> <urn:2> <urn:3> } }", TestContext.Current.CancellationToken);
         Assert.True(result.Success, result.ErrorMessage);
         Assert.Equal(new[] { "<urn:1>", "<urn:2>", "<urn:3>" },
             result.Rows!.Select(r => r["a"]).OrderBy(x => x, StringComparer.Ordinal));
@@ -44,7 +44,7 @@ public class ValuesOnlyTests : IDisposable
     [Fact]
     public void MultiVariable_ReturnsEachRowWithAllVariables()
     {
-        var result = SparqlEngine.Query(_store, "SELECT * WHERE { VALUES (?a ?b) { (<urn:1> <urn:x>) (<urn:2> <urn:y>) } }");
+        var result = SparqlEngine.Query(_store, "SELECT * WHERE { VALUES (?a ?b) { (<urn:1> <urn:x>) (<urn:2> <urn:y>) } }", TestContext.Current.CancellationToken);
         Assert.True(result.Success, result.ErrorMessage);
         Assert.Equal(2, result.Rows!.Count);
         var byA = result.Rows!.ToDictionary(r => r["a"], r => r["b"]);
@@ -56,7 +56,7 @@ public class ValuesOnlyTests : IDisposable
     public void MultiVariable_WithUndef_StillReturnsTheRows()
     {
         // UNDEF leaves that variable unbound in its row, but the row is still produced.
-        var result = SparqlEngine.Query(_store, "SELECT * WHERE { VALUES (?a ?b) { (<urn:1> UNDEF) (<urn:2> <urn:y>) } }");
+        var result = SparqlEngine.Query(_store, "SELECT * WHERE { VALUES (?a ?b) { (<urn:1> UNDEF) (<urn:2> <urn:y>) } }", TestContext.Current.CancellationToken);
         Assert.True(result.Success, result.ErrorMessage);
         Assert.Equal(2, result.Rows!.Count);
     }
@@ -64,7 +64,7 @@ public class ValuesOnlyTests : IDisposable
     [Fact]
     public void WithOrderByAndLimit_AppliesModifiers()
     {
-        var result = SparqlEngine.Query(_store, "SELECT ?a WHERE { VALUES ?a { <urn:3> <urn:1> <urn:2> } } ORDER BY ?a LIMIT 2");
+        var result = SparqlEngine.Query(_store, "SELECT ?a WHERE { VALUES ?a { <urn:3> <urn:1> <urn:2> } } ORDER BY ?a LIMIT 2", TestContext.Current.CancellationToken);
         Assert.True(result.Success, result.ErrorMessage);
         Assert.Equal(new[] { "<urn:1>", "<urn:2>" }, result.Rows!.Select(r => r["a"]));
     }

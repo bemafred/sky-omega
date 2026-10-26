@@ -1,7 +1,6 @@
 using System.Text;
 using SkyOmega.Mercury.Rdf.Turtle;
 using Xunit;
-using Xunit.Abstractions;
 
 namespace SkyOmega.Mercury.Tests.Rdf;
 
@@ -64,7 +63,7 @@ public class ParserLargeStatementTests
         await parser.ParseAsync((s, p, o) =>
         {
             triples.Add($"{s} {p} {o}");
-        });
+        }, TestContext.Current.CancellationToken);
 
         _output.WriteLine($"Parsed {triples.Count} triples");
         Assert.Equal(labelCount, triples.Count);
@@ -93,7 +92,7 @@ public class ParserLargeStatementTests
         await parser.ParseAsync((s, p, o) =>
         {
             subjects.Add(s.ToString());
-        });
+        }, TestContext.Current.CancellationToken);
 
         Assert.Equal(501, subjects.Count); // 500 big + 1 small
         Assert.Equal("<http://example.org/Small>", subjects.Last());

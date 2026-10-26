@@ -109,12 +109,12 @@ public class SparqlHttpServerTests : IDisposable
             using var client = new HttpClient();
 
             var query = "SELECT * WHERE { ?s ?p ?o } LIMIT 10";
-            var response = await client.GetAsync($"http://localhost:{_port}/sparql?query={WebUtility.UrlEncode(query)}");
+            var response = await client.GetAsync($"http://localhost:{_port}/sparql?query={WebUtility.UrlEncode(query)}", TestContext.Current.CancellationToken);
 
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             Assert.Contains("application/sparql-results+json", response.Content.Headers.ContentType?.ToString());
 
-            var content = await response.Content.ReadAsStringAsync();
+            var content = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
             Assert.Contains("\"head\"", content);
             Assert.Contains("\"results\"", content);
             Assert.Contains("\"bindings\"", content);
@@ -139,11 +139,11 @@ public class SparqlHttpServerTests : IDisposable
             using var client = new HttpClient();
 
             var query = "ASK WHERE { <http://example.org/alice> ?p ?o }";
-            var response = await client.GetAsync($"http://localhost:{_port}/sparql?query={WebUtility.UrlEncode(query)}");
+            var response = await client.GetAsync($"http://localhost:{_port}/sparql?query={WebUtility.UrlEncode(query)}", TestContext.Current.CancellationToken);
 
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
-            var content = await response.Content.ReadAsStringAsync();
+            var content = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
             Assert.Contains("\"boolean\"", content);
             Assert.Contains("true", content);
         }
@@ -170,7 +170,7 @@ public class SparqlHttpServerTests : IDisposable
             var content = new StringContent($"query={WebUtility.UrlEncode(query)}",
                 Encoding.UTF8, "application/x-www-form-urlencoded");
 
-            var response = await client.PostAsync($"http://localhost:{_port}/sparql", content);
+            var response = await client.PostAsync($"http://localhost:{_port}/sparql", content, TestContext.Current.CancellationToken);
 
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         }
@@ -196,7 +196,7 @@ public class SparqlHttpServerTests : IDisposable
             var query = "SELECT * WHERE { ?s ?p ?o } LIMIT 5";
             var content = new StringContent(query, Encoding.UTF8, "application/sparql-query");
 
-            var response = await client.PostAsync($"http://localhost:{_port}/sparql", content);
+            var response = await client.PostAsync($"http://localhost:{_port}/sparql", content, TestContext.Current.CancellationToken);
 
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         }
@@ -219,12 +219,12 @@ public class SparqlHttpServerTests : IDisposable
         {
             using var client = new HttpClient();
 
-            var response = await client.GetAsync($"http://localhost:{_port}/sparql");
+            var response = await client.GetAsync($"http://localhost:{_port}/sparql", TestContext.Current.CancellationToken);
 
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             Assert.Contains("text/turtle", response.Content.Headers.ContentType?.ToString());
 
-            var content = await response.Content.ReadAsStringAsync();
+            var content = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
             Assert.Contains("sd:Service", content);
             Assert.Contains("sd:SPARQL11Query", content);
         }
@@ -248,11 +248,11 @@ public class SparqlHttpServerTests : IDisposable
             using var client = new HttpClient();
 
             var query = "INVALID SPARQL QUERY";
-            var response = await client.GetAsync($"http://localhost:{_port}/sparql?query={WebUtility.UrlEncode(query)}");
+            var response = await client.GetAsync($"http://localhost:{_port}/sparql?query={WebUtility.UrlEncode(query)}", TestContext.Current.CancellationToken);
 
             Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
 
-            var content = await response.Content.ReadAsStringAsync();
+            var content = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
             Assert.Contains("error", content);
         }
         finally
@@ -280,12 +280,12 @@ public class SparqlHttpServerTests : IDisposable
             client.DefaultRequestHeaders.Accept.ParseAdd("application/sparql-results+xml");
 
             var query = "SELECT * WHERE { ?s ?p ?o } LIMIT 1";
-            var response = await client.GetAsync($"http://localhost:{_port}/sparql?query={WebUtility.UrlEncode(query)}");
+            var response = await client.GetAsync($"http://localhost:{_port}/sparql?query={WebUtility.UrlEncode(query)}", TestContext.Current.CancellationToken);
 
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             Assert.Contains("application/sparql-results+xml", response.Content.Headers.ContentType?.ToString());
 
-            var content = await response.Content.ReadAsStringAsync();
+            var content = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
             Assert.Contains("<sparql", content);
         }
         finally
@@ -309,7 +309,7 @@ public class SparqlHttpServerTests : IDisposable
             client.DefaultRequestHeaders.Accept.ParseAdd("text/csv");
 
             var query = "SELECT * WHERE { ?s ?p ?o } LIMIT 1";
-            var response = await client.GetAsync($"http://localhost:{_port}/sparql?query={WebUtility.UrlEncode(query)}");
+            var response = await client.GetAsync($"http://localhost:{_port}/sparql?query={WebUtility.UrlEncode(query)}", TestContext.Current.CancellationToken);
 
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             Assert.Contains("text/csv", response.Content.Headers.ContentType?.ToString());
@@ -340,7 +340,7 @@ public class SparqlHttpServerTests : IDisposable
             var update = "INSERT DATA { <http://example.org/test> <http://example.org/value> \"test\" }";
             var content = new StringContent(update, Encoding.UTF8, "application/sparql-update");
 
-            var response = await client.PostAsync($"http://localhost:{_port}/sparql/update", content);
+            var response = await client.PostAsync($"http://localhost:{_port}/sparql/update", content, TestContext.Current.CancellationToken);
 
             Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
         }
@@ -367,11 +367,11 @@ public class SparqlHttpServerTests : IDisposable
             var update = "INSERT DATA { <http://example.org/test> <http://example.org/value> \"test\" }";
             var content = new StringContent(update, Encoding.UTF8, "application/sparql-update");
 
-            var response = await client.PostAsync($"http://localhost:{_port}/sparql/update", content);
+            var response = await client.PostAsync($"http://localhost:{_port}/sparql/update", content, TestContext.Current.CancellationToken);
 
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
-            var responseContent = await response.Content.ReadAsStringAsync();
+            var responseContent = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
             Assert.Contains("\"success\":true", responseContent);
         }
         finally
@@ -394,7 +394,7 @@ public class SparqlHttpServerTests : IDisposable
         {
             using var client = new HttpClient();
 
-            var response = await client.GetAsync($"http://localhost:{_port}/sparql/update");
+            var response = await client.GetAsync($"http://localhost:{_port}/sparql/update", TestContext.Current.CancellationToken);
 
             Assert.Equal(HttpStatusCode.MethodNotAllowed, response.StatusCode);
         }
@@ -422,7 +422,7 @@ public class SparqlHttpServerTests : IDisposable
             using var client = new HttpClient();
 
             var query = "ASK WHERE { ?s ?p ?o }";
-            var response = await client.GetAsync($"http://localhost:{_port}/sparql?query={WebUtility.UrlEncode(query)}");
+            var response = await client.GetAsync($"http://localhost:{_port}/sparql?query={WebUtility.UrlEncode(query)}", TestContext.Current.CancellationToken);
 
             Assert.True(response.Headers.Contains("Access-Control-Allow-Origin"));
         }
@@ -447,7 +447,7 @@ public class SparqlHttpServerTests : IDisposable
             using var client = new HttpClient();
 
             var query = "ASK WHERE { ?s ?p ?o }";
-            var response = await client.GetAsync($"http://localhost:{_port}/sparql?query={WebUtility.UrlEncode(query)}");
+            var response = await client.GetAsync($"http://localhost:{_port}/sparql?query={WebUtility.UrlEncode(query)}", TestContext.Current.CancellationToken);
 
             Assert.False(response.Headers.Contains("Access-Control-Allow-Origin"));
         }
@@ -471,7 +471,7 @@ public class SparqlHttpServerTests : IDisposable
             using var client = new HttpClient();
 
             var request = new HttpRequestMessage(HttpMethod.Options, $"http://localhost:{_port}/sparql");
-            var response = await client.SendAsync(request);
+            var response = await client.SendAsync(request, TestContext.Current.CancellationToken);
 
             Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
         }
@@ -498,7 +498,7 @@ public class SparqlHttpServerTests : IDisposable
         {
             using var client = new HttpClient();
 
-            var response = await client.GetAsync($"http://localhost:{_port}/unknown");
+            var response = await client.GetAsync($"http://localhost:{_port}/unknown", TestContext.Current.CancellationToken);
 
             Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
         }
@@ -522,7 +522,7 @@ public class SparqlHttpServerTests : IDisposable
             using var client = new HttpClient();
 
             var content = new StringContent("SELECT * WHERE { ?s ?p ?o }", Encoding.UTF8, "text/plain");
-            var response = await client.PostAsync($"http://localhost:{_port}/sparql", content);
+            var response = await client.PostAsync($"http://localhost:{_port}/sparql", content, TestContext.Current.CancellationToken);
 
             Assert.Equal(HttpStatusCode.UnsupportedMediaType, response.StatusCode);
         }
@@ -550,11 +550,11 @@ public class SparqlHttpServerTests : IDisposable
             using var client = new HttpClient();
 
             var query = "CONSTRUCT { ?s ?p ?o } WHERE { ?s ?p ?o } LIMIT 1";
-            var response = await client.GetAsync($"http://localhost:{_port}/sparql?query={WebUtility.UrlEncode(query)}");
+            var response = await client.GetAsync($"http://localhost:{_port}/sparql?query={WebUtility.UrlEncode(query)}", TestContext.Current.CancellationToken);
 
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
-            var content = await response.Content.ReadAsStringAsync();
+            var content = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
             // Should contain N-Triples style output
             Assert.Contains(" .", content);
         }
@@ -580,11 +580,11 @@ public class SparqlHttpServerTests : IDisposable
             // Use DESCRIBE with a variable instead of specific IRI
             // since exact IRI matching can be tricky with angle brackets
             var query = "DESCRIBE ?s WHERE { ?s <http://xmlns.com/foaf/0.1/name> \"Alice\" }";
-            var response = await client.GetAsync($"http://localhost:{_port}/sparql?query={WebUtility.UrlEncode(query)}");
+            var response = await client.GetAsync($"http://localhost:{_port}/sparql?query={WebUtility.UrlEncode(query)}", TestContext.Current.CancellationToken);
 
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
-            var content = await response.Content.ReadAsStringAsync();
+            var content = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
             // DESCRIBE returns properties of matching resources
             // Content may be empty if no properties found, which is valid
             Assert.NotNull(content);
@@ -610,12 +610,12 @@ public class SparqlHttpServerTests : IDisposable
             client.DefaultRequestHeaders.Add("Accept", "application/n-triples");
 
             var query = "CONSTRUCT { ?s ?p ?o } WHERE { ?s ?p ?o } LIMIT 1";
-            var response = await client.GetAsync($"http://localhost:{_port}/sparql?query={WebUtility.UrlEncode(query)}");
+            var response = await client.GetAsync($"http://localhost:{_port}/sparql?query={WebUtility.UrlEncode(query)}", TestContext.Current.CancellationToken);
 
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             Assert.Equal("application/n-triples", response.Content.Headers.ContentType?.MediaType);
 
-            var content = await response.Content.ReadAsStringAsync();
+            var content = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
             // N-Triples uses full IRIs with angle brackets
             Assert.Contains("<http://", content);
             Assert.Contains(" .", content);
@@ -641,12 +641,12 @@ public class SparqlHttpServerTests : IDisposable
             client.DefaultRequestHeaders.Add("Accept", "application/rdf+xml");
 
             var query = "CONSTRUCT { ?s ?p ?o } WHERE { ?s ?p ?o } LIMIT 1";
-            var response = await client.GetAsync($"http://localhost:{_port}/sparql?query={WebUtility.UrlEncode(query)}");
+            var response = await client.GetAsync($"http://localhost:{_port}/sparql?query={WebUtility.UrlEncode(query)}", TestContext.Current.CancellationToken);
 
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             Assert.Equal("application/rdf+xml", response.Content.Headers.ContentType?.MediaType);
 
-            var content = await response.Content.ReadAsStringAsync();
+            var content = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
             // RDF/XML starts with XML declaration and rdf:RDF element
             Assert.StartsWith("<?xml version=\"1.0\"", content);
             Assert.Contains("<rdf:RDF", content);
@@ -672,12 +672,12 @@ public class SparqlHttpServerTests : IDisposable
             // No Accept header - should default to Turtle
 
             var query = "CONSTRUCT { ?s ?p ?o } WHERE { ?s ?p ?o } LIMIT 1";
-            var response = await client.GetAsync($"http://localhost:{_port}/sparql?query={WebUtility.UrlEncode(query)}");
+            var response = await client.GetAsync($"http://localhost:{_port}/sparql?query={WebUtility.UrlEncode(query)}", TestContext.Current.CancellationToken);
 
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             Assert.Equal("text/turtle", response.Content.Headers.ContentType?.MediaType);
 
-            var content = await response.Content.ReadAsStringAsync();
+            var content = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
             // Turtle uses prefix declarations or shortened forms
             Assert.Contains(" .", content);
         }

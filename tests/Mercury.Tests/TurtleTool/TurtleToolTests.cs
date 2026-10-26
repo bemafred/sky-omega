@@ -129,7 +129,7 @@ public class TurtleToolTests : IDisposable
         Assert.Contains("Converted", error.ToString()); // Status message goes to stderr
         Assert.True(File.Exists(outputFile));
 
-        var content = await File.ReadAllTextAsync(outputFile);
+        var content = await File.ReadAllTextAsync(outputFile, TestContext.Current.CancellationToken);
         Assert.Contains("<http://example.org/alice>", content);
         Assert.Contains("<http://xmlns.com/foaf/0.1/name>", content);
     }
@@ -245,7 +245,7 @@ public class TurtleToolTests : IDisposable
         Assert.Equal(0, result.ExitCode);
         Assert.True(File.Exists(outputFile));
 
-        var content = await File.ReadAllTextAsync(outputFile);
+        var content = await File.ReadAllTextAsync(outputFile, TestContext.Current.CancellationToken);
         Assert.Contains("<http://example.org/alice>", content);
     }
 

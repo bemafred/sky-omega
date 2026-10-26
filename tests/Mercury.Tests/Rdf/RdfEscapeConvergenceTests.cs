@@ -35,19 +35,19 @@ public class RdfEscapeConvergenceTests
 
         string ntDecoded = null!;
         await using (var stream = new MemoryStream(Encoding.UTF8.GetBytes(triple)))
-            await new NTriplesStreamParser(stream).ParseAsync((_, _, o) => ntDecoded = o.ToString());
+            await new NTriplesStreamParser(stream).ParseAsync((_, _, o) => ntDecoded = o.ToString(), TestContext.Current.CancellationToken);
 
         string nqDecoded = null!;
         await using (var stream = new MemoryStream(Encoding.UTF8.GetBytes(triple)))
-            await new NQuadsStreamParser(stream).ParseAsync((_, _, o, _) => nqDecoded = o.ToString());
+            await new NQuadsStreamParser(stream).ParseAsync((_, _, o, _) => nqDecoded = o.ToString(), TestContext.Current.CancellationToken);
 
         string ttlDecoded = null!;
         await using (var stream = new MemoryStream(Encoding.UTF8.GetBytes(triple)))
-            await new TurtleStreamParser(stream).ParseAsync((_, _, o) => ttlDecoded = o.ToString());
+            await new TurtleStreamParser(stream).ParseAsync((_, _, o) => ttlDecoded = o.ToString(), TestContext.Current.CancellationToken);
 
         string trigDecoded = null!;
         await using (var stream = new MemoryStream(Encoding.UTF8.GetBytes(triple)))
-            await new TriGStreamParser(stream).ParseAsync((_, _, o, _) => trigDecoded = o.ToString());
+            await new TriGStreamParser(stream).ParseAsync((_, _, o, _) => trigDecoded = o.ToString(), TestContext.Current.CancellationToken);
 
         // Each format decodes to the expected form...
         Assert.Equal(expectedDecoded, ntDecoded);
@@ -71,25 +71,25 @@ public class RdfEscapeConvergenceTests
         await Assert.ThrowsAnyAsync<Exception>(async () =>
         {
             await using var stream = new MemoryStream(Encoding.UTF8.GetBytes(triple));
-            await new NTriplesStreamParser(stream).ParseAsync((_, _, _) => { });
+            await new NTriplesStreamParser(stream).ParseAsync((_, _, _) => { }, TestContext.Current.CancellationToken);
         });
 
         await Assert.ThrowsAnyAsync<Exception>(async () =>
         {
             await using var stream = new MemoryStream(Encoding.UTF8.GetBytes(triple));
-            await new NQuadsStreamParser(stream).ParseAsync((_, _, _, _) => { });
+            await new NQuadsStreamParser(stream).ParseAsync((_, _, _, _) => { }, TestContext.Current.CancellationToken);
         });
 
         await Assert.ThrowsAnyAsync<Exception>(async () =>
         {
             await using var stream = new MemoryStream(Encoding.UTF8.GetBytes(triple));
-            await new TurtleStreamParser(stream).ParseAsync((_, _, _) => { });
+            await new TurtleStreamParser(stream).ParseAsync((_, _, _) => { }, TestContext.Current.CancellationToken);
         });
 
         await Assert.ThrowsAnyAsync<Exception>(async () =>
         {
             await using var stream = new MemoryStream(Encoding.UTF8.GetBytes(triple));
-            await new TriGStreamParser(stream).ParseAsync((_, _, _, _) => { });
+            await new TriGStreamParser(stream).ParseAsync((_, _, _, _) => { }, TestContext.Current.CancellationToken);
         });
     }
 }

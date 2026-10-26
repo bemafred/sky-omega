@@ -205,8 +205,7 @@ public class SparqlToolTests : IDisposable
     public async Task SparqlTool_QueryFile_ExecutesFromFile()
     {
         var queryFile = Path.Combine(_tempDir, "query.rq");
-        await File.WriteAllTextAsync(queryFile,
-            "SELECT ?name WHERE { ?s <http://xmlns.com/foaf/0.1/name> ?name }");
+        await File.WriteAllTextAsync(queryFile, "SELECT ?name WHERE { ?s <http://xmlns.com/foaf/0.1/name> ?name }", TestContext.Current.CancellationToken);
 
         var output = new StringWriter();
         var error = new StringWriter();

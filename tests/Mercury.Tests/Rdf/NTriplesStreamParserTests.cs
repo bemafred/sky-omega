@@ -28,7 +28,7 @@ public class NTriplesStreamParserTests
         await parser.ParseAsync((s, p, o) =>
         {
             triples.Add((s.ToString(), p.ToString(), o.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         Assert.Single(triples);
         Assert.Equal("<http://example.org/subject>", triples[0].S);
@@ -49,7 +49,7 @@ public class NTriplesStreamParserTests
         var parser = new NTriplesStreamParser(stream);
 
         int count = 0;
-        await parser.ParseAsync((s, p, o) => count++);
+        await parser.ParseAsync((s, p, o) => count++, TestContext.Current.CancellationToken);
 
         Assert.Equal(3, count);
     }
@@ -68,7 +68,7 @@ public class NTriplesStreamParserTests
         var parser = new NTriplesStreamParser(stream);
 
         int count = 0;
-        await parser.ParseAsync((s, p, o) => count++);
+        await parser.ParseAsync((s, p, o) => count++, TestContext.Current.CancellationToken);
 
         Assert.Equal(2, count);
     }
@@ -88,7 +88,7 @@ public class NTriplesStreamParserTests
         var parser = new NTriplesStreamParser(stream);
 
         int count = 0;
-        await parser.ParseAsync((s, p, o) => count++);
+        await parser.ParseAsync((s, p, o) => count++, TestContext.Current.CancellationToken);
 
         Assert.Equal(2, count);
     }
@@ -109,7 +109,7 @@ public class NTriplesStreamParserTests
         await parser.ParseAsync((s, p, o) =>
         {
             triples.Add((s.ToString(), p.ToString(), o.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         Assert.Single(triples);
         Assert.Equal("_:b1", triples[0].S);
@@ -127,7 +127,7 @@ public class NTriplesStreamParserTests
         await parser.ParseAsync((s, p, o) =>
         {
             triples.Add((s.ToString(), p.ToString(), o.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         Assert.Single(triples);
         Assert.Equal("_:blank123", triples[0].O);
@@ -145,7 +145,7 @@ public class NTriplesStreamParserTests
         await parser.ParseAsync((s, p, o) =>
         {
             triples.Add((s.ToString(), p.ToString(), o.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         Assert.Single(triples);
         Assert.Equal("_:blank_node_with_underscores", triples[0].S);
@@ -167,7 +167,7 @@ public class NTriplesStreamParserTests
         await parser.ParseAsync((s, p, o) =>
         {
             triples.Add((s.ToString(), p.ToString(), o.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         Assert.Single(triples);
         Assert.Equal("\"Hello World\"", triples[0].O);
@@ -185,7 +185,7 @@ public class NTriplesStreamParserTests
         await parser.ParseAsync((s, p, o) =>
         {
             triples.Add((s.ToString(), p.ToString(), o.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         Assert.Single(triples);
         Assert.Equal("\"42\"^^<http://www.w3.org/2001/XMLSchema#integer>", triples[0].O);
@@ -203,7 +203,7 @@ public class NTriplesStreamParserTests
         await parser.ParseAsync((s, p, o) =>
         {
             triples.Add((s.ToString(), p.ToString(), o.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         Assert.Single(triples);
         Assert.Equal("\"Bonjour\"@fr", triples[0].O);
@@ -221,7 +221,7 @@ public class NTriplesStreamParserTests
         await parser.ParseAsync((s, p, o) =>
         {
             triples.Add((s.ToString(), p.ToString(), o.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         Assert.Single(triples);
         // Escapes are decoded in output
@@ -241,7 +241,7 @@ public class NTriplesStreamParserTests
         await parser.ParseAsync((s, p, o) =>
         {
             triples.Add((s.ToString(), p.ToString(), o.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         Assert.Single(triples);
         Assert.Contains("\"", triples[0].O.Substring(1, triples[0].O.Length - 2)); // Check quotes inside
@@ -259,7 +259,7 @@ public class NTriplesStreamParserTests
         await parser.ParseAsync((s, p, o) =>
         {
             triples.Add((s.ToString(), p.ToString(), o.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         Assert.Single(triples);
         Assert.Contains("\\", triples[0].O);
@@ -282,7 +282,7 @@ public class NTriplesStreamParserTests
         await parser.ParseAsync((s, p, o) =>
         {
             triples.Add((s.ToString(), p.ToString(), o.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         Assert.Single(triples);
         Assert.Contains("café", triples[0].O);
@@ -301,7 +301,7 @@ public class NTriplesStreamParserTests
         await parser.ParseAsync((s, p, o) =>
         {
             triples.Add((s.ToString(), p.ToString(), o.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         Assert.Single(triples);
         // Note: Unicode code point may be represented differently
@@ -321,7 +321,7 @@ public class NTriplesStreamParserTests
         await parser.ParseAsync((s, p, o) =>
         {
             triples.Add((s.ToString(), p.ToString(), o.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         Assert.Single(triples);
         Assert.Contains("café", triples[0].S);
@@ -343,7 +343,7 @@ public class NTriplesStreamParserTests
         var parser = new NTriplesStreamParser(stream);
 
         var triples = new List<RdfTriple>();
-        await foreach (var triple in parser.ParseAsync())
+        await foreach (var triple in parser.ParseAsync(TestContext.Current.CancellationToken))
         {
             triples.Add(triple);
         }
@@ -370,7 +370,7 @@ public class NTriplesStreamParserTests
         await using (var warmupStream = new MemoryStream(ntriples))
         {
             var warmupParser = new NTriplesStreamParser(warmupStream);
-            await warmupParser.ParseAsync((s, p, o) => { });
+            await warmupParser.ParseAsync((s, p, o) => { }, TestContext.Current.CancellationToken);
         }
 
         GC.Collect();
@@ -387,7 +387,7 @@ public class NTriplesStreamParserTests
             {
                 tripleCount++;
                 _ = s.Length + p.Length + o.Length;
-            });
+            }, TestContext.Current.CancellationToken);
         }
 
         var after = GC.GetAllocatedBytesForCurrentThread();
@@ -411,7 +411,7 @@ public class NTriplesStreamParserTests
         var parser = new NTriplesStreamParser(stream);
 
         int count = 0;
-        await parser.ParseAsync((s, p, o) => count++);
+        await parser.ParseAsync((s, p, o) => count++, TestContext.Current.CancellationToken);
 
         Assert.Equal(0, count);
     }
@@ -429,7 +429,7 @@ public class NTriplesStreamParserTests
         var parser = new NTriplesStreamParser(stream);
 
         int count = 0;
-        await parser.ParseAsync((s, p, o) => count++);
+        await parser.ParseAsync((s, p, o) => count++, TestContext.Current.CancellationToken);
 
         Assert.Equal(0, count);
     }
@@ -449,7 +449,7 @@ public class NTriplesStreamParserTests
         await parser.ParseAsync((s, p, o) =>
         {
             triples.Add((s.ToString(), p.ToString(), o.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         Assert.Single(triples);
         Assert.Contains(longPath, triples[0].S);
@@ -470,7 +470,7 @@ public class NTriplesStreamParserTests
         await parser.ParseAsync((s, p, o) =>
         {
             triples.Add((s.ToString(), p.ToString(), o.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         Assert.Single(triples);
         Assert.Contains(longText, triples[0].O);
@@ -492,7 +492,7 @@ public class NTriplesStreamParserTests
         var parser = new NTriplesStreamParser(stream, bufferSize: 4096); // Small buffer to test streaming
 
         int count = 0;
-        await parser.ParseAsync((s, p, o) => count++);
+        await parser.ParseAsync((s, p, o) => count++, TestContext.Current.CancellationToken);
 
         Assert.Equal(10_000, count);
     }

@@ -101,7 +101,7 @@ public sealed class BoundedLogSinkTests
             tasks[p] = Task.Run(() =>
             {
                 for (int i = 0; i < perProducer; i++) sink.OnLog(Rec(start + i));
-            });
+            }, TestContext.Current.CancellationToken);
         }
         await Task.WhenAll(tasks);
 

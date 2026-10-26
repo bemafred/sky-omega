@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using Xunit;
-using Xunit.Abstractions;
 using SkyOmega.Mercury.Runtime;
 using SkyOmega.Mercury.Sparql.Execution;
 using SkyOmega.Mercury.Sparql.Parsing;

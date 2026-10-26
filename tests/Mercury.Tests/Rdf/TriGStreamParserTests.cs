@@ -30,7 +30,7 @@ public class TriGStreamParserTests
         await parser.ParseAsync((s, p, o, g) =>
         {
             quads.Add((s.ToString(), p.ToString(), o.ToString(), g.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         Assert.Single(quads);
         Assert.Equal("<http://example.org/s>", quads[0].S);
@@ -55,7 +55,7 @@ public class TriGStreamParserTests
         await parser.ParseAsync((s, p, o, g) =>
         {
             quads.Add((s.ToString(), p.ToString(), o.ToString(), g.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         Assert.Single(quads);
         Assert.Equal("<http://example.org/s>", quads[0].S);
@@ -80,7 +80,7 @@ public class TriGStreamParserTests
         await parser.ParseAsync((s, p, o, g) =>
         {
             quads.Add((s.ToString(), p.ToString(), o.ToString(), g.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         Assert.Single(quads);
         Assert.Equal("<http://example.org/g>", quads[0].G);
@@ -111,7 +111,7 @@ public class TriGStreamParserTests
         await parser.ParseAsync((s, p, o, g) =>
         {
             quads.Add((s.ToString(), p.ToString(), o.ToString(), g.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         Assert.Equal(3, quads.Count);
         Assert.Empty(quads[0].G); // Default graph
@@ -144,7 +144,7 @@ public class TriGStreamParserTests
         await parser.ParseAsync((s, p, o, g) =>
         {
             quads.Add((s.ToString(), p.ToString(), o.ToString(), g.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         Assert.Equal(2, quads.Count);
         Assert.Equal("<http://example.org/person>", quads[0].S);
@@ -173,7 +173,7 @@ public class TriGStreamParserTests
         await parser.ParseAsync((s, p, o, g) =>
         {
             quads.Add((s.ToString(), p.ToString(), o.ToString(), g.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         Assert.Equal(2, quads.Count);
         Assert.Equal("<http://example.org/person1>", quads[0].S);
@@ -200,7 +200,7 @@ public class TriGStreamParserTests
         await parser.ParseAsync((s, p, o, g) =>
         {
             quads.Add((s.ToString(), p.ToString(), o.ToString(), g.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         Assert.Single(quads);
         Assert.StartsWith("_:", quads[0].S);
@@ -222,7 +222,7 @@ public class TriGStreamParserTests
         await parser.ParseAsync((s, p, o, g) =>
         {
             quads.Add((s.ToString(), p.ToString(), o.ToString(), g.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         Assert.Single(quads);
         Assert.StartsWith("_:", quads[0].G);
@@ -245,7 +245,7 @@ public class TriGStreamParserTests
         await parser.ParseAsync((s, p, o, g) =>
         {
             quads.Add((s.ToString(), p.ToString(), o.ToString(), g.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         Assert.Single(quads);
         Assert.StartsWith("_:", quads[0].S);
@@ -272,7 +272,7 @@ public class TriGStreamParserTests
         await parser.ParseAsync((s, p, o, g) =>
         {
             quads.Add((s.ToString(), p.ToString(), o.ToString(), g.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         Assert.Single(quads);
         Assert.Equal("\"Hello World\"", quads[0].O);
@@ -294,7 +294,7 @@ public class TriGStreamParserTests
         await parser.ParseAsync((s, p, o, g) =>
         {
             quads.Add((s.ToString(), p.ToString(), o.ToString(), g.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         Assert.Single(quads);
         Assert.Equal("\"42\"^^<http://www.w3.org/2001/XMLSchema#integer>", quads[0].O);
@@ -316,7 +316,7 @@ public class TriGStreamParserTests
         await parser.ParseAsync((s, p, o, g) =>
         {
             quads.Add((s.ToString(), p.ToString(), o.ToString(), g.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         Assert.Single(quads);
         Assert.Equal("\"Bonjour\"@fr", quads[0].O);
@@ -334,7 +334,7 @@ public class TriGStreamParserTests
         await parser.ParseAsync((s, p, o, g) =>
         {
             quads.Add((s.ToString(), p.ToString(), o.ToString(), g.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         Assert.Single(quads);
         Assert.Contains("Line 1", quads[0].O);
@@ -363,7 +363,7 @@ public class TriGStreamParserTests
         await parser.ParseAsync((s, p, o, g) =>
         {
             quads.Add((s.ToString(), p.ToString(), o.ToString(), g.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         Assert.Single(quads);
         Assert.Equal("<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>", quads[0].P);
@@ -388,7 +388,7 @@ public class TriGStreamParserTests
         await parser.ParseAsync((s, p, o, g) =>
         {
             quads.Add((s.ToString(), p.ToString(), o.ToString(), g.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         Assert.Equal(2, quads.Count);
         Assert.Equal("<http://ex.org/alice>", quads[0].S);
@@ -413,7 +413,7 @@ public class TriGStreamParserTests
         await parser.ParseAsync((s, p, o, g) =>
         {
             quads.Add((s.ToString(), p.ToString(), o.ToString(), g.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         Assert.Equal(2, quads.Count);
         Assert.Contains(quads, q => q.O == "<http://ex.org/bob>");
@@ -443,7 +443,7 @@ public class TriGStreamParserTests
         await parser.ParseAsync((s, p, o, g) =>
         {
             quads.Add((s.ToString(), p.ToString(), o.ToString(), g.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         Assert.Single(quads);
         Assert.Equal("<http://ex.org/g>", quads[0].G);
@@ -469,7 +469,7 @@ public class TriGStreamParserTests
         var parser = new TriGStreamParser(stream);
 
         var quads = new List<RdfQuad>();
-        await foreach (var quad in parser.ParseAsync())
+        await foreach (var quad in parser.ParseAsync(TestContext.Current.CancellationToken))
         {
             quads.Add(quad);
         }
@@ -492,7 +492,7 @@ public class TriGStreamParserTests
         var parser = new TriGStreamParser(stream);
 
         int count = 0;
-        await parser.ParseAsync((s, p, o, g) => count++);
+        await parser.ParseAsync((s, p, o, g) => count++, TestContext.Current.CancellationToken);
 
         Assert.Equal(0, count);
     }
@@ -509,7 +509,7 @@ public class TriGStreamParserTests
         var parser = new TriGStreamParser(stream);
 
         int count = 0;
-        await parser.ParseAsync((s, p, o, g) => count++);
+        await parser.ParseAsync((s, p, o, g) => count++, TestContext.Current.CancellationToken);
 
         Assert.Equal(0, count);
     }
@@ -526,7 +526,7 @@ public class TriGStreamParserTests
         var parser = new TriGStreamParser(stream);
 
         int count = 0;
-        await parser.ParseAsync((s, p, o, g) => count++);
+        await parser.ParseAsync((s, p, o, g) => count++, TestContext.Current.CancellationToken);
 
         Assert.Equal(0, count);
     }
@@ -544,7 +544,7 @@ public class TriGStreamParserTests
         var parser = new TriGStreamParser(stream);
 
         int count = 0;
-        await parser.ParseAsync((s, p, o, g) => count++);
+        await parser.ParseAsync((s, p, o, g) => count++, TestContext.Current.CancellationToken);
 
         Assert.Equal(0, count);
     }
@@ -568,7 +568,7 @@ public class TriGStreamParserTests
         await parser.ParseAsync((s, p, o, g) =>
         {
             quads.Add((s.ToString(), p.ToString(), o.ToString(), g.ToString()));
-        });
+        }, TestContext.Current.CancellationToken);
 
         Assert.Single(quads);
     }
@@ -608,7 +608,7 @@ public class TriGStreamParserTests
         var parser = new TriGStreamParser(stream);
 
         int count = 0;
-        await parser.ParseAsync((s, p, o, g) => count++);
+        await parser.ParseAsync((s, p, o, g) => count++, TestContext.Current.CancellationToken);
 
         Assert.Equal(100, count);
     }

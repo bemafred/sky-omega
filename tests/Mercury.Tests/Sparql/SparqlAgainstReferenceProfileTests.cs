@@ -59,8 +59,7 @@ public class SparqlAgainstReferenceProfileTests : IDisposable
         Directory.CreateDirectory(dir);
         using var store = await BulkLoadNTriplesAsync(dir, SampleData);
 
-        var result = SparqlEngine.Query(store,
-            "SELECT ?s ?name WHERE { ?s <http://ex.org/name> ?name }");
+        var result = SparqlEngine.Query(store, "SELECT ?s ?name WHERE { ?s <http://ex.org/name> ?name }", TestContext.Current.CancellationToken);
 
         Assert.True(result.Success, result.ErrorMessage);
         Assert.Equal(ExecutionResultKind.Select, result.Kind);
@@ -75,8 +74,7 @@ public class SparqlAgainstReferenceProfileTests : IDisposable
         Directory.CreateDirectory(dir);
         using var store = await BulkLoadNTriplesAsync(dir, SampleData);
 
-        var result = SparqlEngine.Query(store,
-            "SELECT ?p ?o WHERE { <http://ex.org/alice> ?p ?o }");
+        var result = SparqlEngine.Query(store, "SELECT ?p ?o WHERE { <http://ex.org/alice> ?p ?o }", TestContext.Current.CancellationToken);
 
         Assert.True(result.Success, result.ErrorMessage);
         Assert.NotNull(result.Rows);
@@ -91,8 +89,7 @@ public class SparqlAgainstReferenceProfileTests : IDisposable
         Directory.CreateDirectory(dir);
         using var store = await BulkLoadNTriplesAsync(dir, SampleData);
 
-        var result = SparqlEngine.Query(store,
-            "SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?o }");
+        var result = SparqlEngine.Query(store, "SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?o }", TestContext.Current.CancellationToken);
 
         Assert.True(result.Success, result.ErrorMessage);
         Assert.NotNull(result.Rows);
@@ -109,8 +106,7 @@ public class SparqlAgainstReferenceProfileTests : IDisposable
         Directory.CreateDirectory(dir);
         using var store = await BulkLoadNTriplesAsync(dir, SampleData);
 
-        var result = SparqlEngine.Query(store,
-            "ASK { <http://ex.org/alice> <http://ex.org/knows> <http://ex.org/bob> }");
+        var result = SparqlEngine.Query(store, "ASK { <http://ex.org/alice> <http://ex.org/knows> <http://ex.org/bob> }", TestContext.Current.CancellationToken);
 
         Assert.True(result.Success, result.ErrorMessage);
         Assert.Equal(ExecutionResultKind.Ask, result.Kind);
@@ -124,8 +120,7 @@ public class SparqlAgainstReferenceProfileTests : IDisposable
         Directory.CreateDirectory(dir);
         using var store = await BulkLoadNTriplesAsync(dir, SampleData);
 
-        var result = SparqlEngine.Query(store,
-            "ASK { <http://ex.org/dave> <http://ex.org/name> ?name }");
+        var result = SparqlEngine.Query(store, "ASK { <http://ex.org/dave> <http://ex.org/name> ?name }", TestContext.Current.CancellationToken);
 
         Assert.True(result.Success, result.ErrorMessage);
         Assert.False(result.AskResult);
@@ -138,8 +133,7 @@ public class SparqlAgainstReferenceProfileTests : IDisposable
         Directory.CreateDirectory(dir);
         using var store = await BulkLoadNTriplesAsync(dir, SampleData);
 
-        var result = SparqlEngine.Query(store,
-            "SELECT ?s ?name ?age WHERE { ?s <http://ex.org/name> ?name . ?s <http://ex.org/age> ?age }");
+        var result = SparqlEngine.Query(store, "SELECT ?s ?name ?age WHERE { ?s <http://ex.org/name> ?name . ?s <http://ex.org/age> ?age }", TestContext.Current.CancellationToken);
 
         Assert.True(result.Success, result.ErrorMessage);
         Assert.NotNull(result.Rows);
@@ -161,8 +155,7 @@ public class SparqlAgainstReferenceProfileTests : IDisposable
         using (var reopened = new QuadStore(dir))
         {
             Assert.Equal(StoreProfile.Reference, reopened.Schema.Profile);
-            var result = SparqlEngine.Query(reopened,
-                "SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?o }");
+            var result = SparqlEngine.Query(reopened, "SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?o }", TestContext.Current.CancellationToken);
             Assert.True(result.Success, result.ErrorMessage);
             Assert.Single(result.Rows!);
             Assert.Contains("7", result.Rows![0].Values.First());

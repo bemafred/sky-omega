@@ -254,11 +254,8 @@ public class TurtleStreamWriterTests
         await using var writer = new TurtleStreamWriter(sw);
 
         writer.RegisterPrefix("ex", "http://example.org/");
-        await writer.WriteTripleAsync(
-            "<http://example.org/s>",
-            "<http://example.org/p>",
-            "<http://example.org/o>");
-        await writer.FlushAsync();
+        await writer.WriteTripleAsync("<http://example.org/s>", "<http://example.org/p>", "<http://example.org/o>", TestContext.Current.CancellationToken);
+        await writer.FlushAsync(TestContext.Current.CancellationToken);
 
         var result = sw.ToString();
         Assert.Contains("ex:s ex:p ex:o", result);
@@ -271,7 +268,7 @@ public class TurtleStreamWriterTests
         await using var writer = new TurtleStreamWriter(sw);
 
         writer.RegisterPrefix("ex", "http://example.org/");
-        await writer.WritePrefixesAsync();
+        await writer.WritePrefixesAsync(TestContext.Current.CancellationToken);
 
         var result = sw.ToString();
         Assert.Contains("@prefix ex:", result);
@@ -302,7 +299,7 @@ public class TurtleStreamWriterTests
         var parser = new TurtleStreamParser(stream);
 
         int count = 0;
-        await parser.ParseAsync((s, p, o) => count++);
+        await parser.ParseAsync((s, p, o) => count++, TestContext.Current.CancellationToken);
 
         // Verify triple count matches
         Assert.Equal(3, count);

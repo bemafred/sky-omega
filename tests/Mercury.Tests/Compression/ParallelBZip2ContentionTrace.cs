@@ -6,7 +6,6 @@ using System.Linq;
 using System.Threading;
 using SkyOmega.Mercury.Compression;
 using Xunit;
-using Xunit.Abstractions;
 
 namespace SkyOmega.Mercury.Tests.Compression;
 

@@ -57,7 +57,7 @@ public class SparqlStarFacadeTests : IDisposable
     [InlineData("quoted triple in object", "SELECT ?d WHERE { ?d <urn:states> << <urn:a> <urn:p> <urn:v1> >> }", "d", "<urn:doc>")]
     public void RdfStar_ThroughTheFacade_ResolvesWithoutCrashing(string name, string query, string variable, string expected)
     {
-        var result = SparqlEngine.Query(_store, query);
+        var result = SparqlEngine.Query(_store, query, TestContext.Current.CancellationToken);
         Assert.True(result.Success, $"[{name}] {result.ErrorMessage}");
         Assert.Equal(expected, Assert.Single(result.Rows!)[variable]);
     }

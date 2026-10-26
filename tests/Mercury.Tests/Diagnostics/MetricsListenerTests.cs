@@ -54,7 +54,7 @@ public class MetricsListenerTests : IDisposable
         Assert.Null(store.RebuildMetricsListener);
 
         store.AddCurrent("s", "p", "o");
-        var result = SparqlEngine.Query(store, "SELECT ?s WHERE { ?s ?p ?o }");
+        var result = SparqlEngine.Query(store, "SELECT ?s WHERE { ?s ?p ?o }", TestContext.Current.CancellationToken);
         Assert.True(result.Success);
         // No exception, no listener state to observe.
     }
@@ -71,9 +71,9 @@ public class MetricsListenerTests : IDisposable
         store.AddCurrent("a", "b", "c");
         store.AddCurrent("d", "e", "f");
 
-        SparqlEngine.Query(store, "SELECT ?s ?p ?o WHERE { ?s ?p ?o }");
-        SparqlEngine.Query(store, "ASK { ?s ?p ?o }");
-        SparqlEngine.Query(store, "SELECT ?s WHERE { ?s <not-a-predicate> ?o }");
+        SparqlEngine.Query(store, "SELECT ?s ?p ?o WHERE { ?s ?p ?o }", TestContext.Current.CancellationToken);
+        SparqlEngine.Query(store, "ASK { ?s ?p ?o }", TestContext.Current.CancellationToken);
+        SparqlEngine.Query(store, "SELECT ?s WHERE { ?s <not-a-predicate> ?o }", TestContext.Current.CancellationToken);
 
         Assert.Equal(3, listener.Captured.Count);
 
@@ -98,7 +98,7 @@ public class MetricsListenerTests : IDisposable
         var listener = new CapturingQueryListener();
         store.QueryMetricsListener = listener;
 
-        SparqlEngine.Query(store, "SELECT ?s WHERE {{{ broken");
+        SparqlEngine.Query(store, "SELECT ?s WHERE {{{ broken", TestContext.Current.CancellationToken);
 
         Assert.Single(listener.Captured);
         Assert.False(listener.Captured[0].Success);
@@ -294,7 +294,7 @@ public class MetricsListenerTests : IDisposable
                             break;
                     }
                 }
-            });
+            }, TestContext.Current.CancellationToken);
         }
 
         await Task.WhenAll(tasks);
@@ -462,7 +462,7 @@ public class MetricsListenerTests : IDisposable
         store.ObservabilityListener = listener;
 
         store.AddCurrent("s", "p", "o");
-        SparqlEngine.Query(store, "SELECT ?s WHERE { ?s ?p ?o }");
+        SparqlEngine.Query(store, "SELECT ?s WHERE { ?s ?p ?o }", TestContext.Current.CancellationToken);
 
         // Exactly one capture, even though the same instance is wired to both slots.
         Assert.Equal(1, listener.QueryCount);

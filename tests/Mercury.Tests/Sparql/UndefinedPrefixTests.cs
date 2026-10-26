@@ -41,7 +41,7 @@ public class UndefinedPrefixTests : IDisposable
     [InlineData("object", "SELECT ?s WHERE { ?s <urn:p> zzz:undef }")]
     public void UndefinedPrefix_FailsWithClearError(string position, string query)
     {
-        var result = SparqlEngine.Query(_store, query);
+        var result = SparqlEngine.Query(_store, query, TestContext.Current.CancellationToken);
         Assert.False(result.Success, $"[{position}] an undefined prefix must error, not return empty");
         Assert.Contains("Undefined prefix", result.ErrorMessage ?? "");
     }
@@ -49,7 +49,7 @@ public class UndefinedPrefixTests : IDisposable
     [Fact]
     public void DeclaredPrefix_StillResolves()
     {
-        var result = SparqlEngine.Query(_store, "PREFIX p: <urn:> SELECT ?o WHERE { p:s p:p ?o }");
+        var result = SparqlEngine.Query(_store, "PREFIX p: <urn:> SELECT ?o WHERE { p:s p:p ?o }", TestContext.Current.CancellationToken);
         Assert.True(result.Success, result.ErrorMessage);
         Assert.Single(result.Rows!);
     }

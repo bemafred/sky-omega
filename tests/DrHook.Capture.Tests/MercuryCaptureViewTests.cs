@@ -40,7 +40,7 @@ public sealed class MercuryCaptureViewTests : IDisposable
         QueryResult braid = SparqlEngine.Query(store, """
             PREFIX dh: <https://sky-omega.dev/drhook/ns#>
             SELECT ?text ?lens WHERE { GRAPH ?g { ?m dh:hypothesisText ?text ; dh:hypothesisLens ?lens } }
-            """);
+            """, TestContext.Current.CancellationToken);
         Assert.True(braid.Success, $"{braid.ErrorMessage}\ncapture diag: {diag}");
         System.Collections.Generic.Dictionary<string, string> row = Assert.Single(braid.Rows!);
         Assert.Contains("span.Length == 5", row["text"]);
@@ -50,7 +50,7 @@ public sealed class MercuryCaptureViewTests : IDisposable
         QueryResult count = SparqlEngine.Query(store, """
             PREFIX dh: <https://sky-omega.dev/drhook/ns#>
             SELECT (COUNT(?m) AS ?c) WHERE { GRAPH ?g { ?m dh:type ?t } }
-            """);
+            """, TestContext.Current.CancellationToken);
         Assert.True(count.Success, $"{count.ErrorMessage}\ncapture diag: {diag}");
         Assert.Contains("2", count.Rows![0]["c"]);
 
@@ -58,7 +58,7 @@ public sealed class MercuryCaptureViewTests : IDisposable
         QueryResult session = SparqlEngine.Query(store, """
             PREFIX dh: <https://sky-omega.dev/drhook/ns#>
             SELECT ?pid WHERE { GRAPH ?g { ?s dh:pid ?pid } }
-            """);
+            """, TestContext.Current.CancellationToken);
         Assert.True(session.Success, $"{session.ErrorMessage}\ncapture diag: {diag}");
         Assert.Contains("123", session.Rows![0]["pid"]);
 
@@ -66,7 +66,7 @@ public sealed class MercuryCaptureViewTests : IDisposable
         QueryResult raw = SparqlEngine.Query(store, """
             PREFIX dh: <https://sky-omega.dev/drhook/ns#>
             SELECT ?raw WHERE { GRAPH ?g { ?m dh:type "snapshot" ; dh:raw ?raw } }
-            """);
+            """, TestContext.Current.CancellationToken);
         Assert.True(raw.Success, $"{raw.ErrorMessage}\ncapture diag: {diag}");
         Assert.Contains("snapshot", raw.Rows![0]["raw"]);
 

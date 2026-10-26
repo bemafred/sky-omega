@@ -100,8 +100,7 @@ public class DeferredIndexTests : IDisposable
         // In PrimaryOnly state, predicate-only queries fall back to GSPO.
         // GSPO can't filter by predicate when subject is unbound — returns all entries.
         // SPARQL engine filters at a higher level. Verify via SPARQL:
-        var result = SparqlEngine.Query(store,
-            "SELECT ?s WHERE { ?s <http://ex.org/name> ?o }");
+        var result = SparqlEngine.Query(store, "SELECT ?s WHERE { ?s <http://ex.org/name> ?o }", TestContext.Current.CancellationToken);
         Assert.True(result.Success);
         Assert.NotNull(result.Rows);
         Assert.Equal(3, result.Rows!.Count); // Alice, Bob, Carol

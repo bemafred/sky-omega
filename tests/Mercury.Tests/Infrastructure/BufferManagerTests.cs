@@ -116,7 +116,7 @@ public class BufferManagerTests : IDisposable
 
         using var parser = new NTriplesStreamParser(stream, bufferManager: tracker);
         var count = 0;
-        await parser.ParseAsync((s, p, o) => count++);
+        await parser.ParseAsync((s, p, o) => count++, TestContext.Current.CancellationToken);
 
         Assert.Equal(1, count);
         tracker.AssertSomeActivity();
@@ -134,7 +134,7 @@ public class BufferManagerTests : IDisposable
 
         using var parser = new TurtleStreamParser(stream, bufferManager: tracker);
         var count = 0;
-        await parser.ParseAsync((s, p, o) => count++);
+        await parser.ParseAsync((s, p, o) => count++, TestContext.Current.CancellationToken);
 
         Assert.Equal(1, count);
         tracker.AssertSomeActivity();
@@ -158,7 +158,7 @@ public class BufferManagerTests : IDisposable
 
         using var parser = new RdfXmlStreamParser(stream, bufferManager: tracker);
         var count = 0;
-        await parser.ParseAsync((s, p, o) => count++);
+        await parser.ParseAsync((s, p, o) => count++, TestContext.Current.CancellationToken);
 
         Assert.Equal(1, count);
         tracker.AssertSomeActivity();
@@ -174,7 +174,7 @@ public class BufferManagerTests : IDisposable
 
         using var parser = new NQuadsStreamParser(stream, bufferManager: tracker);
         var count = 0;
-        await parser.ParseAsync((s, p, o, g) => count++);
+        await parser.ParseAsync((s, p, o, g) => count++, TestContext.Current.CancellationToken);
 
         Assert.Equal(1, count);
         tracker.AssertSomeActivity();
@@ -190,7 +190,7 @@ public class BufferManagerTests : IDisposable
 
         using var parser = new TriGStreamParser(stream, bufferManager: tracker);
         var count = 0;
-        await parser.ParseAsync((s, p, o, g) => count++);
+        await parser.ParseAsync((s, p, o, g) => count++, TestContext.Current.CancellationToken);
 
         Assert.Equal(1, count);
         tracker.AssertSomeActivity();
@@ -411,7 +411,7 @@ public class BufferManagerTests : IDisposable
         var ntParser = Assert.IsType<NTriplesStreamParser>(parser);
 
         var count = 0;
-        await ntParser.ParseAsync((s, p, o) => count++);
+        await ntParser.ParseAsync((s, p, o) => count++, TestContext.Current.CancellationToken);
 
         Assert.Equal(1, count);
         tracker.AssertSomeActivity();
@@ -473,7 +473,7 @@ public class BufferManagerTests : IDisposable
         using var parser = new NTriplesStreamParser(stream, bufferManager: tracker);
 
         var count = 0;
-        await parser.ParseAsync((s, p, o) => count++);
+        await parser.ParseAsync((s, p, o) => count++, TestContext.Current.CancellationToken);
 
         Assert.Equal(1000, count);
         tracker.AssertSomeActivity();

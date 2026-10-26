@@ -43,7 +43,7 @@ public class BindPrefixExpansionTests : IDisposable
     [InlineData("empty prefix", "PREFIX : <urn:> SELECT ?b WHERE { ?x <urn:p> ?o BIND(:abc AS ?b) }", "<urn:abc>")]
     public void Bind_PrefixedNameConstant_ExpandsToIri(string name, string query, string expected)
     {
-        var result = SparqlEngine.Query(_store, query);
+        var result = SparqlEngine.Query(_store, query, TestContext.Current.CancellationToken);
         Assert.True(result.Success, $"[{name}] {result.ErrorMessage}");
         var row = Assert.Single(result.Rows!);
         Assert.Equal(expected, row["b"]);

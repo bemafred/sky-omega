@@ -6,7 +6,6 @@ using SkyOmega.Mercury.Sparql.Parsing;
 using SkyOmega.Mercury.Tests.Fixtures;
 using SkyOmega.Mercury.Tests.W3C;
 using Xunit;
-using Xunit.Abstractions;
 
 namespace SkyOmega.Mercury.Tests.Sparql;
 
@@ -35,7 +34,7 @@ public class XsdCastTests : PooledStoreTestBase
 
         using var stream = new MemoryStream(Encoding.UTF8.GetBytes(turtle));
         using var parser = new TurtleStreamParser(stream);
-        await parser.ParseAsync((s, p, o) => Store.AddCurrent(s, p, o));
+        await parser.ParseAsync((s, p, o) => Store.AddCurrent(s, p, o), TestContext.Current.CancellationToken);
 
         // First, let's see what values are stored
         _output.WriteLine("=== Stored values ===");
@@ -138,13 +137,13 @@ public class XsdCastTests : PooledStoreTestBase
         if (!File.Exists(dataPath))
         {
             _output.WriteLine($"Data file not found: {dataPath}");
-            Skip.If(true, "W3C test data not available");
+            Assert.SkipWhen(true, "W3C test data not available");
             return;
         }
 
         using var fileStream = File.OpenRead(dataPath);
         using var parser = new TurtleStreamParser(fileStream);
-        await parser.ParseAsync((s, p, o) => Store.AddCurrent(s, p, o));
+        await parser.ParseAsync((s, p, o) => Store.AddCurrent(s, p, o), TestContext.Current.CancellationToken);
 
         // Count stored triples
         int tripleCount = 0;
@@ -168,7 +167,7 @@ public class XsdCastTests : PooledStoreTestBase
         var queryPath = Path.Combine(
             W3CTestContext.TestsRoot,
             "sparql", "sparql11", "cast", "cast-int.rq");
-        var query = await File.ReadAllTextAsync(queryPath);
+        var query = await File.ReadAllTextAsync(queryPath, TestContext.Current.CancellationToken);
         _output.WriteLine($"Query:\n{query}\n");
 
         var sparqlParser = new SparqlParser(query.AsSpan());
@@ -266,7 +265,7 @@ public class XsdCastTests : PooledStoreTestBase
         return result!;
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task XsdIntegerCast_DiagnosticW3CStyle()
     {
         // This test mimics exactly how the W3C test extracts bindings
@@ -278,18 +277,18 @@ public class XsdCastTests : PooledStoreTestBase
             "..", "..", "..", "..", "..", // Back to repo root
             "tests/w3c-rdf-tests/sparql/sparql11/cast/data.ttl");
 
-        Skip.IfNot(File.Exists(dataPath), $"W3C test data not found: {dataPath}");
+        Assert.SkipUnless(File.Exists(dataPath), $"W3C test data not found: {dataPath}");
 
         using var fileStream = File.OpenRead(dataPath);
         using var parser = new TurtleStreamParser(fileStream);
-        await parser.ParseAsync((s, p, o) => Store.AddCurrent(s, p, o));
+        await parser.ParseAsync((s, p, o) => Store.AddCurrent(s, p, o), TestContext.Current.CancellationToken);
 
         // Use exact W3C query file
         var queryPath = Path.Combine(
             Directory.GetCurrentDirectory(),
             "..", "..", "..", "..", "..",
             "tests/w3c-rdf-tests/sparql/sparql11/cast/cast-int.rq");
-        var query = await File.ReadAllTextAsync(queryPath);
+        var query = await File.ReadAllTextAsync(queryPath, TestContext.Current.CancellationToken);
 
         _output.WriteLine($"Query:\n{query}\n");
 

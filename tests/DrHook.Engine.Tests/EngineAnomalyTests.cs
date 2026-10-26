@@ -99,7 +99,7 @@ public sealed class EngineAnomalyTests
             tasks[p] = Task.Run(() =>
             {
                 for (int i = 0; i < perProducer; i++) sink.OnAnomaly(Anom(start + i));
-            });
+            }, TestContext.Current.CancellationToken);
         }
         await Task.WhenAll(tasks);
 

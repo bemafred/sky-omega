@@ -4,9 +4,9 @@ using Xunit;
 
 // Limit test parallelization to reduce stack accumulation.
 // QueryResults is ~90KB on stack, and parallel tests can exhaust the 1MB Windows stack.
-// MaxParallelThreads = 1 runs tests sequentially, eliminating stack accumulation from parallelism.
+// MaxThreads = 1 runs tests sequentially, eliminating stack accumulation from parallelism.
 // See ADR-011 for details on the stack overflow issue.
-[assembly: CollectionBehavior(MaxParallelThreads = 1)]
+[assembly: Xunit.v3.Parallelization(MaxThreads = 1)]
 
 namespace SkyOmega.Mercury.Tests;
 

@@ -15,7 +15,6 @@ using SkyOmega.Mercury.Sparql.Patterns;
 using SkyOmega.Mercury.Sparql.Types;
 using SkyOmega.Mercury.Storage;
 using Xunit;
-using Xunit.Abstractions;
 using ExprValueType = SkyOmega.Mercury.Sparql.Execution.Expressions.ValueType;
 
 namespace SkyOmega.Mercury.Tests.Sparql;
@@ -151,7 +150,7 @@ public class GraphTreeEvaluatorTests : IDisposable
         // The known-correct baseline: the unwrapped query over the default graph, via the shipping engine.
         // The SparqlEngine facade's query planner mishandles RDF-star's synthetic offsets (it throws), so for a
         // query it cannot run we fall back to the core QueryExecutor — the path SparqlStarTests trusts — which does.
-        var baseline = SparqlEngine.Query(_store, query);
+        var baseline = SparqlEngine.Query(_store, query, TestContext.Current.CancellationToken);
         List<Dictionary<string, string>>? baselineRows;
         string[] projection;
         if (baseline.Success)

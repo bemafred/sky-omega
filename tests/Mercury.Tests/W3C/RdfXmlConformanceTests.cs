@@ -3,7 +3,6 @@
 using SkyOmega.Mercury.RdfXml;
 using SkyOmega.Mercury.NTriples;
 using Xunit;
-using Xunit.Abstractions;
 
 namespace SkyOmega.Mercury.Tests.W3C;
 
@@ -20,12 +19,12 @@ public class RdfXmlConformanceTests
         _output = output;
     }
 
-    [SkippableTheory]
+    [Theory]
     [MemberData(nameof(GetRdfXml11NegativeSyntaxTests))]
     public async Task RdfXml11_NegativeSyntax(W3CTestCase test)
     {
-        Skip.IfNot(W3CTestContext.IsAvailable, "W3C test suite not available");
-        Skip.IfNot(File.Exists(test.ActionPath), $"Test file not found: {test.ActionPath}");
+        Assert.SkipUnless(W3CTestContext.IsAvailable, "W3C test suite not available");
+        Assert.SkipUnless(File.Exists(test.ActionPath), $"Test file not found: {test.ActionPath}");
 
         _output.WriteLine($"Test: {test.Name}");
         _output.WriteLine($"File: {test.ActionPath}");
@@ -36,20 +35,20 @@ public class RdfXmlConformanceTests
 
         var exception = await Assert.ThrowsAnyAsync<Exception>(async () =>
         {
-            await parser.ParseAsync((s, p, o) => { });
+            await parser.ParseAsync((s, p, o) => { }, TestContext.Current.CancellationToken);
         });
 
         _output.WriteLine($"Expected error: {exception.Message}");
     }
 
-    [SkippableTheory]
+    [Theory]
     [MemberData(nameof(GetRdfXml11EvalTests))]
     public async Task RdfXml11_Eval(W3CTestCase test)
     {
-        Skip.IfNot(W3CTestContext.IsAvailable, "W3C test suite not available");
-        Skip.IfNot(File.Exists(test.ActionPath), $"Test file not found: {test.ActionPath}");
-        Skip.If(test.ResultPath == null, "No expected result file");
-        Skip.IfNot(File.Exists(test.ResultPath), $"Result file not found: {test.ResultPath}");
+        Assert.SkipUnless(W3CTestContext.IsAvailable, "W3C test suite not available");
+        Assert.SkipUnless(File.Exists(test.ActionPath), $"Test file not found: {test.ActionPath}");
+        Assert.SkipWhen(test.ResultPath == null, "No expected result file");
+        Assert.SkipUnless(File.Exists(test.ResultPath), $"Result file not found: {test.ResultPath}");
 
         _output.WriteLine($"Test: {test.Name}");
         _output.WriteLine($"Input: {test.ActionPath}");
@@ -68,7 +67,7 @@ public class RdfXmlConformanceTests
             await parser.ParseAsync((s, p, o) =>
             {
                 actualTriples.Add((s.ToString(), p.ToString(), o.ToString()));
-            });
+            }, TestContext.Current.CancellationToken);
         }
 
         // Parse the expected N-Triples output
@@ -80,7 +79,7 @@ public class RdfXmlConformanceTests
             await parser.ParseAsync((s, p, o) =>
             {
                 expectedTriples.Add((s.ToString(), p.ToString(), o.ToString()));
-            });
+            }, TestContext.Current.CancellationToken);
         }
 
         _output.WriteLine($"Actual: {actualTriples.Count} triples");

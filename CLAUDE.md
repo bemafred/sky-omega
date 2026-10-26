@@ -19,11 +19,14 @@ dotnet build src/Mercury/Mercury.csproj
 # Release build (enables optimizations)
 dotnet build -c Release
 
-# Run tests (xUnit)
+# Run tests (Microsoft.Testing.Platform — xunit.v3 / MSTest.Sdk)
 dotnet test
 
 # Run specific test
 dotnet test --filter "FullyQualifiedName~BasicSelect"
+
+# Run one project
+dotnet test --project tests/Mercury.Tests
 
 # Run benchmarks (BenchmarkDotNet)
 dotnet run --project benchmarks/Mercury.Benchmarks -c Release
@@ -163,7 +166,7 @@ See **[STATISTICS.md](STATISTICS.md)** for line counts, benchmark summaries, and
 
 ## Project Overview
 
-Sky Omega is a semantic-aware cognitive assistant with zero-GC performance design. The codebase targets .NET 10 with C# 14 — a repo-root `global.json` pins the build to the .NET 10 LTS SDK so an installed .NET 11 preview (kept for deliberate testing) can't silently change defaults (file-based `dotnet run x.cs` would build net11, mixing runtime versions and breaking DrHook debugging — finding 86); to test under .NET 11, override or remove the `global.json`. The core library (Mercury) has **no external dependencies** (BCL only). Mercury exposes **28 public types** (2 facades, 2 protocol, 12 storage, 8 diagnostics, 2 compression, 2 delegates); all other types are internal.
+Sky Omega is a semantic-aware cognitive assistant with zero-GC performance design. The codebase targets .NET 10 with C# 14 — a repo-root `global.json` pins the build to the .NET 10 LTS SDK so an installed .NET 11 preview (kept for deliberate testing) can't silently change defaults (file-based `dotnet run x.cs` would build net11, mixing runtime versions and breaking DrHook debugging — finding 86); to test under .NET 11, override or remove the `global.json`. The same `global.json` selects **Microsoft.Testing.Platform** as the `dotnet test` runner: every test project is an MTP executable (`xunit.v3`, or `MSTest.Sdk` for the DrHook integration suite), so `dotnet test` at the root runs the whole solution. The one legacy VSTest project (a DrHook debug target) is isolated outside the solution — see [DRHOOK.md](DRHOOK.md#running-the-tests). The core library (Mercury) has **no external dependencies** (BCL only). Mercury exposes **28 public types** (2 facades, 2 protocol, 12 storage, 8 diagnostics, 2 compression, 2 delegates); all other types are internal.
 
 ### Solution Structure
 

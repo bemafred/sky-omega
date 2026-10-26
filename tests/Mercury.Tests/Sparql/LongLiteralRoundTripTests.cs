@@ -27,7 +27,7 @@ public class LongLiteralRoundTripTests : PooledStoreTestBase
         var lit = new string('x', length);
         Store.AddCurrent(subject, "<urn:p>", "\"" + lit + "\"");
 
-        var result = SparqlEngine.Query(Store, $"SELECT ?o WHERE {{ {subject} <urn:p> ?o }}");
+        var result = SparqlEngine.Query(Store, $"SELECT ?o WHERE {{ {subject} <urn:p> ?o }}", TestContext.Current.CancellationToken);
 
         Assert.True(result.Success);
         Assert.NotNull(result.Rows);

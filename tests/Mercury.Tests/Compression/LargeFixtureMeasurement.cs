@@ -3,7 +3,6 @@ using System.Diagnostics;
 using System.IO;
 using SkyOmega.Mercury.Compression;
 using Xunit;
-using Xunit.Abstractions;
 
 namespace SkyOmega.Mercury.Tests.Compression;
 

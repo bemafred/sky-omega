@@ -54,9 +54,9 @@ public sealed class DebugStateClientTests
         Task run = client.RunAsync(view, cts.Token);
 
         // wait until the client connected + received the snapshot-on-connect, THEN publish a live delta
-        await view.GotSnapshot.WaitAsync(TimeSpan.FromSeconds(10));
+        await view.GotSnapshot.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
         server.OnEvent("Breakpoint");
-        await view.GotDelta.WaitAsync(TimeSpan.FromSeconds(10));
+        await view.GotDelta.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
 
         Assert.Equal(sock, view.Endpoint);
         WireSnapshot snap = Assert.Single(view.Snapshots);

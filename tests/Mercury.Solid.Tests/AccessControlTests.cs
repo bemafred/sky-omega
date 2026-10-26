@@ -69,7 +69,7 @@ public class AccessControlTests
         var decision = await policy.EvaluateAsync(
             "https://alice.example.com/profile#me",
             "https://alice.example.com/data/resource",
-            AccessMode.Read);
+            AccessMode.Read, TestContext.Current.CancellationToken);
 
         Assert.True(decision.IsAllowed);
         Assert.Equal(AccessMode.All, decision.GrantedModes);
@@ -83,7 +83,7 @@ public class AccessControlTests
         var decision = await policy.EvaluateAsync(
             null, // No WebID
             "https://example.com/public/resource",
-            AccessMode.Read);
+            AccessMode.Read, TestContext.Current.CancellationToken);
 
         Assert.True(decision.IsAllowed);
     }
@@ -135,7 +135,7 @@ public class WebAccessControlTests
         var decision = await policy.EvaluateAsync(
             "https://alice.example.com/profile#me",
             "https://example.com/resource",
-            AccessMode.Read);
+            AccessMode.Read, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.True(decision.IsAllowed);
@@ -161,7 +161,7 @@ public class WebAccessControlTests
         var decision = await policy.EvaluateAsync(
             null,
             "https://example.com/public",
-            AccessMode.Read);
+            AccessMode.Read, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.True(decision.IsAllowed);
@@ -186,13 +186,13 @@ public class WebAccessControlTests
         var authedDecision = await policy.EvaluateAsync(
             "https://bob.example.com/profile#me",
             "https://example.com/members",
-            AccessMode.Read);
+            AccessMode.Read, TestContext.Current.CancellationToken);
 
         // Act - unauthenticated access
         var unauthedDecision = await policy.EvaluateAsync(
             null,
             "https://example.com/members",
-            AccessMode.Read);
+            AccessMode.Read, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.True(authedDecision.IsAllowed);
@@ -218,7 +218,7 @@ public class WebAccessControlTests
         var decision = await policy.EvaluateAsync(
             "https://bob.example.com/profile#me",
             "https://example.com/private",
-            AccessMode.Read);
+            AccessMode.Read, TestContext.Current.CancellationToken);
 
         // Assert
         Assert.False(decision.IsAllowed);

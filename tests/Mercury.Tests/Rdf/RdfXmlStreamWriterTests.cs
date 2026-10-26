@@ -275,13 +275,10 @@ public class RdfXmlStreamWriterTests
         await using var writer = new RdfXmlStreamWriter(sw);
 
         writer.RegisterNamespace("ex", "http://example.org/");
-        await writer.WriteStartDocumentAsync();
-        await writer.WriteTripleAsync(
-            "<http://example.org/s>",
-            "<http://example.org/p>",
-            "<http://example.org/o>");
-        await writer.FlushAsync();
-        await writer.WriteEndDocumentAsync();
+        await writer.WriteStartDocumentAsync(TestContext.Current.CancellationToken);
+        await writer.WriteTripleAsync("<http://example.org/s>", "<http://example.org/p>", "<http://example.org/o>", TestContext.Current.CancellationToken);
+        await writer.FlushAsync(TestContext.Current.CancellationToken);
+        await writer.WriteEndDocumentAsync(TestContext.Current.CancellationToken);
 
         var result = sw.ToString();
         Assert.Contains("rdf:about=\"http://example.org/s\"", result);
@@ -337,7 +334,7 @@ public class RdfXmlStreamWriterTests
         var parser = new RdfXmlStreamParser(stream);
 
         int count = 0;
-        await parser.ParseAsync((s, p, o) => count++);
+        await parser.ParseAsync((s, p, o) => count++, TestContext.Current.CancellationToken);
 
         // Verify triple count matches
         Assert.Equal(3, count);

@@ -511,7 +511,7 @@ public class JsonLdStreamParserTests
         await using var parser = new JsonLdStreamParser(stream);
 
         var quads = new List<RdfQuad>();
-        await foreach (var quad in parser.ParseAsync())
+        await foreach (var quad in parser.ParseAsync(TestContext.Current.CancellationToken))
         {
             quads.Add(quad);
         }

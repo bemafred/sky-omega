@@ -147,7 +147,7 @@ public class CrossProcessStoreGateTests
             thread.Start();
 
             // Wait for thread to start
-            waiterStarted.Wait();
+            waiterStarted.Wait(TestContext.Current.CancellationToken);
             Thread.Sleep(50); // Give it time to attempt acquire
 
             // Release one slot — should unblock the waiter
@@ -193,7 +193,7 @@ public class CrossProcessStoreGateTests
                 {
                     Interlocked.Increment(ref failCount);
                 }
-            }));
+            }, TestContext.Current.CancellationToken));
         }
 
         await Task.WhenAll(tasks);

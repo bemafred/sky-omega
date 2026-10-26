@@ -23,7 +23,7 @@ public class SparqlEngineTests : PooledStoreTestBase
     {
         PopulateTestData();
 
-        var result = SparqlEngine.Query(Store, "SELECT ?s ?name WHERE { ?s <http://ex/name> ?name }");
+        var result = SparqlEngine.Query(Store, "SELECT ?s ?name WHERE { ?s <http://ex/name> ?name }", TestContext.Current.CancellationToken);
 
         Assert.True(result.Success);
         Assert.Equal(ExecutionResultKind.Select, result.Kind);
@@ -39,7 +39,7 @@ public class SparqlEngineTests : PooledStoreTestBase
     {
         PopulateTestData();
 
-        var result = SparqlEngine.Query(Store, "SELECT * WHERE { ?s <http://ex/name> ?name }");
+        var result = SparqlEngine.Query(Store, "SELECT * WHERE { ?s <http://ex/name> ?name }", TestContext.Current.CancellationToken);
 
         Assert.True(result.Success);
         Assert.Equal(ExecutionResultKind.Select, result.Kind);
@@ -55,7 +55,7 @@ public class SparqlEngineTests : PooledStoreTestBase
     {
         PopulateTestData();
 
-        var result = SparqlEngine.Query(Store, "ASK { <http://ex/alice> <http://ex/name> ?name }");
+        var result = SparqlEngine.Query(Store, "ASK { <http://ex/alice> <http://ex/name> ?name }", TestContext.Current.CancellationToken);
 
         Assert.True(result.Success);
         Assert.Equal(ExecutionResultKind.Ask, result.Kind);
@@ -67,7 +67,7 @@ public class SparqlEngineTests : PooledStoreTestBase
     {
         PopulateTestData();
 
-        var result = SparqlEngine.Query(Store, "ASK { <http://ex/nobody> <http://ex/name> ?name }");
+        var result = SparqlEngine.Query(Store, "ASK { <http://ex/nobody> <http://ex/name> ?name }", TestContext.Current.CancellationToken);
 
         Assert.True(result.Success);
         Assert.Equal(ExecutionResultKind.Ask, result.Kind);
@@ -79,7 +79,7 @@ public class SparqlEngineTests : PooledStoreTestBase
     {
         PopulateTestData();
 
-        var result = SparqlEngine.Query(Store, "CONSTRUCT { ?s <http://ex/label> ?name } WHERE { ?s <http://ex/name> ?name }");
+        var result = SparqlEngine.Query(Store, "CONSTRUCT { ?s <http://ex/label> ?name } WHERE { ?s <http://ex/name> ?name }", TestContext.Current.CancellationToken);
 
         Assert.True(result.Success);
         Assert.Equal(ExecutionResultKind.Construct, result.Kind);
@@ -93,7 +93,7 @@ public class SparqlEngineTests : PooledStoreTestBase
     {
         PopulateTestData();
 
-        var result = SparqlEngine.Query(Store, "DESCRIBE ?s WHERE { ?s <http://ex/name> ?name }");
+        var result = SparqlEngine.Query(Store, "DESCRIBE ?s WHERE { ?s <http://ex/name> ?name }", TestContext.Current.CancellationToken);
 
         Assert.True(result.Success, $"DESCRIBE failed: {result.ErrorMessage}");
         Assert.Equal(ExecutionResultKind.Describe, result.Kind);
@@ -103,7 +103,7 @@ public class SparqlEngineTests : PooledStoreTestBase
     [Fact]
     public void Query_ParseError_ReturnsError()
     {
-        var result = SparqlEngine.Query(Store, "SELECT * WHERE { ?s ?p }");
+        var result = SparqlEngine.Query(Store, "SELECT * WHERE { ?s ?p }", TestContext.Current.CancellationToken);
 
         Assert.False(result.Success);
         Assert.Equal(ExecutionResultKind.Error, result.Kind);
@@ -128,7 +128,7 @@ public class SparqlEngineTests : PooledStoreTestBase
     {
         PopulateTestData();
 
-        var result = SparqlEngine.Query(Store, "SELECT * WHERE { ?s <http://ex/name> ?name }");
+        var result = SparqlEngine.Query(Store, "SELECT * WHERE { ?s <http://ex/name> ?name }", TestContext.Current.CancellationToken);
 
         Assert.True(result.Success);
         Assert.True(result.ParseTime >= TimeSpan.Zero);
@@ -138,13 +138,13 @@ public class SparqlEngineTests : PooledStoreTestBase
     [Fact]
     public void Update_InsertData_Succeeds()
     {
-        var result = SparqlEngine.Update(Store, "INSERT DATA { <http://ex/dave> <http://ex/name> \"Dave\" }");
+        var result = SparqlEngine.Update(Store, "INSERT DATA { <http://ex/dave> <http://ex/name> \"Dave\" }", TestContext.Current.CancellationToken);
 
         Assert.True(result.Success);
         Assert.True(result.AffectedCount >= 1);
 
         // Verify the data was inserted
-        var query = SparqlEngine.Query(Store, "ASK { <http://ex/dave> <http://ex/name> \"Dave\" }");
+        var query = SparqlEngine.Query(Store, "ASK { <http://ex/dave> <http://ex/name> \"Dave\" }", TestContext.Current.CancellationToken);
         Assert.True(query.AskResult);
     }
 
@@ -153,7 +153,7 @@ public class SparqlEngineTests : PooledStoreTestBase
     {
         Store.AddCurrent("<http://ex/temp>", "<http://ex/name>", "\"Temp\"");
 
-        var result = SparqlEngine.Update(Store, "DELETE DATA { <http://ex/temp> <http://ex/name> \"Temp\" }");
+        var result = SparqlEngine.Update(Store, "DELETE DATA { <http://ex/temp> <http://ex/name> \"Temp\" }", TestContext.Current.CancellationToken);
 
         Assert.True(result.Success);
     }
@@ -161,7 +161,7 @@ public class SparqlEngineTests : PooledStoreTestBase
     [Fact]
     public void Update_ParseError_ReturnsError()
     {
-        var result = SparqlEngine.Update(Store, "INSERT DATAA { <http://ex/s> <http://ex/p> \"o\" }");
+        var result = SparqlEngine.Update(Store, "INSERT DATAA { <http://ex/s> <http://ex/p> \"o\" }", TestContext.Current.CancellationToken);
 
         Assert.False(result.Success);
         Assert.NotNull(result.ErrorMessage);
@@ -174,13 +174,12 @@ public class SparqlEngineTests : PooledStoreTestBase
     [Fact]
     public void Update_TwoInserts_AppliesBoth()
     {
-        var result = SparqlEngine.Update(Store,
-            "INSERT DATA { <http://ex/a> <http://ex/p> \"1\" } ; INSERT DATA { <http://ex/b> <http://ex/p> \"2\" }");
+        var result = SparqlEngine.Update(Store, "INSERT DATA { <http://ex/a> <http://ex/p> \"1\" } ; INSERT DATA { <http://ex/b> <http://ex/p> \"2\" }", TestContext.Current.CancellationToken);
 
         Assert.True(result.Success, result.ErrorMessage);
         Assert.Equal(2, result.AffectedCount);
-        Assert.True(SparqlEngine.Query(Store, "ASK { <http://ex/a> <http://ex/p> \"1\" }").AskResult);
-        Assert.True(SparqlEngine.Query(Store, "ASK { <http://ex/b> <http://ex/p> \"2\" }").AskResult);
+        Assert.True(SparqlEngine.Query(Store, "ASK { <http://ex/a> <http://ex/p> \"1\" }", TestContext.Current.CancellationToken).AskResult);
+        Assert.True(SparqlEngine.Query(Store, "ASK { <http://ex/b> <http://ex/p> \"2\" }", TestContext.Current.CancellationToken).AskResult);
     }
 
     [Fact]
@@ -192,13 +191,13 @@ public class SparqlEngineTests : PooledStoreTestBase
         var result = SparqlEngine.Update(Store, """
             DELETE DATA { GRAPH <http://ex/g> { <http://ex/s> <http://ex/status> "old" } } ;
             INSERT DATA { GRAPH <http://ex/g> { <http://ex/s> <http://ex/status> "new" . <http://ex/s> <http://ex/note> "x" } }
-            """);
+            """, TestContext.Current.CancellationToken);
 
         Assert.True(result.Success, result.ErrorMessage);
         Assert.Equal(3, result.AffectedCount);
-        Assert.False(SparqlEngine.Query(Store, "ASK { GRAPH <http://ex/g> { <http://ex/s> <http://ex/status> \"old\" } }").AskResult);
-        Assert.True(SparqlEngine.Query(Store, "ASK { GRAPH <http://ex/g> { <http://ex/s> <http://ex/status> \"new\" } }").AskResult);
-        Assert.True(SparqlEngine.Query(Store, "ASK { GRAPH <http://ex/g> { <http://ex/s> <http://ex/note> \"x\" } }").AskResult);
+        Assert.False(SparqlEngine.Query(Store, "ASK { GRAPH <http://ex/g> { <http://ex/s> <http://ex/status> \"old\" } }", TestContext.Current.CancellationToken).AskResult);
+        Assert.True(SparqlEngine.Query(Store, "ASK { GRAPH <http://ex/g> { <http://ex/s> <http://ex/status> \"new\" } }", TestContext.Current.CancellationToken).AskResult);
+        Assert.True(SparqlEngine.Query(Store, "ASK { GRAPH <http://ex/g> { <http://ex/s> <http://ex/note> \"x\" } }", TestContext.Current.CancellationToken).AskResult);
     }
 
     [Fact]
@@ -209,24 +208,23 @@ public class SparqlEngineTests : PooledStoreTestBase
             INSERT DATA { a:s a:p "1" } ;
             PREFIX b: <http://ex/b/>
             INSERT DATA { b:s a:p "2" }
-            """);
+            """, TestContext.Current.CancellationToken);
 
         Assert.True(result.Success, result.ErrorMessage);
         Assert.Equal(2, result.AffectedCount);
-        Assert.True(SparqlEngine.Query(Store, "ASK { <http://ex/a/s> <http://ex/a/p> \"1\" }").AskResult);
-        Assert.True(SparqlEngine.Query(Store, "ASK { <http://ex/b/s> <http://ex/a/p> \"2\" }").AskResult);
+        Assert.True(SparqlEngine.Query(Store, "ASK { <http://ex/a/s> <http://ex/a/p> \"1\" }", TestContext.Current.CancellationToken).AskResult);
+        Assert.True(SparqlEngine.Query(Store, "ASK { <http://ex/b/s> <http://ex/a/p> \"2\" }", TestContext.Current.CancellationToken).AskResult);
     }
 
     [Fact]
     public void Update_SemicolonInsideLiteral_IsNotASeparator()
     {
-        var result = SparqlEngine.Update(Store,
-            "INSERT DATA { <http://ex/s> <http://ex/p> \"a ; b\" } ; INSERT DATA { <http://ex/s> <http://ex/q> \"c\" }");
+        var result = SparqlEngine.Update(Store, "INSERT DATA { <http://ex/s> <http://ex/p> \"a ; b\" } ; INSERT DATA { <http://ex/s> <http://ex/q> \"c\" }", TestContext.Current.CancellationToken);
 
         Assert.True(result.Success, result.ErrorMessage);
         Assert.Equal(2, result.AffectedCount);
-        Assert.True(SparqlEngine.Query(Store, "ASK { <http://ex/s> <http://ex/p> \"a ; b\" }").AskResult);
-        Assert.True(SparqlEngine.Query(Store, "ASK { <http://ex/s> <http://ex/q> \"c\" }").AskResult);
+        Assert.True(SparqlEngine.Query(Store, "ASK { <http://ex/s> <http://ex/p> \"a ; b\" }", TestContext.Current.CancellationToken).AskResult);
+        Assert.True(SparqlEngine.Query(Store, "ASK { <http://ex/s> <http://ex/q> \"c\" }", TestContext.Current.CancellationToken).AskResult);
     }
 
     [Fact]
@@ -238,14 +236,14 @@ public class SparqlEngineTests : PooledStoreTestBase
             INSERT DATA { <http://ex/first> <http://ex/p> "1" } ;
             LOAD <file:///nonexistent-adr046/missing.ttl> ;
             INSERT DATA { <http://ex/third> <http://ex/p> "3" }
-            """);
+            """, TestContext.Current.CancellationToken);
 
         Assert.False(result.Success);
         Assert.NotNull(result.ErrorMessage);
         Assert.Contains("operation 2 of 3", result.ErrorMessage);
         Assert.Equal(1, result.AffectedCount);
-        Assert.True(SparqlEngine.Query(Store, "ASK { <http://ex/first> <http://ex/p> \"1\" }").AskResult);
-        Assert.False(SparqlEngine.Query(Store, "ASK { <http://ex/third> <http://ex/p> \"3\" }").AskResult);
+        Assert.True(SparqlEngine.Query(Store, "ASK { <http://ex/first> <http://ex/p> \"1\" }", TestContext.Current.CancellationToken).AskResult);
+        Assert.False(SparqlEngine.Query(Store, "ASK { <http://ex/third> <http://ex/p> \"3\" }", TestContext.Current.CancellationToken).AskResult);
     }
 
     [Fact]
@@ -255,24 +253,23 @@ public class SparqlEngineTests : PooledStoreTestBase
             INSERT DATA { <http://ex/first> <http://ex/p> "1" } ;
             LOAD SILENT <file:///nonexistent-adr046/missing.ttl> ;
             INSERT DATA { <http://ex/third> <http://ex/p> "3" }
-            """);
+            """, TestContext.Current.CancellationToken);
 
         Assert.True(result.Success, result.ErrorMessage);
         Assert.Equal(2, result.AffectedCount);
-        Assert.True(SparqlEngine.Query(Store, "ASK { <http://ex/first> <http://ex/p> \"1\" }").AskResult);
-        Assert.True(SparqlEngine.Query(Store, "ASK { <http://ex/third> <http://ex/p> \"3\" }").AskResult);
+        Assert.True(SparqlEngine.Query(Store, "ASK { <http://ex/first> <http://ex/p> \"1\" }", TestContext.Current.CancellationToken).AskResult);
+        Assert.True(SparqlEngine.Query(Store, "ASK { <http://ex/third> <http://ex/p> \"3\" }", TestContext.Current.CancellationToken).AskResult);
     }
 
     [Fact]
     public void Update_SyntaxErrorInLaterOperation_ExecutesNothing()
     {
         // The whole request parses before anything executes.
-        var result = SparqlEngine.Update(Store,
-            "INSERT DATA { <http://ex/a> <http://ex/p> \"1\" } ; INSERT DATAA { <http://ex/b> <http://ex/p> \"2\" }");
+        var result = SparqlEngine.Update(Store, "INSERT DATA { <http://ex/a> <http://ex/p> \"1\" } ; INSERT DATAA { <http://ex/b> <http://ex/p> \"2\" }", TestContext.Current.CancellationToken);
 
         Assert.False(result.Success);
         Assert.NotNull(result.ErrorMessage);
-        Assert.False(SparqlEngine.Query(Store, "ASK { <http://ex/a> <http://ex/p> \"1\" }").AskResult);
+        Assert.False(SparqlEngine.Query(Store, "ASK { <http://ex/a> <http://ex/p> \"1\" }", TestContext.Current.CancellationToken).AskResult);
     }
 
     [Fact]
@@ -280,20 +277,19 @@ public class SparqlEngineTests : PooledStoreTestBase
     {
         // Without ';' the second operation is not part of the grammar. It must be
         // rejected, never silently dropped.
-        var result = SparqlEngine.Update(Store,
-            "INSERT DATA { <http://ex/a> <http://ex/p> \"1\" } INSERT DATA { <http://ex/b> <http://ex/p> \"2\" }");
+        var result = SparqlEngine.Update(Store, "INSERT DATA { <http://ex/a> <http://ex/p> \"1\" } INSERT DATA { <http://ex/b> <http://ex/p> \"2\" }", TestContext.Current.CancellationToken);
 
         Assert.False(result.Success);
         Assert.NotNull(result.ErrorMessage);
-        Assert.False(SparqlEngine.Query(Store, "ASK { <http://ex/a> <http://ex/p> \"1\" }").AskResult);
-        Assert.False(SparqlEngine.Query(Store, "ASK { <http://ex/b> <http://ex/p> \"2\" }").AskResult);
+        Assert.False(SparqlEngine.Query(Store, "ASK { <http://ex/a> <http://ex/p> \"1\" }", TestContext.Current.CancellationToken).AskResult);
+        Assert.False(SparqlEngine.Query(Store, "ASK { <http://ex/b> <http://ex/p> \"2\" }", TestContext.Current.CancellationToken).AskResult);
     }
 
     [Fact]
     public void Update_EmptyRequest_SucceedsWithNothingAffected()
     {
         // [29] Update ::= Prologue ( Update1 ( ';' Update )? )? — a bare prologue is a valid request.
-        var result = SparqlEngine.Update(Store, "PREFIX ex: <http://ex/>");
+        var result = SparqlEngine.Update(Store, "PREFIX ex: <http://ex/>", TestContext.Current.CancellationToken);
 
         Assert.True(result.Success, result.ErrorMessage);
         Assert.Equal(0, result.AffectedCount);
@@ -358,7 +354,7 @@ public class SparqlEngineTests : PooledStoreTestBase
     {
         PopulateTestData();
 
-        var result = SparqlEngine.Query(Store, "SELECT (COUNT(?s) AS ?count) WHERE { ?s <http://ex/name> ?name }");
+        var result = SparqlEngine.Query(Store, "SELECT (COUNT(?s) AS ?count) WHERE { ?s <http://ex/name> ?name }", TestContext.Current.CancellationToken);
 
         Assert.True(result.Success);
         Assert.Equal(ExecutionResultKind.Select, result.Kind);
@@ -376,7 +372,7 @@ public class SparqlEngineTests : PooledStoreTestBase
     {
         PopulateTestData();
 
-        var result = SparqlEngine.Query(Store, "SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?o }");
+        var result = SparqlEngine.Query(Store, "SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?o }", TestContext.Current.CancellationToken);
 
         Assert.True(result.Success);
         Assert.NotNull(result.Variables);
@@ -405,12 +401,11 @@ public class SparqlEngineTests : PooledStoreTestBase
     {
         var update = "INSERT DATA { <http://ex/s> <http://ex/p> " +
                      "\"prefix \\\"escaped\\\" after-needle\" }";
-        var insert = SparqlEngine.Update(Store, update);
+        var insert = SparqlEngine.Update(Store, update, TestContext.Current.CancellationToken);
         Assert.True(insert.Success, insert.ErrorMessage);
 
-        var query = SparqlEngine.Query(Store,
-            "SELECT ?c WHERE { <http://ex/s> <http://ex/p> ?c " +
-            "FILTER(CONTAINS(STR(?c), \"after-needle\")) }");
+        var query = SparqlEngine.Query(Store, "SELECT ?c WHERE { <http://ex/s> <http://ex/p> ?c " +
+            "FILTER(CONTAINS(STR(?c), \"after-needle\")) }", TestContext.Current.CancellationToken);
 
         Assert.True(query.Success, query.ErrorMessage);
         Assert.NotNull(query.Rows);
@@ -422,12 +417,11 @@ public class SparqlEngineTests : PooledStoreTestBase
     {
         var update = "INSERT DATA { <http://ex/s2> <http://ex/p> " +
                      "\"head \\\"mid\\\" tail-needle\" }";
-        var insert = SparqlEngine.Update(Store, update);
+        var insert = SparqlEngine.Update(Store, update, TestContext.Current.CancellationToken);
         Assert.True(insert.Success, insert.ErrorMessage);
 
-        var query = SparqlEngine.Query(Store,
-            "SELECT ?c WHERE { <http://ex/s2> <http://ex/p> ?c " +
-            "FILTER(CONTAINS(?c, \"tail-needle\")) }");
+        var query = SparqlEngine.Query(Store, "SELECT ?c WHERE { <http://ex/s2> <http://ex/p> ?c " +
+            "FILTER(CONTAINS(?c, \"tail-needle\")) }", TestContext.Current.CancellationToken);
 
         Assert.True(query.Success, query.ErrorMessage);
         Assert.NotNull(query.Rows);
@@ -439,12 +433,11 @@ public class SparqlEngineTests : PooledStoreTestBase
     {
         var update = "INSERT DATA { GRAPH <http://ex/g> { " +
                      "<http://ex/s> <http://ex/p> \"prefix \\\"escaped\\\" after-needle\" } }";
-        var insert = SparqlEngine.Update(Store, update);
+        var insert = SparqlEngine.Update(Store, update, TestContext.Current.CancellationToken);
         Assert.True(insert.Success, insert.ErrorMessage);
 
-        var query = SparqlEngine.Query(Store,
-            "SELECT ?c WHERE { GRAPH <http://ex/g> { <http://ex/s> <http://ex/p> ?c " +
-            "FILTER(CONTAINS(STR(?c), \"after-needle\")) } }");
+        var query = SparqlEngine.Query(Store, "SELECT ?c WHERE { GRAPH <http://ex/g> { <http://ex/s> <http://ex/p> ?c " +
+            "FILTER(CONTAINS(STR(?c), \"after-needle\")) } }", TestContext.Current.CancellationToken);
 
         Assert.True(query.Success, query.ErrorMessage);
         Assert.NotNull(query.Rows);
@@ -456,28 +449,25 @@ public class SparqlEngineTests : PooledStoreTestBase
     {
         var update = "INSERT DATA { <http://ex/s3> <http://ex/p> " +
                      "\"head \\\"middle\\\" tail\" }";
-        var insert = SparqlEngine.Update(Store, update);
+        var insert = SparqlEngine.Update(Store, update, TestContext.Current.CancellationToken);
         Assert.True(insert.Success, insert.ErrorMessage);
 
         // STRENDS targets text after the escape — the failure path pre-fix.
-        var endsQuery = SparqlEngine.Query(Store,
-            "SELECT ?c WHERE { <http://ex/s3> <http://ex/p> ?c " +
-            "FILTER(STRENDS(STR(?c), \"tail\")) }");
+        var endsQuery = SparqlEngine.Query(Store, "SELECT ?c WHERE { <http://ex/s3> <http://ex/p> ?c " +
+            "FILTER(STRENDS(STR(?c), \"tail\")) }", TestContext.Current.CancellationToken);
         Assert.True(endsQuery.Success, endsQuery.ErrorMessage);
         Assert.Single(endsQuery.Rows!);
 
         // STRSTARTS targets text before any escape — already worked pre-fix but
         // we pin it here so a future GetLexicalForm regression in either direction trips.
-        var startsQuery = SparqlEngine.Query(Store,
-            "SELECT ?c WHERE { <http://ex/s3> <http://ex/p> ?c " +
-            "FILTER(STRSTARTS(STR(?c), \"head\")) }");
+        var startsQuery = SparqlEngine.Query(Store, "SELECT ?c WHERE { <http://ex/s3> <http://ex/p> ?c " +
+            "FILTER(STRSTARTS(STR(?c), \"head\")) }", TestContext.Current.CancellationToken);
         Assert.True(startsQuery.Success, startsQuery.ErrorMessage);
         Assert.Single(startsQuery.Rows!);
 
         // REGEX hits the same GetLexicalForm path.
-        var regexQuery = SparqlEngine.Query(Store,
-            "SELECT ?c WHERE { <http://ex/s3> <http://ex/p> ?c " +
-            "FILTER(REGEX(STR(?c), \"tail$\")) }");
+        var regexQuery = SparqlEngine.Query(Store, "SELECT ?c WHERE { <http://ex/s3> <http://ex/p> ?c " +
+            "FILTER(REGEX(STR(?c), \"tail$\")) }", TestContext.Current.CancellationToken);
         Assert.True(regexQuery.Success, regexQuery.ErrorMessage);
         Assert.Single(regexQuery.Rows!);
     }

@@ -272,43 +272,43 @@ Before scripting around a tool, read its flags — `--help`, or `/?` on Windows.
 
 ## Running the tests
 
-The repo has **two kinds** of test project, and on the .NET 10 SDK they run by **different commands**. Knowing which is which saves a confusing error.
+Every test project runs on **Microsoft.Testing.Platform (MTP)**: xUnit projects use `xunit.v3`, the integration suite uses `MSTest.Sdk`, and the repo-root `global.json` selects MTP as the `dotnet test` runner. Each test project builds to an executable, and `dotnet test` at the repo root runs the whole solution:
 
-### Standard test projects — `dotnet test`
+```bash
+dotnet test                                                    # everything (needs the submodules, below)
+dotnet test --project tests/Mercury.Tests                      # one project
+dotnet test --project tests/Mercury.Tests --filter "FullyQualifiedName~BasicSelect"   # one test
+```
 
-`Microsoft.NET.Test.Sdk` (xUnit/MSTest-over-VSTest) projects run the usual way:
+### Unit and conformance projects
 
 | Project | Command | Count |
 |---------|---------|-------|
-| Mercury (W3C conformance + unit) | `dotnet test tests/Mercury.Tests/Mercury.Tests.csproj` | ~4,700 |
-| DrHook.Engine (unit) | `dotnet test tests/DrHook.Engine.Tests/DrHook.Engine.Tests.csproj` | 174 |
-| DrHook.Viz | `dotnet test tests/DrHook.Viz.Tests/DrHook.Viz.Tests.csproj` | 42 |
-| DrHook.Wire | `dotnet test tests/DrHook.Wire.Tests/DrHook.Wire.Tests.csproj` | 5 |
-| DrHook.Capture | `dotnet test tests/DrHook.Capture.Tests/DrHook.Capture.Tests.csproj` | 1 |
-| Mercury.Solid | `dotnet test tests/Mercury.Solid.Tests/Mercury.Solid.Tests.csproj` | 25 |
-| SkyOmega.Bcl | `dotnet test tests/SkyOmega.Bcl.Tests/SkyOmega.Bcl.Tests.csproj` | 12 |
+| Mercury (W3C conformance + unit) | `dotnet test --project tests/Mercury.Tests` | ~4,700 |
+| DrHook.Engine (unit) | `dotnet test --project tests/DrHook.Engine.Tests` | 174 |
+| DrHook.Viz | `dotnet test --project tests/DrHook.Viz.Tests` | 42 |
+| DrHook.Wire | `dotnet test --project tests/DrHook.Wire.Tests` | 5 |
+| DrHook.Capture | `dotnet test --project tests/DrHook.Capture.Tests` | 1 |
+| Mercury.Solid | `dotnet test --project tests/Mercury.Solid.Tests` | 25 |
+| SkyOmega.Bcl | `dotnet test --project tests/SkyOmega.Bcl.Tests` | 12 |
 
-Mercury's W3C suites need the test-data submodules first: `./tools/update-submodules.sh`. Run one test with `--filter "FullyQualifiedName~SomeName"`.
+Mercury's W3C suites need the test-data submodules first: `./tools/update-submodules.sh`. A built test project can also be run as its executable (e.g. `./tests/Mercury.Tests/bin/Debug/net10.0/Mercury.Tests --help`). xUnit tests skip at run time with `Assert.SkipWhen` / `Assert.SkipUnless` (xunit.v3), not `Xunit.SkippableFact`.
 
-### MTP integration tests — run the executable, **not** `dotnet test`
-
-`tests/DrHook.Engine.IntegrationTests` is a **Microsoft.Testing.Platform (MTP)** app (`MSTest.Sdk`). On the .NET 10 SDK, `dotnet test` over the legacy VSTest target is **no longer supported** and fails fast:
-
-> error : Testing with VSTest target is no longer supported by Microsoft.Testing.Platform on .NET 10 SDK and later.
-
-Build it, then run the produced **executable** directly — it spawns its own debuggee targets and attaches via `DrHook.Engine`:
+### Integration tests — `DrHook.Engine.IntegrationTests`
 
 ```bash
-dotnet build tests/DrHook.Engine.IntegrationTests/DrHook.Engine.IntegrationTests.csproj -c Debug
-./tests/DrHook.Engine.IntegrationTests/bin/Debug/net10.0/DrHook.Engine.IntegrationTests
-#   --list-tests                                 # enumerate without running
-#   --filter "FullyQualifiedName~AttachToMtpTarget"   # run one
-#   --output Detailed                            # verbose
+dotnet test --project tests/DrHook.Engine.IntegrationTests
+#   --list-tests                                       # enumerate without running
+#   --filter "FullyQualifiedName~AttachToMtpTarget"    # run one
+#   --output Detailed                                  # verbose
 ```
 
-These are the **17** integration tests: the 16 substrate-correctness tests (ADR-007 Phase 8), validated on macOS-arm64 and Linux x64 (glibc), plus the process-listing test for a deleted executable ([finding 93](poc/drhook-engine/findings/93-deleted-executable-process-listing.md)), validated on Linux only so far. Each has a 120 s limit (`testconfig.json`), so a hang fails with the test's name instead of stalling the run. `DrHook.Engine.IntegrationTargets.{Mtp,Vstest}` are their *targets*, not test projects — don't run them directly.
+The suite spawns its own debuggee targets and attaches via `DrHook.Engine`. These are the **17** integration tests: the 16 substrate-correctness tests (ADR-007 Phase 8), validated on macOS-arm64 and Linux x64 (glibc), plus the process-listing test for a deleted executable ([finding 93](poc/drhook-engine/findings/93-deleted-executable-process-listing.md)), validated on Linux only so far. Each has a 120 s limit (`testconfig.json`), so a hang fails with the test's name instead of stalling the run.
 
-> **Whole-solution caveat.** `dotnet test SkyOmega.sln` trips the same VSTest error on the MTP project (it is in the solution). Run the standard projects individually (above) and the integration suite via its executable.
+Their two *targets* are debuggees, not suites:
+
+- **`DrHook.Engine.IntegrationTargets.Mtp`**: a real MTP test app, launched with `--debug`. It is in the solution, so `dotnet test` also runs its single test directly (about 500 ms, then a natural exit). That's harmless.
+- **`DrHook.Engine.IntegrationTargets.Vstest`**: the one **legacy VSTest** project left, kept so DrHook stays validated against the VSTest testhosts most .NET projects still use. Under MTP, `dotnet test` refuses VSTest projects, so this target is isolated: it is **not in the solution** (the integration suite's ProjectReference builds it), and its folder has its own `global.json` with no test runner. `TargetSpawn.Vstest` starts `dotnet test` *from that folder*, so it gets the legacy runner. To run it by hand: `cd tests/DrHook.Engine.IntegrationTargets.Vstest && dotnet test`.
 
 ### Inspection-robustness fault probes (ADR-014)
 
