@@ -70,6 +70,11 @@ internal static class IntegrationTargetPaths
     public static string SnapshotTargetSource()
         => Path.Combine(TestsDir().FullName, "DrHook.Engine.IntegrationTargets.Snapshot", "Program.cs");
 
+    /// <summary>Resolve the MTP target's <c>IdleTarget.cs</c> — tests scan it for the TEST_RUNNING_HERE marker and
+    /// break there to know the target is running its [TestMethod].</summary>
+    public static string MtpTargetSource()
+        => Path.Combine(TestsDir().FullName, "DrHook.Engine.IntegrationTargets.Mtp", "IdleTarget.cs");
+
     /// <summary>Resolve the Legacy VSTest target's <c>IdleFact.cs</c> — the VSTest tests scan it for the
     /// TEST_RUNNING_HERE marker and break there to know the testhost is running the [Fact] (finding 94).</summary>
     public static string VstestTargetSource()
