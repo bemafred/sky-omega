@@ -28,7 +28,7 @@ public sealed unsafe class PosixSpawnTests
     [Fact]
     public void HeldSpawn_RunsOnlyAfterContinue_AndKeepsThePid()
     {
-        if (OperatingSystem.IsWindows()) return;   // POSIX-only primitive
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "PosixSpawn is a POSIX-only primitive.");
 
         // The child prints its own pid. On Linux it is exec'd from the holding shell, so the printed pid
         // proves exec kept the pid the caller got back (the one RegisterForRuntimeStartup is armed on).

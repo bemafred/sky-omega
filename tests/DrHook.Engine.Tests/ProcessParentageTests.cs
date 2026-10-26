@@ -13,7 +13,7 @@ public sealed class ProcessParentageTests
     [Fact]
     public void ParentOf_ProcessStartChild_IsThisProcess()
     {
-        if (OperatingSystem.IsWindows()) return;   // no parent-reaping model; ParentOf returns null by design
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "Windows has no parent-reaping model; ParentOf returns null there by design.");
 
         using Process child = Process.Start(new ProcessStartInfo("/bin/sleep", "30") { UseShellExecute = false })!;
         try
@@ -30,7 +30,7 @@ public sealed class ProcessParentageTests
     [Fact]
     public void ParentOf_Self_IsSomeOtherLiveProcess()
     {
-        if (OperatingSystem.IsWindows()) return;
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "Windows has no parent-reaping model; ParentOf returns null there by design.");
 
         int? parent = ProcessParentage.ParentOf(Environment.ProcessId);
         Assert.NotNull(parent);
@@ -41,7 +41,7 @@ public sealed class ProcessParentageTests
     [Fact]
     public void ParentOf_ReapedChild_IsNull()
     {
-        if (OperatingSystem.IsWindows()) return;
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "Windows has no parent-reaping model; ParentOf returns null there by design.");
 
         using Process child = Process.Start(new ProcessStartInfo("/usr/bin/true") { UseShellExecute = false })!;
         child.WaitForExit();

@@ -34,7 +34,7 @@ public sealed class MappedFilesTests
     [Fact]
     public void FindByFileName_ExitedProcess_IsNull()
     {
-        if (OperatingSystem.IsWindows()) return;
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "The exited child is a POSIX process (/usr/bin/true); not yet run on Windows (ADR-007 Phase 9).");
 
         using Process child = Process.Start(new ProcessStartInfo("/usr/bin/true") { UseShellExecute = false })!;
         child.WaitForExit();

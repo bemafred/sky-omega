@@ -33,7 +33,8 @@ public sealed class BorrowedIdleDetachTest
     [TestMethod]
     public void Attach_PauseStop_Dispose_DetachesCleanly_AndTargetExitLeavesHostAlive()
     {
-        if (OperatingSystem.IsWindows()) return; // the /bin/sh topology and the observed failure are POSIX
+        if (OperatingSystem.IsWindows())
+            Assert.Inconclusive("The shell-parent topology and the observed failure (finding 89) are POSIX; the Windows spawn is ADR-007 Phase 9.");
 
         string targetDll = IntegrationTargetPaths.SnapshotTargetDll();
         Assert.IsTrue(File.Exists(targetDll), $"Snapshot target not found at {targetDll}.");
