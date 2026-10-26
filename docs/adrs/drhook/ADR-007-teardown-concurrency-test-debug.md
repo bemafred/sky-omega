@@ -174,7 +174,7 @@ Time-budgeted separately. Validates the substrate-correctness probe corpus on Li
 - [ ] Probes 02–40 + 41–46 (Phase 1/2) + 47–56 (ADR-008 substrate behavior) on Linux/x64. Phase 3 superseded (probe numbers 57–59 freed); Phases 4 + 5 + 6 closed (probe numbers 60–73 freed).
 - [ ] Same probe set on Linux/arm64.
 - [ ] Same probe set on Windows/x64.
-- [ ] Same probe set on Windows/arm64.
+- [ ] Same probe set on Windows/arm64. *(Started 2026-10-26 on omega-windows, [finding 96](../../../poc/drhook-engine/findings/96-windows-arm64-first-run.md): the engine worked on first contact; the integration harness gained a Windows spawn path, with a Job Object in place of the process group; integration suite 16 passed / 2 skipped / 0 failed in 3 of 3 runs. Probe corpus, MCP server, launch stdio isolation, launch env and RequestExit on Windows still open.)*
 - [ ] Per-platform findings documented; any new probes from discoveries integrated into the substrate.
 - [ ] Phase 8 CI extended to all four platforms.
 
