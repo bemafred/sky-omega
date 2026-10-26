@@ -10,6 +10,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # Initialize submodules (W3C test data — required for dotnet test)
 ./tools/update-submodules.sh   # or .\tools\update-submodules.ps1
 
+# Keep submodules in sync on every pull (once per clone). A plain `git pull` moves the
+# pinned commit but not the checkout, so tests run on stale W3C data and `git status`
+# shows "(new commits)". If you see that, run update-submodules.sh.
+git config submodule.recurse true
+
 # Build entire solution
 dotnet build SkyOmega.sln
 
