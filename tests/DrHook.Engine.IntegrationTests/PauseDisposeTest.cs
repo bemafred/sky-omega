@@ -114,22 +114,40 @@ public sealed class PauseDisposeTest
             int testHostPid = TargetSpawn.ExtractPid(dotnetTest, TimeSpan.FromSeconds(60));
             var sink = new CollectingSink();
 
+            string source = IntegrationTargetPaths.VstestTargetSource();
+            int markerLine = Array.FindIndex(File.ReadAllLines(source), l => l.Contains("TEST_RUNNING_HERE", StringComparison.Ordinal)) + 1;
+            Assert.IsTrue(markerLine > 0, $"TEST_RUNNING_HERE marker not found in {source}.");
+
             using (DebugSession session = DebugSession.AttachAndOwn(testHostPid, sink, naturalExitTimeout))
             {
-                Thread.Sleep(TimeSpan.FromMilliseconds(500));
-
+                // FINDING 94 — sync on the target's progress, never on the clock. This test used to sleep 500 ms
+                // before its Pause; on elite (4 cores) that left the testhost mid-handshake with vstest.console, and
+                // Dispose's kill there leaves vstest.console waiting out its 90 s connection timeout. Run to a
+                // breakpoint on the [Fact]'s first statement first: its hit proves the handshake is over.
                 session.Pause();
-                StopInfo? stop = session.WaitForStop(TimeSpan.FromSeconds(3));
-                Assert.IsNotNull(stop, "Pause stop did not arrive within 3s.");
-                if (stop!.Reason == StopReason.Break)
+                StopInfo? stop = session.WaitForStop(TimeSpan.FromSeconds(5));
+                Assert.IsNotNull(stop, "No stop within 5s of the first Pause.");
+                int breakpointId = session.SetBreakpointAtLine("IdleFact.cs", markerLine);
+                Assert.AreNotEqual(0, breakpointId, $"Failed to set a breakpoint at IdleFact.cs:{markerLine}.");
+
+                // Finding 91: the VSTEST_HOST_DEBUG hold's Break and the Pause can both queue ahead of the
+                // breakpoint, in either order (the hold's Break first is the norm on zbook, the exception on the
+                // Mac). Each is resumed.
+                do
                 {
-                    // Finding 91, the other ordering: the attach landed AFTER the testhost reached its
-                    // VSTEST_HOST_DEBUG hold, so the hold's Break queued ahead of the Pause (the norm on zbook,
-                    // the exception on the Mac). Consume it and await the Pause this test is about.
                     session.Resume();
-                    stop = session.WaitForStop(TimeSpan.FromSeconds(3));
-                    Assert.IsNotNull(stop, "Pause stop did not arrive within 3s after consuming the hold's Break.");
+                    stop = session.WaitForStop(TimeSpan.FromSeconds(30));
+                    Assert.IsNotNull(stop, "The [Fact] breakpoint was not hit within 30s.");
                 }
+                while (stop!.Reason is StopReason.Break or StopReason.Pause);
+                Assert.AreEqual(StopReason.Breakpoint, stop.Reason);
+                Assert.IsTrue(session.RemoveBreakpoint(breakpointId), "Could not remove the [Fact] breakpoint.");
+
+                // The Pause this test is about, while the [Fact] runs — then Dispose without resuming it.
+                session.Resume();
+                session.Pause();
+                stop = session.WaitForStop(TimeSpan.FromSeconds(3));
+                Assert.IsNotNull(stop, "Pause stop did not arrive within 3s.");
                 Assert.AreEqual(StopReason.Pause, stop!.Reason);
             }
 

@@ -44,7 +44,10 @@ public sealed class IdleFact
         // Generates CreateThread + ExitThread mscordbi callbacks per iteration
         // for substrate observation, then this [Fact] returns naturally.
         // xUnit completes test reporting; testhost exits naturally.
-        for (int i = 0; i < 10; i++)
+        //
+        // The integration tests set a line breakpoint on the TEST_RUNNING_HERE marker: its hit proves the
+        // testhost is past the vstest.console handshake and running this [Fact] (finding 94).
+        for (int i = 0; i < 10; i++) // TEST_RUNNING_HERE
         {
             Thread t = new(static () => Thread.Sleep(20)) { IsBackground = true };
             t.Start();

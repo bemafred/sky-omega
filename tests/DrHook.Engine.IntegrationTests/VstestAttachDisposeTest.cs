@@ -47,30 +47,56 @@ public sealed class VstestAttachDisposeTest
         {
             int testHostPid = TargetSpawn.ExtractPid(dotnetTest, TimeSpan.FromSeconds(60));
 
+            string source = IntegrationTargetPaths.VstestTargetSource();
+            int markerLine = Array.FindIndex(File.ReadAllLines(source), l => l.Contains("TEST_RUNNING_HERE", StringComparison.Ordinal)) + 1;
+            Assert.IsTrue(markerLine > 0, $"TEST_RUNNING_HERE marker not found in {source}.");
+
             using (DebugSession session = DebugSession.AttachAndOwn(testHostPid, new NullSink()))
             {
-                // Brief observation window — substrate's CallbackPump initializes;
-                // testhost's VSTEST_HOST_DEBUG=1 waiter detects Debugger.IsAttached
-                // and continues; the [Fact] runs brief observable work (~500 ms).
-                Thread.Sleep(TimeSpan.FromMilliseconds(500));
+                // FINDING 94 — sync on the target's progress, never on the clock. This test used to sleep 500 ms
+                // and Dispose, assuming the [Fact] was done by then. It was not: the testhost was still in its
+                // vstest.console handshake (or parked at the VSTEST_HOST_DEBUG hold's Break, which nobody
+                // resumed), so Dispose's SIGTERM killed it. A kill DURING the handshake leaves vstest.console
+                // waiting out its 90 s connection timeout — on elite (4 cores) the 500 ms landed exactly there.
+                //
+                // Pause for a stop that works however early the attach landed (finding 91), arm a breakpoint on
+                // the [Fact]'s first statement (pending until the test assembly loads), then run to it. Its hit
+                // proves the handshake is over and the [Fact] is running.
+                session.Pause();
+                StopInfo? stop = session.WaitForStop(TimeSpan.FromSeconds(5));
+                Assert.IsNotNull(stop, "No stop within 5s of Pause.");
+                int breakpointId = session.SetBreakpointAtLine("IdleFact.cs", markerLine);
+                Assert.AreNotEqual(0, breakpointId, $"Failed to set a breakpoint at IdleFact.cs:{markerLine}.");
 
-                // session.Dispose() at end of using:
-                //   Stage 1: SIGTERM → testhost's [Fact] is already wrapping up its
-                //            brief work OR was already done. testhost reports to
-                //            vstest.console, exits. Substrate observes natural exit.
-                //   Stage 2: would only fire if testhost ignored SIGTERM — doesn't
-                //            happen for well-behaved xUnit + dotnet test combo.
-                //   No TargetStuckAtDispose anomaly expected.
+                // Run to the breakpoint. The hold's Break and the Pause can both queue ahead of it (finding 91's
+                // two orderings); each is resumed.
+                do
+                {
+                    session.Resume();
+                    stop = session.WaitForStop(TimeSpan.FromSeconds(30));
+                    Assert.IsNotNull(stop, "The [Fact] breakpoint was not hit within 30s.");
+                }
+                while (stop!.Reason is StopReason.Break or StopReason.Pause);
+                Assert.AreEqual(StopReason.Breakpoint, stop.Reason);
+
+                // The natural exit this test is about: the [Fact] finishes its brief work, xUnit reports to
+                // vstest.console, and the testhost exits by itself while still attached.
+                session.Resume();
+                stop = session.WaitForStop(TimeSpan.FromSeconds(30));
+                Assert.IsNotNull(stop, "The testhost did not exit within 30s of finishing at the breakpoint.");
+                Assert.AreEqual(StopReason.ProcessExited, stop!.Reason);
+
+                // session.Dispose() at end of using: the target is already gone, so neither Stage 1 SIGTERM nor
+                // Stage 2 SIGKILL has anything to do. No TargetStuckAtDispose anomaly expected.
             }
 
-            // Increment 3 discipline assertion: dotnet-test bootstrap should exit
-            // naturally after testhost dies, vstest.console reports, and dotnet test
-            // completes. Total post-Dispose budget: ~5-10 seconds for the full VSTest
-            // tree to wind down (slower than MTP because of the deeper process tree).
+            // Increment 3 discipline assertion: with the testhost gone after reporting its result, the dotnet-test
+            // bootstrap exits naturally — and successfully, because the [Fact] passed.
             bool exitedNaturally = dotnetTest.WaitForExit(10000);
             Assert.IsTrue(exitedNaturally,
                 "VSTest dotnet-test bootstrap did not exit naturally within 10s after Dispose — Layer 1 " +
                 "discipline violation (testhost may be stuck, or vstest reporting may be hanging).");
+            Assert.AreEqual(0, dotnetTest.ExitCode, "dotnet test reported a failure: the [Fact] should have run to completion.");
         }
         finally
         {
