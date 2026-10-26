@@ -44,6 +44,13 @@ public sealed class QuadStorePoolOptions
     public double DiskBudgetFraction { get; init; } = QuadStorePool.DefaultDiskBudgetFraction;
 
     /// <summary>
+    /// Receives the pool's state events: its capacity decision at creation, and each
+    /// <see cref="QuadStorePool.Rent"/> that has to wait for a store and when that wait ends.
+    /// Default: null (no events).
+    /// </summary>
+    public SkyOmega.Mercury.Abstractions.IObservabilityListener? ObservabilityListener { get; init; }
+
+    /// <summary>
     /// Default options suitable for production use.
     /// </summary>
     public static QuadStorePoolOptions Default { get; } = new();

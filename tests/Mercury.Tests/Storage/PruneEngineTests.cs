@@ -161,12 +161,23 @@ public class PruneEngineTests : IDisposable
     {
         // Build a pool whose storage options designate Reference profile, then bulk-load
         // a tiny set of triples through it. The pool's "primary" store comes up sealed.
+        //
+        // Test-sized files: default sizes plus the bulk-mode 256M-bucket hash floor reserve ~13 GB
+        // per store, which a small temp filesystem's disk budget refuses (a 3.7 GB tmpfs /tmp on
+        // omega-ubuntu, 2026-10-26). ForceAtomHashCapacity keeps the 64K-bucket test table in bulk
+        // mode. The rejection under test happens at plan time and does not depend on store size.
         var poolOptions = new QuadStorePoolOptions
         {
             StorageOptions = new StorageOptions
             {
                 Profile = StoreProfile.Reference,
-                BulkMode = true
+                BulkMode = true,
+                IndexInitialSizeBytes = StorageOptions.ForTesting.IndexInitialSizeBytes,
+                AtomDataInitialSizeBytes = StorageOptions.ForTesting.AtomDataInitialSizeBytes,
+                AtomOffsetInitialCapacity = StorageOptions.ForTesting.AtomOffsetInitialCapacity,
+                AtomHashTableInitialCapacity = StorageOptions.ForTesting.AtomHashTableInitialCapacity,
+                ForceAtomHashCapacity = true,
+                MinimumFreeDiskSpace = StorageOptions.ForTesting.MinimumFreeDiskSpace
             }
         };
         _pool = QuadStorePool.CreateTemp("prune-engine-reference-rejection", poolOptions);

@@ -6,6 +6,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading;
 using SkyOmega.Mercury.Abstractions;
+using SkyOmega.Mercury.Runtime;
 using SkyOmega.Mercury.Diagnostics;
 using SkyOmega.Mercury.Runtime.Buffers;
 
@@ -490,7 +491,7 @@ public sealed class QuadStore : IDisposable
     {
         if (_diskSpaceLow)
         {
-            var available = DiskSpaceChecker.GetAvailableSpace(_baseDirectory);
+            var available = DiskSpaceGuard.GetAvailableSpace(_baseDirectory);
             if (available >= _minimumFreeDiskSpace)
             {
                 // Space has been freed, clear the flag
@@ -516,7 +517,7 @@ public sealed class QuadStore : IDisposable
         if (_minimumFreeDiskSpace <= 0)
             return;
 
-        var available = DiskSpaceChecker.GetAvailableSpace(_baseDirectory);
+        var available = DiskSpaceGuard.GetAvailableSpace(_baseDirectory);
         if (available >= 0 && available < _minimumFreeDiskSpace)
         {
             _diskSpaceLow = true;

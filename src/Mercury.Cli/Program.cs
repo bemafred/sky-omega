@@ -7,6 +7,7 @@ using System.Text.Json;
 using SkyOmega.Mercury;
 using SkyOmega.Mercury.Abstractions;
 using SkyOmega.Mercury.Diagnostics;
+using SkyOmega.Mercury.Runtime;
 using SkyOmega.Mercury.Runtime.IO;
 using SkyOmega.Mercury.Sparql.Protocol;
 using SkyOmega.Mercury.Storage;
@@ -377,7 +378,7 @@ if (jsonlListener is not null)
 // Print startup diagnostics when loading or rebuilding
 if (loadFile != null || bulkLoadFile != null || rebuildIndexes || rebuildMphf)
 {
-    var freeSpace = new DriveInfo(Path.GetPathRoot(Path.GetFullPath(resolvedStorePath))!).AvailableFreeSpace;
+    var freeSpace = DiskSpaceGuard.GetAvailableSpace(resolvedStorePath);
     Console.WriteLine($"Store:           {resolvedStorePath}");
     Console.WriteLine($"Profile:         {pool.Active.Schema.Profile}");
     Console.WriteLine($"AtomStore:       {pool.Active.Schema.AtomStore}");
@@ -487,7 +488,7 @@ if (fileToLoad != null)
     var avgRate = totalElapsed.TotalSeconds > 0 ? count / totalElapsed.TotalSeconds : 0;
     var finalGcMB = GC.GetTotalMemory(false) / (1024.0 * 1024);
     var finalWsMB = Environment.WorkingSet / (1024.0 * 1024);
-    var freeAfter = new DriveInfo(Path.GetPathRoot(Path.GetFullPath(resolvedStorePath))!).AvailableFreeSpace;
+    var freeAfter = DiskSpaceGuard.GetAvailableSpace(resolvedStorePath);
 
     Console.WriteLine($"--- Load complete ---");
     Console.WriteLine($"  Triples:       {count:N0}");

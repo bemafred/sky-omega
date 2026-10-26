@@ -6,6 +6,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -67,7 +68,7 @@ public sealed class QuadStorePool : IDisposable
 
     // AtomStore hash bucket is 32 bytes (AtomId, Hash, Offset, Length — 4 × long).
     private const long HashBucketBytes = 32;
-    // Bulk mode bumps the hash table to 256M buckets; mirrors AtomStore.BulkModeHashTableSize.
+    // Bulk mode bumps the hash table to 256M buckets; mirrors HashAtomStore.BulkModeHashTableSize.
     private const long BulkModeHashTableCapacity = 1L << 28;
 
     private const string PoolJsonFileName = "pool.json";
@@ -78,6 +79,7 @@ public sealed class QuadStorePool : IDisposable
     private readonly ConcurrentBag<QuadStore> _available = new();
     private readonly List<(string path, QuadStore store)> _pooledStores = new();
     private readonly SemaphoreSlim _poolGate;
+    private readonly int _capacity;
     private readonly object _poolLock = new();
 
     // === Named store state ===
@@ -92,6 +94,7 @@ public sealed class QuadStorePool : IDisposable
     private readonly StorageOptions _storageOptions;
     private readonly bool _useCrossProcessGate;
     private readonly long _maxDiskBytes;
+    private readonly IObservabilityListener? _observabilityListener;
     private int _globalSlotsHeld;
     private FileStream? _storeLock;
     private bool _disposed;
@@ -118,11 +121,14 @@ public sealed class QuadStorePool : IDisposable
     /// <param name="maxConcurrent">Maximum concurrent stores (0 = ProcessorCount).</param>
     /// <param name="purpose">Category for TempPath naming.</param>
     /// <param name="useCrossProcessGate">Enable cross-process coordination.</param>
+    /// <param name="observabilityListener">Receives the pool's state events: its capacity decision now,
+    /// and each <see cref="Rent"/> that waits for a store. Null for none.</param>
     public QuadStorePool(StorageOptions? storageOptions,
                          double diskBudgetFraction = DefaultDiskBudgetFraction,
                          int maxConcurrent = 0,
                          string purpose = "pooled",
-                         bool useCrossProcessGate = false)
+                         bool useCrossProcessGate = false,
+                         IObservabilityListener? observabilityListener = null)
     {
         if (diskBudgetFraction <= 0 || diskBudgetFraction > 1.0)
             throw new ArgumentOutOfRangeException(nameof(diskBudgetFraction),
@@ -130,6 +136,7 @@ public sealed class QuadStorePool : IDisposable
 
         _storageOptions = storageOptions ?? StorageOptions.Default;
         _useCrossProcessGate = useCrossProcessGate;
+        _observabilityListener = observabilityListener;
         _isTemporary = true;
         _basePath = null;
         _metadata = new PoolMetadata();
@@ -140,11 +147,45 @@ public sealed class QuadStorePool : IDisposable
         tempPath.MarkOwnership();
         _basePath = tempPath.FullPath;
 
-        var cpuLimit = maxConcurrent > 0 ? maxConcurrent : Environment.ProcessorCount;
-        var diskLimit = CalculateDiskLimit(_storageOptions, diskBudgetFraction, _basePath);
-        var max = Math.Max(1, Math.Min(cpuLimit, diskLimit));
-        _poolGate = new SemaphoreSlim(max, max);
-        _maxDiskBytes = (long)(DiskSpaceChecker.GetAvailableSpace(_basePath) * diskBudgetFraction);
+        var concurrencyLimit = maxConcurrent > 0 ? maxConcurrent : Environment.ProcessorCount;
+        var available = DiskSpaceGuard.GetAvailableSpace(_basePath);
+        var perStoreEstimate = EstimateStoreSize(_storageOptions);
+        // Unknown free space (or a zero-size estimate) leaves the disk budget out of the decision.
+        var diskLimit = available < 0 || perStoreEstimate <= 0
+            ? -1
+            : (int)Math.Min(int.MaxValue, (long)(available * diskBudgetFraction) / perStoreEstimate);
+
+        StorePoolCapacityBound bound;
+        if (diskLimit < 0 || concurrencyLimit <= diskLimit)
+        {
+            _capacity = concurrencyLimit;
+            bound = StorePoolCapacityBound.Concurrency;
+        }
+        else if (diskLimit >= 1)
+        {
+            _capacity = diskLimit;
+            bound = StorePoolCapacityBound.DiskBudget;
+        }
+        else
+        {
+            _capacity = 1;
+            bound = StorePoolCapacityBound.DiskBudgetFloor;
+        }
+
+        _poolGate = new SemaphoreSlim(_capacity, _capacity);
+        _maxDiskBytes = (long)(available * diskBudgetFraction);
+
+        _observabilityListener?.OnStorePoolCapacity(new StorePoolCapacityEvent(
+            Timestamp: DateTimeOffset.UtcNow,
+            PoolPath: _basePath,
+            RequestedConcurrent: maxConcurrent,
+            ConcurrencyLimit: concurrencyLimit,
+            DiskLimit: diskLimit,
+            Capacity: _capacity,
+            Bound: bound,
+            AvailableBytes: available,
+            DiskBudgetFraction: diskBudgetFraction,
+            PerStoreEstimateBytes: perStoreEstimate));
     }
 
     /// <summary>
@@ -162,6 +203,7 @@ public sealed class QuadStorePool : IDisposable
         _isTemporary = false;
         _storageOptions = opts.StorageOptions;
         _useCrossProcessGate = opts.UseCrossProcessGate;
+        _observabilityListener = opts.ObservabilityListener;
 
         // Auto-migrate flat QuadStore format to pool structure
         MigrateFlatStore(_basePath);
@@ -178,20 +220,33 @@ public sealed class QuadStorePool : IDisposable
         _metadata = PoolMetadata.Load(PoolJsonPath);
         _activeName = _metadata.Active;
 
-        // Calculate disk budget
+        // Calculate disk budget. Here it is enforced per store creation (EnsureDiskBudget),
+        // not folded into the capacity.
+        var available = DiskSpaceGuard.GetAvailableSpace(_basePath);
         if (opts.MaxDiskBytes > 0)
         {
             _maxDiskBytes = opts.MaxDiskBytes;
         }
         else
         {
-            var available = DiskSpaceChecker.GetAvailableSpace(_basePath);
             _maxDiskBytes = available > 0 ? (long)(available * opts.DiskBudgetFraction) : long.MaxValue;
         }
 
         // Initialize pool gate
-        var poolLimit = opts.MaxPooledStores > 0 ? opts.MaxPooledStores : 8;
-        _poolGate = new SemaphoreSlim(poolLimit, poolLimit);
+        _capacity = opts.MaxPooledStores > 0 ? opts.MaxPooledStores : 8;
+        _poolGate = new SemaphoreSlim(_capacity, _capacity);
+
+        _observabilityListener?.OnStorePoolCapacity(new StorePoolCapacityEvent(
+            Timestamp: DateTimeOffset.UtcNow,
+            PoolPath: _basePath,
+            RequestedConcurrent: opts.MaxPooledStores,
+            ConcurrencyLimit: _capacity,
+            DiskLimit: -1,
+            Capacity: _capacity,
+            Bound: StorePoolCapacityBound.MaxPooledStores,
+            AvailableBytes: available,
+            DiskBudgetFraction: opts.DiskBudgetFraction,
+            PerStoreEstimateBytes: EstimateStoreSize(_storageOptions)));
 
         // Rehydrate named stores from metadata
         RehydrateNamedStores();
@@ -454,16 +509,34 @@ public sealed class QuadStorePool : IDisposable
     #region Anonymous Pool API (Rent/Return)
 
     /// <summary>
-    /// Rent a store from the pool. Blocks if pool is exhausted.
+    /// Rent a store from the pool. Waits, without a timeout, while every store is leased.
     /// Store is cleared before return - guaranteed empty.
     /// </summary>
+    /// <remarks>
+    /// A wait is a state change, so it is reported rather than bounded by a timeout: the
+    /// observability listener gets <see cref="IObservabilityListener.OnStorePoolRentBlocked"/>
+    /// when the wait begins and <see cref="IObservabilityListener.OnStorePoolRentResumed"/> when
+    /// it ends. A blocked event with no resumed event is a lease waiting on a store that has not
+    /// been returned; the capacity event at pool creation says why the capacity is what it is.
+    /// </remarks>
     /// <exception cref="ObjectDisposedException">Thrown if pool is disposed.</exception>
     /// <exception cref="TimeoutException">Thrown if cross-process gate acquisition times out.</exception>
     public QuadStore Rent()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        _poolGate.Wait();
+        if (!_poolGate.Wait(0))
+        {
+            var threadId = Environment.CurrentManagedThreadId;
+            var waitStarted = Stopwatch.GetTimestamp();
+            _observabilityListener?.OnStorePoolRentBlocked(new StorePoolRentBlockedEvent(
+                DateTimeOffset.UtcNow, _basePath!, _capacity, threadId));
+
+            _poolGate.Wait();
+
+            _observabilityListener?.OnStorePoolRentResumed(new StorePoolRentResumedEvent(
+                DateTimeOffset.UtcNow, _basePath!, threadId, Stopwatch.GetElapsedTime(waitStarted)));
+        }
 
         if (_available.TryTake(out var store))
         {
@@ -555,9 +628,10 @@ public sealed class QuadStorePool : IDisposable
     }
 
     /// <summary>
-    /// Maximum number of concurrent pooled stores this pool allows.
+    /// Maximum number of concurrent pooled stores this pool allows: the capacity decided at
+    /// creation, which can be below the requested maximum when the disk budget is smaller.
     /// </summary>
-    public int MaxConcurrent => _poolGate.CurrentCount + (TotalCreated - AvailableCount);
+    public int MaxConcurrent => _capacity;
 
     /// <summary>
     /// Number of cross-process slots currently held by this pool.
@@ -779,26 +853,10 @@ public sealed class QuadStorePool : IDisposable
         }
     }
 
-    private static int CalculateDiskLimit(StorageOptions options, double fraction, string? basePath)
-    {
-        var checkPath = basePath ?? Path.GetTempPath();
-        var available = DiskSpaceChecker.GetAvailableSpace(checkPath);
-
-        if (available < 0)
-            return int.MaxValue;
-
-        var budget = (long)(available * fraction);
-        var perStoreEstimate = EstimateStoreSize(options);
-
-        if (perStoreEstimate <= 0)
-            return int.MaxValue;
-
-        return (int)(budget / perStoreEstimate);
-    }
-
     private static long EstimateStoreSize(StorageOptions options)
     {
-        var hashTableCapacity = options.BulkMode
+        // Same rule as QuadStore's atom-store sizing: ForceAtomHashCapacity suppresses the floor.
+        var hashTableCapacity = options.BulkMode && !options.ForceAtomHashCapacity
             ? Math.Max(options.AtomHashTableInitialCapacity, BulkModeHashTableCapacity)
             : options.AtomHashTableInitialCapacity;
 

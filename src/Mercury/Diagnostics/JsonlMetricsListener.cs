@@ -631,6 +631,54 @@ public sealed class JsonlMetricsListener : IObservabilityListener, IQueryMetrics
         WriteBufferedLine(buffer);
     }
 
+    public void OnStorePoolCapacity(in StorePoolCapacityEvent ev)
+    {
+        using var buffer = new MemoryStream();
+        using (var json = new Utf8JsonWriter(buffer, WriterOptions))
+        {
+            WriteHeader(json, "store_pool_capacity", "event", ev.Timestamp);
+            json.WriteString("pool_path", ev.PoolPath);
+            json.WriteNumber("requested_concurrent", ev.RequestedConcurrent);
+            json.WriteNumber("concurrency_limit", ev.ConcurrencyLimit);
+            json.WriteNumber("disk_limit", ev.DiskLimit);
+            json.WriteNumber("capacity", ev.Capacity);
+            json.WriteString("bound", ev.Bound.ToString());
+            json.WriteNumber("available_bytes", ev.AvailableBytes);
+            json.WriteNumber("disk_budget_fraction", ev.DiskBudgetFraction);
+            json.WriteNumber("per_store_estimate_bytes", ev.PerStoreEstimateBytes);
+            json.WriteEndObject();
+        }
+        WriteBufferedLine(buffer);
+    }
+
+    public void OnStorePoolRentBlocked(in StorePoolRentBlockedEvent ev)
+    {
+        using var buffer = new MemoryStream();
+        using (var json = new Utf8JsonWriter(buffer, WriterOptions))
+        {
+            WriteHeader(json, "store_pool_rent_blocked", "event", ev.Timestamp);
+            json.WriteString("pool_path", ev.PoolPath);
+            json.WriteNumber("capacity", ev.Capacity);
+            json.WriteNumber("thread_id", ev.ThreadId);
+            json.WriteEndObject();
+        }
+        WriteBufferedLine(buffer);
+    }
+
+    public void OnStorePoolRentResumed(in StorePoolRentResumedEvent ev)
+    {
+        using var buffer = new MemoryStream();
+        using (var json = new Utf8JsonWriter(buffer, WriterOptions))
+        {
+            WriteHeader(json, "store_pool_rent_resumed", "event", ev.Timestamp);
+            json.WriteString("pool_path", ev.PoolPath);
+            json.WriteNumber("thread_id", ev.ThreadId);
+            json.WriteNumber("waited_ms", ev.Waited.TotalMilliseconds);
+            json.WriteEndObject();
+        }
+        WriteBufferedLine(buffer);
+    }
+
     public void OnScopeEnter(long scopeId, long parentScopeId, string name, DateTimeOffset timestamp)
     {
         using var buffer = new MemoryStream();

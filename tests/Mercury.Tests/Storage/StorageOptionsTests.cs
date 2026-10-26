@@ -68,15 +68,38 @@ public class StorageOptionsTests : IDisposable
 
     #endregion
 
-    #region DiskSpaceChecker
+    #region Free space (DiskSpaceGuard, DiskSpaceChecker)
 
     [Fact]
-    public void DiskSpaceChecker_GetAvailableSpace_ReturnsPositiveValue()
+    public void DiskSpaceGuard_GetAvailableSpace_ReturnsPositiveValue()
     {
-        var available = DiskSpaceChecker.GetAvailableSpace(_testPath);
+        var available = DiskSpaceGuard.GetAvailableSpace(_testPath);
 
         // Should return a positive value for a valid path
         Assert.True(available > 0, $"Expected positive available space, got {available}");
+    }
+
+    [Fact]
+    public void DiskSpaceGuard_FileSystemOf_MeasuresThePathsFileSystem_NotThePathRoot()
+    {
+        Directory.CreateDirectory(_testPath);
+        var notYetCreated = Path.Combine(_testPath, "store", "atoms");
+
+        var existing = DiskSpaceGuard.FileSystemOf(_testPath);
+        var pending = DiskSpaceGuard.FileSystemOf(notYetCreated);
+
+        Assert.NotNull(existing);
+        Assert.NotNull(pending);
+
+        // A path that does not exist yet resolves to its nearest existing directory, so it
+        // measures the filesystem the store will be created on.
+        Assert.Equal(existing!.Name, pending!.Name);
+
+        // On Unix that is the directory itself, not "/": the path root misses every other
+        // mount, such as a tmpfs /tmp (a test pool sized from "/" hung on omega-ubuntu, 2026-10-26).
+        // On Windows free space is per drive, so the root is the right measurement.
+        var expected = OperatingSystem.IsWindows() ? Path.GetPathRoot(Path.GetFullPath(_testPath)) : Path.GetFullPath(_testPath);
+        Assert.Equal(expected, existing.Name);
     }
 
     [Fact]
@@ -92,7 +115,7 @@ public class StorageOptionsTests : IDisposable
     {
         // Request more space than could possibly exist on any drive
         // This should throw InsufficientDiskSpaceException
-        var available = DiskSpaceChecker.GetAvailableSpace(_testPath);
+        var available = DiskSpaceGuard.GetAvailableSpace(_testPath);
 
         if (available > 0)
         {
@@ -209,7 +232,7 @@ public class StorageOptionsTests : IDisposable
         // This test verifies that an impossibly high minimum prevents storage growth
         // We can't actually fill the disk, but we can set the minimum higher than available
 
-        var available = DiskSpaceChecker.GetAvailableSpace(_testPath);
+        var available = DiskSpaceGuard.GetAvailableSpace(_testPath);
         if (available <= 0)
         {
             // Can't determine available space - skip test

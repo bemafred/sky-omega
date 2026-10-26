@@ -2,7 +2,7 @@
   "$schema": "https://xunit.net/schema/current/xunit.runner.schema.json",
   "methodDisplay": "method",
   "methodDisplayOptions": "all",
-  "diagnosticMessages": false,
+  "diagnosticMessages": true,
   "preEnumerateTheories": true,
   "shadowCopy": false,
   "internalDiagnosticMessages": false,

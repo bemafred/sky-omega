@@ -33,23 +33,56 @@ public static class DiskSpaceGuard
     public const long StressTestMinFreeBytes = 512L << 20; // 512MB
 
     /// <summary>
-    /// Gets available free space on the drive containing the specified path.
+    /// Resolves the filesystem that holds the specified path.
     /// </summary>
-    /// <param name="path">Path to check (file or directory).</param>
+    /// <param name="path">Path to resolve (file or directory). It need not exist yet.</param>
+    /// <returns>The filesystem's <see cref="DriveInfo"/>, or null if it cannot be resolved.</returns>
+    /// <remarks>
+    /// <para>
+    /// On Windows space is per drive, so the path's root names the filesystem. On Unix space
+    /// is per filesystem and the path root is always <c>/</c>: measuring it misses every other
+    /// mount, such as a RAM-backed tmpfs <c>/tmp</c> or a separate data disk. On a Linux VM with
+    /// 46 GB free on <c>/</c> and a 3.7 GB tmpfs <c>/tmp</c>, the root reading sized a test pool
+    /// for the wrong disk and a test hung (2026-10-26). <see cref="DriveInfo"/> on Unix measures
+    /// any directory's filesystem (statvfs), so the nearest existing directory is used instead.
+    /// </para>
+    /// </remarks>
+    public static DriveInfo? FileSystemOf(string path)
+    {
+        try
+        {
+            var fullPath = Path.GetFullPath(path);
+            string? measured;
+
+            if (OperatingSystem.IsWindows())
+            {
+                measured = Path.GetPathRoot(fullPath);
+            }
+            else
+            {
+                measured = fullPath;
+                while (measured is not null && !Directory.Exists(measured))
+                    measured = Path.GetDirectoryName(measured);
+            }
+
+            return string.IsNullOrEmpty(measured) ? null : new DriveInfo(measured);
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Gets available free space on the filesystem that holds the specified path.
+    /// </summary>
+    /// <param name="path">Path to check (file or directory). It need not exist yet.</param>
     /// <returns>Available free space in bytes, or -1 if unable to determine.</returns>
     public static long GetAvailableSpace(string path)
     {
         try
         {
-            // Get the root of the path
-            var fullPath = Path.GetFullPath(path);
-            var root = Path.GetPathRoot(fullPath);
-
-            if (string.IsNullOrEmpty(root))
-                return -1;
-
-            var driveInfo = new DriveInfo(root);
-            return driveInfo.AvailableFreeSpace;
+            return FileSystemOf(path)?.AvailableFreeSpace ?? -1;
         }
         catch (Exception)
         {

@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using SkyOmega.Mercury.Abstractions;
+using SkyOmega.Mercury.Runtime;
 
 namespace SkyOmega.Mercury.Diagnostics;
 
@@ -87,7 +88,7 @@ public static class ProcessStateProducers
     }
 
     /// <summary>
-    /// Disk-free sampler for the supplied path's drive. Best-effort: missing/inaccessible
+    /// Disk-free sampler for the filesystem that holds the supplied path. Best-effort: missing/inaccessible
     /// drives are silently skipped (no record emitted that tick).
     /// </summary>
     public static JsonlMetricsListener.StateProducer DiskFree(string path)
@@ -97,10 +98,8 @@ public static class ProcessStateProducers
         {
             try
             {
-                var root = Path.GetPathRoot(Path.GetFullPath(path));
-                if (string.IsNullOrEmpty(root)) return;
-                var drive = new DriveInfo(root);
-                if (!drive.IsReady) return;
+                var drive = DiskSpaceGuard.FileSystemOf(path);
+                if (drive is null || !drive.IsReady) return;
                 listener.OnDiskFreeState(new DiskFreeState(
                     Timestamp: DateTimeOffset.UtcNow,
                     Path: path,

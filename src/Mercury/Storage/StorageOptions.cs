@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using SkyOmega.Mercury.Abstractions;
+using SkyOmega.Mercury.Runtime;
 
 namespace SkyOmega.Mercury.Storage;
 
@@ -167,7 +168,7 @@ internal static class DiskSpaceChecker
         if (minimumFreeSpace <= 0)
             return; // Enforcement disabled
 
-        var available = GetAvailableSpace(filePath);
+        var available = DiskSpaceGuard.GetAvailableSpace(filePath);
         if (available < 0)
             return; // Unable to determine - proceed (fail-open for exotic filesystems)
 
@@ -179,30 +180,6 @@ internal static class DiskSpaceChecker
                 growthBytes,
                 available,
                 minimumFreeSpace);
-        }
-    }
-
-    /// <summary>
-    /// Gets available free space on the drive containing the specified path.
-    /// </summary>
-    /// <param name="path">Path to check (file or directory).</param>
-    /// <returns>Available free space in bytes, or -1 if unable to determine.</returns>
-    public static long GetAvailableSpace(string path)
-    {
-        try
-        {
-            var fullPath = System.IO.Path.GetFullPath(path);
-            var root = System.IO.Path.GetPathRoot(fullPath);
-
-            if (string.IsNullOrEmpty(root))
-                return -1;
-
-            var driveInfo = new DriveInfo(root);
-            return driveInfo.AvailableFreeSpace;
-        }
-        catch (Exception)
-        {
-            return -1;
         }
     }
 }

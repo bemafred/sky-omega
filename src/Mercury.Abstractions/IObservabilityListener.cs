@@ -146,6 +146,21 @@ public interface IObservabilityListener
     /// </summary>
     void OnMphfMemoryBudget(in MphfMemoryBudgetEvent ev) { }
 
+    /// <summary>
+    /// <c>QuadStorePool</c> capacity decision, emitted once at pool creation: requested
+    /// concurrency, disk budget, and which of them bounded the capacity.
+    /// </summary>
+    void OnStorePoolCapacity(in StorePoolCapacityEvent ev) { }
+
+    /// <summary>
+    /// <c>QuadStorePool.Rent</c> found every store leased and is waiting for a return.
+    /// The wait has no timeout; this event is how a waiting lease becomes visible.
+    /// </summary>
+    void OnStorePoolRentBlocked(in StorePoolRentBlockedEvent ev) { }
+
+    /// <summary>A <c>QuadStorePool.Rent</c> that waited got a store.</summary>
+    void OnStorePoolRentResumed(in StorePoolRentResumedEvent ev) { }
+
     /// <summary>Scope correlation: emitted when a <c>MetricsScope</c> is opened.</summary>
     void OnScopeEnter(long scopeId, long parentScopeId, string name, DateTimeOffset timestamp) { }
 

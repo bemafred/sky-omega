@@ -62,6 +62,9 @@ public sealed class QuadStorePoolFixture : IDisposable
         // - 64K atom capacity (vs 1M default)
         // Pool size is min(ProcessorCount, diskBudget / estimatedStoreSize)
         //
+        // Pool events (a capacity below ProcessorCount, a Rent that waits) go to xunit's
+        // diagnostic messages, so a waiting lease is visible while it waits.
+        //
         // Cross-process gate enabled: coordinates with other test runner processes
         // (e.g., NCrunch parallel execution) to prevent disk exhaustion when multiple
         // processes create pools simultaneously.
@@ -70,7 +73,8 @@ public sealed class QuadStorePoolFixture : IDisposable
             diskBudgetFraction: QuadStorePool.DefaultDiskBudgetFraction,
             maxConcurrent: Environment.ProcessorCount,
             purpose: "test",
-            useCrossProcessGate: true);
+            useCrossProcessGate: true,
+            observabilityListener: DiagnosticMessageListener.Instance);
     }
 
     /// <summary>
