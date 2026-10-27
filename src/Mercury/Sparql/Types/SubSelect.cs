@@ -13,6 +13,9 @@ internal struct SubSelect
     // ParseSelectClause as a query's, so a sub-SELECT's projection has the same grammar and the same capacities.
     public SelectClause Select;
 
+    /// <summary>Source offset of the sub-SELECT's WHERE group '{', recorded by its parser (ADR-055 D1); -1 if none.</summary>
+    public int WhereGroupStart;
+
     // Triple patterns
     private int _patternCount;
     private TriplePattern _p0, _p1, _p2, _p3, _p4, _p5, _p6, _p7;

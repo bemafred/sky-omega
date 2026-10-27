@@ -1483,6 +1483,7 @@ internal ref partial struct SparqlParser
         }
 
         // Parse the nested { } block
+        subSelect.WhereGroupStart = Peek() == '{' ? _position : -1;
         if (Peek() == '{')
         {
             Advance(); // Skip '{'

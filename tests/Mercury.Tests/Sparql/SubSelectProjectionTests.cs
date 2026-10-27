@@ -72,4 +72,19 @@ public class SubSelectProjectionTests : PooledStoreTestBase
         Assert.Single(reduced.Rows!);
         Assert.False(duplicate.Success);
     }
+
+    [Theory]
+    [InlineData("SELECT ?y WHERE { { SELECT (CONCAT(\"{\", STR(?o)) AS ?y) WHERE { ?s <http://ex/p> ?o } } }", "\"{http://ex/o\"")]
+    [InlineData("SELECT ?y WHERE { { SELECT (CONCAT(\"}{\", STR(?o)) AS ?y) WHERE { ?s <http://ex/p> ?o } } }", "\"}{http://ex/o\"")]
+    public void SubSelect_ProjectionContainingABrace_EvaluatesItsOwnWhere(string query, string expected)
+    {
+        // The sub-SELECT's WHERE starts where its parser found it, not at the first '{' after SELECT.
+        Store.AddCurrent("<http://ex/s>", "<http://ex/p>", "<http://ex/o>");
+
+        var result = SparqlEngine.Query(Store, query, TestContext.Current.CancellationToken);
+
+        Assert.True(result.Success, result.ErrorMessage);
+        var row = Assert.Single(result.Rows!);
+        Assert.Contains(expected.Trim('"'), row.Values.First());
+    }
 }

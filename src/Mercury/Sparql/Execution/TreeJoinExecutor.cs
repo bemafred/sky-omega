@@ -778,7 +778,7 @@ internal sealed class TreeJoinExecutor
         // sliced the substring at a prologue offset and threw ArgumentOutOfRange on any prefixed inner term.)
         var sub = new SparqlParser(_source.AsSpan()).ParseSubSelectCoreAt(subStart);
 
-        int whereBrace = _source.IndexOf('{', subStart); // the body's '{' (first brace after the SELECT clause)
+        int whereBrace = sub.WhereGroupStart; // recorded by the sub-SELECT's parser
         int whereClose = MatchBrace(_source, whereBrace);
         var innerBuffer = new byte[PatternSlot.Size * 256];
         var innerPa = new PatternArray(innerBuffer);
