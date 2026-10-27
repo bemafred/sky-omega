@@ -1,4 +1,5 @@
 using System;
+using System.Runtime.CompilerServices;
 using SkyOmega.Mercury.Sparql.Patterns;
 using SkyOmega.Mercury.Sparql.Types;
 
@@ -186,8 +187,7 @@ internal ref partial struct SparqlParser
                 // graph. Reuse the shipping ParseService (into a throwaway pattern) to advance past the clause and
                 // carry its source span; the evaluator re-parses it and delegates to an ISparqlServiceExecutor.
                 int serviceStart = _position;
-                var serviceClause = new GraphPattern();
-                ParseService(ref serviceClause);
+                SkipServiceClause();
                 pa.AddServiceHeader(serviceStart, _position - serviceStart);
                 continue;
             }
@@ -411,17 +411,7 @@ internal ref partial struct SparqlParser
             IsBlankNodePropertyList(subject) || IsBlankNodePropertyList(obj) ||
             IsCollection(subject) || IsCollection(obj))
         {
-            var expanded = new GraphPattern();
-            AddTriplePatternOrExpand(ref expanded, subject, predicate, obj, path);
-            for (int i = 0; i < expanded.PatternCount; i++)
-            {
-                var tp = expanded.GetPattern(i);
-                pa.AddTriple(
-                    tp.Subject.Type, tp.Subject.Start, tp.Subject.Length,
-                    tp.Predicate.Type, tp.Predicate.Start, tp.Predicate.Length,
-                    tp.Object.Type, tp.Object.Start, tp.Object.Length,
-                    tp.Path.Type, tp.Path.Iri.Start, tp.Path.Iri.Length);
-            }
+            EmitExpandedTriples(ref pa, subject, predicate, obj, path);
             return;
         }
 
@@ -599,9 +589,47 @@ internal ref partial struct SparqlParser
     private void EmitValuesTree(scoped ref PatternArray pa, int depth)
     {
         int start = _position; // at "VALUES"
+        SkipValuesClause();
+        pa.AddValuesBlock(start, _position - start);
+    }
+
+    // The three scratch GraphPatterns below (15.5 KB each) live in their own frames, entered only when the construct
+    // occurs. Inlined into the recursive ParseGroupBodyTree they cost every nesting level ~32 KB (ADR-055 Q3).
+
+    /// <summary>Step over a SERVICE clause with the shipping parser; the evaluator re-parses its span.</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void SkipServiceClause()
+    {
+        var serviceClause = new GraphPattern();
+        ParseService(ref serviceClause);
+    }
+
+    /// <summary>Step over a VALUES clause with the shipping parser; the evaluator re-parses its span.</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void SkipValuesClause()
+    {
         var dataBlock = new GraphPattern();
         ParseValues(ref dataBlock);
-        pa.AddValuesBlock(start, _position - start);
+    }
+
+    /// <summary>
+    /// Expand a quoted triple, blank-node property list or collection into plain triples (the shipping expansion,
+    /// same parser instance and synthetic counters) and add them to the tree.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void EmitExpandedTriples(scoped ref PatternArray pa, Term subject, Term predicate, Term obj, PropertyPath path)
+    {
+        var expanded = new GraphPattern();
+        AddTriplePatternOrExpand(ref expanded, subject, predicate, obj, path);
+        for (int i = 0; i < expanded.PatternCount; i++)
+        {
+            var tp = expanded.GetPattern(i);
+            pa.AddTriple(
+                tp.Subject.Type, tp.Subject.Start, tp.Subject.Length,
+                tp.Predicate.Type, tp.Predicate.Start, tp.Predicate.Length,
+                tp.Object.Type, tp.Object.Start, tp.Object.Length,
+                tp.Path.Type, tp.Path.Iri.Start, tp.Path.Iri.Length);
+        }
     }
 
     /// <summary>True if a body keyword (one that ends a property list) begins <paramref name="span"/>.</summary>
