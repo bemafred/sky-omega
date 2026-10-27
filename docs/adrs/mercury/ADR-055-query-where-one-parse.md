@@ -243,7 +243,14 @@ facade defect that header is part of.
   | D. Dead `FilterAnalyzer` code | 16 of 17 tests | FilterPushdownTests | Deleted with the code. `GetFilterVariables`, `ContainsExists`, `GetEarliestApplicablePattern`, `AnalyzeFilters`, `BuildLevelFilters` and `GetUnpushableFilters` read the flat pattern and have no production caller; production filter placement is the tree's, and `DetectTextMatchFilters` (the one live method) reads the tree. The one test that executes a query becomes a facade test. |
   | E. Test-only execution entries | 60 `ExecuteToMaterialized` calls (6 files), 14 buffer-constructor executors (Graph) | QueryExecutorTests.* | Run through `QueryExecutor.Execute()`, the entry `SparqlEngine.Query` uses, with their assertions unchanged. `ExecuteToMaterialized`, `MaterializedQueryResults`, `WrapResultsAsMaterialized`, the `QueryBuffer` constructor of `QueryExecutor` and `BuildGraphPattern` are deleted (D2, D5). These tests exercised an execution path production never runs. |
 
-  Done 2026-10-27: D (`c6ef26f`, 11 tests) and E (all 60 calls and 14 executors moved; the entries deleted).
+  Done 2026-10-27, before D1:
+  - D (`c6ef26f`): 11 tests, with the dead analyzer code.
+  - E (`44bf124`): all 60 calls and 14 executors moved to `Execute()`; the test-only entries are deleted.
+  - C, with what it uncovered: `QueryResults.FromMaterialized` and `VariableGraphExecutor` had no caller (`795421c`).
+    Every `QueryResults` constructor then set its FILTER/EXISTS/MINUS/VALUES/OPTIONAL flags false, so the flags and
+    the 58 methods only they reached are deleted (`400ce92`, `QueryResults.Patterns.cs` 2,768 → ~140 lines). Then
+    `QueryBuffer`'s WHERE-derived members, its pooled pattern slots, `IDisposable` and the adapter's
+    `ConvertGraphPattern` are deleted, with 20 tests of them (D5 done except the WHERE parse itself).
 
   Not affected: Update-template and CONSTRUCT-template assertions (`TemplateQuad`, `ConstructTemplate` stay), and
   `PlannerSpikeDiagnosticTests`, which has no assertion and is deleted as a finished spike. Kinds C, D and E are

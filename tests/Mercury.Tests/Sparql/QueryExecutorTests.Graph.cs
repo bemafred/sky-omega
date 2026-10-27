@@ -789,33 +789,10 @@ SELECT * WHERE {
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        // Verify parser detected EXISTS
-        Assert.True(parsedQuery.WhereClause.Pattern.ExistsFilterCount > 0,
-            $"Parser should detect EXISTS filter, but ExistsFilterCount={parsedQuery.WhereClause.Pattern.ExistsFilterCount}");
-
-        // Verify buffer is created with EXISTS count
-        var buffer = SkyOmega.Mercury.Sparql.Patterns.QueryBufferAdapter.FromQuery(in parsedQuery, query.AsSpan());
-        Assert.True(buffer.ExistsFilterCount > 0,
-            $"Buffer should have ExistsFilterCount > 0, but got {buffer.ExistsFilterCount}, HasExists={buffer.HasExists}");
-        // Also check the GRAPH execution path conditions
-        Assert.True(buffer.HasGraph, $"Buffer should have HasGraph=true, but got {buffer.HasGraph}");
-        Assert.Equal(0, buffer.TriplePatternCount); // No top-level triple patterns
-        Assert.False(buffer.HasSubQueries, $"Buffer should NOT have HasSubQueries, but it does");
-        buffer.Dispose();
-
         Store.AcquireReadLock();
         try
         {
             using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
-
-            // Verify executor's buffer has EXISTS and correct path conditions
-            Assert.True(executor.BufferHasExists,
-                $"Executor buffer should have HasExists=true, ExistsFilterCount={executor.BufferExistsFilterCount}");
-
-            // Verify GRAPH execution path conditions
-            Assert.True(executor.BufferHasGraph, "Executor buffer should have HasGraph=true");
-            Assert.Equal(0, executor.BufferTriplePatternCount);
-            Assert.False(executor.BufferHasSubQueries, "Executor buffer should not have subqueries");
 
             var results = executor.Execute();
 

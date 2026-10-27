@@ -191,7 +191,6 @@ internal ref struct PatternSlot
         Kind == PatternKind.UnionHeader || Kind == PatternKind.OptionalHeader ||
         Kind == PatternKind.MinusHeader;
 
-
     /// <summary>
     /// Clear slot for reuse
     /// </summary>
@@ -910,35 +909,17 @@ finally
 */
 
 // ═══════════════════════════════════════════════════════════════════════════
-// QueryBuffer - Pooled storage for parsed SPARQL queries
+// QueryBuffer - the parsed query's non-WHERE parts, on the heap
 // ═══════════════════════════════════════════════════════════════════════════
 
 /// <summary>
-/// Owns pooled buffer storage for a parsed SPARQL query.
-/// Replaces the large inline struct approach with Buffer + View pattern.
+/// The parts of a parsed query that execution reads besides its WHERE: query type, projection, solution modifiers,
+/// dataset, prologue, CONSTRUCT template, trailing VALUES and temporal clause. Kept on the heap so executors and
+/// result presenters don't carry the large <c>Query</c> struct (ADR-009). The WHERE itself is parsed into a pattern
+/// tree from <see cref="WhereGroupStart"/> (ADR-055 D5).
 /// </summary>
-/// <remarks>
-/// Buffer layout:
-/// - Main patterns: offset 0, DefaultCapacity slots
-/// - Subquery patterns: allocated on demand
-///
-/// This class is the antidote to large inline struct buffers:
-/// - ~100 bytes vs ~9KB for old Query struct
-/// - Pooled memory = zero-GC
-/// - No stack overflow on nested calls
-/// </remarks>
-internal sealed class QueryBuffer : IDisposable
+internal sealed class QueryBuffer
 {
-    /// <summary>Default capacity in pattern slots (64 bytes each)</summary>
-    public const int DefaultCapacity = 128;  // 8KB buffer - handles most queries
-
-    /// <summary>Maximum capacity to prevent runaway allocation</summary>
-    public const int MaxCapacity = 1024;     // 64KB max
-
-    private byte[]? _buffer;
-    private int _patternCount;
-    private bool _disposed;
-
     // Query metadata (lightweight - no large inline storage)
     public QueryType Type { get; set; }
     public bool SelectDistinct { get; set; }
@@ -967,65 +948,6 @@ internal sealed class QueryBuffer : IDisposable
     // Aggregate expressions
     public AggregateEntry[]? Aggregates { get; set; }
 
-    // Pattern metadata (computed during parsing, cached for fast access)
-    public int FilterCount { get; set; }
-    public int BindCount { get; set; }
-    public int FirstBranchBindCount { get; set; }  // BINDs in first UNION branch
-    public int MinusPatternCount { get; set; }
-    public int MinusFilterStart { get; set; }
-    public int MinusFilterLength { get; set; }
-    public byte MinusOptionalFlags { get; set; }  // Bitmask for optional patterns inside MINUS
-    public int MinusBlockCount { get; set; }      // Number of distinct MINUS blocks
-    public int MinusBlockBoundary0 { get; set; }  // Pattern index where block 0 ends
-    public int MinusBlockBoundary1 { get; set; }  // Pattern index where block 1 ends
-    public int MinusBlockBoundary2 { get; set; }  // Pattern index where block 2 ends
-    public int MinusBlockBoundary3 { get; set; }  // Pattern index where block 3 ends
-    public int MinusExistsCount { get; set; }     // Count of EXISTS filters inside MINUS
-    public int MinusExistsBlock0 { get; set; }    // Which block owns EXISTS filter 0
-    public int MinusExistsBlock1 { get; set; }    // Which block owns EXISTS filter 1
-    public int MinusExistsBlock2 { get; set; }    // Which block owns EXISTS filter 2
-    public int MinusExistsBlock3 { get; set; }    // Which block owns EXISTS filter 3
-    public ExistsFilter MinusExists0 { get; set; }  // First MINUS EXISTS filter
-    public ExistsFilter MinusExists1 { get; set; }  // Second MINUS EXISTS filter
-    public ExistsFilter MinusExists2 { get; set; }  // Third MINUS EXISTS filter
-    public ExistsFilter MinusExists3 { get; set; }  // Fourth MINUS EXISTS filter
-    public int MinusFilterBlock { get; set; }     // Which MINUS block the filter belongs to
-    public int CompoundExistsRefCount { get; set; }  // Count of compound EXISTS refs
-    public CompoundExistsRef CompoundExistsRef0 { get; set; }  // First compound EXISTS ref
-    public CompoundExistsRef CompoundExistsRef1 { get; set; }  // Second compound EXISTS ref
-
-    // Nested MINUS inside MINUS blocks
-    public int NestedMinusCount { get; set; }         // Count of nested MINUS blocks
-    public int NestedMinusPatternCount { get; set; }  // Total count of nested MINUS patterns
-    public int NestedMinusParent0 { get; set; }       // Which outer MINUS block owns nested MINUS 0
-    public int NestedMinusParent1 { get; set; }       // Which outer MINUS block owns nested MINUS 1
-    public int NestedMinusParent2 { get; set; }       // Which outer MINUS block owns nested MINUS 2
-    public int NestedMinusParent3 { get; set; }       // Which outer MINUS block owns nested MINUS 3
-    public int NestedMinusBoundary0 { get; set; }     // Pattern index where nested block 0 ends
-    public int NestedMinusBoundary1 { get; set; }     // Pattern index where nested block 1 ends
-    public int NestedMinusBoundary2 { get; set; }     // Pattern index where nested block 2 ends
-    public int NestedMinusBoundary3 { get; set; }     // Pattern index where nested block 3 ends
-    public TriplePattern[]? NestedMinusPatterns { get; set; }  // Nested MINUS patterns
-    public byte NestedMinusExistsFlags { get; set; }  // Bitmask: bit N = 1 means nested MINUS N has EXISTS
-    public ExistsFilter NestedMinusExists0 { get; set; }  // EXISTS filter for nested MINUS 0
-    public ExistsFilter NestedMinusExists1 { get; set; }  // EXISTS filter for nested MINUS 1
-    public ExistsFilter NestedMinusExists2 { get; set; }  // EXISTS filter for nested MINUS 2
-    public ExistsFilter NestedMinusExists3 { get; set; }  // EXISTS filter for nested MINUS 3
-
-    public int ExistsFilterCount { get; set; }
-    public int UnionStartIndex { get; set; }  // Index where UNION branch starts
-    public bool HasUnionFlag { get; set; }    // True if UNION was encountered
-    public uint OptionalFlags { get; set; }   // Bitmask for optional patterns
-    public bool HasValues { get; set; }
-
-    // Graph clause metadata (cached to avoid large struct copies)
-    public int GraphClauseCount { get; set; }
-    public bool FirstGraphIsVariable { get; set; }
-    public int FirstGraphPatternCount { get; set; }
-    public int TriplePatternCount { get; set; }  // Count of direct triple patterns (not in GRAPH)
-    public bool HasSubQueries { get; set; }
-    public bool HasService { get; set; }
-
     // HAVING clause (expression offsets into source)
     public int HavingStart { get; set; }
     public int HavingLength { get; set; }
@@ -1051,228 +973,8 @@ internal sealed class QueryBuffer : IDisposable
     public ValuesClause PostQueryValues { get; set; }
     public bool HasPostQueryValues => PostQueryValues.HasValues;
 
-    // WHERE-level VALUES clause (inline VALUES inside WHERE clause)
-    // Used for VALUES-only GRAPH clauses: GRAPH ?g { VALUES (?g ?t) { ... } }
-    public ValuesClause WhereValues { get; set; }
-    public bool HasWhereValues => WhereValues.HasValues;
-
-    // Computed properties
-    public bool HasFilters => FilterCount > 0;
-    public bool HasBinds => BindCount > 0;
-    public bool HasMinus => MinusPatternCount > 0;
-    public bool HasMinusFilter => MinusFilterLength > 0;
-    public bool HasMinusOptionalPatterns => MinusOptionalFlags != 0;
-    public bool HasMinusExists => MinusExistsCount > 0;
-    public bool HasCompoundExistsRefs => CompoundExistsRefCount > 0;
-
-    public ExistsFilter GetMinusExistsFilter(int index) => index switch
-    {
-        0 => MinusExists0,
-        1 => MinusExists1,
-        2 => MinusExists2,
-        3 => MinusExists3,
-        _ => default
-    };
-
-    /// <summary>
-    /// Get which MINUS block owns a particular EXISTS filter.
-    /// </summary>
-    public int GetMinusExistsBlock(int existsIndex) => existsIndex switch
-    {
-        0 => MinusExistsBlock0,
-        1 => MinusExistsBlock1,
-        2 => MinusExistsBlock2,
-        3 => MinusExistsBlock3,
-        _ => 0
-    };
-
-    /// <summary>
-    /// Get a compound EXISTS ref by index.
-    /// </summary>
-    public CompoundExistsRef GetCompoundExistsRef(int index) => index switch
-    {
-        0 => CompoundExistsRef0,
-        1 => CompoundExistsRef1,
-        _ => default
-    };
-
-    /// <summary>
-    /// Get the start pattern index for a MINUS block.
-    /// </summary>
-    public int GetMinusBlockStart(int blockIndex)
-    {
-        if (blockIndex == 0) return 0;
-        return blockIndex switch
-        {
-            1 => MinusBlockBoundary0,
-            2 => MinusBlockBoundary1,
-            3 => MinusBlockBoundary2,
-            _ => 0
-        };
-    }
-
-    /// <summary>
-    /// Get the end pattern index (exclusive) for a MINUS block.
-    /// </summary>
-    public int GetMinusBlockEnd(int blockIndex) => blockIndex switch
-    {
-        0 => MinusBlockBoundary0,
-        1 => MinusBlockBoundary1,
-        2 => MinusBlockBoundary2,
-        3 => MinusBlockBoundary3,
-        _ => MinusPatternCount
-    };
-
-    /// <summary>
-    /// Check if a MINUS pattern at the given index is optional (from OPTIONAL inside MINUS).
-    /// </summary>
-    public bool IsMinusOptional(int index) => (MinusOptionalFlags & (1 << index)) != 0;
-
-    // Nested MINUS accessors
-    public bool HasNestedMinus => NestedMinusCount > 0;
-
-    /// <summary>
-    /// Get which outer MINUS block a nested MINUS block belongs to.
-    /// </summary>
-    public int GetNestedMinusParentBlock(int nestedBlockIndex) => nestedBlockIndex switch
-    {
-        0 => NestedMinusParent0,
-        1 => NestedMinusParent1,
-        2 => NestedMinusParent2,
-        3 => NestedMinusParent3,
-        _ => 0
-    };
-
-    /// <summary>
-    /// Get the start pattern index for a nested MINUS block.
-    /// </summary>
-    public int GetNestedMinusBlockStart(int nestedBlockIndex)
-    {
-        if (nestedBlockIndex == 0) return 0;
-        return nestedBlockIndex switch
-        {
-            1 => NestedMinusBoundary0,
-            2 => NestedMinusBoundary1,
-            3 => NestedMinusBoundary2,
-            _ => 0
-        };
-    }
-
-    /// <summary>
-    /// Get the end pattern index (exclusive) for a nested MINUS block.
-    /// </summary>
-    public int GetNestedMinusBlockEnd(int nestedBlockIndex) => nestedBlockIndex switch
-    {
-        0 => NestedMinusBoundary0,
-        1 => NestedMinusBoundary1,
-        2 => NestedMinusBoundary2,
-        3 => NestedMinusBoundary3,
-        _ => NestedMinusPatternCount
-    };
-
-    /// <summary>
-    /// Get a nested MINUS pattern by index.
-    /// </summary>
-    public TriplePattern GetNestedMinusPattern(int index)
-    {
-        if (NestedMinusPatterns == null || index < 0 || index >= NestedMinusPatterns.Length)
-            return default;
-        return NestedMinusPatterns[index];
-    }
-
-    /// <summary>
-    /// Check if a nested MINUS block has an EXISTS filter.
-    /// </summary>
-    public bool HasNestedMinusExistsFilter(int nestedBlockIndex)
-    {
-        return (NestedMinusExistsFlags & (1 << nestedBlockIndex)) != 0;
-    }
-
-    /// <summary>
-    /// Get the EXISTS filter for a nested MINUS block.
-    /// </summary>
-    public ExistsFilter GetNestedMinusExistsFilter(int nestedBlockIndex) => nestedBlockIndex switch
-    {
-        0 => NestedMinusExists0,
-        1 => NestedMinusExists1,
-        2 => NestedMinusExists2,
-        3 => NestedMinusExists3,
-        _ => default
-    };
-
-    public bool HasExists => ExistsFilterCount > 0;
-    public bool HasUnion => HasUnionFlag;
-    public bool HasOptionalPatterns => OptionalFlags != 0;
-    public int UnionBranchPatternCount => HasUnion ? PatternCount - UnionStartIndex : 0;
-    public int UnionBranchBindCount => HasUnion ? BindCount - FirstBranchBindCount : 0;
-
-    /// <summary>
-    /// Count of triple patterns in the union branch (excludes BINDs, FILTERs, etc.)
-    /// </summary>
-    public int UnionBranchTripleCount
-    {
-        get
-        {
-            if (!HasUnion) return 0;
-            int count = 0;
-            var patterns = GetPatterns();
-            for (int i = UnionStartIndex; i < PatternCount; i++)
-            {
-                if (patterns[i].Kind == PatternKind.Triple)
-                    count++;
-            }
-            return count;
-        }
-    }
-    public bool HasGraph => GraphClauseCount > 0;
     public bool HasHaving => HavingLength > 0;
     public bool HasConstruct => ConstructPatterns != null && ConstructPatterns.Length > 0;
-
-    /// <summary>
-    /// Create a new query buffer with default capacity
-    /// </summary>
-    public QueryBuffer() : this(DefaultCapacity) { }
-
-    /// <summary>
-    /// Create a new query buffer with specified capacity
-    /// </summary>
-    public QueryBuffer(int capacitySlots)
-    {
-        if (capacitySlots > MaxCapacity)
-            throw new ArgumentOutOfRangeException(nameof(capacitySlots),
-                $"Capacity {capacitySlots} exceeds maximum {MaxCapacity}");
-
-        int bufferSize = capacitySlots * PatternSlot.Size;
-        _buffer = System.Buffers.ArrayPool<byte>.Shared.Rent(bufferSize);
-        _buffer.AsSpan(0, bufferSize).Clear(); // Zero-init for safety
-    }
-
-    /// <summary>
-    /// Get pattern array view for writing/reading.
-    /// When PatternCount > 0 (after parsing), returns read-only view with count.
-    /// When PatternCount == 0 (during parsing), returns writable view.
-    /// </summary>
-    public PatternArray GetPatterns()
-    {
-        ThrowIfDisposed();
-        return _patternCount > 0
-            ? new PatternArray(_buffer.AsSpan(), _patternCount)
-            : new PatternArray(_buffer.AsSpan());
-    }
-
-    /// <summary>
-    /// Pattern count after parsing
-    /// </summary>
-    public int PatternCount
-    {
-        get => _patternCount;
-        set => _patternCount = value;
-    }
-
-    /// <summary>
-    /// Capacity in pattern slots
-    /// </summary>
-    public int Capacity => _buffer?.Length / PatternSlot.Size ?? 0;
 
     /// <summary>
     /// Get HavingClause from stored offsets.
@@ -1331,30 +1033,6 @@ internal sealed class QueryBuffer : IDisposable
     }
 
     /// <summary>
-    /// Extract triple patterns to a heap-allocated array (avoids copying the entire GraphPattern struct).
-    /// </summary>
-    public TriplePattern[] GetTriplePatternsArray()
-    {
-        ThrowIfDisposed();
-        var patterns = GetPatterns();
-        var tripleList = new System.Collections.Generic.List<TriplePattern>();
-
-        foreach (var slot in patterns.EnumerateTriples())
-        {
-            var tp = new TriplePattern
-            {
-                Subject = new Term { Type = slot.SubjectType, Start = slot.SubjectStart, Length = slot.SubjectLength },
-                Predicate = new Term { Type = slot.PredicateType, Start = slot.PredicateStart, Length = slot.PredicateLength },
-                Object = new Term { Type = slot.ObjectType, Start = slot.ObjectStart, Length = slot.ObjectLength },
-                Path = new PropertyPath { Type = slot.PathKind, Iri = new Term { Start = slot.PathIriStart, Length = slot.PathIriLength } }
-            };
-            tripleList.Add(tp);
-        }
-
-        return tripleList.ToArray();
-    }
-
-    /// <summary>
     /// Get ConstructTemplate from stored patterns.
     /// </summary>
     public ConstructTemplate GetConstructTemplate()
@@ -1368,24 +1046,6 @@ internal sealed class QueryBuffer : IDisposable
             }
         }
         return template;
-    }
-
-    public void Dispose()
-    {
-        if (_disposed) return;
-        _disposed = true;
-
-        if (_buffer != null)
-        {
-            System.Buffers.ArrayPool<byte>.Shared.Return(_buffer);
-            _buffer = null;
-        }
-    }
-
-    private void ThrowIfDisposed()
-    {
-        if (_disposed)
-            throw new ObjectDisposedException(nameof(QueryBuffer));
     }
 }
 
@@ -1567,29 +1227,9 @@ internal static class QueryBufferAdapter
     /// </summary>
     public static QueryBuffer FromQuery(in Query query, ReadOnlySpan<char> source)
     {
-        // Estimate capacity: patterns + filters + binds + graph patterns + values
-        var gp = query.WhereClause.Pattern;
-        int valuesSlots = gp.HasValues ? (1 + gp.Values.ValueCount) : 0;  // 1 header + N entries
-        int estimatedSlots = gp.PatternCount
-            + gp.FilterCount
-            + gp.BindCount
-            + gp.GraphClauseCount * 10
-            + gp.ExistsFilterCount * 5
-            + valuesSlots
-            + 16; // Buffer room
-
-        var buffer = new QueryBuffer(Math.Max(estimatedSlots, 32));
-
-        try
-        {
-            PopulateBuffer(buffer, in query, source);
-            return buffer;
-        }
-        catch
-        {
-            buffer.Dispose();
-            throw;
-        }
+        var buffer = new QueryBuffer();
+        PopulateBuffer(buffer, in query, source);
+        return buffer;
     }
 
     private static void PopulateBuffer(QueryBuffer buffer, in Query query, ReadOnlySpan<char> source)
@@ -1669,165 +1309,6 @@ internal static class QueryBufferAdapter
             buffer.GroupBy = entries;
         }
 
-        // Copy pattern metadata from GraphPattern
-        ref readonly var gp = ref query.WhereClause.Pattern;
-        buffer.FilterCount = gp.FilterCount;
-        buffer.BindCount = gp.BindCount;
-        buffer.FirstBranchBindCount = gp.FirstBranchBindCount;
-        buffer.MinusPatternCount = gp.MinusPatternCount;
-        if (gp.HasMinusFilter)
-        {
-            buffer.MinusFilterStart = gp.MinusFilter.Start;
-            buffer.MinusFilterLength = gp.MinusFilter.Length;
-        }
-        if (gp.HasMinusOptionalPatterns)
-        {
-            // Copy the bitmask - GraphPattern uses byte internally
-            for (int i = 0; i < gp.MinusPatternCount; i++)
-            {
-                if (gp.IsMinusOptional(i))
-                    buffer.MinusOptionalFlags |= (byte)(1 << i);
-            }
-        }
-        // Copy MINUS block boundaries
-        buffer.MinusBlockCount = gp.MinusBlockCount;
-        if (gp.MinusBlockCount > 0)
-        {
-            buffer.MinusBlockBoundary0 = gp.GetMinusBlockEnd(0);
-            if (gp.MinusBlockCount > 1)
-                buffer.MinusBlockBoundary1 = gp.GetMinusBlockEnd(1);
-            if (gp.MinusBlockCount > 2)
-                buffer.MinusBlockBoundary2 = gp.GetMinusBlockEnd(2);
-            if (gp.MinusBlockCount > 3)
-                buffer.MinusBlockBoundary3 = gp.GetMinusBlockEnd(3);
-        }
-        // Copy MINUS EXISTS filters
-        if (gp.HasMinusExists)
-        {
-            buffer.MinusExistsCount = gp.MinusExistsCount;
-            if (gp.MinusExistsCount > 0)
-            {
-                buffer.MinusExists0 = gp.GetMinusExistsFilter(0);
-                buffer.MinusExistsBlock0 = gp.GetMinusExistsBlock(0);
-            }
-            if (gp.MinusExistsCount > 1)
-            {
-                buffer.MinusExists1 = gp.GetMinusExistsFilter(1);
-                buffer.MinusExistsBlock1 = gp.GetMinusExistsBlock(1);
-            }
-            if (gp.MinusExistsCount > 2)
-            {
-                buffer.MinusExists2 = gp.GetMinusExistsFilter(2);
-                buffer.MinusExistsBlock2 = gp.GetMinusExistsBlock(2);
-            }
-            if (gp.MinusExistsCount > 3)
-            {
-                buffer.MinusExists3 = gp.GetMinusExistsFilter(3);
-                buffer.MinusExistsBlock3 = gp.GetMinusExistsBlock(3);
-            }
-        }
-        // Copy MINUS filter block index
-        if (gp.HasMinusFilter)
-        {
-            buffer.MinusFilterBlock = gp.MinusFilterBlock;
-        }
-        // Copy compound EXISTS refs
-        if (gp.HasCompoundExistsRefs)
-        {
-            buffer.CompoundExistsRefCount = gp.CompoundExistsRefCount;
-            if (gp.CompoundExistsRefCount > 0)
-                buffer.CompoundExistsRef0 = gp.GetCompoundExistsRef(0);
-            if (gp.CompoundExistsRefCount > 1)
-                buffer.CompoundExistsRef1 = gp.GetCompoundExistsRef(1);
-        }
-
-        // Copy nested MINUS blocks
-        if (gp.HasNestedMinus)
-        {
-            buffer.NestedMinusCount = gp.NestedMinusCount;
-            buffer.NestedMinusPatternCount = gp.NestedMinusPatternCount;
-
-            // Copy nested MINUS patterns into an array
-            if (gp.NestedMinusPatternCount > 0)
-            {
-                buffer.NestedMinusPatterns = new TriplePattern[gp.NestedMinusPatternCount];
-                for (int i = 0; i < gp.NestedMinusPatternCount; i++)
-                {
-                    buffer.NestedMinusPatterns[i] = gp.GetNestedMinusPattern(i);
-                }
-            }
-
-            // Copy boundaries and parent block info
-            if (gp.NestedMinusCount > 0)
-            {
-                buffer.NestedMinusParent0 = gp.GetNestedMinusParentBlock(0);
-                buffer.NestedMinusBoundary0 = gp.GetNestedMinusBlockEnd(0);
-            }
-            if (gp.NestedMinusCount > 1)
-            {
-                buffer.NestedMinusParent1 = gp.GetNestedMinusParentBlock(1);
-                buffer.NestedMinusBoundary1 = gp.GetNestedMinusBlockEnd(1);
-            }
-            if (gp.NestedMinusCount > 2)
-            {
-                buffer.NestedMinusParent2 = gp.GetNestedMinusParentBlock(2);
-                buffer.NestedMinusBoundary2 = gp.GetNestedMinusBlockEnd(2);
-            }
-            if (gp.NestedMinusCount > 3)
-            {
-                buffer.NestedMinusParent3 = gp.GetNestedMinusParentBlock(3);
-                buffer.NestedMinusBoundary3 = gp.GetNestedMinusBlockEnd(3);
-            }
-
-            // Copy nested MINUS EXISTS filters
-            buffer.NestedMinusExistsFlags = 0;
-            for (int i = 0; i < gp.NestedMinusCount && i < 4; i++)
-            {
-                if (gp.HasNestedMinusExistsFilter(i))
-                {
-                    buffer.NestedMinusExistsFlags |= (byte)(1 << i);
-                    switch (i)
-                    {
-                        case 0: buffer.NestedMinusExists0 = gp.GetNestedMinusExistsFilter(0); break;
-                        case 1: buffer.NestedMinusExists1 = gp.GetNestedMinusExistsFilter(1); break;
-                        case 2: buffer.NestedMinusExists2 = gp.GetNestedMinusExistsFilter(2); break;
-                        case 3: buffer.NestedMinusExists3 = gp.GetNestedMinusExistsFilter(3); break;
-                    }
-                }
-            }
-        }
-
-        buffer.ExistsFilterCount = gp.ExistsFilterCount;
-        // UnionStartIndex in QueryBuffer accounts for linearized slot order:
-        // [all triples] + [all filters] + [all binds]
-        // The union branch starts after first-branch triples + all filters + first-branch binds
-        buffer.UnionStartIndex = gp.HasUnion
-            ? gp.FirstBranchPatternCount + gp.FilterCount + gp.FirstBranchBindCount
-            : 0;
-        buffer.HasUnionFlag = gp.HasUnion;
-        buffer.HasValues = gp.HasValues;
-        if (gp.HasValues)
-            buffer.WhereValues = gp.Values;
-        // Copy OptionalFlags - build bitmask from GraphPattern's IsOptional checks
-        uint optFlags = 0;
-        for (int i = 0; i < gp.PatternCount && i < 32; i++)
-        {
-            if (gp.IsOptional(i))
-                optFlags |= (1u << i);
-        }
-        buffer.OptionalFlags = optFlags;
-
-        // Copy graph clause metadata (cached to avoid large struct copies in QueryExecutor)
-        buffer.GraphClauseCount = gp.GraphClauseCount;
-        buffer.TriplePatternCount = gp.PatternCount;
-        buffer.HasSubQueries = gp.HasSubQueries;
-        buffer.HasService = gp.HasService;
-        if (gp.GraphClauseCount > 0)
-        {
-            buffer.FirstGraphIsVariable = gp.IsGraphClauseVariable(0);
-            buffer.FirstGraphPatternCount = gp.GetGraphClausePatternCount(0);
-        }
-
         // Copy HAVING clause (ADR-009 Phase 2)
         buffer.HavingStart = query.SolutionModifier.Having.ExpressionStart;
         buffer.HavingLength = query.SolutionModifier.Having.ExpressionLength;
@@ -1879,132 +1360,5 @@ internal static class QueryBufferAdapter
             buffer.PostQueryValues = query.Values;
         }
 
-        // Convert patterns to slots
-        var patterns = buffer.GetPatterns();
-        ConvertGraphPattern(ref patterns, in query.WhereClause.Pattern, source);
-        buffer.PatternCount = patterns.Count;
-    }
-
-    private static void ConvertGraphPattern(ref PatternArray patterns, in GraphPattern gp, ReadOnlySpan<char> source)
-    {
-        // Add triple patterns
-        for (int i = 0; i < gp.PatternCount; i++)
-        {
-            var tp = gp.GetPattern(i);
-            patterns.AddTriple(
-                tp.Subject.Type, tp.Subject.Start, tp.Subject.Length,
-                tp.Predicate.Type, tp.Predicate.Start, tp.Predicate.Length,
-                tp.Object.Type, tp.Object.Start, tp.Object.Length,
-                tp.Path.Type, tp.Path.Iri.Start, tp.Path.Iri.Length
-            );
-        }
-
-        // Add filters
-        for (int i = 0; i < gp.FilterCount; i++)
-        {
-            var f = gp.GetFilter(i);
-            patterns.AddFilter(f.Start, f.Length, f.ScopeDepth);
-        }
-
-        // Add binds
-        for (int i = 0; i < gp.BindCount; i++)
-        {
-            var b = gp.GetBind(i);
-            patterns.AddBind(b.ExprStart, b.ExprLength, b.VarStart, b.VarLength, b.ScopeDepth);
-        }
-
-        // Add GRAPH clauses
-        // Track if we added VALUES inside a GRAPH clause (to avoid adding it again at top level)
-        bool valuesAddedInsideGraph = false;
-        for (int i = 0; i < gp.GraphClauseCount; i++)
-        {
-            var gc = gp.GetGraphClause(i);
-            int headerIndex = patterns.BeginGraph(gc.Graph.Type, gc.Graph.Start, gc.Graph.Length);
-
-            // Add patterns within GRAPH clause
-            for (int j = 0; j < gc.PatternCount; j++)
-            {
-                var tp = gc.GetPattern(j);
-                patterns.AddTriple(
-                    tp.Subject.Type, tp.Subject.Start, tp.Subject.Length,
-                    tp.Predicate.Type, tp.Predicate.Start, tp.Predicate.Length,
-                    tp.Object.Type, tp.Object.Start, tp.Object.Length,
-                    tp.Path.Type, tp.Path.Iri.Start, tp.Path.Iri.Length
-                );
-            }
-
-            // If GRAPH has variable and 0 patterns, add VALUES as child (VALUES-only GRAPH clause)
-            // W3C test: GRAPH ?g { VALUES (?g ?t) { ... } }
-            if (gc.PatternCount == 0 && gc.Graph.Type == TermType.Variable && gp.HasValues)
-            {
-                var values = gp.Values;
-                int valuesHeaderIdx = patterns.AddValuesHeader(values.VarStart, values.VarLength);
-                for (int v = 0; v < values.ValueCount; v++)
-                {
-                    var (start, len) = values.GetValue(v);
-                    patterns.AddValuesEntry(start, len, valuesHeaderIdx);
-                }
-                valuesAddedInsideGraph = true;
-            }
-
-            patterns.EndGraph(headerIndex);
-        }
-
-        // Add EXISTS filters
-        for (int i = 0; i < gp.ExistsFilterCount; i++)
-        {
-            var ef = gp.GetExistsFilter(i);
-            int headerIndex = patterns.BeginExists(ef.Negated);
-
-            // If EXISTS has a GRAPH context, add GraphHeader inside EXISTS
-            int graphHeaderIndex = -1;
-            if (ef.HasGraph)
-            {
-                graphHeaderIndex = patterns.BeginGraph(
-                    ef.GraphTerm.Type, ef.GraphTerm.Start, ef.GraphTerm.Length
-                );
-            }
-
-            for (int j = 0; j < ef.PatternCount; j++)
-            {
-                var tp = ef.GetPattern(j);
-                patterns.AddTriple(
-                    tp.Subject.Type, tp.Subject.Start, tp.Subject.Length,
-                    tp.Predicate.Type, tp.Predicate.Start, tp.Predicate.Length,
-                    tp.Object.Type, tp.Object.Start, tp.Object.Length
-                );
-            }
-
-            // Close GRAPH header if we opened one
-            if (graphHeaderIndex >= 0)
-            {
-                patterns.EndGraph(graphHeaderIndex);
-            }
-
-            patterns.EndExists(headerIndex);
-        }
-
-        // Add MINUS patterns
-        for (int i = 0; i < gp.MinusPatternCount; i++)
-        {
-            var mp = gp.GetMinusPattern(i);
-            patterns.AddMinusTriple(
-                mp.Subject.Type, mp.Subject.Start, mp.Subject.Length,
-                mp.Predicate.Type, mp.Predicate.Start, mp.Predicate.Length,
-                mp.Object.Type, mp.Object.Start, mp.Object.Length
-            );
-        }
-
-        // Add VALUES clause if present and not already added inside a GRAPH clause
-        if (gp.HasValues && !valuesAddedInsideGraph)
-        {
-            var values = gp.Values;
-            int headerIdx = patterns.AddValuesHeader(values.VarStart, values.VarLength);
-            for (int i = 0; i < values.ValueCount; i++)
-            {
-                var (start, len) = values.GetValue(i);
-                patterns.AddValuesEntry(start, len, headerIdx);
-            }
-        }
     }
 }

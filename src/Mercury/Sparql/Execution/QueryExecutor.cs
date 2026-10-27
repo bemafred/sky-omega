@@ -80,11 +80,6 @@ internal partial class QueryExecutor : IDisposable
     private readonly QueryPlanner? _planner;
 
     // Debug properties for testing
-    internal bool BufferHasExists => _buffer.HasExists;
-    internal int BufferExistsFilterCount => _buffer.ExistsFilterCount;
-    internal bool BufferHasGraph => _buffer.HasGraph;
-    internal int BufferTriplePatternCount => _buffer.TriplePatternCount;
-    internal bool BufferHasSubQueries => _buffer.HasSubQueries;
     internal int BufferHashCode => _buffer.GetHashCode();
 
     public QueryExecutor(QuadStore store, ReadOnlySpan<char> source, in Query query)
@@ -222,7 +217,6 @@ internal partial class QueryExecutor : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
-        _buffer?.Dispose();
         if (_stringBuffer != null)
             _bufferManager.Return(_stringBuffer);
     }

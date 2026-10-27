@@ -929,78 +929,12 @@ public class PatternArraySliceTests
 
 public class QueryBufferTests
 {
-    #region Construction and Capacity
-
-    [Fact]
-    public void QueryBuffer_DefaultCapacity_Is128Slots()
-    {
-        using var buffer = new QueryBuffer();
-
-        Assert.Equal(QueryBuffer.DefaultCapacity, buffer.Capacity);
-    }
-
-    [Fact]
-    public void QueryBuffer_CustomCapacity()
-    {
-        using var buffer = new QueryBuffer(64);
-
-        Assert.Equal(64, buffer.Capacity);
-    }
-
-    [Fact]
-    public void QueryBuffer_MaxCapacity_Is1024()
-    {
-        Assert.Throws<ArgumentOutOfRangeException>(() => new QueryBuffer(2000));
-    }
-
-    [Fact]
-    public void QueryBuffer_ExactMaxCapacity_Allowed()
-    {
-        using var buffer = new QueryBuffer(QueryBuffer.MaxCapacity);
-
-        Assert.Equal(1024, buffer.Capacity);
-    }
-
-    #endregion
-
-    #region Pattern Management
-
-    [Fact]
-    public void QueryBuffer_GetPatterns_ReturnsWritableArray()
-    {
-        using var buffer = new QueryBuffer();
-
-        var patterns = buffer.GetPatterns();
-        patterns.AddTriple(TermType.Variable, 0, 2, TermType.Iri, 10, 20, TermType.Variable, 40, 2);
-
-        buffer.PatternCount = patterns.Count;
-
-        Assert.Equal(1, buffer.PatternCount);
-    }
-
-    [Fact]
-    public void QueryBuffer_GetPatterns_WithCount_ReturnsReadonlyView()
-    {
-        using var buffer = new QueryBuffer();
-
-        var patterns = buffer.GetPatterns();
-        patterns.AddTriple(TermType.Variable, 0, 2, TermType.Iri, 10, 20, TermType.Variable, 40, 2);
-        patterns.AddFilter(50, 10);
-        buffer.PatternCount = patterns.Count;
-
-        var readPatterns = buffer.GetPatterns();
-
-        Assert.Equal(2, readPatterns.Count);
-    }
-
-    #endregion
-
     #region Metadata Properties
 
     [Fact]
     public void QueryBuffer_QueryType()
     {
-        using var buffer = new QueryBuffer();
+        var buffer = new QueryBuffer();
 
         buffer.Type = QueryType.Select;
 
@@ -1010,7 +944,7 @@ public class QueryBufferTests
     [Fact]
     public void QueryBuffer_SelectModifiers()
     {
-        using var buffer = new QueryBuffer();
+        var buffer = new QueryBuffer();
 
         buffer.SelectDistinct = true;
         buffer.SelectAll = false;
@@ -1026,7 +960,7 @@ public class QueryBufferTests
     [Fact]
     public void QueryBuffer_BaseUri()
     {
-        using var buffer = new QueryBuffer();
+        var buffer = new QueryBuffer();
 
         buffer.BaseUriStart = 0;
         buffer.BaseUriLength = 30;
@@ -1037,151 +971,12 @@ public class QueryBufferTests
 
     #endregion
 
-    #region Pattern Metadata Flags
-
-    [Fact]
-    public void QueryBuffer_HasFilters()
-    {
-        using var buffer = new QueryBuffer();
-
-        buffer.FilterCount = 0;
-        Assert.False(buffer.HasFilters);
-
-        buffer.FilterCount = 2;
-        Assert.True(buffer.HasFilters);
-    }
-
-    [Fact]
-    public void QueryBuffer_HasBinds()
-    {
-        using var buffer = new QueryBuffer();
-
-        buffer.BindCount = 0;
-        Assert.False(buffer.HasBinds);
-
-        buffer.BindCount = 1;
-        Assert.True(buffer.HasBinds);
-    }
-
-    [Fact]
-    public void QueryBuffer_HasMinus()
-    {
-        using var buffer = new QueryBuffer();
-
-        buffer.MinusPatternCount = 0;
-        Assert.False(buffer.HasMinus);
-
-        buffer.MinusPatternCount = 3;
-        Assert.True(buffer.HasMinus);
-    }
-
-    [Fact]
-    public void QueryBuffer_HasExists()
-    {
-        using var buffer = new QueryBuffer();
-
-        buffer.ExistsFilterCount = 0;
-        Assert.False(buffer.HasExists);
-
-        buffer.ExistsFilterCount = 1;
-        Assert.True(buffer.HasExists);
-    }
-
-    [Fact]
-    public void QueryBuffer_HasUnion()
-    {
-        using var buffer = new QueryBuffer();
-
-        buffer.HasUnionFlag = false;
-        Assert.False(buffer.HasUnion);
-
-        buffer.HasUnionFlag = true;
-        Assert.True(buffer.HasUnion);
-    }
-
-    [Fact]
-    public void QueryBuffer_HasOptionalPatterns()
-    {
-        using var buffer = new QueryBuffer();
-
-        buffer.OptionalFlags = 0;
-        Assert.False(buffer.HasOptionalPatterns);
-
-        buffer.OptionalFlags = 0b0101;
-        Assert.True(buffer.HasOptionalPatterns);
-    }
-
-    [Fact]
-    public void QueryBuffer_UnionBranchPatternCount()
-    {
-        using var buffer = new QueryBuffer();
-
-        buffer.PatternCount = 10;
-        buffer.HasUnionFlag = false;
-        buffer.UnionStartIndex = 0;
-        Assert.Equal(0, buffer.UnionBranchPatternCount);
-
-        buffer.HasUnionFlag = true;
-        buffer.UnionStartIndex = 3;
-        Assert.Equal(7, buffer.UnionBranchPatternCount);
-    }
-
-    [Fact]
-    public void QueryBuffer_HasGraph()
-    {
-        using var buffer = new QueryBuffer();
-
-        buffer.GraphClauseCount = 0;
-        Assert.False(buffer.HasGraph);
-
-        buffer.GraphClauseCount = 2;
-        Assert.True(buffer.HasGraph);
-    }
-
-    [Fact]
-    public void QueryBuffer_HasValues()
-    {
-        using var buffer = new QueryBuffer();
-
-        buffer.HasValues = false;
-        Assert.False(buffer.HasValues);
-
-        buffer.HasValues = true;
-        Assert.True(buffer.HasValues);
-    }
-
-    #endregion
-
-    #region Graph Clause Metadata
-
-    [Fact]
-    public void QueryBuffer_GraphClauseMetadata()
-    {
-        using var buffer = new QueryBuffer();
-
-        buffer.GraphClauseCount = 2;
-        buffer.FirstGraphIsVariable = true;
-        buffer.FirstGraphPatternCount = 5;
-        buffer.TriplePatternCount = 3;
-        buffer.HasSubQueries = true;
-        buffer.HasService = false;
-
-        Assert.Equal(2, buffer.GraphClauseCount);
-        Assert.True(buffer.FirstGraphIsVariable);
-        Assert.Equal(5, buffer.FirstGraphPatternCount);
-        Assert.Equal(3, buffer.TriplePatternCount);
-        Assert.True(buffer.HasSubQueries);
-        Assert.False(buffer.HasService);
-    }
-
-    #endregion
-
     #region Dataset Clauses
 
     [Fact]
     public void QueryBuffer_Datasets()
     {
-        using var buffer = new QueryBuffer();
+        var buffer = new QueryBuffer();
 
         var datasets = new DatasetClause[]
         {
@@ -1205,7 +1000,7 @@ public class QueryBufferTests
     [Fact]
     public void QueryBuffer_Aggregates()
     {
-        using var buffer = new QueryBuffer();
+        var buffer = new QueryBuffer();
 
         var aggregates = new AggregateEntry[]
         {
@@ -1234,7 +1029,7 @@ public class QueryBufferTests
     [Fact]
     public void QueryBuffer_OrderBy()
     {
-        using var buffer = new QueryBuffer();
+        var buffer = new QueryBuffer();
 
         var orderBy = new OrderByEntry[]
         {
@@ -1256,7 +1051,7 @@ public class QueryBufferTests
     [Fact]
     public void QueryBuffer_GroupBy()
     {
-        using var buffer = new QueryBuffer();
+        var buffer = new QueryBuffer();
 
         var groupBy = new GroupByEntry[]
         {
@@ -1276,7 +1071,7 @@ public class QueryBufferTests
     [Fact]
     public void QueryBuffer_Prefixes()
     {
-        using var buffer = new QueryBuffer();
+        var buffer = new QueryBuffer();
 
         var prefixes = new PrefixMapping[]
         {
@@ -1291,56 +1086,6 @@ public class QueryBufferTests
 
     #endregion
 
-    #region Disposal
-
-    [Fact]
-    public void QueryBuffer_Dispose_CleansUp()
-    {
-        var buffer = new QueryBuffer();
-        buffer.Dispose();
-
-        Assert.Equal(0, buffer.Capacity);
-    }
-
-    [Fact]
-    public void QueryBuffer_DoubleDispose_Safe()
-    {
-        var buffer = new QueryBuffer();
-        buffer.Dispose();
-        buffer.Dispose(); // Should not throw
-    }
-
-    [Fact]
-    public void QueryBuffer_GetPatterns_AfterDispose_Throws()
-    {
-        var buffer = new QueryBuffer();
-        buffer.Dispose();
-
-        Assert.Throws<ObjectDisposedException>(() => buffer.GetPatterns());
-    }
-
-    #endregion
-
-    #region ArrayPool Integration
-
-    [Fact]
-    public void QueryBuffer_UsesArrayPool()
-    {
-        // Create and dispose many buffers to verify no memory leaks
-        for (int i = 0; i < 100; i++)
-        {
-            using var buffer = new QueryBuffer();
-            var patterns = buffer.GetPatterns();
-            patterns.AddTriple(TermType.Variable, 0, 2, TermType.Iri, 10, 20, TermType.Variable, 40, 2);
-            buffer.PatternCount = patterns.Count;
-        }
-
-        // If ArrayPool wasn't used properly, this would cause memory issues
-        // The fact it completes is the test
-        Assert.True(true);
-    }
-
-    #endregion
 }
 
 public class AggregateEntryTests
