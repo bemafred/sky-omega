@@ -162,7 +162,7 @@ public class QuadStoreProfileDispatchTests : IDisposable
         using var store = new QuadStore(dir, null, null, new StorageOptions { Profile = StoreProfile.Reference });
 
         Assert.Throws<ProfileCapabilityException>(() =>
-            store.Delete("s", "p", "o", DateTimeOffset.MinValue, DateTimeOffset.MaxValue));
+            store.Retract("s", "p", "o", DateTimeOffset.MinValue, DateTimeOffset.MaxValue));
     }
 
     [Fact]

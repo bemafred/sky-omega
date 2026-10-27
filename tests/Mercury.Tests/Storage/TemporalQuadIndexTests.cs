@@ -448,7 +448,7 @@ public class TemporalQuadIndexTests : IDisposable
     #region Delete Operations
 
     [Fact]
-    public void Delete_ExistingTriple_ReturnsTrue()
+    public void Retract_ExistingVersion_ReturnsTrue()
     {
         var index = CreateIndex();
         var validFrom = DateTimeOffset.UtcNow.AddDays(-10);
@@ -456,61 +456,80 @@ public class TemporalQuadIndexTests : IDisposable
 
         index.AddHistorical("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", validFrom, validTo);
 
-        var deleted = index.DeleteHistorical("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", validFrom, validTo);
+        var retracted = index.RetractHistorical("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", validFrom, validTo);
 
-        Assert.True(deleted);
+        Assert.True(retracted);
     }
 
     [Fact]
-    public void Delete_NonExistentTriple_ReturnsFalse()
+    public void Retract_OtherSubject_ReturnsFalse()
     {
         var index = CreateIndex();
-        index.AddCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
+        var validFrom = DateTimeOffset.UtcNow.AddDays(-10);
+        var validTo = DateTimeOffset.UtcNow.AddDays(10);
+        index.AddHistorical("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", validFrom, validTo);
+        index.AddHistorical("<http://ex.org/other>", "<http://ex.org/p>", "<http://ex.org/x>", validFrom, validTo);
 
-        var deleted = index.DeleteHistorical("<http://ex.org/other>", "<http://ex.org/p>", "<http://ex.org/o>",
-            DateTimeOffset.MinValue, DateTimeOffset.MaxValue);
+        var retracted = index.RetractHistorical("<http://ex.org/other>", "<http://ex.org/p>", "<http://ex.org/o>", validFrom, validTo);
 
-        Assert.False(deleted);
+        Assert.False(retracted);
     }
 
     [Fact]
-    public void Delete_AfterDelete_NotInQueryCurrent()
+    public void Retract_IntervalThatIsNotTheVersions_ReturnsFalse()
+    {
+        // Retract names one version by its exact interval (ADR-054 D2); an interval that only overlaps it is not that version.
+        var index = CreateIndex();
+        var validFrom = DateTimeOffset.UtcNow.AddDays(-10);
+        var validTo = DateTimeOffset.UtcNow.AddDays(10);
+        index.AddHistorical("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", validFrom, validTo);
+
+        var retracted = index.RetractHistorical("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>",
+            DateTimeOffset.MinValue, DateTimeOffset.MaxValue);
+
+        Assert.False(retracted);
+        var results = index.QueryCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
+        Assert.True(results.MoveNext(), "The version was not retracted, so it is still current");
+    }
+
+    [Fact]
+    public void Retract_AfterRetract_NotInQueryCurrent()
     {
         var index = CreateIndex();
-        index.AddCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
+        var validFrom = DateTimeOffset.UtcNow.AddDays(-10);
+        var validTo = DateTimeOffset.UtcNow.AddDays(10);
+        index.AddHistorical("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", validFrom, validTo);
 
-        index.DeleteHistorical("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>",
-            DateTimeOffset.MinValue, DateTimeOffset.MaxValue);
+        index.RetractHistorical("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", validFrom, validTo);
 
         var results = index.QueryCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
-        Assert.False(results.MoveNext(), "Deleted triple should not appear in QueryCurrent");
+        Assert.False(results.MoveNext(), "A retracted version does not appear in QueryCurrent");
     }
 
     [Fact]
-    public void Delete_NonExistentAtom_ReturnsFalse()
+    public void Retract_NonExistentAtom_ReturnsFalse()
     {
         var index = CreateIndex();
 
-        // Try to delete something that was never added
-        var deleted = index.DeleteHistorical("<http://ex.org/never-added>", "<http://ex.org/p>", "<http://ex.org/o>",
+        var retracted = index.RetractHistorical("<http://ex.org/never-added>", "<http://ex.org/p>", "<http://ex.org/o>",
             DateTimeOffset.MinValue, DateTimeOffset.MaxValue);
 
-        Assert.False(deleted);
+        Assert.False(retracted);
     }
 
     [Fact]
-    public void Delete_AlreadyDeleted_ReturnsFalse()
+    public void Retract_AlreadyRetracted_ReturnsFalse()
     {
         var index = CreateIndex();
-        index.AddCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
+        var validFrom = DateTimeOffset.UtcNow.AddDays(-10);
+        var validTo = DateTimeOffset.UtcNow.AddDays(10);
+        index.AddHistorical("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", validFrom, validTo);
 
-        var deleted1 = index.DeleteHistorical("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>",
-            DateTimeOffset.MinValue, DateTimeOffset.MaxValue);
-        var deleted2 = index.DeleteHistorical("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>",
-            DateTimeOffset.MinValue, DateTimeOffset.MaxValue);
+        var retracted1 = index.RetractHistorical("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", validFrom, validTo);
+        var retracted2 = index.RetractHistorical("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", validFrom, validTo);
 
-        Assert.True(deleted1);
-        Assert.False(deleted2, "Deleting already-deleted should return false");
+        Assert.True(retracted1);
+        Assert.False(retracted2, "Retracting an already-retracted version returns false");
     }
 
     #endregion

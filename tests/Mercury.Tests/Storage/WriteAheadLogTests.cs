@@ -57,9 +57,9 @@ public class WriteAheadLogTests : IDisposable
     {
         var from = DateTimeOffset.UtcNow;
         var to = from.AddDays(1);
-        var record = LogRecord.CreateDelete(10, 20, 30, from, to);
+        var record = LogRecord.CreateRetract(10, 20, 30, from, to);
 
-        Assert.Equal(LogOperation.Delete, record.Operation);
+        Assert.Equal(LogOperation.Retract, record.Operation);
         Assert.Equal(10, record.SubjectId);
         Assert.Equal(20, record.PredicateId);
         Assert.Equal(30, record.ObjectId);
@@ -673,7 +673,7 @@ public class WriteAheadLogTests : IDisposable
             var addRecord = LogRecord.CreateAdd(1, 2, 3, DateTimeOffset.UtcNow, DateTimeOffset.MaxValue);
             wal.Append(addRecord);
 
-            var deleteRecord = LogRecord.CreateDelete(1, 2, 3, DateTimeOffset.UtcNow, DateTimeOffset.MaxValue);
+            var deleteRecord = LogRecord.CreateRetract(1, 2, 3, DateTimeOffset.UtcNow, DateTimeOffset.MaxValue);
             wal.Append(deleteRecord);
         }
 
@@ -689,7 +689,7 @@ public class WriteAheadLogTests : IDisposable
 
             Assert.Equal(2, records.Count);
             Assert.Equal(LogOperation.Add, records[0].Operation);
-            Assert.Equal(LogOperation.Delete, records[1].Operation);
+            Assert.Equal(LogOperation.Retract, records[1].Operation);
         }
         finally
         {

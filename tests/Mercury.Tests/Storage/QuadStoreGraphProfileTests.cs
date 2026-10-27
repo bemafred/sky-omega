@@ -138,7 +138,7 @@ public class QuadStoreGraphProfileTests : IDisposable
         while (before.MoveNext()) beforeCount++;
         Assert.Equal(1, beforeCount);
 
-        var deleted = store.Delete("<http://ex/s>", "<http://ex/p>", "<http://ex/o>",
+        var deleted = store.Retract("<http://ex/s>", "<http://ex/p>", "<http://ex/o>",
             DateTimeOffset.UtcNow, DateTimeOffset.MaxValue);
         Assert.True(deleted);
 
@@ -157,7 +157,7 @@ public class QuadStoreGraphProfileTests : IDisposable
 
         store.Add("<http://ex/s>", "<http://ex/p>", "<http://ex/o>",
             DateTimeOffset.UtcNow, DateTimeOffset.MaxValue);
-        store.Delete("<http://ex/s>", "<http://ex/p>", "<http://ex/o>",
+        store.Retract("<http://ex/s>", "<http://ex/p>", "<http://ex/o>",
             DateTimeOffset.UtcNow, DateTimeOffset.MaxValue);
         store.Add("<http://ex/s>", "<http://ex/p>", "<http://ex/o>",
             DateTimeOffset.UtcNow, DateTimeOffset.MaxValue);

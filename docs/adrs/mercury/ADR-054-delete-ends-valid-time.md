@@ -282,6 +282,85 @@ insert) is already correct for a store without valid time. Reference and Minimal
    `sky:status "open"` for `<https://sky-omega.org/bugs/mercury-update-where-legacy-pattern>`, and the current query
    returns `"fixed"`.
 
+## Implementation (2026-10-27)
+
+**What changed**
+
+- **WAL** (`WriteAheadLog.cs`): `LogOperation.Delete = 2` is renamed `Retract`, and `End = 5` is new;
+  `LogRecord.CreateEnd` and `CreateRetract` replace `CreateDelete`. The record layout is unchanged.
+- **Index** (`TemporalQuadIndex.cs`):
+  - `EndRaw` shortens `ValidTo` on the live entry with an exact `ValidFrom`. Applying it again is a no-op.
+  - `RetractRaw` flags the live entry with an exact interval.
+  - Both find their entry with `FindLiveEntry`, which walks the leaf chain.
+  - `FindVersionHoldingAt` finds the version that holds at T, on the GSPO index.
+  - `ReplayPreAdr054Delete` is today's overlap delete, kept only for replaying old records.
+  - `RepairDeleted` repairs one index's flagged entries in place.
+  - `InsertIntoLeaf`: Case A (a replayed Add) compares `ValidFrom` and transaction time, not `ValidTo`. Otherwise a
+    replayed Add would bring back a version an End had shortened. Cases B and C skip retracted entries (D3).
+  - The enumerator carries `ModifiedAt`.
+- **Store** (`QuadStore.cs`):
+  - `DeleteCurrent` and `DeleteCurrentBatched` write and apply End. The batched form looks at the batch's own buffered
+    records first.
+  - `Delete`/`DeleteBatched` are renamed `Retract`/`RetractBatched` and match an exact interval.
+  - One `ApplyRecordToIndexesById` serves batch commit and recovery, and throws on an unknown operation (D8).
+  - `ResolvedTemporalQuad` gains `RetractedAt` (D6).
+  - `RepairDeletes(restore, dryRun, report)` is D7.
+  - A Graph store keeps its versioned delete.
+- **Update** (`UpdateExecutor.ApplyChanges`): a quad in both the delete and the insert set leaves both (D4).
+- **CLI**: `mercury --repair-deletes [--dry-run] [--restore <graph>@<time>]`. It runs without the HTTP endpoint or the
+  REPL, disposes the pool, and exits.
+- **Pruning** (found while checking the readers of `IsDeleted`): `PreserveAll` copied a retracted version into the
+  target as a plain Add, so it held again there. It now retracts the copy in the same batch. To make that possible,
+  `RetractBatched` also finds a version added earlier in the same batch. `docs/tutorials/pruning-and-maintenance.md`
+  now describes ended and retracted versions.
+
+**Validation results**
+
+1. **Store tests** (`DeleteEndsValidTimeTests`, 17), with each validation-plan item 1 case written as one inline
+   sequence:
+   - End and AS OF;
+   - two versions;
+   - 401 versions across leaf pages;
+   - counts, single and in a batch;
+   - Add then End in one batch;
+   - Retract with adjacent versions;
+   - re-insert after End (through SPARQL) and after Retract;
+   - WAL replay of Add + End onto indexes that already hold them, opened twice;
+   - a delete and re-insert in the same millisecond, replayed;
+   - a pre-ADR-054 operation-2 record;
+   - an unknown operation;
+   - the repair (end, restore, left, dry run, rerun).
+
+   The replay tests append the records with `WriteAheadLog` while the store is closed. The log is opened
+   `FileShare.None`, and `Dispose` checkpoints, so this is the way to put a store in the state "indexes flushed, log
+   not yet checkpointed".
+2. **SPARQL facade** (in the same file): the status rewrite with AS OF before and after; `DELETE { x } INSERT { x }`
+   leaves one unbroken version and reports 0; DELETE DATA and DELETE WHERE of an ended quad report 0.
+3. **Existing suites:** the six tests that pinned the old meaning changed:
+   - `QueryEvolution_DeletedTriple_IsVisible` and `QueryEvolution_MixedDeletedAndActive_ShowsAll` now assert a closed
+     interval and no retraction;
+   - the `TemporalQuadIndexTests` delete tests became retract tests with exact intervals, plus one showing that an
+     overlapping interval doesn't retract;
+   - `SessionMutationFlagTests.Delete_SetsFlag` uses `DeleteCurrent`.
+
+   Two pruning tests were added: `PreserveVersions` keeps a deleted fact as history, and `PreserveAll` keeps a
+   retraction retracted.
+
+   Results: Mercury.Tests 4,776 passed, 7 skipped, 0 failed (W3C conformance included); Mercury.Solid.Tests 25/25;
+   SkyOmega.Bcl.Tests 12/12; solution build 0 warnings.
+4. **Repair on a copy of the MCP pool**, with the source build of `mercury`:
+   - The dry run finds 323 entries in 96 events, as the Q1 probe did.
+   - `--restore "<urn:sky-omega:session:2026-05-30>@2026-05-30T23:25:12.044Z"` ends 204 and restores 119.
+   - A second dry run finds 0.
+   - On the repaired copy, the status of `<https://sky-omega.org/bugs/mercury-update-where-legacy-pattern>` AS OF
+     2026-10-27T06:00Z is `"open"`, and now it is `"fixed"`.
+   - The 2026-05-30 session graph has 184 current triples.
+   - A `ck:` resume point AS OF 2026-06-08 returns the `nextAction` that held then.
+
+   The copy was taken while `mercury-mcp` was running; the live repair runs with it stopped.
+5. **Dogfood:** pending. It needs `mercury` and `mercury-mcp` installed from this change, `mercury-mcp` stopped for the
+   repair, and the MCP reconnected for the AS OF query.
+
 ## References
 
 - [ADR-001](ADR-001-compaction.md) (soft delete with end-validity timestamps), [ADR-029](ADR-029-store-profiles.md)

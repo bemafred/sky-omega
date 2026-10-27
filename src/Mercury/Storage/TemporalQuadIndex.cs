@@ -161,12 +161,46 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
     }
 
     /// <summary>
-    /// Soft-delete a key with pre-resolved atom IDs. Used by QuadStore when replaying
-    /// WAL records or materializing a batch — the IDs are already known, so we skip
-    /// the string lookup roundtrip that the public Delete(span) path does.
-    /// Returns true if the entry was found and marked deleted.
+    /// End a version (ADR-054 D1): the live entry with these dimensions and exactly <paramref name="validFrom"/> stops
+    /// holding at <paramref name="end"/>. Returns false, changing nothing, when no such entry exists or it already ends
+    /// at or before <paramref name="end"/>, so applying the same End twice (WAL replay) is a no-op.
     /// </summary>
-    internal bool DeleteRaw(long graph, long primary, long secondary, long tertiary,
+    internal bool EndRaw(long graph, long primary, long secondary, long tertiary,
+        long validFrom, long end, long transactionTime)
+    {
+        var entry = FindLiveEntry(graph, primary, secondary, tertiary, validFrom, validTo: null);
+        if (entry == null || entry->Key.ValidTo <= end)
+            return false;
+
+        entry->Key.ValidTo = end;
+        entry->ModifiedAt = transactionTime;
+        _file.FlushPage();
+        return true;
+    }
+
+    /// <summary>
+    /// Retract a version (ADR-054 D2): the live entry with these dimensions and exactly [validFrom, validTo) is marked
+    /// as recorded in error. Returns false when no such live entry exists.
+    /// </summary>
+    internal bool RetractRaw(long graph, long primary, long secondary, long tertiary,
+        long validFrom, long validTo, long transactionTime)
+    {
+        var entry = FindLiveEntry(graph, primary, secondary, tertiary, validFrom, validTo);
+        if (entry == null)
+            return false;
+
+        entry->IsDeleted = true;
+        entry->ModifiedAt = transactionTime;
+        _file.FlushPage();
+        return true;
+    }
+
+    /// <summary>
+    /// Replay a delete record written before ADR-054 (operation 2 with [MinValue, MaxValue], from DeleteCurrent): mark
+    /// the first live entry whose interval overlaps, which is what that record did when it was written. Nothing writes
+    /// such a record any more; only <see cref="QuadStore"/> recovery calls this.
+    /// </summary>
+    internal bool ReplayPreAdr054Delete(long graph, long primary, long secondary, long tertiary,
         long validFrom, long validTo, long transactionTime)
     {
         var key = new TemporalKey
@@ -181,6 +215,119 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
         };
 
         return DeleteFromTree(key);
+    }
+
+    /// <summary>
+    /// The ValidFrom of the live version that holds at <paramref name="at"/> (ValidFrom ≤ at &lt; ValidTo), or null.
+    /// Walks every version of the quad across leaf pages. Only an EntityFirst index keeps a quad's versions together,
+    /// so QuadStore asks its GSPO index.
+    /// </summary>
+    internal long? FindVersionHoldingAt(long graph, long primary, long secondary, long tertiary, long at)
+    {
+        if (_sortOrder != KeySortOrder.EntityFirst)
+            throw new InvalidOperationException("FindVersionHoldingAt needs an EntityFirst index: a TimeFirst index does not keep a quad's versions together.");
+
+        var lo = new TemporalKey { Graph = graph, Primary = primary, Secondary = secondary, Tertiary = tertiary,
+            ValidFrom = long.MinValue, ValidTo = long.MinValue, TransactionTime = long.MinValue };
+        var hi = new TemporalKey { Graph = graph, Primary = primary, Secondary = secondary, Tertiary = tertiary,
+            ValidFrom = long.MaxValue, ValidTo = long.MaxValue, TransactionTime = long.MaxValue };
+
+        for (var pageId = FindLeafPage(_file.RootPageId, lo); pageId != 0;)
+        {
+            var page = GetPage(pageId);
+            for (int i = 0; i < page->EntryCount; i++)
+            {
+                ref var entry = ref page->GetEntry(i);
+                if (CompareKeys(in entry.Key, in lo) < 0) continue;
+                if (CompareKeys(in entry.Key, in hi) > 0) return null;
+                if (!entry.IsDeleted && entry.Key.ValidFrom <= at && entry.Key.ValidTo > at)
+                    return entry.Key.ValidFrom;
+            }
+            pageId = page->NextLeaf;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// The live entry with these dimensions and exactly this ValidFrom (and, when given, this ValidTo), or null.
+    /// Entries sharing dimensions and ValidFrom are adjacent in both sort orders; the walk follows the leaf chain
+    /// because they can straddle a page boundary.
+    /// </summary>
+    private TemporalBTreeEntry* FindLiveEntry(long graph, long primary, long secondary, long tertiary,
+        long validFrom, long? validTo)
+    {
+        var lo = new TemporalKey { Graph = graph, Primary = primary, Secondary = secondary, Tertiary = tertiary,
+            ValidFrom = validFrom, ValidTo = validTo ?? long.MinValue, TransactionTime = long.MinValue };
+        var hi = new TemporalKey { Graph = graph, Primary = primary, Secondary = secondary, Tertiary = tertiary,
+            ValidFrom = validFrom, ValidTo = validTo ?? long.MaxValue, TransactionTime = long.MaxValue };
+
+        for (var pageId = FindLeafPage(_file.RootPageId, lo); pageId != 0;)
+        {
+            var page = GetPage(pageId);
+            for (int i = 0; i < page->EntryCount; i++)
+            {
+                ref var entry = ref page->GetEntry(i);
+                if (CompareKeys(in entry.Key, in lo) < 0) continue;
+                if (CompareKeys(in entry.Key, in hi) > 0) return null;
+                if (!entry.IsDeleted)
+                    return (TemporalBTreeEntry*)Unsafe.AsPointer(ref entry);
+            }
+            pageId = page->NextLeaf;
+        }
+        return null;
+    }
+
+    /// <summary>Whether a live entry with these dimensions and exactly [validFrom, validTo) exists.</summary>
+    internal bool HoldsLiveEntry(long graph, long primary, long secondary, long tertiary, long validFrom, long validTo) =>
+        FindLiveEntry(graph, primary, secondary, tertiary, validFrom, validTo) != null;
+
+    /// <summary>What <see cref="RepairDeleted"/> does with one flagged entry (ADR-054 D7).</summary>
+    internal enum DeletedEntryRepair : byte
+    {
+        /// <summary>Leave the entry as it is.</summary>
+        Leave,
+        /// <summary>The fact ended when it was deleted: ValidTo = ModifiedAt, IsDeleted = false.</summary>
+        End,
+        /// <summary>The delete was the mistake: IsDeleted = false, ValidTo unchanged.</summary>
+        Restore
+    }
+
+    /// <summary>
+    /// Visit every IsDeleted leaf entry and apply what <paramref name="decide"/> returns for it. The callback gets the
+    /// entry's dimensions in this index's order, its ValidFrom, ValidTo and ModifiedAt (the deletion's transaction
+    /// time). Each index is repaired on its own entries, so an interrupted repair can be rerun: entries already
+    /// repaired are no longer flagged. Returns the number of entries changed.
+    /// </summary>
+    internal int RepairDeleted(Func<long, long, long, long, long, long, long, DeletedEntryRepair> decide)
+    {
+        var first = new TemporalKey { Graph = long.MinValue, Primary = long.MinValue, Secondary = long.MinValue,
+            Tertiary = long.MinValue, ValidFrom = long.MinValue, ValidTo = long.MinValue, TransactionTime = long.MinValue };
+        int changed = 0;
+        for (var pageId = FindLeafPage(_file.RootPageId, first); pageId != 0;)
+        {
+            var page = GetPage(pageId);
+            for (int i = 0; i < page->EntryCount; i++)
+            {
+                ref var entry = ref page->GetEntry(i);
+                if (!entry.IsDeleted) continue;
+                var k = entry.Key;
+                switch (decide(k.Graph, k.Primary, k.Secondary, k.Tertiary, k.ValidFrom, k.ValidTo, entry.ModifiedAt))
+                {
+                    case DeletedEntryRepair.End:
+                        entry.Key.ValidTo = entry.ModifiedAt;
+                        entry.IsDeleted = false;
+                        changed++;
+                        break;
+                    case DeletedEntryRepair.Restore:
+                        entry.IsDeleted = false;
+                        changed++;
+                        break;
+                }
+            }
+            pageId = page->NextLeaf;
+        }
+        _file.Flush();
+        return changed;
     }
 
     /// <summary>
@@ -220,10 +367,10 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
     }
 
     /// <summary>
-    /// Soft-delete a triple with explicit time bounds.
-    /// Returns true if the triple was found and deleted, false otherwise.
+    /// Retract the version with exactly these time bounds (ADR-054 D2).
+    /// Returns true if that live version was found and retracted, false otherwise.
     /// </summary>
-    public bool Delete(
+    public bool Retract(
         ReadOnlySpan<char> primary,
         ReadOnlySpan<char> secondary,
         ReadOnlySpan<char> tertiary,
@@ -245,25 +392,14 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
 
         var tt = transactionTime != 0 ? transactionTime : DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
-        var key = new TemporalKey
-        {
-            Graph = g,
-            Primary = a,
-            Secondary = b,
-            Tertiary = c,
-            ValidFrom = validFrom,
-            ValidTo = validTo,
-            TransactionTime = tt
-        };
-
-        return DeleteFromTree(key);
+        return RetractRaw(g, a, b, c, validFrom, validTo, tt);
     }
 
     /// <summary>
-    /// Soft-delete a historical triple (valid for specific time period).
-    /// Returns true if the triple was found and deleted, false otherwise.
+    /// Retract the version valid for exactly this period (ADR-054 D2).
+    /// Returns true if that live version was found and retracted, false otherwise.
     /// </summary>
-    public bool DeleteHistorical(
+    public bool RetractHistorical(
         ReadOnlySpan<char> primary,
         ReadOnlySpan<char> secondary,
         ReadOnlySpan<char> tertiary,
@@ -272,7 +408,7 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
         long transactionTime = 0,
         ReadOnlySpan<char> graph = default)
     {
-        return Delete(primary, secondary, tertiary,
+        return Retract(primary, secondary, tertiary,
             validFrom.ToUnixTimeMilliseconds(),
             validTo.ToUnixTimeMilliseconds(),
             transactionTime,
@@ -616,6 +752,7 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
         private readonly TemporalQuery _query;
         private TemporalKey _currentKey;
         private bool _currentIsDeleted;
+        private long _currentModifiedAt;
 
         internal TemporalQuadEnumerator(
             TemporalQuadIndex store,
@@ -632,6 +769,7 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
             _query = query;
             _currentKey = default;
             _currentIsDeleted = false;
+            _currentModifiedAt = 0;
         }
 
         public bool MoveNext()
@@ -645,6 +783,7 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
                     ref var entry = ref page->GetEntry(_currentSlot);
                     _currentKey = entry.Key;
                     _currentIsDeleted = entry.IsDeleted;
+                    _currentModifiedAt = entry.ModifiedAt;
 
                     // Check spatial bounds using the index's sort order
                     if (_store.CompareKeys(in _currentKey, in _maxKey) > 0)
@@ -722,7 +861,8 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
                 ValidFrom = _currentKey.ValidFrom,
                 ValidTo = _currentKey.ValidTo,
                 TransactionTime = _currentKey.TransactionTime,
-                IsDeleted = _currentIsDeleted
+                IsDeleted = _currentIsDeleted,
+                ModifiedAt = _currentModifiedAt
             };
         }
 
@@ -842,19 +982,22 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
             ref var prevEntry = ref page->GetEntry(insertPos - 1);
             if (IsSameDimensions(key, prevEntry.Key))
             {
-                // Case A: Exact full-key duplicate (all 7 TemporalKey fields match) — replayed no-op
+                // Case A: the same Add applied again (WAL replay) — same ValidFrom and TransactionTime. ValidTo is not
+                // compared: an End may have shortened it since (ADR-054 D1), and the replayed Add must not bring the
+                // ended version back.
                 if (prevEntry.Key.ValidFrom == key.ValidFrom &&
-                    prevEntry.Key.ValidTo == key.ValidTo &&
                     prevEntry.Key.TransactionTime == key.TransactionTime)
                     return default;
 
-                // Case B: Both entries are "current" (ValidTo is far future) — RDF idempotency
+                // Case B: Both entries are "current" (ValidTo is far future) — RDF idempotency. A retracted entry is
+                // not current and never blocks an insert (ADR-054 D3).
                 const long FarFutureThreshold = 253370764800000L; // Year 9000 in Unix ms
-                if (prevEntry.Key.ValidTo >= FarFutureThreshold && key.ValidTo >= FarFutureThreshold)
+                if (!prevEntry.IsDeleted && prevEntry.Key.ValidTo >= FarFutureThreshold && key.ValidTo >= FarFutureThreshold)
                     return default;
 
-                // Case C: Same dimensions, different temporal key — truncate predecessor, then insert new row
-                HandleTemporalUpdate(page, insertPos - 1, key);
+                // Case C: Same dimensions, different temporal key — truncate a live predecessor, then insert new row
+                if (!prevEntry.IsDeleted)
+                    HandleTemporalUpdate(page, insertPos - 1, key);
                 // Fall through to insert the new committed row
             }
         }
@@ -1236,5 +1379,6 @@ internal struct TemporalQuad
     public long ValidFrom;
     public long ValidTo;
     public long TransactionTime;
-    public bool IsDeleted;      // Soft-delete flag (visible in AllTime queries)
+    public bool IsDeleted;      // Retracted (ADR-054 D2); visible in AllTime queries only
+    public long ModifiedAt;     // Transaction time of the last End or Retract, else of the insert
 }

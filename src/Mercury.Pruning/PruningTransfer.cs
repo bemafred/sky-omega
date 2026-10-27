@@ -441,6 +441,13 @@ internal sealed class PruningTransfer
                 quad.Subject, quad.Predicate, quad.Object,
                 quad.ValidFrom, quad.ValidTo, quad.Graph);
 
+            // PreserveAll keeps a retracted version (recorded in error, ADR-054 D2) as a retracted version: copied as
+            // a plain Add it would hold again in the target.
+            if (quad.IsDeleted)
+                _target.RetractBatched(
+                    quad.Subject, quad.Predicate, quad.Object,
+                    quad.ValidFrom, quad.ValidTo, quad.Graph);
+
             stats.Written++;
             batchCount++;
 

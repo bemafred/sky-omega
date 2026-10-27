@@ -74,7 +74,7 @@ public class SessionMutationFlagTests : IDisposable
         }
         using var store = new QuadStore(dir);
         Assert.False(store.SessionMutated);
-        store.Delete("s", "p", "o", DateTimeOffset.MinValue, DateTimeOffset.MaxValue);
+        store.DeleteCurrent("s", "p", "o");
         Assert.True(store.SessionMutated);
     }
 

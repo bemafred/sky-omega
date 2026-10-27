@@ -12,11 +12,15 @@ history, filtering out specific graphs or predicates, and verifying the result.
 
 ## Why Pruning Matters
 
-Every fact Mercury stores has a valid-time range. When a fact changes, the old
-version is soft-deleted (its valid-to is set) and a new version is written.
-Over time, the store accumulates:
+Every fact Mercury stores has a valid-time range. When a fact is deleted or
+changes, its version ends: its valid-to is set to the time of the change, and
+`AS OF` an earlier time still returns it. A version that was recorded in error
+can instead be retracted (soft-deleted), which removes it from every `AS OF`
+view ([ADR-054](../adrs/mercury/ADR-054-delete-ends-valid-time.md)). Over time,
+the store accumulates:
 
-- Soft-deleted triples that are no longer current
+- Ended versions that are no longer current
+- Retracted (soft-deleted) versions
 - Multiple versions of the same fact
 - Temporary or debug data you no longer need
 - Graphs that have served their purpose
@@ -82,9 +86,9 @@ cli> :prune --history preserve
 
 | Mode | Flag value | What it keeps |
 |------|-----------|---------------|
-| Flatten to current | *(default)* | Only the latest version of each triple |
-| Preserve versions | `preserve` | All versions, but removes soft deletes |
-| Preserve all | `all` | Everything including soft deletes (rewrite only) |
+| Flatten to current | *(default)* | Only the current version of each triple |
+| Preserve versions | `preserve` | All versions, ended ones included, but removes retracted (soft-deleted) ones |
+| Preserve all | `all` | Everything, retracted versions kept as retracted (rewrite only) |
 
 **Flatten to current** produces the most compact store. Use it when you don't
 need historical queries.

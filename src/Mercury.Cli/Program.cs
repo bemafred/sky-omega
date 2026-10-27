@@ -27,6 +27,9 @@ string? convertInput = null;
 string? convertOutput = null;
 bool rebuildIndexes = false;
 bool rebuildMphf = false;
+bool repairDeletes = false;
+bool dryRun = false;
+var restoreEvents = new List<(string Graph, DateTimeOffset DeletedAt)>();
 long? minFreeSpaceGB = null;
 long? loadLimit = null;
 string? metricsOutPath = null;
@@ -94,6 +97,28 @@ for (int i = 0; i < args.Length; i++)
         case "--rebuild-mphf":
             rebuildMphf = true;
             break;
+        case "--repair-deletes":
+            repairDeletes = true;
+            break;
+        case "--dry-run":
+            dryRun = true;
+            break;
+        case "--restore":
+        {
+            // <graph IRI>@<deletion time as the repair report prints it>, e.g. <urn:g>@2026-05-30T23:25:12.345Z.
+            // "(default graph)" names the default graph.
+            var spec = i + 1 < args.Length ? args[++i] : "";
+            var at = spec.LastIndexOf('@');
+            if (at <= 0 || !DateTimeOffset.TryParse(spec[(at + 1)..], System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.AssumeUniversal, out var deletedAt))
+            {
+                Console.Error.WriteLine("Error: --restore requires <graph>@<deletion time>, as printed by --repair-deletes --dry-run.");
+                return 1;
+            }
+            var graphIri = spec[..at];
+            restoreEvents.Add((graphIri == "(default graph)" ? "" : graphIri, deletedAt));
+            break;
+        }
         case "--min-free-space":
             if (i + 1 < args.Length && long.TryParse(args[++i], out var gb))
                 minFreeSpaceGB = gb;
@@ -192,6 +217,9 @@ if (showHelp)
           --convert <in> <out>       Streaming format conversion (no store, exits after)
           --rebuild-indexes          Rebuild secondary indexes, then enter REPL
           --rebuild-mphf             Rebuild MPHF (atoms.mphf + atoms.idx) from sealed SortedAtomStore — recovery after MPHF-only failure
+          --repair-deletes           Repair history erased by deletes before 1.8.23 (ADR-054): each deleted fact ends at its deletion time, then exit. Stop mercury-mcp first.
+          --dry-run                  With --repair-deletes: print every deletion event and what would change, change nothing
+          --restore <graph>@<time>   With --repair-deletes: restore that deletion event instead (the delete was the mistake). Time as the dry run prints it
           --profile <Cognitive|Graph|Reference|Minimal>   Storage profile at store creation (default: Cognitive). Atom-store implementation is derived from profile (Reference→Sorted, others→Hash) — no separate flag. All four ADR-029 profiles ship as distinct concrete index implementations.
           --min-free-space <GB>      Minimum free disk space (default: 100 for bulk, 1 otherwise)
           --limit <N>                Cap triples added (--bulk-load/--load) or emitted (--convert) at N
@@ -394,6 +422,20 @@ if (loadFile != null || bulkLoadFile != null || rebuildIndexes || rebuildMphf)
     if (loadLimit.HasValue)
         Console.WriteLine($"Limit:           {loadLimit.Value:N0} triples");
     Console.WriteLine();
+}
+
+// ADR-054 D7: repair the valid-time history pre-ADR-054 deletes erased, then exit. Runs with no HTTP endpoint and
+// no REPL; the store must not be open in another process (mercury-mcp stopped).
+if (repairDeletes)
+{
+    if (restoreEvents.Count > 0 && dryRun)
+        Console.WriteLine("Dry run: the --restore events are shown with action 'restore'; nothing is changed.");
+    var (ended, restored, left) = pool.Active.RepairDeletes(restoreEvents, dryRun, Console.Out);
+    pool.Dispose();
+    Console.WriteLine(dryRun
+        ? $"Dry run complete: {ended} would end, {restored} would be restored, {left} left."
+        : $"Repair complete: {ended} ended, {restored} restored, {left} left.");
+    return 0;
 }
 
 // Start HTTP server if enabled

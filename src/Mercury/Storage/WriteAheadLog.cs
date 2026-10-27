@@ -406,9 +406,23 @@ internal sealed class WriteAheadLog : IDisposable
 internal enum LogOperation : byte
 {
     Add = 1,
-    Delete = 2,
+
+    /// <summary>
+    /// The version with exactly [ValidFrom, ValidTo) was recorded in error: it is marked IsDeleted (ADR-054 D2).
+    /// Records written before ADR-054 by DeleteCurrent carry [MinValue, MaxValue] and are replayed with their old
+    /// meaning (mark the first overlapping version); a Retract written since always carries the exact interval.
+    /// </summary>
+    Retract = 2,
+
     BeginTx = 3,
     CommitTx = 4,
+
+    /// <summary>
+    /// The version whose ValidFrom is the record's ValidFrom stops holding at the record's ValidTo (ADR-054 D1). The
+    /// record names the version so a replay always applies to the same entry, and applying it twice is a no-op.
+    /// </summary>
+    End = 5,
+
     Checkpoint = 255
 }
 
@@ -464,15 +478,36 @@ internal struct LogRecord
     }
 
     /// <summary>
-    /// Create a log record for a Delete operation.
+    /// Create a log record that ends a version: the version starting at <paramref name="versionValidFrom"/> stops
+    /// holding at <paramref name="end"/> (ADR-054 D1).
     /// </summary>
-    public static LogRecord CreateDelete(long subjectId, long predicateId, long objectId,
+    public static LogRecord CreateEnd(long subjectId, long predicateId, long objectId,
+        DateTimeOffset versionValidFrom, DateTimeOffset end, long graphId,
+        long transactionTimeTicks)
+    {
+        return new LogRecord
+        {
+            Operation = LogOperation.End,
+            GraphId = graphId,
+            SubjectId = subjectId,
+            PredicateId = predicateId,
+            ObjectId = objectId,
+            ValidFromTicks = versionValidFrom.UtcTicks,
+            ValidToTicks = end.UtcTicks,
+            TransactionTimeTicks = transactionTimeTicks
+        };
+    }
+
+    /// <summary>
+    /// Create a log record that retracts the version with exactly [validFrom, validTo) (ADR-054 D2).
+    /// </summary>
+    public static LogRecord CreateRetract(long subjectId, long predicateId, long objectId,
         DateTimeOffset validFrom, DateTimeOffset validTo, long graphId = 0,
         long transactionTimeTicks = 0)
     {
         return new LogRecord
         {
-            Operation = LogOperation.Delete,
+            Operation = LogOperation.Retract,
             GraphId = graphId,
             SubjectId = subjectId,
             PredicateId = predicateId,

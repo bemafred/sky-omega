@@ -367,6 +367,23 @@ internal class UpdateExecutor
         if (toDelete.Count == 0 && (toInsert == null || toInsert.Count == 0))
             return new UpdateResult { Success = true, AffectedCount = 0 };
 
+        // A quad both deleted and inserted holds afterwards, as it did before. Ending it at T and starting it again at
+        // T would put a version boundary into its history that no fact change caused, so it leaves both sets
+        // (ADR-054 D4).
+        if (toInsert is { Count: > 0 } && toDelete.Count > 0)
+        {
+            var inserted = new HashSet<(string s, string p, string o, string? g)>(toInsert);
+            var unchanged = new HashSet<(string s, string p, string o, string? g)>();
+            foreach (var quad in toDelete)
+                if (inserted.Contains(quad))
+                    unchanged.Add(quad);
+            if (unchanged.Count > 0)
+            {
+                toDelete.RemoveAll(unchanged.Contains);
+                toInsert.RemoveAll(unchanged.Contains);
+            }
+        }
+
         _store.BeginBatch();
         try
         {

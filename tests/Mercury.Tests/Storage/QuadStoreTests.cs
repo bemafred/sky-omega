@@ -1212,7 +1212,7 @@ public class QuadStoreTests : IDisposable
     }
 
     [Fact]
-    public void Delete_WithTemporalBounds_DeletesCorrectVersion()
+    public void Retract_WithTemporalBounds_RetractsThatVersion()
     {
         var store = CreateStore();
 
@@ -1221,7 +1221,7 @@ public class QuadStoreTests : IDisposable
 
         store.Add("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", validFrom, validTo);
 
-        var deleted = store.Delete("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", validFrom, validTo);
+        var deleted = store.Retract("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", validFrom, validTo);
 
         Assert.True(deleted);
 
@@ -1355,11 +1355,14 @@ public class QuadStoreTests : IDisposable
     #region QueryHistory / Audit Trail
 
     [Fact]
-    public void QueryEvolution_DeletedTriple_IsVisible()
+    public void QueryEvolution_DeletedTriple_IsVisibleWithClosedInterval()
     {
+        // ADR-054 D1: a delete ends the version (ValidTo = the delete's time); it is not a retraction.
         var store = CreateStore();
+        var before = DateTimeOffset.UtcNow;
         store.AddCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
         store.DeleteCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
+        var after = DateTimeOffset.UtcNow;
 
         store.AcquireReadLock();
         try
@@ -1368,7 +1371,10 @@ public class QuadStoreTests : IDisposable
             try
             {
                 Assert.True(results.MoveNext(), "Deleted triple should be visible in QueryEvolution");
-                Assert.True(results.Current.IsDeleted, "Triple should be marked as deleted");
+                Assert.False(results.Current.IsDeleted, "An ended version is not a retracted one");
+                Assert.InRange(results.Current.ValidTo, before.AddMilliseconds(-1), after.AddMilliseconds(1));
+                Assert.Null(results.Current.RetractedAt);
+                Assert.False(results.MoveNext(), "The delete ends the version; it adds none");
             }
             finally
             {
@@ -1400,16 +1406,20 @@ public class QuadStoreTests : IDisposable
             try
             {
                 var count = 0;
-                var deletedCount = 0;
+                var endedCount = 0;
+                var retractedCount = 0;
                 while (results.MoveNext())
                 {
                     count++;
+                    if (results.Current.ValidTo < DateTimeOffset.MaxValue.AddYears(-1000))
+                        endedCount++;
                     if (results.Current.IsDeleted)
-                        deletedCount++;
+                        retractedCount++;
                 }
 
                 Assert.Equal(3, count); // All three visible in evolution
-                Assert.Equal(1, deletedCount); // One is deleted
+                Assert.Equal(1, endedCount); // The deleted one has a closed valid-time interval (ADR-054 D1)
+                Assert.Equal(0, retractedCount); // and is not retracted
             }
             finally
             {

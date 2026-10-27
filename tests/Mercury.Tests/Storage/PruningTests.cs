@@ -223,6 +223,66 @@ public class PruningTests : IDisposable
     }
 
     [Fact]
+    public void HistoryMode_PreserveVersions_KeepsADeletedFactAsHistory()
+    {
+        // ADR-054 D1: a delete ends the fact, so the version is history, not a retraction.
+        CreateStores();
+        var t0 = DateTimeOffset.UtcNow.AddHours(-2);
+        _source!.Add("<http://example.org/s>", "<http://example.org/status>", "\"open\"", t0, DateTimeOffset.MaxValue);
+        _source.DeleteCurrent("<http://example.org/s>", "<http://example.org/status>", "\"open\"");
+
+        var options = new TransferOptions { HistoryMode = HistoryMode.PreserveVersions };
+        var result = new PruningTransfer(_source, _target!, options).Execute();
+
+        Assert.True(result.Success);
+        Assert.Equal(1, result.TotalWritten);
+        _target!.AcquireReadLock();
+        try
+        {
+            var past = _target.QueryAsOf("<http://example.org/s>", "<http://example.org/status>", "\"open\"", t0.AddHours(1));
+            Assert.True(past.MoveNext(), "The ended fact is in the target's past view");
+            past.Dispose();
+            var now = _target.QueryCurrent("<http://example.org/s>", "<http://example.org/status>", "\"open\"");
+            Assert.False(now.MoveNext(), "and not current");
+            now.Dispose();
+        }
+        finally
+        {
+            _target.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void HistoryMode_PreserveAll_KeepsARetractedVersionRetracted()
+    {
+        CreateStores();
+        var t0 = DateTimeOffset.UtcNow.AddHours(-2);
+        _source!.Add("<http://example.org/s>", "<http://example.org/p>", "\"wrong\"", t0, DateTimeOffset.MaxValue);
+        Assert.True(_source.Retract("<http://example.org/s>", "<http://example.org/p>", "\"wrong\"", t0, DateTimeOffset.MaxValue));
+
+        var options = new TransferOptions { HistoryMode = HistoryMode.PreserveAll };
+        var result = new PruningTransfer(_source, _target!, options).Execute();
+
+        Assert.True(result.Success);
+        Assert.Equal(1, result.TotalWritten);
+        _target!.AcquireReadLock();
+        try
+        {
+            var past = _target.QueryAsOf("<http://example.org/s>", "<http://example.org/p>", "\"wrong\"", t0.AddHours(1));
+            Assert.False(past.MoveNext(), "A retracted version does not hold again in the target");
+            past.Dispose();
+            var history = _target.QueryEvolution("<http://example.org/s>", "<http://example.org/p>", "\"wrong\"");
+            Assert.True(history.MoveNext());
+            Assert.True(history.Current.IsDeleted, "It is kept, as a retraction");
+            history.Dispose();
+        }
+        finally
+        {
+            _target.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
     public void DryRun_NoWrites()
     {
         CreateStores();
