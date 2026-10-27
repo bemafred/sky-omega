@@ -89,6 +89,11 @@ mercury -m                    # Start an in-memory session — REPL + SPARQL HTT
 mercury <store> --bulk-load data.ttl.bz2  # Bulk-load Turtle (or .nt, .nq, .trig, .rdf, .jsonld; .bz2 / plain)
 ```
 
+> **On Linux?** Install .NET from Microsoft (`dotnet-install.sh`), not from the
+> distribution's packages. Ubuntu's build crashes intermittently with
+> `Internal CLR error. (0x80131506)`. See the
+> [Linux .NET runbook](docs/operations/runbook-linux-dotnet-runtime.md).
+
 > **Already cloned without submodules?** Run `./tools/update-submodules.sh` to fetch
 > the W3C conformance test data needed by `dotnet test`.
 

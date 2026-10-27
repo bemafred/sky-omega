@@ -1,0 +1,26 @@
+@prefix sky:   <urn:sky-omega:> .
+@prefix rdfs:  <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix dct:   <http://purl.org/dc/terms/> .
+@prefix xsd:   <http://www.w3.org/2001/XMLSchema#> .
+
+# =============================================================================
+# Platform decision: which .NET build Sky Omega runs on under Linux
+# =============================================================================
+#
+# Load into Mercury when preparing or diagnosing a Linux machine:
+#   LOAD <file:///path/to/docs/knowledge/decisions/linux-dotnet-runtime.ttl>
+#     INTO GRAPH <urn:sky-omega:knowledge:linux-dotnet-runtime>
+#
+# Status: Validated by an A/B on the Linux test machine, 2026-10-27.
+# =============================================================================
+
+sky:decision-linux-microsoft-dotnet a sky:Decision ;
+    rdfs:label "On Linux, run Sky Omega on Microsoft's .NET build, not the distro package" ;
+    rdfs:comment "Install .NET with dotnet-install.sh, Microsoft's tarball, Microsoft's container images (mcr.microsoft.com/dotnet) or a self-contained publish from a Microsoft SDK. Set both PATH (the dotnet CLI) and DOTNET_ROOT (the apphosts: global tools, MCP servers, MTP test executables). Without DOTNET_ROOT the apphosts fall back to /etc/dotnet/install_location, which Ubuntu points at its own build. Check every machine and image: 'ldd <runtime>/libcoreclr.so | grep unwind' must print nothing. Applies to developer machines, test machines, CI, production servers and containers (VGR included). Rejected: the distro package (apt install dotnet-sdk-10.0 / dotnet-runtime-10.0), and any runtime whose libcoreclr.so links the system libunwind." ;
+    sky:status "accepted" ;
+    sky:decidedBy <urn:sky-omega:concern:linux-deployment> ;
+    sky:rationale "Ubuntu 26.04's dotnet-runtime-10.0 10.0.13 links the system libunwind (libunwind8 1.8.3) and intermittently aborts with 'Internal CLR error. (0x80131506)' in IL_Throw -> SoftwareExceptionFrame::Init -> EEPolicy::HandleFatalError under parallel exception-heavy load. A same-version A/B (tools/throwstress.cs, 20 interleaved 30 s pairs) crashed Ubuntu's build 5 of 20 times and Microsoft's 0 of 20 (p about 0.024); Ubuntu's build also threw about 32% fewer exceptions per second. Real incidents hit the same path: dotnet pack and a test host. Not a Sky Omega defect." ;
+    dct:date "2026-10-27"^^xsd:date ;
+    rdfs:seeAlso <https://bugs.launchpad.net/bugs/2143357> ;
+    rdfs:seeAlso <https://github.com/bemafred/sky-omega/blob/main/docs/operations/runbook-linux-dotnet-runtime.md> ,
+                 <https://github.com/bemafred/sky-omega/blob/main/docs/validations/ubuntu-dotnet-libunwind-2026-10-27.md> .

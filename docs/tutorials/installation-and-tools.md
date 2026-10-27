@@ -219,6 +219,16 @@ to make it permanent.
 The .NET SDK installer typically adds `%USERPROFILE%\.dotnet\tools` to PATH.
 If not, add it manually via System Properties > Environment Variables.
 
+### `Internal CLR error. (0x80131506)` on Linux
+
+The process dies with `Fatal error. Internal CLR error. (0x80131506)` and exit
+code 134, intermittently. It happens during `dotnet pack` in the install
+script, in a test host, or in a running tool. It means the .NET runtime is a
+distribution build that links the system `libunwind`, such as Ubuntu's
+`dotnet-runtime-10.0`. Switch to Microsoft's build, set `PATH` and
+`DOTNET_ROOT`, and reinstall the tools. The steps are in the
+[Linux .NET runbook](../operations/runbook-linux-dotnet-runtime.md).
+
 ### Port conflicts
 
 If Mercury fails to start with a port error, another process is using the

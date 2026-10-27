@@ -3,7 +3,10 @@
 A 30-minute walkthrough from clone to first query. By the end you will have
 Mercury installed, a working SPARQL REPL, and data loaded from a file.
 
-> **Prerequisites:** .NET 10 SDK and git.
+> **Prerequisites:** .NET 10 SDK and git. On Linux, install the SDK from
+> Microsoft (`dotnet-install.sh`), not from the distribution's packages, and set
+> `DOTNET_ROOT` as well as `PATH`. See the
+> [Linux .NET runbook](../operations/runbook-linux-dotnet-runtime.md).
 
 ---
 
