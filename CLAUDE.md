@@ -292,7 +292,7 @@ Sky (Agent) → James (Orchestration) → Lucy (Semantic Memory) → Mercury (St
 - **Mercury** - B+Tree indexes, append-only stores, memory-mapped files
 - **Minerva** - Tensor inference (BCL only), HW interop in C/C++
 
-For the vision, methodology (EEE), and broader context, see [docs/architecture/sky-omega-convergence.md](docs/architecture/sky-omega-convergence.md).
+For the vision, methodology (EEE), and broader context, see [docs/architecture/narratives/sky-omega-convergence.md](docs/architecture/narratives/sky-omega-convergence.md).
 
 ### Technical Reference
 
