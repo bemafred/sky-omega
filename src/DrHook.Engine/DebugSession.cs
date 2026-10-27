@@ -126,12 +126,13 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
     // Per-module Portable PDB readers, opened on demand for source mapping; disposed on Dispose.
     private readonly Dictionary<string, SymbolReader?> _symbols = new(StringComparer.Ordinal);
 
-    // ADR-011 D2 / finding 75: for a POSIX Owned launch the debuggee's stdout/stderr are redirected
+    // ADR-011 D2 / finding 75 / probe 64: for an Owned launch the debuggee's stdout/stderr are redirected
     // to these DrHook-owned pipe read ends; background threads drain them so a verbose debuggee can't
-    // fill the pipe and block on write, and its console output never reaches the inherited (under an
-    // MCP stdio server, JSON-RPC) fds. -1 when not a POSIX Owned launch (Attach, or the Windows path).
-    // D3 will route the drained bytes to the IDebugEventSink instead of discarding them.
+    // fill the pipe and block on write, and its console output never reaches the host's (under an MCP
+    // stdio server, JSON-RPC) streams. POSIX holds file descriptors (-1 when absent), Windows pipe
+    // handles (null when absent); neither is set for Attach. D3 routes the drained text to the sink.
     private int _consoleStdoutFd = -1, _consoleStderrFd = -1;
+    private Microsoft.Win32.SafeHandles.SafeFileHandle? _consoleStdoutPipe, _consoleStderrPipe;
     private Thread? _consoleStdoutDrain, _consoleStderrDrain;
 
     private DebugSession(int processId, DbgShim dbgShim, CallbackPump pump, ManagedCallbackHost callback,
@@ -292,6 +293,7 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
         nint pUnknown = 0;
         Process? targetProcess = null;
         int stdoutFd = -1, stderrFd = -1;
+        WindowsSpawnedProcess? windowsChild = null;
         // For a single-file app the launched program IS the apphost, so its directory holds the
         // sidecar <module>.pdb. (For `dotnet exec X.dll` program is the muxer — but those modules are
         // on disk, so the SymbolsFor sidecar fallback never fires and this value goes unused.)
@@ -319,29 +321,33 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
                 return session;
             }
 
-            // Windows: dbgshim CreateProcessForLaunch — the child inherits the debugger's fds. Stdio
-            // isolation for the Windows launch path (CreateProcess CREATE_SUSPENDED + STARTUPINFO) is
-            // ADR-011 D2 follow-up; macOS-arm64 is the substrate's exercised platform today.
-            // Windows env override is not yet wired (the CreateProcessForLaunch env block lands with the
-            // Phase 9 Windows launch hardening). Fail explicitly rather than silently inheriting — silent
-            // drop is the exact gap this change closes. POSIX (macOS/Linux) applies env above.
-            if (env is { Count: > 0 })
-                throw new PlatformNotSupportedException(
-                    "Launch env override is not yet wired on the Windows launch path (Phase 9 — CreateProcessForLaunch env block). POSIX supports it.");
-            string commandLine = BuildCommandLine(program, args);
+            // Windows (ADR-011 D2 on Windows / probe 64): OWN the spawn as on POSIX. dbgshim's
+            // CreateProcessForLaunch let the debuggee share the host's stdin/stdout/stderr — probe 64 saw it
+            // write to the MCP channel and read the client's request line. WindowsSpawn gives it NUL stdin and
+            // DrHook-owned pipes, and applies env overrides in the same CreateProcess call.
             ThrowIfFailed(
-                dbgShim.LaunchWithDebugger(commandLine, workingDirectory, TimeSpan.FromSeconds(30), out uint pid, out pUnknown),
-                "DbgShim.LaunchWithDebugger");
-            try { targetProcess = Process.GetProcessById((int)pid); } catch (ArgumentException) { /* exited already */ }
-            return FromCordbg(dbgShim, sink, (int)pid, pUnknown, ownsTarget: true, targetProcess: targetProcess,
-                naturalExitTimeout: naturalExitTimeout ?? DefaultNaturalExitTimeout, entryModule: entryModule,
-                imageBaseDir: launchedImageDir ?? ImageDirOf(targetProcess), targetRuntimeMajor: targetRuntimeMajor);
+                dbgShim.LaunchWithDebuggerWindows(program, args, workingDirectory, env, TimeSpan.FromSeconds(30),
+                    out windowsChild, out pUnknown),
+                "DbgShim.LaunchWithDebuggerWindows");
+            try { targetProcess = Process.GetProcessById(windowsChild!.ProcessId); } catch (ArgumentException) { /* exited already */ }
+            DebugSession windowsSession = FromCordbg(dbgShim, sink, windowsChild!.ProcessId, pUnknown, ownsTarget: true,
+                targetProcess: targetProcess, naturalExitTimeout: naturalExitTimeout ?? DefaultNaturalExitTimeout,
+                entryModule: entryModule, imageBaseDir: launchedImageDir ?? ImageDirOf(targetProcess), targetRuntimeMajor: targetRuntimeMajor);
+            windowsSession.BeginConsoleDrain(windowsChild.StdoutRead, windowsChild.StderrRead);
+            windowsChild.Dispose(); // the process and thread handles; the session owns the pipe read ends now
+            return windowsSession;
         }
         catch
         {
             try { if (targetProcess is { HasExited: false }) targetProcess.Kill(); } catch { /* best effort */ }
             if (stdoutFd >= 0) Interop.PosixSpawn.Close(stdoutFd);
             if (stderrFd >= 0) Interop.PosixSpawn.Close(stderrFd);
+            if (windowsChild is not null)
+            {
+                windowsChild.StdoutRead.Dispose();
+                windowsChild.StderrRead.Dispose();
+                windowsChild.Dispose();
+            }
             if (pUnknown != 0) Marshal.Release(pUnknown);
             dbgShim.Dispose();
             targetProcess?.Dispose();
@@ -349,16 +355,52 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
         }
     }
 
-    /// <summary>Start background discard-drains on a POSIX launch's redirected stdout/stderr read ends
+    /// <summary>Start background drains on a POSIX launch's redirected stdout/stderr read ends
     /// (ADR-011 D2). Draining is mandatory, not cosmetic: an undrained pipe fills (~64 KB) and the
-    /// debuggee then blocks on its next write, stalling the session. Bytes are discarded today; D3
-    /// routes them to the IDebugEventSink. No-op when no console pipes were created (fds = -1).</summary>
+    /// debuggee then blocks on its next write, stalling the session. D3 routes the text to the
+    /// IDebugEventSink. No-op when no console pipes were created (fds = -1).</summary>
     internal void BeginConsoleDrain(int stdoutFd, int stderrFd)
     {
         _consoleStdoutFd = stdoutFd;
         _consoleStderrFd = stderrFd;
-        if (stdoutFd >= 0) { _consoleStdoutDrain = new Thread(() => DrainToSink(stdoutFd, ConsoleStream.Stdout)) { IsBackground = true, Name = "drhook-console-out" }; _consoleStdoutDrain.Start(); }
-        if (stderrFd >= 0) { _consoleStderrDrain = new Thread(() => DrainToSink(stderrFd, ConsoleStream.Stderr)) { IsBackground = true, Name = "drhook-console-err" }; _consoleStderrDrain.Start(); }
+        if (stdoutFd >= 0) StartConsoleDrain(buffer => ReadFd(stdoutFd, buffer), ConsoleStream.Stdout);
+        if (stderrFd >= 0) StartConsoleDrain(buffer => ReadFd(stderrFd, buffer), ConsoleStream.Stderr);
+    }
+
+    /// <summary>The Windows counterpart of <see cref="BeginConsoleDrain(int, int)"/>: the session takes
+    /// ownership of the two pipe read ends and drains them the same way (probe 64).</summary>
+    internal void BeginConsoleDrain(Microsoft.Win32.SafeHandles.SafeFileHandle stdoutPipe, Microsoft.Win32.SafeHandles.SafeFileHandle stderrPipe)
+    {
+        _consoleStdoutPipe = stdoutPipe;
+        _consoleStderrPipe = stderrPipe;
+        var stdout = new FileStream(stdoutPipe, FileAccess.Read, bufferSize: 0);
+        var stderr = new FileStream(stderrPipe, FileAccess.Read, bufferSize: 0);
+        StartConsoleDrain(buffer => ReadPipe(stdout, buffer), ConsoleStream.Stdout);
+        StartConsoleDrain(buffer => ReadPipe(stderr, buffer), ConsoleStream.Stderr);
+    }
+
+    private void StartConsoleDrain(Func<byte[], int> read, ConsoleStream stream)
+    {
+        var thread = new Thread(() => DrainToSink(read, stream))
+        {
+            IsBackground = true,
+            Name = stream == ConsoleStream.Stdout ? "drhook-console-out" : "drhook-console-err",
+        };
+        if (stream == ConsoleStream.Stdout) _consoleStdoutDrain = thread; else _consoleStderrDrain = thread;
+        thread.Start();
+    }
+
+    private static unsafe int ReadFd(int fd, byte[] buffer)
+    {
+        fixed (byte* p = buffer) return (int)Interop.PosixSpawn.Read(fd, p, buffer.Length);
+    }
+
+    // A pipe whose last write end closed (the target exited) reads as 0; so does a handle closed at Dispose.
+    private static int ReadPipe(FileStream pipe, byte[] buffer)
+    {
+        try { return pipe.Read(buffer, 0, buffer.Length); }
+        catch (IOException) { return 0; }
+        catch (ObjectDisposedException) { return 0; }
     }
 
     // ADR-011 D3: route the debuggee's redirected console output to the sink as OnConsoleOutput
@@ -368,21 +410,18 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
     // regardless (an undrained pipe fills and the debuggee blocks), so a misbehaving sink can't
     // stall it — OnConsoleOutput throws are swallowed (the contract says sinks must not throw;
     // this is defense in depth on the drain thread).
-    private unsafe void DrainToSink(int fd, ConsoleStream stream)
+    private void DrainToSink(Func<byte[], int> read, ConsoleStream stream)
     {
         byte[] buf = new byte[4096];
         char[] chars = new char[4096];
         System.Text.Decoder decoder = System.Text.Encoding.UTF8.GetDecoder();
-        fixed (byte* p = buf)
+        for (int n; (n = read(buf)) > 0;)
         {
-            for (nint n; (n = Interop.PosixSpawn.Read(fd, p, buf.Length)) > 0;)
-            {
-                int charCount = decoder.GetChars(buf, 0, (int)n, chars, 0, flush: false);
-                if (charCount == 0) continue;
-                var record = new ConsoleOutputRecord(DateTimeOffset.UtcNow, stream, new string(chars, 0, charCount));
-                try { _sink.OnConsoleOutput(record); }
-                catch { /* sink must not throw; swallow so the drain keeps reading (else the pipe fills and the debuggee blocks) */ }
-            }
+            int charCount = decoder.GetChars(buf, 0, n, chars, 0, flush: false);
+            if (charCount == 0) continue;
+            var record = new ConsoleOutputRecord(DateTimeOffset.UtcNow, stream, new string(chars, 0, charCount));
+            try { _sink.OnConsoleOutput(record); }
+            catch { /* sink must not throw; swallow so the drain keeps reading (else the pipe fills and the debuggee blocks) */ }
         }
     }
 
@@ -492,19 +531,6 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
 
     /// <summary>Quote a token if it contains spaces/quotes; dbgshim's command-line parser splits on
     /// whitespace with shell-style quoting.</summary>
-    private static string BuildCommandLine(string program, IReadOnlyList<string> args)
-    {
-        System.Text.StringBuilder sb = new();
-        sb.Append(Quote(program));
-        foreach (string arg in args) { sb.Append(' '); sb.Append(Quote(arg)); }
-        return sb.ToString();
-    }
-
-    private static string Quote(string s)
-        => s.Length == 0 || s.IndexOfAny(new[] { ' ', '"', '\t' }) >= 0
-            ? "\"" + s.Replace("\"", "\\\"") + "\""
-            : s;
-
     /// <summary>Block until the debuggee next stops (breakpoint, step complete, exception, or
     /// <c>Debugger.Break</c>), up to <paramref name="timeout"/>. Returns null on timeout (still
     /// running); a <see cref="StopReason.ProcessExited"/> result means the session is over.
@@ -2429,6 +2455,8 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
         // still-pending read and the brief join lets them exit. No-op when no console drain was started.
         if (_consoleStdoutFd >= 0) { Interop.PosixSpawn.Close(_consoleStdoutFd); _consoleStdoutFd = -1; }
         if (_consoleStderrFd >= 0) { Interop.PosixSpawn.Close(_consoleStderrFd); _consoleStderrFd = -1; }
+        _consoleStdoutPipe?.Dispose();
+        _consoleStderrPipe?.Dispose();
         _consoleStdoutDrain?.Join(TimeSpan.FromMilliseconds(200));
         _consoleStderrDrain?.Join(TimeSpan.FromMilliseconds(200));
 

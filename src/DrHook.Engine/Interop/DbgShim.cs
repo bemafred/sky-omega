@@ -18,24 +18,26 @@ internal sealed unsafe class DbgShim : IDisposable
     private const int E_FAIL = unchecked((int)0x80004005);
     private const int E_INSUFFICIENT_BUFFER = unchecked((int)0x8007007A);
 
-    private nint _lib;  // not readonly — Dispose zeros it after Free (ENG-DBG-D)
+    // FINDING 98 — libdbgshim is loaded ONCE per process and never freed. Its embedded PAL registers pthread
+    // keys whose destructors live inside the library, and gives every thread that calls into it a value for
+    // them. Freeing the library (as Dispose did) leaves those keys registered: when such a thread later exits,
+    // glibc calls a destructor in unmapped memory and the whole host dies with SIGSEGV — on Linux x64 and arm64,
+    // deterministically (probe 65), and in ~1 of 8 integration runs on omega-ubuntu. A debugger host keeps its
+    // debugging shim loaded for its lifetime; so does DrHook.
+    private static readonly object s_libLock = new();
+    private static nint s_lib;
+    private static string? s_libPath;
+
     private readonly delegate* unmanaged[Cdecl]<uint, char*, char*, uint, uint*, int> _createVersionStringFromModule;
     private readonly delegate* unmanaged[Cdecl]<int, char*, nint*, int> _createDebuggingInterfaceFromVersionEx;
     // Launch path (RegisterForRuntimeStartup flow).
-    private readonly delegate* unmanaged[Cdecl]<char*, int, nint, char*, uint*, nint*, int> _createProcessForLaunch;
-    private readonly delegate* unmanaged[Cdecl]<nint, int> _resumeProcess;
-    private readonly delegate* unmanaged[Cdecl]<nint, int> _closeResumeHandle;
     private readonly delegate* unmanaged[Cdecl]<uint, nint, nint, nint*, int> _registerForRuntimeStartup;
     private readonly delegate* unmanaged[Cdecl]<nint, int> _unregisterForRuntimeStartup;
 
     private DbgShim(nint lib)
     {
-        _lib = lib;
         _createVersionStringFromModule = (delegate* unmanaged[Cdecl]<uint, char*, char*, uint, uint*, int>)NativeLibrary.GetExport(lib, "CreateVersionStringFromModule");
         _createDebuggingInterfaceFromVersionEx = (delegate* unmanaged[Cdecl]<int, char*, nint*, int>)NativeLibrary.GetExport(lib, "CreateDebuggingInterfaceFromVersionEx");
-        _createProcessForLaunch = (delegate* unmanaged[Cdecl]<char*, int, nint, char*, uint*, nint*, int>)NativeLibrary.GetExport(lib, "CreateProcessForLaunch");
-        _resumeProcess = (delegate* unmanaged[Cdecl]<nint, int>)NativeLibrary.GetExport(lib, "ResumeProcess");
-        _closeResumeHandle = (delegate* unmanaged[Cdecl]<nint, int>)NativeLibrary.GetExport(lib, "CloseResumeHandle");
         _registerForRuntimeStartup = (delegate* unmanaged[Cdecl]<uint, nint, nint, nint*, int>)NativeLibrary.GetExport(lib, "RegisterForRuntimeStartup");
         _unregisterForRuntimeStartup = (delegate* unmanaged[Cdecl]<nint, int>)NativeLibrary.GetExport(lib, "UnregisterForRuntimeStartup");
     }
@@ -43,12 +45,20 @@ internal sealed unsafe class DbgShim : IDisposable
     /// <summary>Locate and load libdbgshim. Throws if it cannot be found or loaded.</summary>
     public static DbgShim Load()
     {
-        string? path = Resolve(out string searched);
-        if (path is null)
-            throw new DllNotFoundException(
-                "libdbgshim not found. It left the .NET runtime install at .NET 7+; set DBGSHIM_PATH " +
-                "or restore the Microsoft.Diagnostics.DbgShim native-asset NuGet. Searched:\n" + searched);
-        return new DbgShim(NativeLibrary.Load(path));
+        lock (s_libLock)
+        {
+            if (s_lib == 0)
+            {
+                string? path = Resolve(out string searched);
+                if (path is null)
+                    throw new DllNotFoundException(
+                        "libdbgshim not found. It left the .NET runtime install at .NET 7+; set DBGSHIM_PATH " +
+                        "or restore the Microsoft.Diagnostics.DbgShim native-asset NuGet. Searched:\n" + searched);
+                s_lib = NativeLibrary.Load(path);
+                s_libPath = path;
+            }
+            return new DbgShim(s_lib);
+        }
     }
 
     /// <summary>Run the attach flow for <paramref name="pid"/> and produce an <c>IUnknown*</c> that QIs to
@@ -252,56 +262,43 @@ internal sealed unsafe class DbgShim : IDisposable
         return os + "-" + arch;
     }
 
-    /// <summary>Launch a process under debug control using dbgshim's RegisterForRuntimeStartup flow:
-    /// (1) <c>CreateProcessForLaunch</c> spawns the process SUSPENDED so it can't run before we
-    /// register; (2) <c>RegisterForRuntimeStartup</c> installs the static callback that delivers an
-    /// <c>ICorDebug</c> <c>IUnknown*</c> once the runtime has initialized; (3) <c>ResumeProcess</c>
-    /// + <c>CloseResumeHandle</c> let the process run; (4) we wait on the startup event. On success
-    /// <paramref name="pid"/> + <paramref name="pUnknown"/> are non-zero; the caller still calls
-    /// <c>DebugActiveProcess</c> on the cordbg to complete the attach (same as the Attach path from
-    /// <see cref="CreateCordbForProcess"/>'s output onward).</summary>
-    public int LaunchWithDebugger(string commandLine, string? workingDirectory, TimeSpan startupTimeout,
-        out uint pid, out nint pUnknown)
+    /// <summary>Windows launch with ISOLATED stdio (ADR-011 D2 on Windows, probe 64). dbgshim's own
+    /// <c>CreateProcessForLaunch</c> takes no stdio handles, so its child shared the host's stdin, stdout and
+    /// stderr — under an MCP stdio server, the JSON-RPC channel (probe 64 saw the debuggee read the client's
+    /// request line). Instead <see cref="WindowsSpawn"/> creates the target SUSPENDED with stdin = NUL and
+    /// stdout/stderr = DrHook-owned pipes; <c>RegisterForRuntimeStartup</c> is armed while it is suspended; then
+    /// its main thread is resumed. On success <paramref name="child"/> is set and the caller owns it — the pipe read
+    /// ends to drain, the handles to dispose; the caller still <c>DebugActiveProcess</c>es to complete the attach.</summary>
+    public int LaunchWithDebuggerWindows(string program, IReadOnlyList<string> args, string? workingDirectory,
+        IReadOnlyDictionary<string, string>? env, TimeSpan startupTimeout, out WindowsSpawnedProcess? child, out nint pUnknown)
     {
-        pid = 0;
+        child = null;
         pUnknown = 0;
-
-        nint resumeHandle = 0;
-        uint launchedPid = 0;
-        int hr;
-        fixed (char* pCmd = commandLine)
-        fixed (char* pCwd = workingDirectory)
-        {
-            // CreateProcessForLaunch(cmdLine, suspend=TRUE, env=null/inherit, cwd, &pid, &resumeHandle)
-            hr = _createProcessForLaunch(pCmd, 1, 0, pCwd, &launchedPid, &resumeHandle);
-            if (hr < 0) return hr;
-        }
-        pid = launchedPid;
+        WindowsSpawnedProcess spawned;
+        try { spawned = WindowsSpawn.SpawnSuspendedRedirected(program, args, workingDirectory, env); }
+        catch (System.ComponentModel.Win32Exception ex) { return ex.NativeErrorCode == 0 ? E_FAIL : unchecked((int)(0x80070000u | (uint)ex.NativeErrorCode)); }
 
         var ctx = new StartupContext();
         GCHandle handle = GCHandle.Alloc(ctx);
         nint pContext = GCHandle.ToIntPtr(handle);
-
         nint unregisterToken = 0;
+        bool handedOver = false;
         try
         {
             nint pCallback = (nint)(delegate* unmanaged[Cdecl]<nint, nint, int, void>)&StartupCallbackThunk;
-            hr = _registerForRuntimeStartup(launchedPid, pCallback, pContext, &unregisterToken);
-            if (hr < 0)
-            {
-                _closeResumeHandle(resumeHandle);
-                return hr;
-            }
+            int hr = _registerForRuntimeStartup((uint)spawned.ProcessId, pCallback, pContext, &unregisterToken);
+            if (hr < 0) return hr;
 
-            // The process is still suspended — release it now that the callback is armed.
-            _resumeProcess(resumeHandle);
-            _closeResumeHandle(resumeHandle);
+            // Callback armed — release the suspended child. CREATE_SUSPENDED guaranteed the CLR could not have
+            // initialized before now, so the runtime-startup callback is not missed.
+            WindowsSpawn.Resume(spawned);
 
-            if (!ctx.Signaled.Wait(startupTimeout))
-                return E_FAIL; // runtime didn't initialize within the budget
-
+            if (!ctx.Signaled.Wait(startupTimeout)) return E_FAIL;
             if (ctx.HResult < 0) return ctx.HResult;
+
             pUnknown = ctx.PCordb;
+            child = spawned;
+            handedOver = true;
             return 0;
         }
         finally
@@ -309,12 +306,19 @@ internal sealed unsafe class DbgShim : IDisposable
             if (unregisterToken != 0) _unregisterForRuntimeStartup(unregisterToken);
             handle.Free();
             ctx.Signaled.Dispose();
+            if (!handedOver)
+            {
+                WindowsSpawn.Terminate(spawned);
+                spawned.StdoutRead.Dispose();
+                spawned.StderrRead.Dispose();
+                spawned.Dispose();
+            }
         }
     }
 
-    /// <summary>POSIX launch with ISOLATED stdio (ADR-011 D2 / finding 75). Unlike
-    /// <see cref="LaunchWithDebugger"/> — which uses dbgshim's <c>CreateProcessForLaunch</c> and so
-    /// makes the child inherit the debugger process's stdin/stdout/stderr — this posix_spawnp's the
+    /// <summary>POSIX launch with ISOLATED stdio (ADR-011 D2 / finding 75). Unlike dbgshim's own
+    /// <c>CreateProcessForLaunch</c> — which takes no stdio handles, so its child shares the debugger
+    /// process's stdin/stdout/stderr — this posix_spawnp's the
     /// target SUSPENDED with stdout/stderr redirected to DrHook-owned pipes, arms
     /// <c>RegisterForRuntimeStartup</c>, then <c>SIGCONT</c>s it. The launched debuggee's console
     /// output therefore cannot reach the parent's fds, which under an MCP stdio server are the
@@ -396,14 +400,12 @@ internal sealed unsafe class DbgShim : IDisposable
         }
     }
 
+    /// <summary>The path libdbgshim was loaded from in this process, or null before the first <see cref="Load"/>.</summary>
+    internal static string? LoadedPath { get { lock (s_libLock) return s_libPath; } }
+
+    /// <summary>Ends this session's use of dbgshim. The library itself stays loaded for the process's lifetime
+    /// (finding 98), so there is nothing to free — and no double-<c>dlclose</c> to guard against (finding 54 T7).</summary>
     public void Dispose()
     {
-        // Zero _lib after Free so a concurrent Dispose can't double-dlclose
-        // (T7 in finding 54; macOS dlclose-on-already-freed is undefined).
-        if (_lib != 0)
-        {
-            NativeLibrary.Free(_lib);
-            _lib = 0;
-        }
     }
 }

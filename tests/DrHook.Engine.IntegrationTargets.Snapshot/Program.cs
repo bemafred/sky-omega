@@ -8,7 +8,24 @@
 
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Threading;
+using System.Threading.Tasks;
+
+// `console-streams <report>`: the ConsoleIsolationTest mode (ADR-011 D2, probe 64). Touches all three standard
+// streams — a marker on stdout and on stderr, then up to 1.5 s to read a line from stdin — and records what stdin
+// gave in the report file, a channel independent of the streams under test.
+if (args is ["console-streams", string reportPath])
+{
+    Console.WriteLine("CONSOLE_ISOLATION_STDOUT");
+    Console.Out.Flush();
+    Console.Error.WriteLine("CONSOLE_ISOLATION_STDERR");
+    Console.Error.Flush();
+    Task<string?> read = Task.Run(() => Console.In.ReadLine());
+    string stdin = read.Wait(1500) ? (read.Result ?? "EOF") : "NOTHING_WITHIN_1500MS";
+    File.WriteAllText(reportPath, $"stdin={stdin}\n");
+    return;
+}
 
 var worker = new Worker();
 const string alphabet = "abcdefghij";

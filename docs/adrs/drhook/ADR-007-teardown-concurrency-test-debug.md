@@ -172,9 +172,9 @@ The ADR-006 Validation gate closes here, not earlier. Phase 2's meta-probe is th
 Time-budgeted separately. Validates the substrate-correctness probe corpus on Linux + Windows; per-platform discoveries become new probes. ADR-008's Phase 0.1 (probes 49–54 signal-disposition ground truth across platforms) is folded into this campaign. NCrunch validation deferred until concrete use case + Windows environment converge (Phase 6 closure note).
 
 - [ ] Probes 02–40 + 41–46 (Phase 1/2) + 47–56 (ADR-008 substrate behavior) on Linux/x64. Phase 3 superseded (probe numbers 57–59 freed); Phases 4 + 5 + 6 closed (probe numbers 60–73 freed).
-- [ ] Same probe set on Linux/arm64.
+- [ ] Same probe set on Linux/arm64. *(Started 2026-10-26 on omega-ubuntu: the integration suite passes, but the test host crashed in some runs. Freeing libdbgshim left its TLS destructors registered in unmapped memory, [finding 98](../../../poc/drhook-engine/findings/98-dbgshim-unload-tls-destructor-segv.md), fixed; a second crash in an mscordbi thread is open.)*
 - [ ] Same probe set on Windows/x64.
-- [ ] Same probe set on Windows/arm64. *(Started 2026-10-26 on omega-windows, [finding 96](../../../poc/drhook-engine/findings/96-windows-arm64-first-run.md): the engine worked on first contact; the integration harness gained a Windows spawn path, with a Job Object in place of the process group; integration suite 16 passed / 2 skipped / 0 failed in 3 of 3 runs. Probe corpus, MCP server, launch stdio isolation, launch env and RequestExit on Windows still open.)*
+- [ ] Same probe set on Windows/arm64. *(Started 2026-10-26 on omega-windows, [finding 96](../../../poc/drhook-engine/findings/96-windows-arm64-first-run.md): the engine worked on first contact; the integration harness gained a Windows spawn path, with a Job Object in place of the process group; integration suite 16 passed / 2 skipped / 0 failed in 3 of 3 runs. Launch stdio isolation and launch env followed the same day, [finding 97](../../../poc/drhook-engine/findings/97-windows-launch-stdio-isolation.md): the Windows launch owns its spawn, as POSIX does. Probe corpus, MCP server and RequestExit on Windows still open.)*
 - [ ] Per-platform findings documented; any new probes from discoveries integrated into the substrate.
 - [ ] Phase 8 CI extended to all four platforms.
 
