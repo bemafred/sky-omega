@@ -228,8 +228,8 @@ internal ref partial struct QueryResults
         {
             int hash = (int)2166136261; // FNV offset basis
 
-            // If SELECT * or no explicit variables, hash all bindings
-            if (_selectClause.SelectAll || _selectClause.ProjectedVariableCount == 0)
+            // SELECT *, or a clause projecting nothing by name: hash all bindings
+            if (_selectClause.SelectAll || (_selectClause.ProjectedVariableCount == 0 && _selectClause.AggregateCount == 0))
             {
                 for (int i = 0; i < _bindingTable.Count; i++)
                 {
@@ -261,6 +261,21 @@ internal ref partial struct QueryResults
                         }
                         hash = (hash ^ '|') * 16777619; // Separator between bindings
                     }
+                }
+
+                // ... and the aliases of projected expressions, e.g. ?n in (COUNT(?s) AS ?n)
+                for (int i = 0; i < _selectClause.AggregateCount; i++)
+                {
+                    var agg = _selectClause.GetAggregate(i);
+                    if (agg.AliasLength == 0)
+                        continue;
+                    var bindingIdx = _bindingTable.FindBinding(_source.Slice(agg.AliasStart, agg.AliasLength));
+                    if (bindingIdx >= 0)
+                    {
+                        foreach (var ch in _bindingTable.GetString(bindingIdx))
+                            hash = (hash ^ ch) * 16777619;
+                    }
+                    hash = (hash ^ '|') * 16777619;
                 }
             }
 

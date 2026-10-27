@@ -25,7 +25,7 @@ internal ref partial struct QueryResults
         }
 
         // Check if we've hit the limit
-        if (_limit > 0 && _returned >= _limit)
+        if (_limitOffset.LimitReached(_returned))
             return false;
 
         // Iterate through sorted results
@@ -77,27 +77,31 @@ internal ref partial struct QueryResults
                     continue; // Matches MINUS, skip this row
             }
 
-            // Apply DISTINCT - skip duplicate rows
-            // This must happen after loading bindings so we can compute the hash
-            if (_distinct)
-            {
-                var hash = ComputeBindingsHash();
-                if (!_seenHashes!.Add(hash))
-                    continue; // Duplicate, try next row
-            }
-
-            // Apply OFFSET
-            if (_skipped < _offset)
-            {
-                _skipped++;
+            if (!KeepAfterDistinctAndOffset())
                 continue;
-            }
-
-            _returned++;
             return true;
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// The last solution modifiers, in the order SPARQL 1.1 §18.2.5 applies them: DISTINCT, then OFFSET. (LIMIT is checked
+    /// before each row is produced.) Both presentations, ordered rows and grouped rows, call this once per row that every
+    /// earlier modifier kept, with the row in the binding table. True when the row is returned; false when DISTINCT drops
+    /// it as a repeat or OFFSET skips it.
+    /// </summary>
+    private bool KeepAfterDistinctAndOffset()
+    {
+        if (_distinct && !_seenHashes!.Add(ComputeBindingsHash()))
+            return false;
+        if (_skipped < _limitOffset.Offset)
+        {
+            _skipped++;
+            return false;
+        }
+        _returned++;
+        return true;
     }
 
     /// <summary>
@@ -239,13 +243,6 @@ internal ref partial struct QueryResults
                     continue;
             }
 
-            if (_distinct)
-            {
-                var hash = ComputeBindingsHash();
-                if (!_seenHashes!.Add(hash))
-                    continue;
-            }
-
             return true;
         }
     }
@@ -265,19 +262,12 @@ internal ref partial struct QueryResults
         }
 
         // Check if we've hit the limit
-        if (_limit > 0 && _returned >= _limit)
+        if (_limitOffset.LimitReached(_returned))
             return false;
 
         // Iterate through grouped results
         while (++_groupedIndex < _groupedResults!.Count)
         {
-            // Apply OFFSET
-            if (_skipped < _offset)
-            {
-                _skipped++;
-                continue;
-            }
-
             // Load the grouped row into binding table
             var group = _groupedResults[_groupedIndex];
             _bindingTable.Clear();
@@ -304,7 +294,8 @@ internal ref partial struct QueryResults
             // e.g., ((MIN(?p) + MAX(?p)) / 2 AS ?c)
             EvaluateGroupedSelectExpressions(group);
 
-            _returned++;
+            if (!KeepAfterDistinctAndOffset())
+                continue;
             return true;
         }
 

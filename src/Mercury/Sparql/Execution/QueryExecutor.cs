@@ -308,7 +308,7 @@ internal partial class QueryExecutor : IDisposable
 
         var bindings = new Binding[64];
         return QueryResults.FromMaterializedSimple(rows, _source.AsSpan(), _store, bindings, _stringBuffer,
-            _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct,
+            _buffer.LimitOffset, _buffer.SelectDistinct,
             _buffer.GetOrderByClause(), _buffer.GetGroupByClause(),
             _buffer.GetSelectClause(), _buffer.GetHavingClause(), _buffer);
     }
@@ -363,7 +363,7 @@ internal partial class QueryExecutor : IDisposable
             var groups = new List<GroupedRow>(1) { group };
             var bindings = new Binding[64];
             result = QueryResults.FromFinalizedGroups(groups, _source.AsSpan(), _store, bindings, _stringBuffer,
-                _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct, select);
+                _buffer.LimitOffset, _buffer.SelectDistinct, select);
             return true;
         }
         finally
@@ -389,7 +389,7 @@ internal partial class QueryExecutor : IDisposable
         var orderBy = _buffer.GetOrderByClause();
         if (!orderBy.HasOrderBy) return false;        // not an ORDER BY query
         if (_buffer.HasPostQueryValues) return false; // a trailing VALUES joins (multiplies) before the page — top-K would miss it
-        if (_buffer.Limit <= 0) return false;         // no bounding LIMIT — top-K cannot bound it (result floor)
+        if (_buffer.LimitOffset.RowsRead is not long capacity64) return false; // no bounding LIMIT — top-K cannot bound it (result floor)
         if (_buffer.SelectDistinct) return false;     // DISTINCT must dedup before the top-N — fall back
         var select = _buffer.GetSelectClause();
         if (select.HasRealAggregates) return false;   // aggregates go through the fold / grouped path
@@ -399,7 +399,6 @@ internal partial class QueryExecutor : IDisposable
         // The heap retains `capacity` (= OFFSET + LIMIT) rows. Bound that by a fraction of available physical memory so
         // a pathological OFFSET+LIMIT cannot itself OOM the heap; above the cap, fall back to full materialization (the
         // streaming-presentation territory, not this fold). This is the "adapted to system memory availability" budget.
-        long capacity64 = (long)_buffer.Offset + _buffer.Limit;
         long budget = SkyOmega.Mercury.Runtime.ProcessMemoryProbe.AvailablePhysicalBytes() / 8;
         const long AssumedRowBytes = 512;
         long capCap = System.Math.Max(100_000, budget / AssumedRowBytes);
@@ -423,7 +422,7 @@ internal partial class QueryExecutor : IDisposable
 
             var bindings = new Binding[64];
             result = QueryResults.FromMaterializedSimple(rows, _source.AsSpan(), _store, bindings, _stringBuffer,
-                _buffer.Limit, _buffer.Offset, distinct: false,
+                _buffer.LimitOffset, distinct: false,
                 orderBy, default, select, default, _buffer);
             return true;
         }
@@ -461,7 +460,7 @@ internal partial class QueryExecutor : IDisposable
             // whole group first (the cap is left off — the tree's EvalGroup-then-test existence primitive applies).
             if (askExistenceCap > 0 && TreeJoinExecutor.IsPureBgp(ref tree, root))
                 maxRows = askExistenceCap;
-            else if (_buffer.Limit > 0
+            else if (_buffer.LimitOffset.RowsRead is long cap
                 && !_buffer.GetOrderByClause().HasOrderBy
                 && !_buffer.GetGroupByClause().HasGroupBy
                 && !_buffer.GetHavingClause().HasHaving
@@ -470,7 +469,6 @@ internal partial class QueryExecutor : IDisposable
                 && !_buffer.HasPostQueryValues   // a trailing VALUES joins AFTER the BGP — it can multiply rows, so the cap is invalid
                 && TreeJoinExecutor.IsPureBgp(ref tree, root))
             {
-                long cap = (long)_buffer.Offset + _buffer.Limit;
                 if (cap < int.MaxValue) maxRows = (int)cap;
             }
 
@@ -656,7 +654,7 @@ internal partial class QueryExecutor : IDisposable
 
         var bindings = new Binding[16];
         return new MaterializedQueryResults(results, bindings, _stringBuffer,
-            _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct);
+            _buffer.LimitOffset, _buffer.SelectDistinct);
     }
 
     /// <summary>
@@ -775,7 +773,7 @@ internal partial class QueryExecutor : IDisposable
 
         var results = new List<MaterializedRow> { new MaterializedRow(bindingTable) };
         return new MaterializedQueryResults(results, bindings, _stringBuffer,
-            _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct);
+            _buffer.LimitOffset, _buffer.SelectDistinct);
     }
 
     /// <summary>The store's result-row cap (<c>StorageOptions.MaxResultRows</c>; 0 = unbounded) — the drain loops
@@ -888,7 +886,7 @@ internal partial class QueryExecutor : IDisposable
             // Return tiny wrapper backed by heap list
             var bindings = new Binding[16];
             return QueryResults.FromMaterializedList(rows, bindings, _stringBuffer,
-                _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct);
+                _buffer.LimitOffset, _buffer.SelectDistinct);
         }
         finally
         {

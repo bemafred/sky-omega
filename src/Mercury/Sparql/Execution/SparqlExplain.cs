@@ -445,7 +445,7 @@ internal sealed class SparqlExplainer
         var currentNode = root;
 
         // LIMIT/OFFSET
-        if (_query.SolutionModifier.Limit >= 0 || _query.SolutionModifier.Offset > 0)
+        if (_query.SolutionModifier.LimitOffset.HasLimit || _query.SolutionModifier.LimitOffset.Offset > 0)
         {
             var sliceNode = new ExplainNode
             {
@@ -801,10 +801,11 @@ internal sealed class SparqlExplainer
     private string GetSliceDescription()
     {
         var parts = new List<string>();
-        if (_query.SolutionModifier.Limit >= 0)
-            parts.Add($"LIMIT {_query.SolutionModifier.Limit}");
-        if (_query.SolutionModifier.Offset > 0)
-            parts.Add($"OFFSET {_query.SolutionModifier.Offset}");
+        var slice = _query.SolutionModifier.LimitOffset;
+        if (slice.HasLimit)
+            parts.Add($"LIMIT {slice.Limit}");
+        if (slice.Offset > 0)
+            parts.Add($"OFFSET {slice.Offset}");
         return string.Join(" ", parts);
     }
 

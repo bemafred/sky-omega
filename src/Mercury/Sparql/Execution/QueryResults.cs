@@ -31,8 +31,7 @@ internal ref partial struct QueryResults
     private FilterEvaluator _filterEvaluator;
 
     // LIMIT/OFFSET support
-    private readonly int _limit;
-    private readonly int _offset;
+    private readonly LimitOffsetClause _limitOffset;
     private int _skipped;
     private int _returned;
 
@@ -147,8 +146,7 @@ internal ref partial struct QueryResults
         // Initialize other required fields to defaults
         _isEmpty = false;
         _hasOptional = false;
-        _limit = 0;
-        _offset = 0;
+        _limitOffset = buffer.LimitOffset;
         _distinct = false;
         _orderBy = default;
         _hasOrderBy = false;
@@ -168,7 +166,7 @@ internal ref partial struct QueryResults
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     internal static QueryResults FromMaterialized(List<MaterializedRow> rows, Patterns.QueryBuffer buffer,
         ReadOnlySpan<char> source, QuadStore store, Binding[] bindings, char[] stringBuffer,
-        int limit = 0, int offset = 0, bool distinct = false, OrderByClause orderBy = default,
+        LimitOffsetClause limitOffset = default, bool distinct = false, OrderByClause orderBy = default,
         GroupByClause groupBy = default, SelectClause selectClause = default, HavingClause having = default)
     {
         // If actual ORDER BY is specified, sort the materialized results
@@ -179,7 +177,7 @@ internal ref partial struct QueryResults
         }
 
         return new QueryResults(rows, buffer, source, store, bindings, stringBuffer,
-            limit, offset, distinct, orderBy, groupBy, selectClause, having);
+            limitOffset, distinct, orderBy, groupBy, selectClause, having);
     }
 
     /// <summary>
@@ -190,7 +188,7 @@ internal ref partial struct QueryResults
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     internal static QueryResults FromMaterializedSimple(List<MaterializedRow> rows,
         ReadOnlySpan<char> source, QuadStore store, Binding[] bindings, char[] stringBuffer,
-        int limit = 0, int offset = 0, bool distinct = false, OrderByClause orderBy = default,
+        LimitOffsetClause limitOffset = default, bool distinct = false, OrderByClause orderBy = default,
         GroupByClause groupBy = default, SelectClause selectClause = default, HavingClause having = default,
         Patterns.QueryBuffer? buffer = null, PrefixMapping[]? prefixes = null)
     {
@@ -202,7 +200,7 @@ internal ref partial struct QueryResults
         }
 
         return new QueryResults(rows, source, store, bindings, stringBuffer,
-            limit, offset, distinct, orderBy, groupBy, selectClause, having, buffer, prefixes);
+            limitOffset, distinct, orderBy, groupBy, selectClause, having, buffer, prefixes);
     }
 
     private static readonly List<MaterializedRow> EmptyMaterializedRows = new();
@@ -218,9 +216,9 @@ internal ref partial struct QueryResults
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     internal static QueryResults FromFinalizedGroups(List<GroupedRow> groups,
         ReadOnlySpan<char> source, QuadStore store, Binding[] bindings, char[] stringBuffer,
-        int limit, int offset, bool distinct, SelectClause selectClause)
+        LimitOffsetClause limitOffset, bool distinct, SelectClause selectClause)
     {
-        return new QueryResults(groups, source, store, bindings, stringBuffer, limit, offset, distinct, selectClause);
+        return new QueryResults(groups, source, store, bindings, stringBuffer, limitOffset, distinct, selectClause);
     }
 
     /// <summary>
@@ -231,9 +229,9 @@ internal ref partial struct QueryResults
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     internal static QueryResults FromMaterializedRows(List<MaterializedRow> rows,
         ReadOnlySpan<char> source, QuadStore store, Binding[] bindings, char[] stringBuffer,
-        int limit = 0, int offset = 0, bool distinct = false)
+        LimitOffsetClause limitOffset = default, bool distinct = false)
     {
-        return new QueryResults(rows, source, store, bindings, stringBuffer, limit, offset, distinct);
+        return new QueryResults(rows, source, store, bindings, stringBuffer, limitOffset, distinct);
     }
 
     /// <summary>
@@ -242,9 +240,9 @@ internal ref partial struct QueryResults
     /// </summary>
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     internal static QueryResults FromMaterializedList(List<MaterializedRow> rows,
-        Binding[] bindings, char[] stringBuffer, int limit = 0, int offset = 0, bool distinct = false)
+        Binding[] bindings, char[] stringBuffer, LimitOffsetClause limitOffset = default, bool distinct = false)
     {
-        return new QueryResults(rows, bindings, stringBuffer, limit, offset, distinct);
+        return new QueryResults(rows, bindings, stringBuffer, limitOffset, distinct);
     }
 
     /// <summary>
@@ -252,7 +250,7 @@ internal ref partial struct QueryResults
     /// </summary>
     private QueryResults(List<MaterializedRow> rows, Patterns.QueryBuffer buffer, ReadOnlySpan<char> source,
         QuadStore store, Binding[] bindings, char[] stringBuffer,
-        int limit, int offset, bool distinct, OrderByClause orderBy,
+        LimitOffsetClause limitOffset, bool distinct, OrderByClause orderBy,
         GroupByClause groupBy, SelectClause selectClause, HavingClause having)
     {
         _buffer = buffer;
@@ -264,8 +262,7 @@ internal ref partial struct QueryResults
         _hasFilters = buffer?.HasFilters ?? false; // Evaluate filters for GRAPH clause results
         _hasOptional = false;
         _isEmpty = rows.Count == 0;
-        _limit = limit;
-        _offset = offset;
+        _limitOffset = limitOffset;
         _skipped = 0;
         _returned = 0;
         _distinct = distinct;
@@ -298,7 +295,7 @@ internal ref partial struct QueryResults
     /// </summary>
     private QueryResults(List<MaterializedRow> rows, ReadOnlySpan<char> source,
         QuadStore store, Binding[] bindings, char[] stringBuffer,
-        int limit, int offset, bool distinct, OrderByClause orderBy,
+        LimitOffsetClause limitOffset, bool distinct, OrderByClause orderBy,
         GroupByClause groupBy, SelectClause selectClause, HavingClause having,
         Patterns.QueryBuffer? buffer = null, PrefixMapping[]? prefixes = null)
     {
@@ -317,8 +314,7 @@ internal ref partial struct QueryResults
         _hasFilters = false; // Filters already applied during materialization
         _hasOptional = false;
         _isEmpty = rows.Count == 0;
-        _limit = limit;
-        _offset = offset;
+        _limitOffset = limitOffset;
         _skipped = 0;
         _returned = 0;
         _distinct = distinct;
@@ -356,7 +352,7 @@ internal ref partial struct QueryResults
     /// </summary>
     private QueryResults(List<GroupedRow> groups, ReadOnlySpan<char> source,
         QuadStore store, Binding[] bindings, char[] stringBuffer,
-        int limit, int offset, bool distinct, SelectClause selectClause)
+        LimitOffsetClause limitOffset, bool distinct, SelectClause selectClause)
     {
         _buffer = null;
         _source = source;
@@ -367,8 +363,7 @@ internal ref partial struct QueryResults
         _hasFilters = false;
         _hasOptional = false;
         _isEmpty = groups.Count == 0;
-        _limit = limit;
-        _offset = offset;
+        _limitOffset = limitOffset;
         _skipped = 0;
         _returned = 0;
         _distinct = distinct;
@@ -400,7 +395,7 @@ internal ref partial struct QueryResults
     /// </summary>
     private QueryResults(List<MaterializedRow> rows, ReadOnlySpan<char> source,
         QuadStore store, Binding[] bindings, char[] stringBuffer,
-        int limit, int offset, bool distinct)
+        LimitOffsetClause limitOffset, bool distinct)
     {
         _buffer = null;
         _source = source;
@@ -411,8 +406,7 @@ internal ref partial struct QueryResults
         _hasFilters = false;
         _hasOptional = false;
         _isEmpty = rows.Count == 0;
-        _limit = limit;
-        _offset = offset;
+        _limitOffset = limitOffset;
         _skipped = 0;
         _returned = 0;
         _distinct = distinct;
@@ -441,7 +435,7 @@ internal ref partial struct QueryResults
     /// No source/store references needed.
     /// </summary>
     private QueryResults(List<MaterializedRow> rows, Binding[] bindings, char[] stringBuffer,
-        int limit, int offset, bool distinct)
+        LimitOffsetClause limitOffset, bool distinct)
     {
         _buffer = null;
         _source = default;
@@ -452,8 +446,7 @@ internal ref partial struct QueryResults
         _hasFilters = false;
         _hasOptional = false;
         _isEmpty = rows.Count == 0;
-        _limit = limit;
-        _offset = offset;
+        _limitOffset = limitOffset;
         _skipped = 0;
         _returned = 0;
         _distinct = distinct;
@@ -509,6 +502,10 @@ internal ref partial struct QueryResults
                 return false;
 
             _emptyPatternReturned = true;
+
+            // The one solution is the whole sequence: an OFFSET skips it, and LIMIT 0 returns none.
+            if (_limitOffset.Offset > 0 || _limitOffset.LimitReached(0))
+                return false;
 
             // Increment bnode row seed for this new row - ensures BNODE(str) produces
             // different bnodes for different rows (same string in same row → same bnode)

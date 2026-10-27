@@ -18,7 +18,7 @@ public partial class QueryExecutorTests
         var parsedQuery = parser.ParseQuery();
 
         // Verify LIMIT was parsed
-        Assert.Equal(3, parsedQuery.SolutionModifier.Limit);
+        Assert.Equal(3, parsedQuery.SolutionModifier.LimitOffset.Limit);
 
         Store.AcquireReadLock();
         try
@@ -50,7 +50,7 @@ public partial class QueryExecutorTests
         var parsedQuery = parser.ParseQuery();
 
         // Verify OFFSET was parsed
-        Assert.Equal(5, parsedQuery.SolutionModifier.Offset);
+        Assert.Equal(5, parsedQuery.SolutionModifier.LimitOffset.Offset);
 
         Store.AcquireReadLock();
         try
@@ -82,8 +82,8 @@ public partial class QueryExecutorTests
         var parsedQuery = parser.ParseQuery();
 
         // Verify both were parsed
-        Assert.Equal(2, parsedQuery.SolutionModifier.Limit);
-        Assert.Equal(3, parsedQuery.SolutionModifier.Offset);
+        Assert.Equal(2, parsedQuery.SolutionModifier.LimitOffset.Limit);
+        Assert.Equal(3, parsedQuery.SolutionModifier.LimitOffset.Offset);
 
         Store.AcquireReadLock();
         try
@@ -167,15 +167,15 @@ public partial class QueryExecutorTests
     }
 
     [Fact]
-    public void Execute_LimitZero_ReturnsAllResults()
+    public void Execute_NoLimit_ReturnsAllResults()
     {
-        // LIMIT 0 means no limit (return all)
+        // Without a LIMIT clause the slice is unbounded. (LIMIT 0 is a bound of zero: LimitOffsetTests.)
         var query = "SELECT * WHERE { ?s ?p ?o }";
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
         // Verify no limit was set
-        Assert.Equal(0, parsedQuery.SolutionModifier.Limit);
+        Assert.False(parsedQuery.SolutionModifier.LimitOffset.HasLimit);
 
         Store.AcquireReadLock();
         try

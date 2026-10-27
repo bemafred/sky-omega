@@ -1014,13 +1014,13 @@ public class QueryBufferTests
 
         buffer.SelectDistinct = true;
         buffer.SelectAll = false;
-        buffer.Limit = 100;
-        buffer.Offset = 50;
+        buffer.LimitOffset = new LimitOffsetClause { Limit = 100, HasLimit = true, Offset = 50 };
 
         Assert.True(buffer.SelectDistinct);
         Assert.False(buffer.SelectAll);
-        Assert.Equal(100, buffer.Limit);
-        Assert.Equal(50, buffer.Offset);
+        Assert.True(buffer.LimitOffset.HasLimit);
+        Assert.Equal(100, buffer.LimitOffset.Limit);
+        Assert.Equal(50, buffer.LimitOffset.Offset);
     }
 
     [Fact]

@@ -5,7 +5,6 @@ internal struct SolutionModifier
     public GroupByClause GroupBy;
     public HavingClause Having;
     public OrderByClause OrderBy;
-    public int Limit;
-    public int Offset;
+    public LimitOffsetClause LimitOffset;
     public TemporalClause Temporal;
 }

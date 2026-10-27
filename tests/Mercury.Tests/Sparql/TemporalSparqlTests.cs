@@ -303,8 +303,8 @@ public class TemporalSparqlTests : PooledStoreTestBase
         var parsed = parser.ParseQuery();
 
         Assert.Equal(TemporalQueryMode.AllVersions, parsed.SolutionModifier.Temporal.Mode);
-        Assert.Equal(10, parsed.SolutionModifier.Limit);
-        Assert.Equal(5, parsed.SolutionModifier.Offset);
+        Assert.Equal(10, parsed.SolutionModifier.LimitOffset.Limit);
+        Assert.Equal(5, parsed.SolutionModifier.LimitOffset.Offset);
     }
 
     [Fact]

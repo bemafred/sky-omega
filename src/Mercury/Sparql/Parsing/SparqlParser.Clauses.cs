@@ -1989,25 +1989,8 @@ internal ref partial struct SparqlParser
             SkipWhitespace();
         }
 
-        // Parse LIMIT
-        span = PeekSpan(5);
-        if (span.Length >= 5 && span[..5].Equals("LIMIT", StringComparison.OrdinalIgnoreCase))
-        {
-            ConsumeKeyword("LIMIT");
-            SkipWhitespace();
-            subSelect.Limit = ParseInteger();
-            SkipWhitespace();
-        }
-
-        // Parse OFFSET
-        span = PeekSpan(6);
-        if (span.Length >= 6 && span[..6].Equals("OFFSET", StringComparison.OrdinalIgnoreCase))
-        {
-            ConsumeKeyword("OFFSET");
-            SkipWhitespace();
-            subSelect.Offset = ParseInteger();
-            SkipWhitespace();
-        }
+        subSelect.LimitOffset = ParseLimitOffsetClauses();
+        SkipWhitespace();
 
         // Parse VALUES clause (inline data at end of subquery)
         span = PeekSpan(6);

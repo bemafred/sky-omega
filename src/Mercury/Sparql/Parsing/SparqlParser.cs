@@ -2534,25 +2534,7 @@ internal ref partial struct SparqlParser
             modifier.OrderBy = ParseOrderByClause();
         }
         
-        // Parse LIMIT
-        SkipWhitespace();
-        span = PeekSpan(5);
-        if (span.Length >= 5 && span[..5].Equals("LIMIT", StringComparison.OrdinalIgnoreCase))
-        {
-            ConsumeKeyword("LIMIT");
-            SkipWhitespace();
-            modifier.Limit = ParseInteger();
-        }
-        
-        // Parse OFFSET
-        SkipWhitespace();
-        span = PeekSpan(6);
-        if (span.Length >= 6 && span[..6].Equals("OFFSET", StringComparison.OrdinalIgnoreCase))
-        {
-            ConsumeKeyword("OFFSET");
-            SkipWhitespace();
-            modifier.Offset = ParseInteger();
-        }
+        modifier.LimitOffset = ParseLimitOffsetClauses();
 
         // Parse temporal clauses (AS OF, DURING, ALL VERSIONS)
         SkipWhitespace();
@@ -2951,15 +2933,54 @@ internal ref partial struct SparqlParser
         return clause;
     }
 
-    private int ParseInteger()
+    /// <summary>
+    /// [25] LimitOffsetClauses ::= LimitClause OffsetClause? | OffsetClause LimitClause?
+    /// [26] LimitClause ::= 'LIMIT' INTEGER    [27] OffsetClause ::= 'OFFSET' INTEGER
+    /// The one parse of a slice, for a query and for a sub-SELECT. Either clause may come first; neither may repeat.
+    /// </summary>
+    private LimitOffsetClause ParseLimitOffsetClauses()
+    {
+        var clause = new LimitOffsetClause();
+        bool sawOffset = false;
+        while (true)
+        {
+            SkipWhitespace();
+            var span = PeekSpan(6);
+            if (!clause.HasLimit && span.Length >= 5 && span[..5].Equals("LIMIT", StringComparison.OrdinalIgnoreCase))
+            {
+                ConsumeKeyword("LIMIT");
+                SkipWhitespace();
+                clause.Limit = ParseInteger("LIMIT");
+                clause.HasLimit = true;
+            }
+            else if (!sawOffset && span.Length >= 6 && span[..6].Equals("OFFSET", StringComparison.OrdinalIgnoreCase))
+            {
+                ConsumeKeyword("OFFSET");
+                SkipWhitespace();
+                clause.Offset = ParseInteger("OFFSET");
+                sawOffset = true;
+            }
+            else
+            {
+                return clause;
+            }
+        }
+    }
+
+    /// <summary>[146] INTEGER ::= [0-9]+ — the operand of <paramref name="keyword"/>; anything else is a syntax error.</summary>
+    private int ParseInteger(string keyword)
     {
         var start = _position;
-        
+
         while (!IsAtEnd() && char.IsDigit(Peek()))
             Advance();
-        
+
         var span = _source.Slice(start, _position - start);
-        return int.TryParse(span, NumberStyles.Integer, CultureInfo.InvariantCulture, out var result) ? result : 0;
+        if (span.IsEmpty)
+            throw new SparqlParseException($"{keyword} requires an integer");
+        if (!int.TryParse(span, NumberStyles.None, CultureInfo.InvariantCulture, out var result))
+            throw new SparqlParseException($"{keyword} {span.ToString()} is out of range");
+        return result;
     }
 
     private ReadOnlySpan<char> ParseIriRef()

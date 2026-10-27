@@ -943,8 +943,7 @@ internal sealed class QueryBuffer : IDisposable
     public QueryType Type { get; set; }
     public bool SelectDistinct { get; set; }
     public bool SelectAll { get; set; }
-    public int Limit { get; set; }
-    public int Offset { get; set; }
+    public LimitOffsetClause LimitOffset { get; set; }
 
     // Source span offsets for lazily-evaluated expressions
     public int BaseUriStart { get; set; }
@@ -1645,8 +1644,7 @@ internal static class QueryBufferAdapter
         buffer.Type = query.Type;
         buffer.SelectDistinct = query.SelectClause.Distinct || query.SelectClause.Reduced;
         buffer.SelectAll = query.SelectClause.SelectAll;
-        buffer.Limit = query.SolutionModifier.Limit;
-        buffer.Offset = query.SolutionModifier.Offset;
+        buffer.LimitOffset = query.SolutionModifier.LimitOffset;
         buffer.BaseUriStart = query.Prologue.BaseUriStart;
         buffer.BaseUriLength = query.Prologue.BaseUriLength;
 

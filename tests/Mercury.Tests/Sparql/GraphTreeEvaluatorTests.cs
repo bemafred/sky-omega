@@ -1014,7 +1014,7 @@ internal sealed class GraphTreeEvaluator
         var qrBindings = new Binding[64];
         var qrStringBuffer = new char[16384];
         var qr = QueryResults.FromMaterializedSimple(rows, subSrc.AsSpan(), _store, qrBindings, qrStringBuffer,
-            sub.Limit, sub.Offset, sub.Distinct, sub.OrderBy, sub.GroupBy, selectClause, sub.Having);
+            sub.LimitOffset, sub.Distinct, sub.OrderBy, sub.GroupBy, selectClause, sub.Having);
 
         // Read the modified rows back over the projected/aggregated output variables.
         var outNames = OutputVarNames(sub, subSrc, innerBag);

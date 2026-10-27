@@ -22,8 +22,7 @@ internal ref struct MaterializedQueryResults
     private BindingTable _bindingTable;
 
     // LIMIT/OFFSET support
-    private readonly int _limit;
-    private readonly int _offset;
+    private readonly LimitOffsetClause _limitOffset;
     private int _skipped;
     private int _returned;
 
@@ -37,18 +36,17 @@ internal ref struct MaterializedQueryResults
 
     public static MaterializedQueryResults Empty()
     {
-        return new MaterializedQueryResults(null, null!, null!, 0, 0, false);
+        return new MaterializedQueryResults(null, null!, null!, default, false);
     }
 
     internal MaterializedQueryResults(List<MaterializedRow>? rows, Binding[] bindings, char[] stringBuffer,
-        int limit = 0, int offset = 0, bool distinct = false)
+        LimitOffsetClause limitOffset = default, bool distinct = false)
     {
         _rows = rows ?? new List<MaterializedRow>();
         _bindings = bindings;
         _stringBuffer = stringBuffer;
         _bindingTable = new BindingTable(bindings, stringBuffer);
-        _limit = limit;
-        _offset = offset;
+        _limitOffset = limitOffset;
         _skipped = 0;
         _returned = 0;
         _distinct = distinct;
@@ -79,7 +77,7 @@ internal ref struct MaterializedQueryResults
             }
 
             // Handle OFFSET
-            if (_offset > 0 && _skipped < _offset)
+            if (_skipped < _limitOffset.Offset)
             {
                 _skipped++;
                 continue;
@@ -94,12 +92,9 @@ internal ref struct MaterializedQueryResults
             }
 
             // Handle LIMIT
-            if (_limit > 0)
-            {
-                if (_returned >= _limit)
-                    return false;
-                _returned++;
-            }
+            if (_limitOffset.LimitReached(_returned))
+                return false;
+            _returned++;
 
             return true;
         }

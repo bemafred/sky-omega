@@ -218,7 +218,8 @@ public class SparqlParserTests
         Assert.Equal(QueryType.Select, result.Type);
         Assert.Equal(2, result.WhereClause.Pattern.PatternCount);
         Assert.Equal(1, result.WhereClause.Pattern.FilterCount);
-        Assert.Equal(10, result.SolutionModifier.Limit);
+        Assert.Equal(10, result.SolutionModifier.LimitOffset.Limit);
+        Assert.True(result.SolutionModifier.LimitOffset.HasLimit);
     }
 
     #endregion

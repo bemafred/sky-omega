@@ -29,8 +29,7 @@ internal struct SubSelect
     private FilterExpr _f0, _f1, _f2, _f3, _f4, _f5, _f6, _f7;
 
     // Solution modifiers
-    public int Limit;
-    public int Offset;
+    public LimitOffsetClause LimitOffset;
     public OrderByClause OrderBy;
 
     // UNION support
