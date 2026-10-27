@@ -69,19 +69,32 @@ One file per type in `Sparql/Execution/Operators/`:
 
 `SparqlExplainer` generates query execution plans for analysis and debugging.
 
-**Operator symbols:**
+**Operator symbols.** The WHERE part of a plan is the pattern tree that executes, one operator per node (ADR-055 D6):
 
 | Symbol | Operator | Description |
 |--------|----------|-------------|
-| ⊳ | TriplePatternScan | Scan index for triple pattern |
-| ⋈ | NestedLoopJoin | Join two patterns |
-| ⟕ | LeftOuterJoin | OPTIONAL pattern |
-| ∪ | Union | UNION alternatives |
-| σ | Filter | FILTER expression |
-| γ | GroupBy | GROUP BY with aggregation |
+| → | Query | SELECT / ASK / CONSTRUCT / DESCRIBE |
+| ⌊ | Slice | LIMIT / OFFSET (only when the query has them) |
 | ↑ | Sort | ORDER BY |
-| ⌊ | Slice | LIMIT/OFFSET |
+| δ | Distinct | DISTINCT |
+| γ | GroupBy | GROUP BY and aggregates |
+| η | Having | HAVING |
 | π | Project | SELECT projection |
+| ⋈ | NestedLoopJoin | A group: its children joined in source order, FILTERs last |
+| ⊳ | TriplePatternScan | A triple pattern (with an estimate when a store is given) |
+| ⇝ | PathScan | A triple whose predicate is a property path |
+| ∪ | Union | UNION, one child per branch |
+| ⟕ | LeftOuterJoin | OPTIONAL, with its group |
+| − | Minus | MINUS, with its group |
+| ▣ | GraphScan | GRAPH with an IRI |
+| ▢ | GraphVariable | GRAPH with a variable |
+| ∃ | Exists | FILTER EXISTS, with its group |
+| ∄ | NotExists | FILTER NOT EXISTS, with its group |
+| σ | Filter | FILTER |
+| ← | Bind | BIND |
+| ≡ | Values | VALUES |
+| ⊂ | SubQuery | A sub-SELECT, with its own modifiers and WHERE |
+| ⇄ | Service | SERVICE (the remote pattern is not planned) |
 
 ## SPARQL Result Formats
 

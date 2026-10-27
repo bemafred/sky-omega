@@ -8,6 +8,9 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Text;
+using SkyOmega.Mercury.Sparql.Parsing;
+using SkyOmega.Mercury.Sparql.Patterns;
+using System.Linq;
 using SkyOmega.Mercury.Storage;
 using SkyOmega.Mercury.Sparql.Types;
 using SkyOmega.Mercury.Sparql.Execution.Operators;
@@ -24,6 +27,15 @@ internal enum ExplainOperatorType
 
     /// <summary>Single triple pattern scan.</summary>
     TriplePatternScan,
+
+    /// <summary>Property-path evaluation (a triple whose predicate is a path).</summary>
+    PathScan,
+
+    /// <summary>FILTER EXISTS { … }.</summary>
+    Exists,
+
+    /// <summary>FILTER NOT EXISTS { … }.</summary>
+    NotExists,
 
     /// <summary>Multi-pattern nested loop join.</summary>
     NestedLoopJoin,
@@ -160,17 +172,21 @@ internal sealed class ExplainPlan
     }
 
     private void FormatNode(StringBuilder sb, ExplainNode node, int depth, bool isLast)
-    {
-        var indent = new string(' ', depth * 2);
-        var prefix = depth == 0 ? "" : (isLast ? "└─ " : "├─ ");
+        => FormatNode(sb, node, "", depth == 0, isLast);
 
-        sb.Append(indent);
-        sb.Append(prefix);
+    /// <summary>
+    /// One node and its subtree. <paramref name="lead"/> is the column drawn by the ancestors: "│  " under an
+    /// ancestor with later siblings, "   " under a last child.
+    /// </summary>
+    private void FormatNode(StringBuilder sb, ExplainNode node, string lead, bool isRoot, bool isLast)
+    {
+        sb.Append(lead);
+        if (!isRoot)
+            sb.Append(isLast ? "└─ " : "├─ ");
         sb.Append(GetOperatorSymbol(node.OperatorType));
         sb.Append(' ');
         sb.Append(node.Description);
 
-        // Show row counts if available
         if (node.EstimatedRows.HasValue || node.ActualRows.HasValue)
         {
             sb.Append(" (");
@@ -182,38 +198,27 @@ internal sealed class ExplainPlan
                 sb.Append($", time={node.ExecutionTimeMs:F2}ms");
             sb.Append(')');
         }
-
         sb.AppendLine();
 
-        // Show output variables
+        // The node's own detail lines, and its children, hang under this column
+        string childLead = isRoot ? "  " : lead + (isLast ? "   " : "│  ");
+        string detailLead = childLead + (node.Children.Count > 0 ? "│ " : "  ");
         if (node.OutputVariables.Count > 0)
-        {
-            sb.Append(indent);
-            sb.Append(depth == 0 ? "  " : (isLast ? "   " : "│  "));
-            sb.Append("→ binds: ");
-            sb.AppendLine(string.Join(", ", node.OutputVariables));
-        }
-
-        // Show properties
+            sb.Append(detailLead).Append("→ binds: ").AppendLine(string.Join(", ", node.OutputVariables));
         foreach (var (key, value) in node.Properties)
-        {
-            sb.Append(indent);
-            sb.Append(depth == 0 ? "  " : (isLast ? "   " : "│  "));
-            sb.Append($"  {key}: {value}");
-            sb.AppendLine();
-        }
+            sb.Append(detailLead).Append("  ").Append(key).Append(": ").AppendLine(value);
 
-        // Recurse to children
         for (int i = 0; i < node.Children.Count; i++)
-        {
-            FormatNode(sb, node.Children[i], depth + 1, i == node.Children.Count - 1);
-        }
+            FormatNode(sb, node.Children[i], childLead, isRoot: false, isLast: i == node.Children.Count - 1);
     }
 
     private static string GetOperatorSymbol(ExplainOperatorType type) => type switch
     {
         ExplainOperatorType.Query => "→",
         ExplainOperatorType.TriplePatternScan => "⊳",
+        ExplainOperatorType.PathScan => "⇝",
+        ExplainOperatorType.Exists => "∃",
+        ExplainOperatorType.NotExists => "∄",
         ExplainOperatorType.NestedLoopJoin => "⋈",
         ExplainOperatorType.LeftOuterJoin => "⟕",
         ExplainOperatorType.Union => "∪",
@@ -439,8 +444,6 @@ internal sealed class SparqlExplainer
 
     private void BuildPlanTree(ExplainNode root)
     {
-        ref readonly var pattern = ref _query.WhereClause.Pattern;
-
         // Add solution modifiers at the top
         var currentNode = root;
 
@@ -492,227 +495,191 @@ internal sealed class SparqlExplainer
             currentNode = groupNode;
         }
 
-        // Build WHERE clause operators
-        BuildWhereClause(currentNode, in pattern);
+        // The WHERE, as the pattern tree that executes (ADR-055 D6)
+        if (_query.WhereClause.GroupStart >= 0)
+            AddWhere(currentNode, _query.WhereClause.GroupStart);
     }
 
-    private void BuildWhereClause(ExplainNode parent, ref readonly GraphPattern pattern)
+    private void AddWhere(ExplainNode parent, int groupStart)
     {
-        // Handle UNION
-        if (pattern.HasUnion)
+        const int treeBytes = PatternSlot.Size * 1024;
+        var treeBuffer = System.Buffers.ArrayPool<byte>.Shared.Rent(treeBytes);
+        try
         {
-            var unionNode = new ExplainNode
-            {
-                OperatorType = ExplainOperatorType.Union,
-                Description = "Alternative patterns"
-            };
-            parent.Children.Add(unionNode);
-
-            // First branch
-            var firstBranchNode = new ExplainNode
-            {
-                OperatorType = ExplainOperatorType.NestedLoopJoin,
-                Description = $"Branch 1 ({pattern.FirstBranchPatternCount} patterns)"
-            };
-            unionNode.Children.Add(firstBranchNode);
-            AddTriplePatterns(firstBranchNode, in pattern, 0, pattern.FirstBranchPatternCount);
-
-            // Second branch
-            var secondBranchNode = new ExplainNode
-            {
-                OperatorType = ExplainOperatorType.NestedLoopJoin,
-                Description = $"Branch 2 ({pattern.UnionBranchPatternCount} patterns)"
-            };
-            unionNode.Children.Add(secondBranchNode);
-            AddTriplePatterns(secondBranchNode, in pattern, pattern.FirstBranchPatternCount, pattern.PatternCount);
-
-            return;
+            var tree = new PatternArray(treeBuffer.AsSpan(0, treeBytes));
+            int root = new SparqlParser(_source.AsSpan()).ParsePatternTreeAt(groupStart, ref tree);
+            parent.Children.Add(NodeFor(ref tree, root));
         }
-
-        // Handle GRAPH clauses
-        if (pattern.HasGraph)
+        finally
         {
-            for (int i = 0; i < pattern.GraphClauseCount; i++)
+            System.Buffers.ArrayPool<byte>.Shared.Return(treeBuffer);
+        }
+    }
+
+    /// <summary>One tree node as an operator, by the mapping of ADR-055 D6.</summary>
+    private ExplainNode NodeFor(ref PatternArray tree, int index)
+    {
+        var slot = tree[index];
+        switch (slot.Kind)
+        {
+            case PatternKind.Triple:
+            case PatternKind.MinusTriple:
+                return slot.PathKind == PathType.None ? TripleNode(slot, index) : PathNode(slot);
+            case PatternKind.GroupHeader:
+                return GroupNode(ref tree, index);
+            case PatternKind.UnionHeader:
+                return Operator(ExplainOperatorType.Union, "Alternative patterns", ref tree, index);
+            case PatternKind.OptionalHeader:
+                return Operator(ExplainOperatorType.LeftOuterJoin, "OPTIONAL", ref tree, index);
+            case PatternKind.MinusHeader:
+                return Operator(ExplainOperatorType.Minus, "Anti-join (MINUS)", ref tree, index);
+            case PatternKind.ExistsHeader:
+                return Operator(ExplainOperatorType.Exists, "FILTER EXISTS", ref tree, index);
+            case PatternKind.NotExistsHeader:
+                return Operator(ExplainOperatorType.NotExists, "FILTER NOT EXISTS", ref tree, index);
+            case PatternKind.GraphHeader:
             {
-                var gc = pattern.GetGraphClause(i);
-                var isVariable = IsVariable(gc.Graph);
-                var graphNode = new ExplainNode
-                {
-                    OperatorType = isVariable ? ExplainOperatorType.GraphVariable : ExplainOperatorType.GraphScan,
-                    Description = GetGraphDescription(gc)
-                };
-
-                if (isVariable)
-                {
-                    graphNode.OutputVariables.Add(GetTermString(gc.Graph));
-                }
-
-                parent.Children.Add(graphNode);
+                var term = new Term { Type = slot.GraphTermType, Start = slot.GraphTermStart, Length = slot.GraphTermLength };
+                bool variable = IsVariable(term);
+                var node = Operator(variable ? ExplainOperatorType.GraphVariable : ExplainOperatorType.GraphScan,
+                    $"GRAPH {GetTermString(term)}", ref tree, index);
+                if (variable) node.OutputVariables.Add(GetTermString(term));
+                return node;
             }
-        }
-
-        // Handle SERVICE clauses
-        if (pattern.HasService)
-        {
-            for (int i = 0; i < pattern.ServiceClauseCount; i++)
+            case PatternKind.Filter:
+                return new ExplainNode { OperatorType = ExplainOperatorType.Filter, Description = $"FILTER({Clip(slot.FilterStart, slot.FilterLength, 47)})" };
+            case PatternKind.Bind:
             {
-                var svc = pattern.GetServiceClause(i);
-                var serviceNode = new ExplainNode
-                {
-                    OperatorType = ExplainOperatorType.Service,
-                    Description = GetServiceDescription(svc)
-                };
-                if (svc.Silent)
-                    serviceNode.Properties["silent"] = "true";
-                parent.Children.Add(serviceNode);
+                var variable = _source.Substring(slot.BindVarStart, slot.BindVarLength);
+                var node = new ExplainNode { OperatorType = ExplainOperatorType.Bind, Description = $"BIND({Clip(slot.BindExprStart, slot.BindExprLength, 40)}) AS {variable}" };
+                node.OutputVariables.Add(variable);
+                return node;
             }
-        }
-
-        // Handle subqueries
-        if (pattern.HasSubQueries)
-        {
-            for (int i = 0; i < pattern.SubQueryCount; i++)
+            case PatternKind.ValuesHeader:
+                return new ExplainNode { OperatorType = ExplainOperatorType.Values, Description = $"Inline data: {Clip(slot.ValuesVarStart, slot.ValuesVarLength, 50)}" };
+            case PatternKind.ServiceHeader:
             {
-                var sq = pattern.GetSubQuery(i);
-                var subNode = new ExplainNode
-                {
-                    OperatorType = ExplainOperatorType.SubQuery,
-                    Description = "Nested SELECT"
-                };
-                parent.Children.Add(subNode);
+                var span = _source.AsSpan(slot.GraphTermStart, slot.GraphTermLength);
+                int brace = span.IndexOf('{');
+                return new ExplainNode { OperatorType = ExplainOperatorType.Service, Description = (brace > 0 ? span[..brace] : span).Trim().ToString() };
             }
+            case PatternKind.SubSelectHeader:
+                return SubSelectNode(slot.GraphTermStart);
+            default:
+                return new ExplainNode { OperatorType = ExplainOperatorType.Query, Description = slot.Kind.ToString() };
         }
+    }
 
-        // Regular triple patterns
-        var requiredCount = pattern.RequiredPatternCount;
-        var optionalStart = -1;
-
-        // Find where optional patterns start
-        for (int i = 0; i < pattern.PatternCount && i < pattern.FirstBranchPatternCount; i++)
+    /// <summary>A group joins its children in source order, the order TreeJoinExecutor runs them; FILTERs and EXISTS
+    /// apply to the whole group, so they are drawn last. A group with one child is drawn as that child.</summary>
+    private ExplainNode GroupNode(ref PatternArray tree, int index)
+    {
+        var steps = new List<ExplainNode>();
+        var groupScoped = new List<ExplainNode>();
+        var e = tree.EnumerateDirectChildren(index);
+        while (e.MoveNext())
         {
-            if (pattern.IsOptional(i) && optionalStart < 0)
-                optionalStart = i;
-        }
-
-        if (requiredCount > 0)
-        {
-            if (requiredCount == 1)
-            {
-                // Single pattern scan
-                int idx = 0;
-                for (int i = 0; i < pattern.PatternCount; i++)
-                {
-                    if (!pattern.IsOptional(i)) { idx = i; break; }
-                }
-                var scanNode = CreateTriplePatternNode(pattern.GetPattern(idx), idx);
-                parent.Children.Add(scanNode);
-            }
+            var kind = e.Current.Kind;
+            var child = NodeFor(ref tree, e.CurrentIndex);
+            if (kind is PatternKind.Filter or PatternKind.ExistsHeader or PatternKind.NotExistsHeader)
+                groupScoped.Add(child);
             else
-            {
-                // Multi-pattern join
-                var joinNode = new ExplainNode
-                {
-                    OperatorType = ExplainOperatorType.NestedLoopJoin,
-                    Description = $"Join {requiredCount} patterns"
-                };
-                parent.Children.Add(joinNode);
-
-                for (int i = 0; i < pattern.PatternCount && (optionalStart < 0 || i < optionalStart); i++)
-                {
-                    if (!pattern.IsOptional(i))
-                    {
-                        var scanNode = CreateTriplePatternNode(pattern.GetPattern(i), i);
-                        joinNode.Children.Add(scanNode);
-                    }
-                }
-            }
+                steps.Add(child);
         }
-
-        // OPTIONAL patterns
-        if (pattern.HasOptionalPatterns)
+        if (steps.Count + groupScoped.Count == 1)
+            return steps.Count == 1 ? steps[0] : groupScoped[0];
+        var join = new ExplainNode
         {
-            var optionalCount = pattern.PatternCount - requiredCount;
-            if (optionalCount > 0)
-            {
-                var optNode = new ExplainNode
-                {
-                    OperatorType = ExplainOperatorType.LeftOuterJoin,
-                    Description = $"OPTIONAL ({optionalCount} patterns)"
-                };
-                parent.Children.Add(optNode);
-
-                for (int i = 0; i < pattern.PatternCount; i++)
-                {
-                    if (pattern.IsOptional(i))
-                    {
-                        var scanNode = CreateTriplePatternNode(pattern.GetPattern(i), i);
-                        optNode.Children.Add(scanNode);
-                    }
-                }
-            }
-        }
-
-        // MINUS patterns
-        if (pattern.HasMinus)
-        {
-            var minusNode = new ExplainNode
-            {
-                OperatorType = ExplainOperatorType.Minus,
-                Description = $"Anti-join ({pattern.MinusPatternCount} patterns)"
-            };
-            parent.Children.Add(minusNode);
-        }
-
-        // FILTER expressions
-        if (pattern.FilterCount > 0)
-        {
-            for (int i = 0; i < pattern.FilterCount; i++)
-            {
-                var filter = pattern.GetFilter(i);
-                var filterNode = new ExplainNode
-                {
-                    OperatorType = ExplainOperatorType.Filter,
-                    Description = GetFilterDescription(filter)
-                };
-                parent.Children.Add(filterNode);
-            }
-        }
-
-        // BIND expressions
-        if (pattern.HasBinds)
-        {
-            for (int i = 0; i < pattern.BindCount; i++)
-            {
-                var bind = pattern.GetBind(i);
-                var bindNode = new ExplainNode
-                {
-                    OperatorType = ExplainOperatorType.Bind,
-                    Description = GetBindDescription(bind)
-                };
-                bindNode.OutputVariables.Add(GetBindVariable(bind));
-                parent.Children.Add(bindNode);
-            }
-        }
-
-        // VALUES clause
-        if (pattern.HasValues)
-        {
-            var valuesNode = new ExplainNode
-            {
-                OperatorType = ExplainOperatorType.Values,
-                Description = $"Inline data ({pattern.Values.ValueCount} values)"
-            };
-            parent.Children.Add(valuesNode);
-        }
+            OperatorType = ExplainOperatorType.NestedLoopJoin,
+            Description = steps.Count == 0 ? "Empty group (one solution)" : steps.Count == 1 ? "Join 1 pattern" : $"Join {steps.Count} patterns"
+        };
+        join.Children.AddRange(steps);
+        join.Children.AddRange(groupScoped);
+        return join;
     }
 
-    private void AddTriplePatterns(ExplainNode parent, ref readonly GraphPattern pattern, int start, int end)
+    /// <summary>An operator over its children (UNION branches, or the group of OPTIONAL / MINUS / GRAPH / EXISTS).</summary>
+    private ExplainNode Operator(ExplainOperatorType type, string description, ref PatternArray tree, int index)
     {
-        for (int i = start; i < end; i++)
+        var node = new ExplainNode { OperatorType = type, Description = description };
+        if (type is ExplainOperatorType.GraphScan or ExplainOperatorType.GraphVariable)
         {
-            var scanNode = CreateTriplePatternNode(pattern.GetPattern(i), i);
-            parent.Children.Add(scanNode);
+            node.Children.Add(GroupNode(ref tree, index)); // a GRAPH header holds its group's children directly
+            return node;
         }
+        var e = tree.EnumerateDirectChildren(index);
+        while (e.MoveNext())
+            node.Children.Add(NodeFor(ref tree, e.CurrentIndex));
+        if (type is ExplainOperatorType.Exists or ExplainOperatorType.NotExists && node.Children.Count > 1)
+        {
+            var group = GroupNode(ref tree, index);
+            node.Children.Clear();
+            node.Children.Add(group);
+        }
+        return node;
+    }
+
+    private ExplainNode TripleNode(PatternSlot slot, int index) => CreateTriplePatternNode(slot.ToTriplePattern(), index);
+
+    private ExplainNode PathNode(PatternSlot slot)
+    {
+        var s = new Term { Type = slot.SubjectType, Start = slot.SubjectStart, Length = slot.SubjectLength };
+        var o = new Term { Type = slot.ObjectType, Start = slot.ObjectStart, Length = slot.ObjectLength };
+        var node = new ExplainNode
+        {
+            OperatorType = ExplainOperatorType.PathScan,
+            Description = $"{GetTermString(s)} {Clip(slot.PathIriStart, slot.PathIriLength, 40)} {GetTermString(o)}"
+        };
+        if (IsVariable(s)) node.OutputVariables.Add(GetTermString(s));
+        if (IsVariable(o)) node.OutputVariables.Add(GetTermString(o));
+        return node;
+    }
+
+    /// <summary>A sub-SELECT's own plan: its modifiers above its WHERE.</summary>
+    private ExplainNode SubSelectNode(int subSelectStart)
+    {
+        var sub = new SparqlParser(_source.AsSpan()).ParseSubSelectCoreAt(subSelectStart);
+        var node = new ExplainNode
+        {
+            OperatorType = ExplainOperatorType.SubQuery,
+            Description = "Nested SELECT" + (sub.Select.Distinct ? " DISTINCT" : "") + (sub.Select.SelectAll ? " *" : "")
+        };
+        var current = node;
+        if (sub.LimitOffset.HasLimit || sub.LimitOffset.Offset > 0)
+        {
+            var slice = new ExplainNode
+            {
+                OperatorType = ExplainOperatorType.Slice,
+                Description = string.Join(" ", new[] {
+                    sub.LimitOffset.HasLimit ? $"LIMIT {sub.LimitOffset.Limit}" : null,
+                    sub.LimitOffset.Offset > 0 ? $"OFFSET {sub.LimitOffset.Offset}" : null }.Where(x => x != null))
+            };
+            current.Children.Add(slice);
+            current = slice;
+        }
+        if (sub.OrderBy.HasOrderBy)
+        {
+            var sort = new ExplainNode { OperatorType = ExplainOperatorType.Sort, Description = $"Sort by {sub.OrderBy.Count} expression(s)" };
+            current.Children.Add(sort);
+            current = sort;
+        }
+        if (sub.GroupBy.HasGroupBy || sub.Select.HasRealAggregates)
+        {
+            var group = new ExplainNode { OperatorType = ExplainOperatorType.GroupBy, Description = "Aggregate" };
+            current.Children.Add(group);
+            current = group;
+        }
+        if (sub.WhereGroupStart >= 0)
+            AddWhere(current, sub.WhereGroupStart);
+        return node;
+    }
+
+    /// <summary>The source text at [start, start+length), cut to <paramref name="max"/> characters.</summary>
+    private string Clip(int start, int length, int max)
+    {
+        if (start < 0 || length <= 0) return "";
+        var text = _source.AsSpan(start, length).Trim();
+        return text.Length > max ? text[..max].ToString() + "..." : text.ToString();
     }
 
     private ExplainNode CreateTriplePatternNode(TriplePattern tp, int index)
@@ -827,38 +794,6 @@ internal sealed class SparqlExplainer
         return string.Join(", ", parts);
     }
 
-    private string GetGraphDescription(GraphClause gc)
-    {
-        var graphTerm = GetTermString(gc.Graph);
-        return $"GRAPH {graphTerm} ({gc.PatternCount} patterns)";
-    }
-
-    private string GetServiceDescription(ServiceClause svc)
-    {
-        var endpoint = GetTermString(svc.Endpoint);
-        var silent = svc.Silent ? " SILENT" : "";
-        return $"SERVICE{silent} {endpoint}";
-    }
-
-    private string GetFilterDescription(FilterExpr filter)
-    {
-        var expr = _source.AsSpan().Slice(filter.Start, filter.Length);
-        if (expr.Length > 50)
-            return $"FILTER({expr.Slice(0, 47).ToString()}...)";
-        return $"FILTER({expr.ToString()})";
-    }
-
-    private string GetBindDescription(BindExpr bind)
-    {
-        var varName = GetBindVariable(bind);
-        return $"BIND AS {varName}";
-    }
-
-    private string GetBindVariable(BindExpr bind)
-    {
-        if (bind.VarLength == 0) return "?";
-        return _source.AsSpan().Slice(bind.VarStart, bind.VarLength).ToString();
-    }
 }
 
 /// <summary>
