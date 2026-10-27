@@ -206,9 +206,12 @@ internal ref partial struct SparqlParser
         for (int i = 0; i < pattern.SubQueryCount; i++)
         {
             var subquery = pattern.GetSubQuery(i);
-            for (int j = 0; j < subquery.ProjectedVarCount; j++)
+            int projected = subquery.Select.ProjectedVariableCount;
+            for (int j = 0; j < projected + subquery.Select.AggregateCount; j++)
             {
-                var (start, len) = subquery.GetProjectedVariable(j);
+                var (start, len) = j < projected
+                    ? subquery.Select.GetProjectedVariable(j)
+                    : (subquery.Select.GetAggregate(j - projected).AliasStart, subquery.Select.GetAggregate(j - projected).AliasLength);
                 if (len > 0)
                 {
                     var hash = ComputeSpanHash(_source.Slice(start, len));
@@ -1463,68 +1466,13 @@ internal ref partial struct SparqlParser
     {
         var subSelect = new SubSelect();
 
-        // Parse SELECT keyword
-        ConsumeKeyword("SELECT");
-        SkipWhitespace();
-
-        // Check for DISTINCT
-        var span = PeekSpan(8);
-        if (span.Length >= 8 && span[..8].Equals("DISTINCT", StringComparison.OrdinalIgnoreCase))
-        {
-            ConsumeKeyword("DISTINCT");
-            SkipWhitespace();
-            subSelect.Distinct = true;
-        }
-
-        // Parse projected variables or *
-        if (Peek() == '*')
-        {
-            Advance();
-            subSelect.SelectAll = true;
-        }
-        else
-        {
-            // Parse projection list: variables ?x or expressions (expr AS ?var)
-            while (Peek() == '?' || Peek() == '(')
-            {
-                if (Peek() == '?')
-                {
-                    var varStart = _position;
-                    Advance(); // Skip '?'
-                    while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_'))
-                        Advance();
-                    var varLen = _position - varStart;
-                    subSelect.AddProjectedVariable(varStart, varLen);
-                }
-                else if (Peek() == '(')
-                {
-                    // Parse (expr AS ?var) or aggregate expression (COUNT(?x) AS ?c)
-                    // Reuse ParseAggregateExpression which handles both cases
-                    var agg = ParseAggregateExpression();
-
-                    if (agg.Function != AggregateFunction.None)
-                    {
-                        // It's an aggregate - store both the aggregate and the projected variable
-                        subSelect.AddAggregate(agg);
-                        if (agg.AliasLength > 0)
-                            subSelect.AddProjectedVariable(agg.AliasStart, agg.AliasLength);
-                    }
-                    else if (agg.AliasLength > 0)
-                    {
-                        // It's a non-aggregate expression with alias - store both for evaluation
-                        // (e.g., CONCAT(?F, " ", ?L) AS ?FullName)
-                        subSelect.AddAggregate(agg);
-                        subSelect.AddProjectedVariable(agg.AliasStart, agg.AliasLength);
-                    }
-                }
-                SkipWhitespace();
-            }
-        }
+        // [9] SelectClause, the one parse a query's projection uses too
+        subSelect.Select = ParseSelectClause();
 
         SkipWhitespace();
 
         // Parse WHERE keyword (optional per SPARQL grammar)
-        span = PeekSpan(5);
+        var span = PeekSpan(5);
         if (span.Length >= 5 && span[..5].Equals("WHERE", StringComparison.OrdinalIgnoreCase))
         {
             ConsumeKeyword("WHERE");

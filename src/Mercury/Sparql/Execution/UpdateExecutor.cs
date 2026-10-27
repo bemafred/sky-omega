@@ -213,7 +213,7 @@ internal class UpdateExecutor
         try
         {
             foreach (var row in EvaluateWhere(defaultGraphs: null, namedGraphs: null))
-                InstantiateTemplate(in _update.DeleteTemplate, row, activeGraph: null, toDelete);
+                InstantiateTemplate(_update.DeleteTemplate, row, activeGraph: null, toDelete);
         }
         finally
         {
@@ -258,8 +258,8 @@ internal class UpdateExecutor
         {
             foreach (var row in EvaluateWhere(defaultGraphs, namedGraphs))
             {
-                InstantiateTemplate(in _update.DeleteTemplate, row, withGraph, toDelete);
-                InstantiateTemplate(in _update.InsertTemplate, row, withGraph, toInsert);
+                InstantiateTemplate(_update.DeleteTemplate, row, withGraph, toDelete);
+                InstantiateTemplate(_update.InsertTemplate, row, withGraph, toInsert);
             }
         }
         finally
@@ -301,34 +301,21 @@ internal class UpdateExecutor
     /// go to <paramref name="activeGraph"/> (the WITH graph; null = the default graph); a GRAPH block's triples go
     /// to its graph, which may be a variable. A triple with an unbound variable is not instantiated (§3.1.3).
     /// </summary>
-    private void InstantiateTemplate(in GraphPattern template, MaterializedRow row, string? activeGraph,
+    private void InstantiateTemplate(TemplateQuad[]? template, MaterializedRow row, string? activeGraph,
         List<(string s, string p, string o, string? g)> sink)
     {
-        for (int i = 0; i < template.PatternCount; i++)
+        if (template == null)
+            return;
+        foreach (var quad in template)
         {
-            var tp = template.GetPattern(i);
-            var s = InstantiateTerm(tp.Subject, row);
-            var p = InstantiateTerm(tp.Predicate, row);
-            var o = InstantiateTerm(tp.Object, row);
-            if (s != null && p != null && o != null)
-                sink.Add((s, p, o, activeGraph));
-        }
-
-        for (int i = 0; i < template.GraphClauseCount; i++)
-        {
-            var gc = template.GetGraphClause(i);
-            var graph = InstantiateTerm(gc.Graph, row);
-            if (graph == null)
+            var graph = quad.InGraphBlock ? InstantiateTerm(quad.Graph, row) : activeGraph;
+            if (quad.InGraphBlock && graph == null)
                 continue;
-            for (int j = 0; j < gc.PatternCount; j++)
-            {
-                var tp = gc.GetPattern(j);
-                var s = InstantiateTerm(tp.Subject, row);
-                var p = InstantiateTerm(tp.Predicate, row);
-                var o = InstantiateTerm(tp.Object, row);
-                if (s != null && p != null && o != null)
-                    sink.Add((s, p, o, graph));
-            }
+            var s = InstantiateTerm(quad.Subject, row);
+            var p = InstantiateTerm(quad.Predicate, row);
+            var o = InstantiateTerm(quad.Object, row);
+            if (s != null && p != null && o != null)
+                sink.Add((s, p, o, graph));
         }
     }
 

@@ -6,18 +6,12 @@ namespace SkyOmega.Mercury.Sparql.Types;
 /// </summary>
 internal struct SubSelect
 {
-    public const int MaxProjectedVars = 8;
     public const int MaxPatterns = 16;
     public const int MaxFilters = 8;
 
-    // SELECT clause flags
-    public bool Distinct;
-    public bool SelectAll;  // SELECT * means project all
-
-    // Projected variables
-    private int _projectedVarCount;
-    private int _pv0Start, _pv0Len, _pv1Start, _pv1Len, _pv2Start, _pv2Len, _pv3Start, _pv3Len;
-    private int _pv4Start, _pv4Len, _pv5Start, _pv5Len, _pv6Start, _pv6Len, _pv7Start, _pv7Len;
+    // [9] SelectClause: DISTINCT / REDUCED, *, the projected variables and expressions. Parsed by the same
+    // ParseSelectClause as a query's, so a sub-SELECT's projection has the same grammar and the same capacities.
+    public SelectClause Select;
 
     // Triple patterns
     private int _patternCount;
@@ -52,11 +46,6 @@ internal struct SubSelect
     public GroupByClause GroupBy;
     public HavingClause Having;
 
-    // Aggregate expressions (e.g., COUNT(?x) AS ?c)
-    public const int MaxAggregates = 8;
-    private int _aggregateCount;
-    private AggregateExpression _a0, _a1, _a2, _a3, _a4, _a5, _a6, _a7;
-
     // Nested subqueries (boxed to avoid recursive struct definition)
     // For queries like: SELECT * WHERE { { SELECT ?x WHERE { ... } } ?x ?p ?o }
     public const int MaxNestedSubQueries = 2;
@@ -64,31 +53,11 @@ internal struct SubSelect
     private object? _nestedSq0;  // Boxed SubSelect
     private object? _nestedSq1;  // Boxed SubSelect
 
-    public readonly int ProjectedVarCount => _projectedVarCount;
     public readonly int PatternCount => _patternCount;
     public readonly int FilterCount => _filterCount;
-    public readonly int AggregateCount => _aggregateCount;
     public readonly bool HasPatterns => _patternCount > 0;
     public readonly bool HasFilters => _filterCount > 0;
     public readonly bool HasOrderBy => OrderBy.HasOrderBy;
-    public readonly bool HasAggregates => _aggregateCount > 0;
-    /// <summary>
-    /// Returns true if there are any real aggregate functions (COUNT, SUM, AVG, etc.).
-    /// Non-aggregate computed expressions (CONCAT, STR, etc.) with AggregateFunction.None
-    /// do not count as real aggregates and should not trigger implicit grouping.
-    /// </summary>
-    public readonly bool HasRealAggregates
-    {
-        get
-        {
-            for (int i = 0; i < _aggregateCount; i++)
-            {
-                if (GetAggregate(i).Function != AggregateFunction.None)
-                    return true;
-            }
-            return false;
-        }
-    }
     public readonly bool HasGroupBy => GroupBy.HasGroupBy;
     public readonly bool HasHaving => Having.HasHaving;
     public readonly int FirstBranchPatternCount => HasUnion ? UnionStartIndex : PatternCount;
@@ -112,39 +81,6 @@ internal struct SubSelect
     /// Returns true if any patterns in UNION are inside GRAPH blocks (some may be default graph).
     /// </summary>
     public readonly bool HasMixedGraphUnion => HasUnion && _graphPatternFlags != 0 && HasGraphContext;
-
-    public void AddProjectedVariable(int start, int length)
-    {
-        if (_projectedVarCount >= MaxProjectedVars) return;
-        SetProjectedVariable(_projectedVarCount++, start, length);
-    }
-
-    public readonly (int Start, int Length) GetProjectedVariable(int index)
-    {
-        return index switch
-        {
-            0 => (_pv0Start, _pv0Len), 1 => (_pv1Start, _pv1Len),
-            2 => (_pv2Start, _pv2Len), 3 => (_pv3Start, _pv3Len),
-            4 => (_pv4Start, _pv4Len), 5 => (_pv5Start, _pv5Len),
-            6 => (_pv6Start, _pv6Len), 7 => (_pv7Start, _pv7Len),
-            _ => (0, 0)
-        };
-    }
-
-    private void SetProjectedVariable(int index, int start, int length)
-    {
-        switch (index)
-        {
-            case 0: _pv0Start = start; _pv0Len = length; break;
-            case 1: _pv1Start = start; _pv1Len = length; break;
-            case 2: _pv2Start = start; _pv2Len = length; break;
-            case 3: _pv3Start = start; _pv3Len = length; break;
-            case 4: _pv4Start = start; _pv4Len = length; break;
-            case 5: _pv5Start = start; _pv5Len = length; break;
-            case 6: _pv6Start = start; _pv6Len = length; break;
-            case 7: _pv7Start = start; _pv7Len = length; break;
-        }
-    }
 
     public void AddPattern(TriplePattern pattern)
     {
@@ -203,33 +139,6 @@ internal struct SubSelect
             case 2: _f2 = filter; break; case 3: _f3 = filter; break;
             case 4: _f4 = filter; break; case 5: _f5 = filter; break;
             case 6: _f6 = filter; break; case 7: _f7 = filter; break;
-        }
-    }
-
-    public void AddAggregate(AggregateExpression agg)
-    {
-        if (_aggregateCount >= MaxAggregates) return;
-        SetAggregate(_aggregateCount++, agg);
-    }
-
-    public readonly AggregateExpression GetAggregate(int index)
-    {
-        return index switch
-        {
-            0 => _a0, 1 => _a1, 2 => _a2, 3 => _a3,
-            4 => _a4, 5 => _a5, 6 => _a6, 7 => _a7,
-            _ => default
-        };
-    }
-
-    private void SetAggregate(int index, AggregateExpression agg)
-    {
-        switch (index)
-        {
-            case 0: _a0 = agg; break; case 1: _a1 = agg; break;
-            case 2: _a2 = agg; break; case 3: _a3 = agg; break;
-            case 4: _a4 = agg; break; case 5: _a5 = agg; break;
-            case 6: _a6 = agg; break; case 7: _a7 = agg; break;
         }
     }
 

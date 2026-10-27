@@ -74,9 +74,7 @@ internal ref partial struct SparqlParser
         };
 
         ExpectChar('{');
-        SkipWhitespace();
-        ParseQuadTemplateBody(ref op.DeleteTemplate);
-        SkipWhitespace();
+        op.DeleteTemplate = ParseQuads();
         ExpectChar('}');
 
         // The same text is evaluated as a group, so the group grammar must read it to the same end.
@@ -149,9 +147,7 @@ internal ref partial struct SparqlParser
             if (Peek() != '{')
                 throw new SparqlParseException($"Expected '{{' but found '{Peek()}'");
             Advance();
-            SkipWhitespace();
-            ParseQuadTemplateBody(ref op.DeleteTemplate);
-            SkipWhitespace();
+            op.DeleteTemplate = ParseQuads();
             if (Peek() != '}')
                 throw new SparqlParseException($"Expected '}}' but found '{Peek()}'");
             Advance();
@@ -165,9 +161,7 @@ internal ref partial struct SparqlParser
             if (Peek() != '{')
                 throw new SparqlParseException($"Expected '{{' but found '{Peek()}'");
             Advance();
-            SkipWhitespace();
-            ParseQuadTemplateBody(ref op.InsertTemplate);
-            SkipWhitespace();
+            op.InsertTemplate = ParseQuads();
             if (Peek() != '}')
                 throw new SparqlParseException($"Expected '}}' but found '{Peek()}'");
             Advance();
@@ -682,35 +676,36 @@ internal ref partial struct SparqlParser
     }
 
     /// <summary>
-    /// Parse the body of a QuadPattern template (DELETE/INSERT).
-    /// [49] Quads ::= TriplesTemplate? ( QuadsNotTriples '.'? TriplesTemplate? )*
-    /// [50] QuadsNotTriples ::= 'GRAPH' VarOrIri '{' TriplesTemplate? '}'
-    /// Only supports triple patterns and GRAPH blocks (per SPARQL spec).
-    /// Avoids ParseGroupGraphPatternSub→ParseGraph call chain to reduce stack depth
-    /// for NCrunch compatibility. Large struct locals (GraphPattern, GraphClause) are
-    /// isolated in ParseQuadTemplateGraph to keep this method's frame small.
+    /// The body of a QuadPattern template (DELETE / INSERT / DELETE WHERE), from after its '{' to before its '}'.
+    /// [50] Quads ::= TriplesTemplate? ( QuadsNotTriples '.'? TriplesTemplate? )*
+    /// [51] QuadsNotTriples ::= 'GRAPH' VarOrIri '{' TriplesTemplate? '}'
+    /// Every triple becomes one <see cref="TemplateQuad"/>; the template has as many as the text has.
     /// </summary>
-    private void ParseQuadTemplateBody(ref GraphPattern pattern)
+    private TemplateQuad[] ParseQuads()
     {
-        while (!IsAtEnd() && Peek() != '}')
+        var quads = new List<TemplateQuad>();
+        while (true)
         {
             SkipWhitespace();
             if (IsAtEnd() || Peek() == '}')
-                break;
+                return quads.ToArray();
 
             var span = PeekSpan(5);
             if (span.Length >= 5 && span[..5].Equals("GRAPH", StringComparison.OrdinalIgnoreCase))
             {
-                ParseQuadTemplateGraph(ref pattern);
+                ConsumeKeyword("GRAPH");
                 SkipWhitespace();
-                if (Peek() == '.')
-                    Advance();
-                continue;
+                var graph = ParseTerm();
+                SkipWhitespace();
+                ExpectChar('{');
+                ParseTriplesTemplate(graph, quads);
+                SkipWhitespace();
+                ExpectChar('}');
             }
-
-            // Triple pattern (TriplesTemplate)
-            if (!TryParseTriplePattern(ref pattern))
-                break;
+            else
+            {
+                ParseTriplesTemplate(default, quads);
+            }
 
             SkipWhitespace();
             if (Peek() == '.')
@@ -719,82 +714,70 @@ internal ref partial struct SparqlParser
     }
 
     /// <summary>
-    /// Parse a GRAPH block inside a QuadPattern template.
-    /// [50] QuadsNotTriples ::= 'GRAPH' VarOrIri '{' TriplesTemplate? '}'
-    /// [51] TriplesTemplate ::= TriplesSameSubject ( '.' TriplesTemplate? )?
-    /// Parses triples directly into GraphClause without a temp GraphPattern,
-    /// keeping the stack frame small (~1KB vs ~6-11KB) for NCrunch compatibility.
+    /// [52] TriplesTemplate ::= TriplesSameSubject ( '.' TriplesTemplate? )?, adding each triple to
+    /// <paramref name="quads"/> in <paramref name="graph"/>. Stops before a '}' or a GRAPH keyword.
+    /// [75] TriplesSameSubject ::= VarOrTerm PropertyListNotEmpty
+    /// [77] PropertyListNotEmpty ::= Verb ObjectList ( ';' ( Verb ObjectList )? )*
+    /// [78] Verb ::= VarOrIri | 'a'        [79] ObjectList ::= Object ( ',' Object )*
+    /// A template takes a Verb, not a property path: a path has no single triple to instantiate.
     /// </summary>
-    private void ParseQuadTemplateGraph(ref GraphPattern pattern)
+    private void ParseTriplesTemplate(Term graph, List<TemplateQuad> quads)
     {
-        ConsumeKeyword("GRAPH");
-        SkipWhitespace();
-
-        var graphTerm = ParseTerm();
-        SkipWhitespace();
-
-        if (Peek() != '{')
-            throw new SparqlParseException($"Expected '{{' after GRAPH term");
-        Advance();
-        SkipWhitespace();
-
-        var graphClause = new GraphClause { Graph = graphTerm };
-
-        // Parse TriplesTemplate directly into GraphClause (no temp GraphPattern)
-        while (!IsAtEnd() && Peek() != '}')
+        while (true)
         {
             SkipWhitespace();
             if (IsAtEnd() || Peek() == '}')
-                break;
+                return;
+            var span = PeekSpan(5);
+            if (span.Length >= 5 && span[..5].Equals("GRAPH", StringComparison.OrdinalIgnoreCase))
+                return;
 
             var subject = ParseTerm();
-            if (subject.Type == TermType.Variable && subject.Length == 0)
-                break;
+            if (subject.Length == 0 && subject.Start >= 0)
+                throw new SparqlParseException($"Expected a triple in the template at position {_position}");
 
-            SkipWhitespace();
-            var (predicate, path) = ParsePredicateOrPath();
-            SkipWhitespace();
-            var obj = ParseTerm();
-
-            if (path.Type == PathType.Sequence)
-                ExpandSequencePathIntoGraphClause(ref graphClause, subject, obj, path);
-            else
-                graphClause.AddPattern(new TriplePattern
-                {
-                    Subject = subject, Predicate = predicate, Object = obj, Path = path
-                });
-
-            SkipWhitespace();
-
-            // Handle ';' for predicate-object lists (same subject)
-            while (Peek() == ';')
+            // PropertyListNotEmpty
+            while (true)
             {
-                Advance();
                 SkipWhitespace();
-                if (IsAtEnd() || Peek() == '}' || Peek() == '.')
+                var (verb, path) = ParsePredicateOrPath();
+                if (path.Type != PathType.None)
+                    throw new SparqlParseException($"A property path is not allowed in an Update template (position {_position})");
+                if (verb.Length == 0 && verb.Start >= 0)
+                    throw new SparqlParseException($"Expected a predicate in the template at position {_position}");
+
+                // ObjectList
+                while (true)
+                {
+                    SkipWhitespace();
+                    var obj = ParseTerm();
+                    if (obj.Length == 0 && obj.Start >= 0)
+                        throw new SparqlParseException($"Expected an object in the template at position {_position}");
+                    quads.Add(new TemplateQuad { Subject = subject, Predicate = verb, Object = obj, Graph = graph });
+
+                    SkipWhitespace();
+                    if (Peek() != ',')
+                        break;
+                    Advance();
+                }
+
+                if (Peek() != ';')
                     break;
-                var (nextPred, nextPath) = ParsePredicateOrPath();
-                SkipWhitespace();
-                var nextObj = ParseTerm();
-                if (nextPath.Type == PathType.Sequence)
-                    ExpandSequencePathIntoGraphClause(ref graphClause, subject, nextObj, nextPath);
-                else
-                    graphClause.AddPattern(new TriplePattern
-                    {
-                        Subject = subject, Predicate = nextPred, Object = nextObj, Path = nextPath
-                    });
-                SkipWhitespace();
+                // ';' may repeat and may end the list: "?s :p ?o ; ; ." and "?s :p ?o ;" are both valid
+                while (Peek() == ';')
+                {
+                    Advance();
+                    SkipWhitespace();
+                }
+                if (IsAtEnd() || Peek() == '.' || Peek() == '}')
+                    break;
             }
 
-            if (Peek() == '.')
-                Advance();
-        }
-
-        SkipWhitespace();
-        if (Peek() == '}')
+            SkipWhitespace();
+            if (Peek() != '.')
+                return;
             Advance();
-
-        pattern.AddGraphClause(graphClause);
+        }
     }
 
     /// <summary>

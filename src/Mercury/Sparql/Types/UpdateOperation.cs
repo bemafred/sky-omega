@@ -14,8 +14,8 @@ internal struct UpdateOperation
 
     // For DELETE/INSERT ... WHERE - template patterns ([52] QuadPattern). DELETE WHERE's QuadPattern is its
     // DeleteTemplate as well as its WHERE.
-    public GraphPattern DeleteTemplate;
-    public GraphPattern InsertTemplate;
+    public TemplateQuad[] DeleteTemplate;
+    public TemplateQuad[] InsertTemplate;
 
     // ADR-052: source offset of the WHERE group's opening '{' (for DELETE WHERE, its QuadPattern's '{').
     // The WHERE is a GroupGraphPattern, parsed into the pattern tree from here and evaluated by TreeJoinExecutor,

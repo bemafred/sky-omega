@@ -41,13 +41,13 @@ SELECT ?g WHERE {
         Assert.True(parsed.WhereClause.Pattern.SubQueryCount > 0, "Should have a subquery");
 
         var subSelect = parsed.WhereClause.Pattern.GetSubQuery(0);
-        _output.WriteLine($"HasAggregates: {subSelect.HasAggregates}");
-        _output.WriteLine($"AggregateCount: {subSelect.AggregateCount}");
+        _output.WriteLine($"HasAggregates: {subSelect.Select.HasAggregates}");
+        _output.WriteLine($"AggregateCount: {subSelect.Select.AggregateCount}");
 
-        Assert.True(subSelect.HasAggregates, "Subquery should have aggregates");
-        Assert.Equal(1, subSelect.AggregateCount);
+        Assert.True(subSelect.Select.HasAggregates, "Subquery should have aggregates");
+        Assert.Equal(1, subSelect.Select.AggregateCount);
 
-        var agg = subSelect.GetAggregate(0);
+        var agg = subSelect.Select.GetAggregate(0);
         _output.WriteLine($"Function: {agg.Function}");
         _output.WriteLine($"AliasStart: {agg.AliasStart}, AliasLength: {agg.AliasLength}");
         _output.WriteLine($"VariableStart: {agg.VariableStart}, VariableLength: {agg.VariableLength}");

@@ -1010,11 +1010,11 @@ internal sealed class GraphTreeEvaluator
             Populate(ref table, sol);
             rows.Add(new MaterializedRow(table));
         }
-        var selectClause = BuildSelectClause(sub, subSrc);
+        var selectClause = sub.Select;
         var qrBindings = new Binding[64];
         var qrStringBuffer = new char[16384];
         var qr = QueryResults.FromMaterializedSimple(rows, subSrc.AsSpan(), _store, qrBindings, qrStringBuffer,
-            sub.LimitOffset, sub.Distinct, sub.OrderBy, sub.GroupBy, selectClause, sub.Having);
+            sub.LimitOffset, sub.Select.Distinct, sub.OrderBy, sub.GroupBy, selectClause, sub.Having);
 
         // Read the modified rows back over the projected/aggregated output variables.
         var outNames = OutputVarNames(sub, subSrc, innerBag);
@@ -1047,34 +1047,29 @@ internal sealed class GraphTreeEvaluator
         return output;
     }
 
-    private static SelectClause BuildSelectClause(SubSelect sub, string subSrc)
-    {
-        var sc = new SelectClause { Distinct = sub.Distinct, SelectAll = sub.SelectAll };
-        for (int i = 0; i < sub.ProjectedVarCount; i++)
-        {
-            var (start, length) = sub.GetProjectedVariable(i);
-            sc.AddProjectedVariable(start, length);
-        }
-        for (int i = 0; i < sub.AggregateCount; i++)
-            sc.AddAggregate(sub.GetAggregate(i));
-        return sc;
-    }
-
     private static List<string> OutputVarNames(SubSelect sub, string subSrc, List<Dictionary<string, string>> innerBag)
     {
         var names = new List<string>();
         var seen = new HashSet<string>();
-        if (sub.SelectAll)
+        if (sub.Select.SelectAll)
         {
             foreach (var sol in innerBag)
                 foreach (var k in sol.Keys)
                     if (seen.Add(k)) names.Add(k);
             return names;
         }
-        for (int i = 0; i < sub.ProjectedVarCount; i++)
+        for (int i = 0; i < sub.Select.ProjectedVariableCount; i++)
         {
-            var (start, length) = sub.GetProjectedVariable(i);
+            var (start, length) = sub.Select.GetProjectedVariable(i);
             string name = VarName(subSrc.Substring(start, length));
+            if (seen.Add(name)) names.Add(name);
+        }
+        // Expression aliases, e.g. ?c in (COUNT(*) AS ?c), as TreeJoinExecutor.OutputVarNames reads them
+        for (int i = 0; i < sub.Select.AggregateCount; i++)
+        {
+            var agg = sub.Select.GetAggregate(i);
+            if (agg.AliasLength == 0) continue;
+            string name = VarName(subSrc.Substring(agg.AliasStart, agg.AliasLength));
             if (seen.Add(name)) names.Add(name);
         }
         return names;

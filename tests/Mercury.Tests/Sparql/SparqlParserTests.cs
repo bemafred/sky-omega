@@ -735,7 +735,7 @@ public class SparqlParserTests
         var result = parser.ParseUpdate();
 
         Assert.Equal(QueryType.DeleteWhere, result.Type);
-        Assert.True(result.DeleteTemplate.PatternCount > 0);
+        Assert.True(result.DeleteTemplate.Length > 0);
         Assert.Equal(update.IndexOf('{'), result.WhereGroupStart);
     }
 
@@ -749,8 +749,8 @@ public class SparqlParserTests
         var result = parser.ParseUpdate();
 
         Assert.Equal(QueryType.Modify, result.Type);
-        Assert.True(result.DeleteTemplate.PatternCount > 0);
-        Assert.True(result.InsertTemplate.PatternCount > 0);
+        Assert.True(result.DeleteTemplate.Length > 0);
+        Assert.True(result.InsertTemplate.Length > 0);
         Assert.Equal(update.LastIndexOf('{'), result.WhereGroupStart);
     }
 

@@ -747,7 +747,7 @@ public partial class QueryExecutorTests
             Assert.True(subSelect.HasUnion, "SubQuery should have UNION");
             Assert.Equal(3, subSelect.PatternCount);  // 3 UNION alternatives
             Assert.Equal(1, subSelect.UnionStartIndex);  // UNION starts after first pattern
-            Assert.False(subSelect.Distinct, "Removed DISTINCT to avoid GetHashCode issue");
+            Assert.False(subSelect.Select.Distinct, "Removed DISTINCT to avoid GetHashCode issue");
 
             using var executor = new QueryExecutor(Store, query.AsSpan(), parsed);
             var results = executor.ExecuteToMaterialized();
@@ -862,7 +862,7 @@ public partial class QueryExecutorTests
 
         // Get the middle subquery
         var middleSq = parsedQuery.WhereClause.Pattern.GetSubQuery(0);
-        Assert.True(middleSq.SelectAll, "Middle subquery should be SELECT *");
+        Assert.True(middleSq.Select.SelectAll, "Middle subquery should be SELECT *");
 
         // The middle subquery should have a nested subquery
         Assert.True(middleSq.HasSubQueries, "Middle subquery should have nested subquery");
@@ -870,8 +870,8 @@ public partial class QueryExecutorTests
 
         // Get the innermost subquery
         var innerSq = middleSq.GetSubQuery(0);
-        Assert.False(innerSq.SelectAll, "Inner subquery should NOT be SELECT *");
-        Assert.Equal(1, innerSq.ProjectedVarCount);
+        Assert.False(innerSq.Select.SelectAll, "Inner subquery should NOT be SELECT *");
+        Assert.Equal(1, innerSq.Select.ProjectedVariableCount);
         Assert.Equal(1, innerSq.PatternCount);
     }
 
@@ -1084,7 +1084,7 @@ public partial class QueryExecutorTests
         var middleSq = parsed.WhereClause.Pattern.GetSubQuery(0);
 
         // Verify middle SubSelect state
-        Assert.True(middleSq.SelectAll, "Middle SelectAll should be true");
+        Assert.True(middleSq.Select.SelectAll, "Middle SelectAll should be true");
         Assert.True(middleSq.HasSubQueries, "Middle HasSubQueries should be true");
         Assert.Equal(1, middleSq.SubQueryCount);
         Assert.Equal(0, middleSq.PatternCount);
@@ -1093,11 +1093,11 @@ public partial class QueryExecutorTests
         var innerSq = middleSq.GetSubQuery(0);
 
         // Verify inner SubSelect state after unboxing
-        Assert.False(innerSq.SelectAll, "Inner SelectAll should be false");
+        Assert.False(innerSq.Select.SelectAll, "Inner SelectAll should be false");
         Assert.False(innerSq.HasSubQueries, "Inner HasSubQueries should be false (no more nesting)");
         Assert.Equal(0, innerSq.SubQueryCount);
         Assert.Equal(1, innerSq.PatternCount);
-        Assert.Equal(1, innerSq.ProjectedVarCount);
+        Assert.Equal(1, innerSq.Select.ProjectedVariableCount);
 
         // Now simulate what BoxedSubQueryExecutor does for middle SubSelect
         // It should detect HasSubQueries && PatternCount == 0 and call ExecuteNestedSubQueries
@@ -1125,15 +1125,15 @@ public partial class QueryExecutorTests
 
         // Get the outer GroupPattern's subquery (middle SubSelect)
         var middleSq = parsed.WhereClause.Pattern.GetSubQuery(0);
-        Assert.True(middleSq.SelectAll, "Middle should be SELECT *");
+        Assert.True(middleSq.Select.SelectAll, "Middle should be SELECT *");
         Assert.Equal(0, middleSq.PatternCount);
         Assert.True(middleSq.HasSubQueries, "Middle should have nested subquery");
 
         // Get the inner SubSelect from the middle SubSelect
         var innerSq = middleSq.GetSubQuery(0);
-        Assert.False(innerSq.SelectAll, "Inner should NOT be SELECT *");
+        Assert.False(innerSq.Select.SelectAll, "Inner should NOT be SELECT *");
         Assert.Equal(1, innerSq.PatternCount);
-        Assert.Equal(1, innerSq.ProjectedVarCount);
+        Assert.Equal(1, innerSq.Select.ProjectedVariableCount);
 
         // Verify the inner pattern's term references point to valid positions in source
         var tp = innerSq.GetPattern(0);

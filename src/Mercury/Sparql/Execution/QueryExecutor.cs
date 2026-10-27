@@ -558,14 +558,14 @@ internal partial class QueryExecutor : IDisposable
                 int s = sq.GetPattern(i).Subject.Start;
                 if (s >= 0 && (min < 0 || s < min)) min = s;
             }
-            for (int i = 0; i < sq.ProjectedVarCount; i++)
+            for (int i = 0; i < sq.Select.ProjectedVariableCount; i++)
             {
-                int s = sq.GetProjectedVariable(i).Start;
+                int s = sq.Select.GetProjectedVariable(i).Start;
                 if (s >= 0 && (min < 0 || s < min)) min = s;
             }
-            for (int i = 0; i < sq.AggregateCount; i++)
+            for (int i = 0; i < sq.Select.AggregateCount; i++)
             {
-                int s = sq.GetAggregate(i).AliasStart;
+                int s = sq.Select.GetAggregate(i).AliasStart;
                 if (s >= 0 && (min < 0 || s < min)) min = s;
             }
         }

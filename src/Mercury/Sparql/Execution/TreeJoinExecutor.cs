@@ -792,14 +792,14 @@ internal sealed class TreeJoinExecutor
         if (sub.Values.HasValues)
             innerBag = JoinPostQueryValues(innerBag, sub.Values);
 
-        var selectClause = BuildSelectClause(sub);
+        var selectClause = sub.Select;
         var qrBindings = new Binding[64];
         var qrStringBuffer = new char[16384];
         // Lend the prefixes (there is no outer QueryBuffer here) so the modifier layer can evaluate a computed sub-SELECT
         // projection like ( CONCAT(?f," ",?l) AS ?full ) — without them EvaluateSelectExpressions never ran and the alias
         // came out unbound (W3C sq12, surfaced by the C2 CONSTRUCT-subquery cutover).
         var qr = QueryResults.FromMaterializedSimple(innerBag, _source.AsSpan(), _store, qrBindings, qrStringBuffer,
-            sub.LimitOffset, sub.Distinct, sub.OrderBy, sub.GroupBy, selectClause, sub.Having, buffer: null, prefixes: _prefixes);
+            sub.LimitOffset, sub.Select.Distinct || sub.Select.Reduced, sub.OrderBy, sub.GroupBy, selectClause, sub.Having, buffer: null, prefixes: _prefixes);
 
         var outNames = OutputVarNames(sub, _source, whereBrace, whereClose);
         var projected = new List<MaterializedRow>();
@@ -828,24 +828,11 @@ internal sealed class TreeJoinExecutor
         return Join(input, projected);
     }
 
-    private static SelectClause BuildSelectClause(SubSelect sub)
-    {
-        var sc = new SelectClause { Distinct = sub.Distinct, SelectAll = sub.SelectAll };
-        for (int i = 0; i < sub.ProjectedVarCount; i++)
-        {
-            var (start, length) = sub.GetProjectedVariable(i);
-            sc.AddProjectedVariable(start, length);
-        }
-        for (int i = 0; i < sub.AggregateCount; i++)
-            sc.AddAggregate(sub.GetAggregate(i));
-        return sc;
-    }
-
     private static List<string> OutputVarNames(SubSelect sub, string source, int whereBrace, int whereClose)
     {
         var names = new List<string>();
         var seen = new HashSet<string>();
-        if (sub.SelectAll)
+        if (sub.Select.SelectAll)
         {
             // SELECT * — the output variables are the body's variables, in first-seen order, scanned over the body's
             // span (whereBrace..whereClose) in the one source.
@@ -859,17 +846,17 @@ internal sealed class TreeJoinExecutor
             }
             return names;
         }
-        for (int i = 0; i < sub.ProjectedVarCount; i++)
+        for (int i = 0; i < sub.Select.ProjectedVariableCount; i++)
         {
-            var (start, length) = sub.GetProjectedVariable(i);
+            var (start, length) = sub.Select.GetProjectedVariable(i);
             string name = source.Substring(start, length).TrimStart('?');
             if (seen.Add(name)) names.Add(name);
         }
         // Aggregate aliases: SELECT (COUNT(?x) AS ?c) projects ?c, which is not a plain projected variable —
         // FromMaterializedSimple binds the computed aggregate to that alias, so read it back too.
-        for (int i = 0; i < sub.AggregateCount; i++)
+        for (int i = 0; i < sub.Select.AggregateCount; i++)
         {
-            var agg = sub.GetAggregate(i);
+            var agg = sub.Select.GetAggregate(i);
             if (agg.AliasLength == 0) continue;
             string name = source.Substring(agg.AliasStart, agg.AliasLength).TrimStart('?');
             if (seen.Add(name)) names.Add(name);
