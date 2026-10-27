@@ -299,63 +299,63 @@ public static class SparqlEngine
     {
         var results = executor.Execute();
         var rows = new List<Dictionary<string, string>>();
-        string[] columnNames = []; // maps binding column index → variable name (via hash)
-        string[] projectedNames = []; // the variable names to expose in the result
 
+        // Every row is named by its own bindings: a binding's variable hash maps to the variable's name as written in
+        // the query. Rows differ in which variables they bind (OPTIONAL, UNION branches), so names read from one row
+        // and applied to the others by position would drop or mislabel values.
+        var (nameByHash, namesInSourceOrder) = VariableNamesOf(sparql);
+
+        string[] projectedNames;
+        HashSet<string>? projected;
+        if (!parsed.SelectClause.SelectAll)
+        {
+            // Explicit SELECT — expose projected variables AND aggregate aliases. The parser stores regular variables
+            // and aggregate expressions in separate inline lists (SelectClause), so the original lexical order is not
+            // preserved; projected variables come first and aggregate aliases after. That covers the common
+            // `SELECT ?x (COUNT(*) AS ?n)` and pure-aggregate `SELECT (COUNT(*) AS ?n)` shapes.
+            var varCount = parsed.SelectClause.ProjectedVariableCount;
+            var aggCount = parsed.SelectClause.AggregateCount;
+            var names = new List<string>(varCount + aggCount);
+            for (int i = 0; i < varCount; i++)
+            {
+                var (start, length) = parsed.SelectClause.GetProjectedVariable(i);
+                names.Add(WithoutSigil(sparql.AsSpan().Slice(start, length)));
+            }
+            for (int i = 0; i < aggCount; i++)
+            {
+                var agg = parsed.SelectClause.GetAggregate(i);
+                if (agg.AliasLength == 0) continue;
+                names.Add(WithoutSigil(sparql.AsSpan().Slice(agg.AliasStart, agg.AliasLength)));
+            }
+            projectedNames = names.ToArray();
+            projected = new HashSet<string>(projectedNames);
+        }
+        else
+        {
+            // SELECT * — every variable that some row binds, in the order the query first mentions it. (A variable in
+            // scope but bound in no row is not listed; that needs the WHERE's in-scope variables, ADR-055 D7.)
+            projectedNames = [];
+            projected = null;
+        }
+
+        var boundNames = projected == null ? new HashSet<string>() : null;
         try
         {
-            if (results.MoveNext())
-            {
-                var bindings = results.Current;
-
-                // Always use hash matching to correctly map binding columns to variable names
-                columnNames = ExtractColumnNames(bindings, sparql);
-
-                if (!parsed.SelectClause.SelectAll)
-                {
-                    // Explicit SELECT — expose projected variables AND aggregate aliases.
-                    // The parser stores regular variables and aggregate expressions in
-                    // separate inline lists (SelectClause), so the original lexical order
-                    // is not preserved; we surface projected variables first and aggregate
-                    // aliases after. That covers the common `SELECT ?x (COUNT(*) AS ?n)`
-                    // and pure-aggregate `SELECT (COUNT(*) AS ?n)` shapes. Before this,
-                    // any SELECT whose only projection was an aggregate expression
-                    // produced an empty Variables array and rendered as
-                    // "(no variables selected)", silently dropping the count result.
-                    var varCount = parsed.SelectClause.ProjectedVariableCount;
-                    var aggCount = parsed.SelectClause.AggregateCount;
-                    projectedNames = new string[varCount + aggCount];
-                    for (int i = 0; i < varCount; i++)
-                    {
-                        var (start, length) = parsed.SelectClause.GetProjectedVariable(i);
-                        var varSpan = sparql.AsSpan().Slice(start, length);
-                        if (varSpan.Length > 0 && (varSpan[0] == '?' || varSpan[0] == '$'))
-                            varSpan = varSpan.Slice(1);
-                        projectedNames[i] = varSpan.ToString();
-                    }
-                    for (int i = 0; i < aggCount; i++)
-                    {
-                        var agg = parsed.SelectClause.GetAggregate(i);
-                        if (agg.AliasLength == 0) continue;
-                        var aliasSpan = sparql.AsSpan().Slice(agg.AliasStart, agg.AliasLength);
-                        if (aliasSpan.Length > 0 && (aliasSpan[0] == '?' || aliasSpan[0] == '$'))
-                            aliasSpan = aliasSpan.Slice(1);
-                        projectedNames[varCount + i] = aliasSpan.ToString();
-                    }
-                }
-                else
-                {
-                    // SELECT * — expose all bound variables
-                    projectedNames = columnNames;
-                }
-
-                rows.Add(BindingsToRow(bindings, columnNames, projectedNames));
-            }
-
             long maxResultRows = executor.MaxResultRows; // unbounded-result guard (StorageOptions.MaxResultRows)
             while (results.MoveNext())
             {
-                rows.Add(BindingsToRow(results.Current, columnNames, projectedNames));
+                var bindings = results.Current;
+                var row = new Dictionary<string, string>();
+                for (int i = 0; i < bindings.Count; i++)
+                {
+                    if (!nameByHash.TryGetValue(bindings.GetVariableHash(i), out var name))
+                        continue; // not a query variable (e.g. a blank node's internal binding)
+                    if (projected != null && !projected.Contains(name))
+                        continue;
+                    if (row.TryAdd(name, bindings.GetString(i).ToString()))
+                        boundNames?.Add(name);
+                }
+                rows.Add(row);
                 ResultLimitExceededException.ThrowIfExceeded(maxResultRows, rows.Count);
             }
         }
@@ -363,6 +363,9 @@ public static class SparqlEngine
         {
             results.Dispose();
         }
+
+        if (boundNames != null)
+            projectedNames = namesInSourceOrder.Where(boundNames.Contains).ToArray();
 
         return new QueryResult
         {
@@ -438,76 +441,36 @@ public static class SparqlEngine
     /// Build a row dictionary mapping projected variable names to their values.
     /// Uses columnNames (hash-matched) to find the correct binding column for each projected variable.
     /// </summary>
-    private static Dictionary<string, string> BindingsToRow(BindingTable bindings, string[] columnNames, string[] projectedNames)
-    {
-        var row = new Dictionary<string, string>();
-        foreach (var name in projectedNames)
-        {
-            // Find the binding column for this projected variable
-            var colIndex = Array.IndexOf(columnNames, name);
-            if (colIndex >= 0 && colIndex < bindings.Count)
-                row[name] = bindings.GetString(colIndex).ToString();
-        }
-        return row;
-    }
-
     /// <summary>
-    /// Extract variable names for each binding column using FNV-1a hash matching.
-    /// Returns names without the ? prefix.
+    /// The query's variables, by the FNV-1a hash the executor gives a binding (of the variable as written, sigil
+    /// included), and their names without the sigil in the order the query first mentions them. Both <c>?x</c> and
+    /// <c>$x</c> are variables; they name the same variable, so they share one name.
     /// </summary>
-    private static string[] ExtractColumnNames(BindingTable bindings, string source)
+    private static (Dictionary<int, string> NameByHash, List<string> NamesInSourceOrder) VariableNamesOf(string source)
     {
-        var names = ExtractVariableNamesByHash(bindings, source);
-        // Strip ? prefix
-        for (int i = 0; i < names.Length; i++)
-        {
-            if (names[i].StartsWith("?") || names[i].StartsWith("$"))
-                names[i] = names[i].Substring(1);
-        }
-        return names;
-    }
-
-    /// <summary>
-    /// FNV-1a hash-based variable name extraction for SELECT *.
-    /// Scans the SPARQL source for ?varName tokens, computes their FNV-1a hash,
-    /// and matches against binding hashes from the query executor.
-    /// </summary>
-    private static string[] ExtractVariableNamesByHash(BindingTable bindings, string source)
-    {
-        var knownVars = new List<(string Name, int Hash)>();
+        var nameByHash = new Dictionary<int, string>();
+        var namesInSourceOrder = new List<string>();
         var span = source.AsSpan();
-
         for (int i = 0; i < span.Length - 1; i++)
         {
-            if (span[i] == '?')
-            {
-                int end = i + 1;
-                while (end < span.Length && (char.IsLetterOrDigit(span[end]) || span[end] == '_'))
-                    end++;
-
-                if (end > i + 1)
-                {
-                    var varName = span.Slice(i, end - i).ToString();
-                    var hash = Fnv1a.Hash(varName.AsSpan());
-                    if (!knownVars.Exists(v => v.Hash == hash))
-                        knownVars.Add((varName, hash));
-                }
-            }
+            if (span[i] != '?' && span[i] != '$')
+                continue;
+            int end = i + 1;
+            while (end < span.Length && (char.IsLetterOrDigit(span[end]) || span[end] == '_'))
+                end++;
+            if (end == i + 1)
+                continue;
+            var written = span.Slice(i, end - i);
+            var name = written.Slice(1).ToString();
+            if (nameByHash.TryAdd(Fnv1a.Hash(written), name) && !namesInSourceOrder.Contains(name))
+                namesInSourceOrder.Add(name);
+            i = end - 1;
         }
-
-        var result = new string[bindings.Count];
-        for (int i = 0; i < bindings.Count; i++)
-        {
-            var bindingHash = bindings.GetVariableHash(i);
-            string? foundName = null;
-            foreach (var (name, hash) in knownVars)
-            {
-                if (hash == bindingHash) { foundName = name; break; }
-            }
-            result[i] = foundName ?? $"?var{i}";
-        }
-        return result;
+        return (nameByHash, namesInSourceOrder);
     }
+
+    private static string WithoutSigil(ReadOnlySpan<char> variable) =>
+        (variable.Length > 0 && (variable[0] == '?' || variable[0] == '$') ? variable.Slice(1) : variable).ToString();
 
     #endregion
 }
