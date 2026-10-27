@@ -645,10 +645,7 @@ internal sealed class TreeJoinExecutor
     private List<MaterializedRow> ValuesStep(ref PatternArray pa, int valuesIndex, List<MaterializedRow> input)
     {
         var slot = pa[valuesIndex];
-        string valuesSpan = _source.Substring(slot.ValuesVarStart, slot.ValuesVarLength);
-        var temp = new GraphPattern();
-        new SparqlParser(valuesSpan.AsSpan()).ParseValues(ref temp);
-        return JoinValuesClause(input, temp.Values, valuesSpan);
+        return JoinValuesClause(input, new ValuesClause { Start = slot.ValuesVarStart, Length = slot.ValuesVarLength });
     }
 
     /// <summary>
@@ -657,17 +654,17 @@ internal sealed class TreeJoinExecutor
     /// The buffer's ValuesClause carries offsets into this executor's source, so it reuses the same join as inline VALUES.
     /// </summary>
     public List<MaterializedRow> JoinPostQueryValues(List<MaterializedRow> input, ValuesClause postValues)
-        => JoinValuesClause(input, postValues, _source);
+        => JoinValuesClause(input, postValues);
 
     /// <summary>Build a row per VALUES data row (UNDEF leaves the variable unbound) and join it with the input — the
-    /// join multiplies and merges, so a solution compatible with several data rows yields several solutions.</summary>
-    private List<MaterializedRow> JoinValuesClause(List<MaterializedRow> input, ValuesClause vc, string vcSource)
+    /// join multiplies and merges, so a solution compatible with several data rows yields several solutions. The clause
+    /// is read from this executor's source with the reader the parser checked it with.</summary>
+    private List<MaterializedRow> JoinValuesClause(List<MaterializedRow> input, ValuesClause vc)
     {
-        int varCount = vc.VariableCount;
-        if (varCount == 0) return input;
-
-        var varNames = new string[varCount];
-        for (int i = 0; i < varCount; i++) { var (vs, vl) = vc.GetVariable(i); varNames[i] = vcSource.Substring(vs, vl); }
+        var reader = new SparqlParser.DataBlockReader(_source.AsSpan(), vc.Start);
+        var varNames = new List<string>();
+        while (reader.MoveNextVariable(out int vs, out int vl))
+            varNames.Add("?" + _source.Substring(vs + 1, vl - 1)); // ?x and $x are one variable
 
         var valueRows = new List<MaterializedRow>();
         var bindingArray = ArrayPool<Binding>.Shared.Rent(64);
@@ -675,14 +672,13 @@ internal sealed class TreeJoinExecutor
         try
         {
             var table = new BindingTable(bindingArray.AsSpan(0, 64), charArray.AsSpan(0, 1 << 13));
-            for (int r = 0; r < vc.RowCount; r++)
+            while (reader.MoveNextRow())
             {
                 table.TruncateTo(0);
-                for (int c = 0; c < varCount; c++)
+                for (int c = 0; reader.MoveNextValue(out int start, out int length); c++)
                 {
-                    var (vs, vl) = vc.GetValueAt(r, c);
-                    if (vl < 0) continue; // UNDEF
-                    table.Bind(varNames[c].AsSpan(), ExpandValueTerm(vcSource.Substring(vs, vl)).AsSpan());
+                    if (length < 0) continue; // UNDEF
+                    table.Bind(varNames[c].AsSpan(), ExpandValueTerm(_source.Substring(start, length)).AsSpan());
                 }
                 valueRows.Add(new MaterializedRow(table));
             }
@@ -779,7 +775,7 @@ internal sealed class TreeJoinExecutor
 
         // A trailing VALUES inside the sub-SELECT joins its WHERE solutions BEFORE the modifier layer (W3C inline02).
         // sub.Values offsets index _source (parsed at absolute offset above), so the shared join reuses _source.
-        if (sub.Values.HasValues)
+        if (sub.Values.IsPresent)
             innerBag = JoinPostQueryValues(innerBag, sub.Values);
 
         var selectClause = sub.Select;

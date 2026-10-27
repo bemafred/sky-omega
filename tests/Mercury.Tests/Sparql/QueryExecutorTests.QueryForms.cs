@@ -362,7 +362,7 @@ VALUES ?age { 25 30 }";
         var parsedQuery = parser.ParseQuery();
 
         // Verify post-query VALUES was parsed (in query.Values, not in WhereClause.Pattern.Values)
-        Assert.True(parsedQuery.Values.HasValues, "Post-query VALUES should be parsed");
+        Assert.True(parsedQuery.Values.IsPresent, "Post-query VALUES should be parsed");
 
         Store.AcquireReadLock();
         try
@@ -404,14 +404,17 @@ VALUES ?person { ex:Alice }";
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        Assert.True(parsedQuery.Values.HasValues, "Post-query VALUES should be parsed");
-        Assert.Equal(1, parsedQuery.Values.ValueCount);
+        Assert.True(parsedQuery.Values.IsPresent, "Post-query VALUES should be parsed");
 
-        // Debug: Check what the VALUES variable and value are
-        var valVar = query.Substring(parsedQuery.Values.VarStart, parsedQuery.Values.VarLength);
-        Assert.Equal("?person", valVar);
-
-        var (valStart, valLen) = parsedQuery.Values.GetValue(0);
+        // The VALUES variable and value, read as the executor reads them
+        var reader = new SparqlParser.DataBlockReader(query.AsSpan(), parsedQuery.Values.Start);
+        Assert.True(reader.MoveNextVariable(out int varStart, out int varLength));
+        Assert.False(reader.MoveNextVariable(out _, out _));
+        Assert.Equal("?person", query.Substring(varStart, varLength));
+        Assert.True(reader.MoveNextRow());
+        Assert.True(reader.MoveNextValue(out int valStart, out int valLen));
+        Assert.False(reader.MoveNextValue(out _, out _));
+        Assert.False(reader.MoveNextRow());
         var valValue = query.Substring(valStart, valLen);
         Assert.Equal("ex:Alice", valValue);
 
@@ -470,12 +473,16 @@ WHERE {
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        Assert.True(parsedQuery.Values.HasValues, "Post-query VALUES should be parsed");
-        Assert.Equal(1, parsedQuery.Values.VariableCount);
-        Assert.Equal(1, parsedQuery.Values.ValueCount);
+        Assert.True(parsedQuery.Values.IsPresent, "Post-query VALUES should be parsed");
 
-        // Debug: Check parsed VALUES
-        var (v0Start, v0Len) = parsedQuery.Values.GetValue(0);
+        // The one variable's one value, read as the executor reads it
+        var reader = new SparqlParser.DataBlockReader(query.AsSpan(), parsedQuery.Values.Start);
+        Assert.True(reader.MoveNextVariable(out _, out _));
+        Assert.False(reader.MoveNextVariable(out _, out _));
+        Assert.True(reader.MoveNextRow());
+        Assert.True(reader.MoveNextValue(out int v0Start, out int v0Len));
+        Assert.False(reader.MoveNextValue(out _, out _));
+        Assert.False(reader.MoveNextRow());
         var val0 = query.Substring(v0Start, v0Len);
 
         // The value should be "Alice" (with quotes)
@@ -539,13 +546,18 @@ WHERE {
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        Assert.True(parsedQuery.Values.HasValues, "Post-query VALUES should be parsed");
-        Assert.Equal(2, parsedQuery.Values.VariableCount);
-        Assert.Equal(2, parsedQuery.Values.ValueCount);
+        Assert.True(parsedQuery.Values.IsPresent, "Post-query VALUES should be parsed");
 
-        // Debug: Check parsed VALUES
-        var (v0Start, v0Len) = parsedQuery.Values.GetValue(0);
-        var (v1Start, v1Len) = parsedQuery.Values.GetValue(1);
+        // Two variables, one row of two values, read as the executor reads them
+        var reader = new SparqlParser.DataBlockReader(query.AsSpan(), parsedQuery.Values.Start);
+        Assert.True(reader.MoveNextVariable(out _, out _));
+        Assert.True(reader.MoveNextVariable(out _, out _));
+        Assert.False(reader.MoveNextVariable(out _, out _));
+        Assert.True(reader.MoveNextRow());
+        Assert.True(reader.MoveNextValue(out int v0Start, out int v0Len));
+        Assert.True(reader.MoveNextValue(out int v1Start, out int v1Len));
+        Assert.False(reader.MoveNextValue(out _, out _));
+        Assert.False(reader.MoveNextRow());
         var val0 = query.Substring(v0Start, v0Len);
         var val1 = query.Substring(v1Start, v1Len);
 
@@ -622,21 +634,24 @@ WHERE {
         var parsedQuery = parser.ParseQuery();
 
         // Verify the parsed VALUES structure
-        Assert.True(parsedQuery.Values.HasValues, "Post-query VALUES should be parsed");
-        Assert.Equal(2, parsedQuery.Values.VariableCount);
-        Assert.Equal(2, parsedQuery.Values.ValueCount);
+        Assert.True(parsedQuery.Values.IsPresent, "Post-query VALUES should be parsed");
 
-        // Check variables
-        var (var0Start, var0Len) = parsedQuery.Values.GetVariable(0);
-        var (var1Start, var1Len) = parsedQuery.Values.GetVariable(1);
+        // Variables, then the one row's values, read as the executor reads them
+        var reader = new SparqlParser.DataBlockReader(query.AsSpan(), parsedQuery.Values.Start);
+        Assert.True(reader.MoveNextVariable(out int var0Start, out int var0Len));
+        Assert.True(reader.MoveNextVariable(out int var1Start, out int var1Len));
+        Assert.False(reader.MoveNextVariable(out _, out _));
         var var0 = query.Substring(var0Start, var0Len);
         var var1 = query.Substring(var1Start, var1Len);
         Assert.Equal("?o1", var0);
         Assert.Equal("?o2", var1);
 
         // Check values
-        var (val0Start, val0Len) = parsedQuery.Values.GetValue(0);
-        var (val1Start, val1Len) = parsedQuery.Values.GetValue(1);
+        Assert.True(reader.MoveNextRow());
+        Assert.True(reader.MoveNextValue(out int val0Start, out int val0Len));
+        Assert.True(reader.MoveNextValue(out int val1Start, out int val1Len));
+        Assert.False(reader.MoveNextValue(out _, out _));
+        Assert.False(reader.MoveNextRow());
         var val0 = query.Substring(val0Start, val0Len);
         var val1 = query.Substring(val1Start, val1Len);
         Assert.Equal("\"Alan\"", val0);
@@ -762,19 +777,20 @@ SELECT ?s ?o1 ?o2
             var parsed2 = parser2.ParseQuery();
 
             // Debug: verify VALUES is parsed
-            Assert.True(parsed2.Values.HasValues, "VALUES should be parsed");
-            Assert.Equal(2, parsed2.Values.VariableCount);
-            Assert.Equal(2, parsed2.Values.ValueCount);
+            Assert.True(parsed2.Values.IsPresent, "VALUES should be parsed");
 
-            // Get the parsed VALUES values
-            var (val0Start, val0Len) = parsed2.Values.GetValue(0);
-            var (val1Start, val1Len) = parsed2.Values.GetValue(1);
+            // The parsed VALUES variable names, then its one row's values, read as the executor reads them
+            var reader = new SparqlParser.DataBlockReader(queryWithValues.AsSpan(), parsed2.Values.Start);
+            Assert.True(reader.MoveNextVariable(out int var0Start, out int var0Len));
+            Assert.True(reader.MoveNextVariable(out int var1Start, out int var1Len));
+            Assert.False(reader.MoveNextVariable(out _, out _));
+            Assert.True(reader.MoveNextRow());
+            Assert.True(reader.MoveNextValue(out int val0Start, out int val0Len));
+            Assert.True(reader.MoveNextValue(out int val1Start, out int val1Len));
+            Assert.False(reader.MoveNextValue(out _, out _));
+            Assert.False(reader.MoveNextRow());
             var parsedVal0 = queryWithValues.Substring(val0Start, val0Len);
             var parsedVal1 = queryWithValues.Substring(val1Start, val1Len);
-
-            // Get the parsed VALUES variable names
-            var (var0Start, var0Len) = parsed2.Values.GetVariable(0);
-            var (var1Start, var1Len) = parsed2.Values.GetVariable(1);
             var parsedVar0 = queryWithValues.Substring(var0Start, var0Len);
             var parsedVar1 = queryWithValues.Substring(var1Start, var1Len);
 

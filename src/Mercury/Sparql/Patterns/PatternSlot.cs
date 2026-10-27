@@ -576,8 +576,8 @@ internal ref struct PatternArray
     }
 
     /// <summary>
-    /// Add a VALUES leaf carrying the full <c>VALUES … { … }</c> source span (ADR-045 recursive parser). Re-parsed
-    /// on evaluation via the shipping VALUES parser, so single- AND multi-variable forms are one path. The span is
+    /// Add a VALUES leaf carrying the full <c>VALUES … { … }</c> source span (ADR-045 recursive parser), read on
+    /// evaluation with SparqlParser.DataBlockReader, so single- AND multi-variable forms are one path. The span is
     /// stored in the ValuesVar fields with zero trailing entries (so SubtreeEnd treats it as a single-slot leaf).
     /// </summary>
     public int AddValuesBlock(int sourceStart, int sourceLength)
@@ -975,7 +975,7 @@ internal sealed class QueryBuffer
     // Post-query VALUES clause (appears after WHERE clause, not inline)
     // Stored separately from inline VALUES (which goes into pattern slots)
     public ValuesClause PostQueryValues { get; set; }
-    public bool HasPostQueryValues => PostQueryValues.HasValues;
+    public bool HasPostQueryValues => PostQueryValues.IsPresent;
 
     public bool HasHaving => HavingLength > 0;
     public bool HasConstruct => ConstructPatterns != null && ConstructPatterns.Length > 0;
@@ -1359,7 +1359,7 @@ internal static class QueryBufferAdapter
         }
 
         // Copy post-query VALUES clause (if present)
-        if (query.Values.HasValues)
+        if (query.Values.IsPresent)
         {
             buffer.PostQueryValues = query.Values;
         }

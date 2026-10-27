@@ -95,7 +95,6 @@ internal struct GraphPattern
     private ServiceClause _svc0, _svc1;
 
     // VALUES clause storage
-    private ValuesClause _values;
 
     public readonly int PatternCount => _patternCount;
     public readonly int FilterCount => _filterCount;
@@ -124,11 +123,9 @@ internal struct GraphPattern
     public readonly bool HasGraph => _graphClauseCount > 0;
     public readonly bool HasSubQueries => _subQueryCount > 0;
     public readonly bool HasService => _serviceClauseCount > 0;
-    public readonly bool HasValues => _values.HasValues;
     public readonly bool HasOptionalPatterns => _optionalFlags != 0;
     public readonly bool HasUnion => _hasUnion;
 
-    public readonly ValuesClause Values => _values;
 
     /// <summary>
     /// Count of patterns in the first branch (before UNION).
@@ -733,11 +730,6 @@ internal struct GraphPattern
             case 2: _g2 = clause; break;
             case 3: _g3 = clause; break;
         }
-    }
-
-    public void SetValues(ValuesClause values)
-    {
-        _values = values;
     }
 
     public void AddSubQuery(SubSelect subQuery)

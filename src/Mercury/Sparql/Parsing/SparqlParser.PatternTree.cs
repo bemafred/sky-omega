@@ -579,19 +579,16 @@ internal ref partial struct SparqlParser
     }
 
     /// <summary>
-    /// [61] InlineData ::= 'VALUES' DataBlock. Single- AND multi-variable forms (<c>VALUES ?v { … }</c> and
-    /// <c>VALUES (?a ?b) { (…) … }</c>). Reuses the shipping VALUES parser (same parser instance) to advance past
-    /// the clause and carries its source span on a ValuesHeader leaf; the evaluator re-parses it into a
-    /// ValuesClause — one path for both forms, no special-casing.
+    /// [61] InlineData ::= 'VALUES' DataBlock, checked by <see cref="ParseValuesClause"/>; a ValuesHeader leaf carries
+    /// its source span, which the evaluator reads with the same <see cref="DataBlockReader"/>.
     /// </summary>
     private void EmitValuesTree(scoped ref PatternArray pa, int depth)
     {
-        int start = _position; // at "VALUES"
-        SkipValuesClause();
-        pa.AddValuesBlock(start, _position - start);
+        var clause = ParseValuesClause();
+        pa.AddValuesBlock(clause.Start, clause.Length);
     }
 
-    // The three scratch GraphPatterns below (15.5 KB each) live in their own frames, entered only when the construct
+    // The scratch GraphPatterns below (15.5 KB each) live in their own frames, entered only when the construct
     // occurs. Inlined into the recursive ParseGroupBodyTree they cost every nesting level ~32 KB (ADR-055 Q3).
 
     /// <summary>Step over a SERVICE clause with the shipping parser; the evaluator re-parses its span.</summary>
@@ -600,14 +597,6 @@ internal ref partial struct SparqlParser
     {
         var serviceClause = new GraphPattern();
         ParseService(ref serviceClause);
-    }
-
-    /// <summary>Step over a VALUES clause with the shipping parser; the evaluator re-parses its span.</summary>
-    [MethodImpl(MethodImplOptions.NoInlining)]
-    private void SkipValuesClause()
-    {
-        var dataBlock = new GraphPattern();
-        ParseValues(ref dataBlock);
     }
 
     /// <summary>

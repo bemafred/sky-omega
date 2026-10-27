@@ -138,7 +138,7 @@ public class GraphTreeEvaluatorTests : IDisposable
     // subject) — both produce synthetic terms (negative offsets) resolved via SyntheticTermHelper.
     [InlineData("rdf-star", "SELECT ?c WHERE { << <urn:a> <urn:p> <urn:v1> >> <urn:certainty> ?c }")]
     [InlineData("blank-node-proplist", "SELECT ?s WHERE { ?s <urn:knows> [ <urn:name> \"x\" ] }")]
-    // Multi-variable VALUES (one path with single-var via the shipping ParseValues), joined with a triple.
+    // Multi-variable VALUES (one path with single-var via the shipping DataBlockReader), joined with a triple.
     // (A VALUES-only multi-var WHERE is excluded — the shipping facade returns nothing for it; see the UNDEF
     // Fact below, which asserts the walker directly. The join form exercises the same VALUES parsing + binding.)
     [InlineData("values-multi-join", "SELECT ?o WHERE { VALUES (?s ?o) { (<urn:a> <urn:v1>) (<urn:a> <urn:wrong>) } ?s <urn:p> ?o }")]
@@ -836,30 +836,21 @@ internal sealed class GraphTreeEvaluator
         List<Dictionary<string, string>> input)
     {
         var slot = pa[valuesHeaderIndex];
-        string valuesSpan = _source.Substring(slot.ValuesVarStart, slot.ValuesVarLength);
 
-        var temp = new GraphPattern();
-        new SparqlParser(valuesSpan.AsSpan()).ParseValues(ref temp);
-        var vc = temp.Values;
-
-        int varCount = vc.VariableCount;
-        if (varCount == 0) return input;
-        var varNames = new string[varCount];
-        for (int i = 0; i < varCount; i++)
-        {
-            var (vs, vl) = vc.GetVariable(i);
-            varNames[i] = VarName(valuesSpan.Substring(vs, vl));
-        }
+        // Read with the reader the parser checked the clause with (offsets into _source)
+        var reader = new SparqlParser.DataBlockReader(_source.AsSpan(), slot.ValuesVarStart);
+        var varNames = new List<string>();
+        while (reader.MoveNextVariable(out int vs, out int vl))
+            varNames.Add(VarName(_source.Substring(vs, vl)));
 
         var rows = new List<Dictionary<string, string>>();
-        for (int r = 0; r < vc.RowCount; r++)
+        while (reader.MoveNextRow())
         {
             var row = new Dictionary<string, string>();
-            for (int c = 0; c < varCount; c++)
+            for (int c = 0; reader.MoveNextValue(out int vs, out int vl); c++)
             {
-                var (vs, vl) = vc.GetValueAt(r, c);
                 if (vl < 0) continue; // UNDEF: leave the variable unbound for this row
-                row[varNames[c]] = ExpandValueTerm(valuesSpan.Substring(vs, vl));
+                row[varNames[c]] = ExpandValueTerm(_source.Substring(vs, vl));
             }
             rows.Add(row);
         }
