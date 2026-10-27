@@ -66,6 +66,11 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
     /// routing decision. Finding 66 / Probe 47.</summary>
     private const int BorrowedDeathCheckSettleMs = 50;
 
+    /// <summary>How long an attach waits for the target's runtime debugger to start (finding 99). A starting
+    /// runtime gets there within milliseconds of loading; 10 s is the bound mscordbi itself gives the transport
+    /// session of the same attach (DbgTransportPipeline::DebugActiveProcess, WaitForSessionToOpen(10000)).</summary>
+    private static readonly TimeSpan DebuggerStartTimeout = TimeSpan.FromSeconds(10);
+
     /// <summary>Default natural-exit wait for Owned-path Dispose (ADR-008 / finding 68 Stage 1).
     /// 2000 ms is ~50× the empirically-observed worst case for well-behaved SIGTERM response on
     /// macOS-arm64 (probes 49/50/52/53: 12-45 ms). Generous enough to absorb host-load variance
@@ -187,6 +192,7 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
         nint pUnknown = 0;
         try
         {
+            AwaitTargetDebugger(processId);
             // Refuse a runtime-major mismatch before dbgshim attaches (finding 86) — clear error, no leak.
             int? targetRuntimeMajor = RuntimeMajorOf(targetProcess);
             GuardRuntimeLock(targetRuntimeMajor);
@@ -201,6 +207,30 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
             dbgShim.Dispose();
             targetProcess.Dispose();
             throw;
+        }
+    }
+
+    /// <summary>Finding 99 — attach only to a target whose runtime debugger has started. On Linux and macOS
+    /// mscordbi queues its managed attach unconditionally; if the target's debug transport is up but its debugger
+    /// is not yet marked initialized, no IPC channel is opened and the queued attach dereferences it, killing THIS
+    /// host with SIGSEGV (probe 66: 3 of 3 with the target held in that window). The runtime's debugger helper
+    /// thread starts right after the mark, so its name proves the target is past the window. A target that never
+    /// gets there (still starting after the bound, or debugging disabled with DOTNET_EnableDiagnostics=0) is
+    /// refused with CORDBG_E_TIMEOUT, the error mscordbi gives a target whose transport never opens. Windows does
+    /// not queue the attach unconditionally and needs no wait.</summary>
+    private static void AwaitTargetDebugger(int processId)
+    {
+        if (OperatingSystem.IsWindows()) return;
+        const int CORDBG_E_TIMEOUT = unchecked((int)0x80131C08);
+        var waited = Stopwatch.StartNew();
+        while (!TargetThreads.HasThreadNamed(processId, TargetThreads.DebuggerHelperThreadName))
+        {
+            if (waited.Elapsed >= DebuggerStartTimeout)
+                throw new DebugEngineException(
+                    $"Attach to {processId} (its runtime debugger did not start within {DebuggerStartTimeout.TotalSeconds:0} s: " +
+                    $"no \"{TargetThreads.DebuggerHelperThreadName}\" thread, so the runtime is still starting or debugging is " +
+                    "disabled with DOTNET_EnableDiagnostics=0)", CORDBG_E_TIMEOUT);
+            Thread.Sleep(5);
         }
     }
 
@@ -254,6 +284,7 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
         nint pUnknown = 0;
         try
         {
+            AwaitTargetDebugger(processId);
             // Refuse a runtime-major mismatch before dbgshim attaches (finding 86) — clear error, no leak.
             int? targetRuntimeMajor = RuntimeMajorOf(targetProcess);
             GuardRuntimeLock(targetRuntimeMajor);
@@ -529,8 +560,6 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
         }
     }
 
-    /// <summary>Quote a token if it contains spaces/quotes; dbgshim's command-line parser splits on
-    /// whitespace with shell-style quoting.</summary>
     /// <summary>Block until the debuggee next stops (breakpoint, step complete, exception, or
     /// <c>Debugger.Break</c>), up to <paramref name="timeout"/>. Returns null on timeout (still
     /// running); a <see cref="StopReason.ProcessExited"/> result means the session is over.

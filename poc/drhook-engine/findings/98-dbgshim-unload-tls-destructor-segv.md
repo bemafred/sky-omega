@@ -2,7 +2,8 @@
 
 **Date:** 2026-10-26
 **Status:** Mechanism **PROVEN** (probe 65, deterministic on Linux arm64 and x64). **Fixed**: libdbgshim stays loaded
-for the process's lifetime. A **second, separate** host crash on Linux arm64 remains open (below).
+for the process's lifetime. A **second, separate** host crash on Linux arm64 (below) became
+[finding 99](99-attach-before-debugger-started-segv.md), also fixed.
 
 ## Symptom
 
@@ -48,12 +49,14 @@ it passes with the fix and **fails** with `Dispose` freeing the library again.
 - The new cores show no unmapped TLS destructor, so this mechanism is gone.
 - DrHook.Engine.Tests 184 (1 skipped) on omega-ubuntu and omega.
 
-## Still open — a second crash in an mscordbi thread (finding 99 to come)
+## A second crash in an mscordbi thread (now finding 99)
 
 With the fix, omega-ubuntu still crashed in **2 of 12** integration runs (and one run timed out
 `AttachAndOwn_VstestTestHost_PauseDuringStoppingFlood_PauseStopSurfaces` at 120 s). Both cores have the **same
 signature**, different from the one above: a thread started by `libmscordbi.so` faults (signal frame directly above
 frames at `libmscordbi.so+0x24a18`, `+0x24a30`, `+0x2ce98`, `+0x24898`, `+0x5338`, `+0x123dc`, with
 `libmscordaccore.so` frames below). The last tests reported before each crash were `SpanLengthCondition_…` and
-`AttachAndOwn_MtpTarget_DisposeDuringFlood_…`. Naming the function needs symbols for the distro-built runtime (Ubuntu
-debug packages), or a Microsoft-built runtime whose symbols are on the symbol server.
+`AttachAndOwn_MtpTarget_DisposeDuringFlood_…`. (Those offsets were measured from the start of mscordbi's code
+mapping, not its load address; with Ubuntu's debug symbols the frames are `SendAttachProcessWorkItem::Do` →
+`CordbRCEventThread::SendIPCEvent`.) [Finding 99](99-attach-before-debugger-started-segv.md) has the mechanism: an
+attach whose transport session opens before the target's runtime has marked its debugger initialized.
