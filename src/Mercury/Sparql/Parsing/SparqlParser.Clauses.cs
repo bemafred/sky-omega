@@ -1,5 +1,6 @@
 using System;
 using SkyOmega.Mercury.Sparql.Types;
+using SkyOmega.Mercury.Sparql.Patterns;
 
 namespace SkyOmega.Mercury.Sparql.Parsing;
 
@@ -20,7 +21,7 @@ internal ref partial struct SparqlParser
         ValidateGroupBySemantics(selectClause, modifier.GroupBy);
 
         // Validate SELECT alias scope conflicts with subqueries (syntax-SELECTscope2)
-        ValidateSelectSubqueryScope(selectClause, ref whereClause.Pattern);
+        ValidateSelectSubqueryScope(selectClause, whereClause.GroupStart);
 
         var query = new Query
         {
@@ -182,7 +183,7 @@ internal ref partial struct SparqlParser
     /// <summary>
     /// Validates that SELECT clause aliases don't conflict with subquery projections (syntax-SELECTscope2).
     /// </summary>
-    private void ValidateSelectSubqueryScope(SelectClause selectClause, ref GraphPattern pattern)
+    private void ValidateSelectSubqueryScope(SelectClause selectClause, int whereGroupStart)
     {
         // Collect SELECT clause aliases
         Span<int> selectAliasHashes = stackalloc int[32];
@@ -200,30 +201,48 @@ internal ref partial struct SparqlParser
         }
 
         // If no aliases to check, nothing to do
-        if (selectAliasCount == 0) return;
+        if (selectAliasCount == 0 || whereGroupStart < 0) return;
 
-        // Check each subquery's projected variables for conflicts
-        for (int i = 0; i < pattern.SubQueryCount; i++)
+        // Check each sub-SELECT of the WHERE group (the group itself, or its direct children) for a projected
+        // variable or expression alias that one of the outer aliases reuses
+        const int treeBytes = PatternSlot.Size * 1024;
+        var treeBuffer = System.Buffers.ArrayPool<byte>.Shared.Rent(treeBytes);
+        try
         {
-            var subquery = pattern.GetSubQuery(i);
-            int projected = subquery.Select.ProjectedVariableCount;
-            for (int j = 0; j < projected + subquery.Select.AggregateCount; j++)
+            var tree = new PatternArray(treeBuffer.AsSpan(0, treeBytes));
+            int root = new SparqlParser(_source).ParsePatternTreeAt(whereGroupStart, ref tree);
+            if (tree[root].Kind == PatternKind.SubSelectHeader)
+                ThrowOnSubSelectAliasConflict(tree[root].GraphTermStart, selectAliasHashes[..selectAliasCount]);
+            var e = tree.EnumerateDirectChildren(root);
+            while (e.MoveNext())
             {
-                var (start, len) = j < projected
-                    ? subquery.Select.GetProjectedVariable(j)
-                    : (subquery.Select.GetAggregate(j - projected).AliasStart, subquery.Select.GetAggregate(j - projected).AliasLength);
-                if (len > 0)
-                {
-                    var hash = ComputeSpanHash(_source.Slice(start, len));
-                    for (int k = 0; k < selectAliasCount; k++)
-                    {
-                        if (selectAliasHashes[k] == hash)
-                        {
-                            var varName = _source.Slice(start, len).ToString();
-                            throw new SparqlParseException($"Variable {varName} in SELECT conflicts with same variable in subquery projection");
-                        }
-                    }
-                }
+                if (e.Current.Kind == PatternKind.SubSelectHeader)
+                    ThrowOnSubSelectAliasConflict(e.Current.GraphTermStart, selectAliasHashes[..selectAliasCount]);
+            }
+        }
+        finally
+        {
+            System.Buffers.ArrayPool<byte>.Shared.Return(treeBuffer);
+        }
+    }
+
+    /// <summary>syntax-SELECTscope2: an outer SELECT alias must not reuse a variable the sub-SELECT at
+    /// <paramref name="subSelectStart"/> projects.</summary>
+    private void ThrowOnSubSelectAliasConflict(int subSelectStart, scoped ReadOnlySpan<int> aliasHashes)
+    {
+        var subquery = new SparqlParser(_source).ParseSubSelectCoreAt(subSelectStart);
+        int projected = subquery.Select.ProjectedVariableCount;
+        for (int j = 0; j < projected + subquery.Select.AggregateCount; j++)
+        {
+            var (start, len) = j < projected
+                ? subquery.Select.GetProjectedVariable(j)
+                : (subquery.Select.GetAggregate(j - projected).AliasStart, subquery.Select.GetAggregate(j - projected).AliasLength);
+            if (len == 0) continue;
+            var hash = ComputeSpanHash(_source.Slice(start, len));
+            foreach (var aliasHash in aliasHashes)
+            {
+                if (aliasHash == hash)
+                    throw new SparqlParseException($"Variable {_source.Slice(start, len).ToString()} in SELECT conflicts with same variable in subquery projection");
             }
         }
     }
@@ -267,64 +286,54 @@ internal ref partial struct SparqlParser
     }
 
     /// <summary>
-    /// Validates CONSTRUCT WHERE shorthand restrictions.
-    /// Only basic triple patterns are allowed (no FILTER, GRAPH, OPTIONAL, BIND, etc.)
+    /// CONSTRUCT WHERE { TriplesTemplate } ([10] ConstructQuery, second form): the WHERE group is also the template, so
+    /// it may hold only triples, and no property paths. Returns those triples as the template.
     /// </summary>
-    private void ValidateConstructWherePattern(GraphPattern pattern)
+    private ConstructTemplate ConstructTemplateFromWhere(int whereGroupStart)
     {
-        // constructwhere05: FILTER is not allowed
-        if (pattern.FilterCount > 0)
+        var template = new ConstructTemplate();
+        const int treeBytes = PatternSlot.Size * 1024;
+        var treeBuffer = System.Buffers.ArrayPool<byte>.Shared.Rent(treeBytes);
+        try
         {
-            throw new SparqlParseException("CONSTRUCT WHERE shorthand does not allow FILTER");
+            var tree = new PatternArray(treeBuffer.AsSpan(0, treeBytes));
+            int root = new SparqlParser(_source).ParsePatternTreeAt(whereGroupStart, ref tree);
+            if (tree[root].Kind != PatternKind.GroupHeader)
+                throw new SparqlParseException("CONSTRUCT WHERE shorthand does not allow subqueries");
+            var e = tree.EnumerateDirectChildren(root);
+            while (e.MoveNext())
+            {
+                var kind = e.Current.Kind;
+                if (kind == PatternKind.Triple && e.Current.PathKind == PathType.None)
+                {
+                    template.AddPattern(e.Current.ToTriplePattern());
+                    continue;
+                }
+                throw new SparqlParseException("CONSTRUCT WHERE shorthand does not allow " + kind switch
+                {
+                    PatternKind.Triple => "property paths",
+                    PatternKind.Filter => "FILTER",
+                    PatternKind.GraphHeader => "GRAPH",
+                    PatternKind.OptionalHeader => "OPTIONAL",
+                    PatternKind.Bind => "BIND",
+                    PatternKind.MinusHeader or PatternKind.MinusTriple => "MINUS",
+                    PatternKind.UnionHeader => "UNION",
+                    PatternKind.ServiceHeader => "SERVICE",
+                    PatternKind.SubSelectHeader => "subqueries",
+                    PatternKind.ValuesHeader => "VALUES",
+                    PatternKind.ExistsHeader or PatternKind.NotExistsHeader => "EXISTS",
+                    PatternKind.GroupHeader => "nested groups",
+                    _ => kind.ToString(),
+                });
+            }
         }
-
-        // constructwhere06: GRAPH is not allowed
-        if (pattern.HasGraph)
+        finally
         {
-            throw new SparqlParseException("CONSTRUCT WHERE shorthand does not allow GRAPH");
+            System.Buffers.ArrayPool<byte>.Shared.Return(treeBuffer);
         }
-
-        // Other restrictions for shorthand form
-        if (pattern.HasOptionalPatterns)
-        {
-            throw new SparqlParseException("CONSTRUCT WHERE shorthand does not allow OPTIONAL");
-        }
-
-        if (pattern.HasBinds)
-        {
-            throw new SparqlParseException("CONSTRUCT WHERE shorthand does not allow BIND");
-        }
-
-        if (pattern.HasMinus)
-        {
-            throw new SparqlParseException("CONSTRUCT WHERE shorthand does not allow MINUS");
-        }
-
-        if (pattern.HasUnion)
-        {
-            throw new SparqlParseException("CONSTRUCT WHERE shorthand does not allow UNION");
-        }
-
-        if (pattern.HasService)
-        {
-            throw new SparqlParseException("CONSTRUCT WHERE shorthand does not allow SERVICE");
-        }
-
-        if (pattern.HasSubQueries)
-        {
-            throw new SparqlParseException("CONSTRUCT WHERE shorthand does not allow subqueries");
-        }
-
-        if (pattern.HasValues)
-        {
-            throw new SparqlParseException("CONSTRUCT WHERE shorthand does not allow VALUES");
-        }
-
-        if (pattern.HasExists)
-        {
-            throw new SparqlParseException("CONSTRUCT WHERE shorthand does not allow EXISTS");
-        }
+        return template;
     }
+
 
     /// <summary>
     /// Validates that SELECT variables are properly scoped for GROUP BY.
@@ -462,14 +471,7 @@ internal ref partial struct SparqlParser
 
             // constructwhere05/06: CONSTRUCT WHERE shorthand restricts what can appear in the pattern
             // Only basic triple patterns are allowed (no FILTER, GRAPH, OPTIONAL, etc.)
-            ValidateConstructWherePattern(whereClause.Pattern);
-
-            // Copy WHERE patterns to template
-            template = new ConstructTemplate();
-            for (int i = 0; i < whereClause.Pattern.PatternCount; i++)
-            {
-                template.AddPattern(whereClause.Pattern.GetPattern(i));
-            }
+            template = ConstructTemplateFromWhere(whereClause.GroupStart);
         }
         else
         {

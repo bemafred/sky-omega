@@ -211,7 +211,7 @@ internal sealed class TreeJoinExecutor
                 var slot = pa[ci];
                 if (slot.PathKind == PathType.None)
                 {
-                    pendingPatterns.Add(TripleFromSlot(slot));
+                    pendingPatterns.Add(slot.ToTriplePattern());
                     pendingGraphs.Add(activeGraph);
                 }
                 else
@@ -1087,7 +1087,7 @@ internal sealed class TreeJoinExecutor
         var e = pa.EnumerateDirectChildren(rootHeader);
         while (e.MoveNext())
         {
-            patterns.Add(TripleFromSlot(e.Current)); // IsFlatBgp guarantees: every child is a plain triple
+            patterns.Add(e.Current.ToTriplePattern()); // IsFlatBgp guarantees: every child is a plain triple
             graphs.Add(activeGraph);
         }
         if (patterns.Count == 0)
@@ -1179,7 +1179,7 @@ internal sealed class TreeJoinExecutor
         var e = pa.EnumerateDirectChildren(rootHeader);
         while (e.MoveNext())
         {
-            patterns.Add(TripleFromSlot(e.Current)); // IsFlatBgp guarantees: every child is a plain triple
+            patterns.Add(e.Current.ToTriplePattern()); // IsFlatBgp guarantees: every child is a plain triple
             graphs.Add(activeGraph);
         }
         if (patterns.Count == 0)
@@ -1264,13 +1264,6 @@ internal sealed class TreeJoinExecutor
             scan.Dispose();
         }
     }
-
-    private static TriplePattern TripleFromSlot(PatternSlot slot) => new()
-    {
-        Subject = new Term { Type = slot.SubjectType, Start = slot.SubjectStart, Length = slot.SubjectLength },
-        Predicate = new Term { Type = slot.PredicateType, Start = slot.PredicateStart, Length = slot.PredicateLength },
-        Object = new Term { Type = slot.ObjectType, Start = slot.ObjectStart, Length = slot.ObjectLength },
-    };
 
     /// <summary>
     /// A property-path triple. The slot carries the full path-expression SPAN (not a base IRI); re-parse it over the

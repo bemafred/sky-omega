@@ -57,6 +57,14 @@ internal enum PatternKind : byte
 /// </remarks>
 internal ref struct PatternSlot
 {
+    /// <summary>A Triple slot's subject, predicate and object as a <see cref="TriplePattern"/> (no path).</summary>
+    public TriplePattern ToTriplePattern() => new()
+    {
+        Subject = new Term { Type = SubjectType, Start = SubjectStart, Length = SubjectLength },
+        Predicate = new Term { Type = PredicateType, Start = PredicateStart, Length = PredicateLength },
+        Object = new Term { Type = ObjectType, Start = ObjectStart, Length = ObjectLength },
+    };
+
     public const int Size = 64;
     
     private readonly Span<byte> _span;

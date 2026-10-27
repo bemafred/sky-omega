@@ -52,7 +52,6 @@ internal partial class QueryExecutor : IDisposable
     private readonly QuadStore _store;
     private readonly string _source;
     private readonly QueryBuffer _buffer;  // Heap-allocated pattern storage (ADR-009 Phase 2)
-    private readonly GraphPattern _cachedPattern;  // Cached from buffer for scans
     private readonly IBufferManager _bufferManager;
     private readonly char[] _stringBuffer; // Pooled buffer for string operations (replaces scattered new char[1024])
     private readonly int _maxJoinDepth;
@@ -117,7 +116,6 @@ internal partial class QueryExecutor : IDisposable
         _buffer = QueryBufferAdapter.FromQuery(in query, source);
         // Cache the original GraphPattern (has all complex structures like subqueries, service clauses)
         // Building from buffer would lose this info, so we copy directly
-        _cachedPattern = query.WhereClause.Pattern;
         // Store prologue for prefix expansion
         _prologue = query.Prologue;
 
@@ -545,7 +543,6 @@ internal partial class QueryExecutor : IDisposable
     /// </summary>
     public ConstructResults ExecuteConstruct()
     {
-        ref readonly var pattern = ref _cachedPattern;
         var template = _buffer.GetConstructTemplate();
 
         if (!template.HasPatterns)
@@ -574,11 +571,10 @@ internal partial class QueryExecutor : IDisposable
     /// </summary>
     public DescribeResults ExecuteDescribe()
     {
-        ref readonly var pattern = ref _cachedPattern;
         var describeAll = _buffer.DescribeAll;
 
-        // If no WHERE clause, return empty
-        if (pattern.PatternCount == 0)
+        // No WHERE group, no solutions to describe from (ADR-055 D3 evaluates DESCRIBE <iri> without one)
+        if (_buffer.WhereGroupStart < 0)
             return DescribeResults.Empty();
 
         // ADR-047 A2/B2: evaluate the WHERE through the unified tree to collect the resources to describe — the
