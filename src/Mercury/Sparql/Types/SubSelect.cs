@@ -11,11 +11,8 @@ internal struct SubSelect
     // ParseSelectClause as a query's, so a sub-SELECT's projection has the same grammar and the same capacities.
     public SelectClause Select;
 
-    // Solution modifiers
-    public GroupByClause GroupBy;
-    public HavingClause Having;
-    public OrderByClause OrderBy;
-    public LimitOffsetClause LimitOffset;
+    // [18] SolutionModifier, parsed by the query's parser; its Temporal is unused (a temporal clause ends the query)
+    public SolutionModifier Modifier;
 
     // VALUES clause (inline bindings at end of subquery)
     public ValuesClause Values;

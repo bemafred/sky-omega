@@ -2156,6 +2156,10 @@ internal ref partial struct SparqlParser
         ch == '\0' || ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n' ||
         ch == '.' || ch == ';' || ch == '}' || ch == ')' || ch == ',';
 
+    /// <summary>
+    /// [18] SolutionModifier ::= GroupClause? HavingClause? OrderClause? LimitOffsetClauses?, for a query and a
+    /// sub-SELECT alike.
+    /// </summary>
     private SolutionModifier ParseSolutionModifier()
     {
         var modifier = new SolutionModifier();
@@ -2233,14 +2237,22 @@ internal ref partial struct SparqlParser
         }
         
         modifier.LimitOffset = ParseLimitOffsetClauses();
+        return modifier;
+    }
 
-        // Parse temporal clauses (AS OF, DURING, ALL VERSIONS)
+    /// <summary>
+    /// A query's [18] SolutionModifier, then Mercury's temporal clause (AS OF, DURING, ALL VERSIONS), which applies to
+    /// the whole query, and the deprecated BINDINGS clause's cardinality check.
+    /// </summary>
+    private SolutionModifier ParseQuerySolutionModifier()
+    {
+        var modifier = ParseSolutionModifier();
         SkipWhitespace();
         modifier.Temporal = ParseTemporalClause();
 
         // Check for deprecated BINDINGS clause and validate cardinality
         SkipWhitespace();
-        span = PeekSpan(8);
+        var span = PeekSpan(8);
         if (span.Length >= 8 && span[..8].Equals("BINDINGS", StringComparison.OrdinalIgnoreCase))
         {
             ConsumeKeyword("BINDINGS");

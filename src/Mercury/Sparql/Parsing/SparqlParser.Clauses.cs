@@ -16,7 +16,7 @@ internal ref partial struct SparqlParser
         var selectClause = ParseSelectClause();
         var datasets = ParseDatasetClauses();
         var whereClause = ParseWhereClause();
-        var modifier = ParseSolutionModifier();
+        var modifier = ParseQuerySolutionModifier();
 
         // Validate GROUP BY semantics
         ValidateGroupBySemantics(selectClause, modifier.GroupBy);
@@ -39,18 +39,18 @@ internal ref partial struct SparqlParser
         var span = PeekSpan(6);
         if (span.Length >= 6 && span[..6].Equals("VALUES", StringComparison.OrdinalIgnoreCase))
         {
-            query.Values = ParseQueryValues();
+            query.Values = ParseValuesClause();
         }
 
         return query;
     }
 
     /// <summary>
-    /// Parse trailing VALUES clause for a query.
+    /// [28] ValuesClause, trailing a query or a sub-SELECT.
     /// VALUES ?var { value1 value2 ... } or VALUES (?var1 ?var2) { (val1 val2) ... }
     /// UNDEF values are stored with length = -1.
     /// </summary>
-    private ValuesClause ParseQueryValues()
+    private ValuesClause ParseValuesClause()
     {
         ConsumeKeyword("VALUES");
         SkipWhitespace();
@@ -422,7 +422,7 @@ internal ref partial struct SparqlParser
             whereClause = ParseWhereClause();
         }
 
-        var modifier = ParseSolutionModifier();
+        var modifier = ParseQuerySolutionModifier();
 
         return new Query
         {
@@ -662,7 +662,7 @@ internal ref partial struct SparqlParser
             whereClause = ParseWhereClause();
         }
 
-        var modifier = ParseSolutionModifier();
+        var modifier = ParseQuerySolutionModifier();
 
         return new Query
         {
@@ -1372,7 +1372,7 @@ internal ref partial struct SparqlParser
         ParseGroupTree(ref pa, depth + 1); // [17] WhereClause ::= 'WHERE'? GroupGraphPattern
         SkipWhitespace();
         int modifiersStart = _position;
-        ParseSubSelectTail();
+        ParseSubSelectTail(pa[header].GraphTermStart, modifiersStart);
         pa.EndSubSelect(header, modifiersStart, _position);
     }
 
@@ -1389,12 +1389,15 @@ internal ref partial struct SparqlParser
         }
     }
 
-    /// <summary>SolutionModifier ValuesClause: moves the cursor past the sub-SELECT.</summary>
+    /// <summary>
+    /// SolutionModifier ValuesClause, checked against the SelectClause as a query's are (GROUP BY rules): moves the
+    /// cursor past the sub-SELECT.
+    /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private void ParseSubSelectTail()
+    private void ParseSubSelectTail(int selectStart, int modifiersStart)
     {
-        var modifiers = new SubSelect();
-        ParseSubSelectSolutionModifiers(ref modifiers);
+        var clauses = ParseSubSelectClausesAt(selectStart, modifiersStart);
+        ValidateGroupBySemantics(clauses.Select, clauses.Modifier.GroupBy);
     }
 
     /// <summary>
@@ -1412,214 +1415,17 @@ internal ref partial struct SparqlParser
     }
 
     /// <summary>
-    /// Parse solution modifiers for a subquery (ORDER BY, LIMIT, OFFSET, VALUES).
-    /// [8] SubSelect ::= SelectClause WhereClause SolutionModifier ValuesClause
+    /// A sub-SELECT's SolutionModifier ValuesClause: the same [18] and [28] parses a query uses.
     /// </summary>
     private void ParseSubSelectSolutionModifiers(ref SubSelect subSelect)
     {
-        // Parse GROUP BY (must come before HAVING and ORDER BY)
-        var span = PeekSpan(8);
-        if (span.Length >= 5 && span[..5].Equals("GROUP", StringComparison.OrdinalIgnoreCase))
-        {
-            ConsumeKeyword("GROUP");
-            SkipWhitespace();
-            ConsumeKeyword("BY");
-            SkipWhitespace();
-            subSelect.GroupBy = ParseGroupByClause();
-            SkipWhitespace();
-        }
-
-        // Parse HAVING (must come after GROUP BY, before ORDER BY)
-        span = PeekSpan(6);
-        if (span.Length >= 6 && span[..6].Equals("HAVING", StringComparison.OrdinalIgnoreCase))
-        {
-            ConsumeKeyword("HAVING");
-            SkipWhitespace();
-
-            // HAVING expression is in parentheses
-            if (Peek() == '(')
-            {
-                Advance(); // Skip '('
-                var start = _position;
-
-                // Find matching closing paren
-                int depth = 1;
-                while (!IsAtEnd() && depth > 0)
-                {
-                    var ch = Peek();
-                    if (ch == '(') depth++;
-                    else if (ch == ')') depth--;
-                    if (depth > 0) Advance();
-                }
-
-                var length = _position - start;
-                subSelect.Having = new HavingClause { ExpressionStart = start, ExpressionLength = length };
-
-                if (Peek() == ')')
-                    Advance(); // Skip ')'
-            }
-            SkipWhitespace();
-        }
-
-        // Parse ORDER BY
-        span = PeekSpan(8);
-        if (span.Length >= 5 && span[..5].Equals("ORDER", StringComparison.OrdinalIgnoreCase))
-        {
-            ConsumeKeyword("ORDER");
-            SkipWhitespace();
-            ConsumeKeyword("BY");
-            SkipWhitespace();
-            subSelect.OrderBy = ParseOrderByClause();
-            SkipWhitespace();
-        }
-
-        subSelect.LimitOffset = ParseLimitOffsetClauses();
+        subSelect.Modifier = ParseSolutionModifier();
         SkipWhitespace();
-
-        // Parse VALUES clause (inline data at end of subquery)
-        span = PeekSpan(6);
-        if (span.Length >= 6 && span[..6].Equals("VALUES", StringComparison.OrdinalIgnoreCase))
+        if (KeywordIs(PeekSpan(6), "VALUES"))
         {
-            subSelect.Values = ParseSubSelectValues();
+            subSelect.Values = ParseValuesClause();
             SkipWhitespace();
         }
-    }
-
-    /// <summary>
-    /// Parse VALUES clause for a subquery: VALUES ?var { value1 value2 ... } or VALUES (?var1 ?var2) { (val1 val2) ... }
-    /// UNDEF values are stored with length = -1.
-    /// </summary>
-    private ValuesClause ParseSubSelectValues()
-    {
-        ConsumeKeyword("VALUES");
-        SkipWhitespace();
-
-        var values = new ValuesClause();
-
-        // Check for multi-variable form: (?var1 ?var2 ...)
-        if (Peek() == '(')
-        {
-            Advance(); // Skip '('
-            SkipWhitespace();
-
-            // Parse all variables
-            while (!IsAtEnd() && Peek() == '?')
-            {
-                int varStart = _position;
-                Advance(); // Skip '?'
-                while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_'))
-                    Advance();
-                values.AddVariable(varStart, _position - varStart);
-                SkipWhitespace();
-            }
-
-            if (Peek() == ')')
-                Advance(); // Skip ')'
-            SkipWhitespace();
-        }
-        // Single variable form: ?var
-        else if (Peek() == '?')
-        {
-            int varStart = _position;
-            Advance(); // Skip '?'
-            while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_'))
-                Advance();
-            values.AddVariable(varStart, _position - varStart);
-            SkipWhitespace();
-        }
-        else
-        {
-            return values; // No valid VALUES
-        }
-
-        int varCount = values.VariableCount;
-
-        // Expect '{'
-        if (Peek() != '{')
-            return values;
-
-        Advance(); // Skip '{'
-        SkipWhitespace();
-
-        // Parse value rows
-        while (!IsAtEnd() && Peek() != '}')
-        {
-            SkipWhitespace();
-
-            // Check for parenthesized row: (val1 val2 ...)
-            if (Peek() == '(')
-            {
-                Advance(); // Skip '('
-                SkipWhitespace();
-
-                int rowValueCount = 0;
-                while (!IsAtEnd() && Peek() != ')')
-                {
-                    // Check for UNDEF first
-                    var span = PeekSpan(5);
-                    if (span.Length >= 5 && span[..5].Equals("UNDEF", StringComparison.OrdinalIgnoreCase))
-                    {
-                        ConsumeKeyword("UNDEF");
-                        values.AddValue(0, -1); // Mark as UNDEF with length = -1
-                        rowValueCount++;
-                    }
-                    else
-                    {
-                        int valueStart = _position;
-                        int valueLen = ParseValuesValue();
-                        if (valueLen > 0)
-                        {
-                            values.AddValue(valueStart, valueLen);
-                            rowValueCount++;
-                        }
-                        else
-                        {
-                            break;
-                        }
-                    }
-                    SkipWhitespace();
-                }
-
-                // Validate cardinality
-                if (varCount > 0 && rowValueCount != varCount)
-                {
-                    if (rowValueCount < varCount)
-                        throw new SparqlParseException($"VALUES row has {rowValueCount} values but {varCount} variables declared");
-                    else
-                        throw new SparqlParseException($"VALUES row has {rowValueCount} values but only {varCount} variables declared");
-                }
-
-                if (Peek() == ')')
-                    Advance(); // Skip ')'
-                SkipWhitespace();
-            }
-            else
-            {
-                // Single value (for single variable form)
-                // Check for UNDEF
-                var span = PeekSpan(5);
-                if (span.Length >= 5 && span[..5].Equals("UNDEF", StringComparison.OrdinalIgnoreCase))
-                {
-                    ConsumeKeyword("UNDEF");
-                    values.AddValue(0, -1); // Mark as UNDEF with length = -1
-                }
-                else
-                {
-                    int valueStart = _position;
-                    int valueLen = ParseValuesValue();
-                    if (valueLen > 0)
-                    {
-                        values.AddValue(valueStart, valueLen);
-                    }
-                }
-                SkipWhitespace();
-            }
-        }
-
-        if (Peek() == '}')
-            Advance(); // Skip '}'
-
-        return values;
     }
 
     /// <summary>

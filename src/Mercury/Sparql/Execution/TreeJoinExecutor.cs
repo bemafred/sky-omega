@@ -789,7 +789,7 @@ internal sealed class TreeJoinExecutor
         // projection like ( CONCAT(?f," ",?l) AS ?full ) — without them EvaluateSelectExpressions never ran and the alias
         // came out unbound (W3C sq12, surfaced by the C2 CONSTRUCT-subquery cutover).
         var qr = QueryResults.FromMaterializedSimple(innerBag, _source.AsSpan(), _store, qrBindings, qrStringBuffer,
-            sub.LimitOffset, sub.Select.Distinct || sub.Select.Reduced, sub.OrderBy, sub.GroupBy, selectClause, sub.Having, buffer: null, prefixes: _prefixes);
+            sub.Modifier.LimitOffset, sub.Select.Distinct || sub.Select.Reduced, sub.Modifier.OrderBy, sub.Modifier.GroupBy, selectClause, sub.Modifier.Having, buffer: null, prefixes: _prefixes);
 
         var outNames = OutputVarNames(sub, _source, slot.GraphTermStart, slot.SubSelectModifiersStart);
         var projected = new List<MaterializedRow>();

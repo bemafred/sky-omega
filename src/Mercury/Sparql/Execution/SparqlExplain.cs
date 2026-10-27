@@ -646,25 +646,25 @@ internal sealed class SparqlExplainer
             Description = "Nested SELECT" + (sub.Select.Distinct ? " DISTINCT" : "") + (sub.Select.SelectAll ? " *" : "")
         };
         var current = node;
-        if (sub.LimitOffset.HasLimit || sub.LimitOffset.Offset > 0)
+        if (sub.Modifier.LimitOffset.HasLimit || sub.Modifier.LimitOffset.Offset > 0)
         {
             var slice = new ExplainNode
             {
                 OperatorType = ExplainOperatorType.Slice,
                 Description = string.Join(" ", new[] {
-                    sub.LimitOffset.HasLimit ? $"LIMIT {sub.LimitOffset.Limit}" : null,
-                    sub.LimitOffset.Offset > 0 ? $"OFFSET {sub.LimitOffset.Offset}" : null }.Where(x => x != null))
+                    sub.Modifier.LimitOffset.HasLimit ? $"LIMIT {sub.Modifier.LimitOffset.Limit}" : null,
+                    sub.Modifier.LimitOffset.Offset > 0 ? $"OFFSET {sub.Modifier.LimitOffset.Offset}" : null }.Where(x => x != null))
             };
             current.Children.Add(slice);
             current = slice;
         }
-        if (sub.OrderBy.HasOrderBy)
+        if (sub.Modifier.OrderBy.HasOrderBy)
         {
-            var sort = new ExplainNode { OperatorType = ExplainOperatorType.Sort, Description = $"Sort by {sub.OrderBy.Count} expression(s)" };
+            var sort = new ExplainNode { OperatorType = ExplainOperatorType.Sort, Description = $"Sort by {sub.Modifier.OrderBy.Count} expression(s)" };
             current.Children.Add(sort);
             current = sort;
         }
-        if (sub.GroupBy.HasGroupBy || sub.Select.HasRealAggregates)
+        if (sub.Modifier.GroupBy.HasGroupBy || sub.Select.HasRealAggregates)
         {
             var group = new ExplainNode { OperatorType = ExplainOperatorType.GroupBy, Description = "Aggregate" };
             current.Children.Add(group);
