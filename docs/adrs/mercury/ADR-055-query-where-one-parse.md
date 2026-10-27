@@ -2,7 +2,7 @@
 
 ## Status
 
-**Status:** Proposed — 2026-10-27
+**Status:** Accepted — 2026-10-27
 
 Found while probing for [ADR-053](ADR-053-one-rdf-term-one-atom.md): `SELECT ?o WHERE { { ?s ?p ?o } UNION { GRAPH ?g
 { ?s ?p ?o } } }` fails to parse, and it fails the same way on the source before
@@ -10,6 +10,10 @@ Found while probing for [ADR-053](ADR-053-one-rdf-term-one-atom.md): `SELECT ?o 
 is now parsed once by the pattern tree, while a query's WHERE is still parsed twice, and the first parse decides
 where the query goes. It also closes ADR-052's follow-up "queries still guess where their WHERE begins", and the
 divergence register's A4 (two group-body parsers) and B3 (flat `GraphPattern` WHERE parser, parse-then-discard).
+
+Accepted with Q1–Q3 resolved. Parts of D1 (the recorded WHERE start) and D2 (the empty WHERE through the tree, for
+SELECT, ASK and CONSTRUCT) shipped first, in 1.8.25. The stack probes for validation step 4 are in
+[`tools/probes/stack/`](../../../tools/probes/stack/README.md).
 
 ## Context
 
@@ -25,9 +29,12 @@ results are from SPARQL 1.1 Query: §18 algebra, §16.2 ASK, §16.4 DESCRIBE.
 | S5 | `?s ?p ?o OPTIONAL { { GRAPH ?g { ?s <q> ?z } } }` | 1 row, `?g` bound | parse error |
 | S6 | `?s ?p ?o . { GRAPH ?g { ?s ?x ?o } }` | 1 row | parse error |
 | S9 | `{ { VALUES ?x { 1 2 } } }` | 2 rows | parse error |
+| S10 | `{ … } UNION { … } UNION { … }` at the top level | one row per matching branch | parse error ("UNION requires graph patterns enclosed in braces"); the same UNION nested in a group, or in an Update WHERE, works |
 | A6 | `ASK { { … } UNION { GRAPH ?g { … } } }` | true | parse error |
 | E1 | `SELECT * {}` | 1 row (the empty solution) | 0 rows |
 | E5 | `SELECT * { MINUS { ?s ?p ?o } }` | 1 row | 0 rows |
+| E6 | `SELECT * { { BIND("x" AS ?a) } UNION { BIND("y" AS ?b) } }` | 2 rows (`a=x`; `b=y`) | 1 row, `a=x b=y` |
+| E7 | `SELECT (COUNT(*) AS ?n) { { BIND(1 AS ?a) } UNION { BIND(2 AS ?b) } }` | 1 row, `n=2` | 0 rows |
 | A1 | `ASK {}` | true | false |
 | A2 | `ASK { VALUES ?x { 1 } }` | true | false |
 | C1 | `CONSTRUCT { <a> <b> ?x } WHERE { BIND(1 AS ?x) }` | 1 triple | 0 |
@@ -39,7 +46,7 @@ results are from SPARQL 1.1 Query: §18 algebra, §16.2 ASK, §16.4 DESCRIBE.
 | D3 | `DESCRIBE ?s WHERE { VALUES ?s { <s> } }` | triples | 0 |
 
 The same probe found correct results for MINUS and FILTER EXISTS over GRAPH, a sub-SELECT containing `{ GRAPH … }`,
-UNION with BIND, OPTIONAL-only groups, BIND with FILTER, `SELECT (1 AS ?x) {}`, and ASK over GRAPH, FILTER(true)
+UNION with BIND when a branch has a triple pattern, OPTIONAL-only groups, BIND with FILTER, `SELECT (1 AS ?x) {}`, and ASK over GRAPH, FILTER(true)
 and OPTIONAL.
 
 C2 is the plain way to export a named graph. D1 is DESCRIBE's most common form.
@@ -59,7 +66,8 @@ three jobs:
    `TriplePatternCount` and `Has*` flags, copied into `QueryBuffer` by `QueryBufferAdapter`:
    - `QueryExecutor.Execute` sends a WHERE without top-level triples to `QueryResults.EmptyPattern` (its own
      BIND/FILTER/SELECT-expression evaluator), unless it has VALUES, a sub-SELECT or SERVICE. With none of those it
-     returns no rows: E1, E5.
+     returns no rows: E1, E5. With BINDs it returns exactly one row holding every BIND, whatever the group
+     structure: E6 merges two UNION branches into one row, and E7 counts nothing. (Found in the 1.8.24 live check.)
    - `ExecuteAsk` has a third evaluator for a pattern-less WHERE, and returns false when there are no BINDs or
      FILTERs: A1, A2.
    - `ExecuteConstruct` returns empty when `PatternCount == 0` and there is no sub-SELECT: C1–C4.
@@ -115,7 +123,9 @@ modifiers, temporal clause) and stops building a `GraphPattern` for the WHERE.
 - Deleted: `ParseGroupGraphPatternSub`, `ParseGroupOrUnionGraphPattern`, `ParseNestedGroupGraphPattern` and the rest
   of the flat WHERE family in `SparqlParser.Clauses.cs` that nothing else calls; `ParseSubSelectPatterns`;
   `WhereClause` and `Query.WhereClause`.
-- `GraphPattern` stays: Update templates, `INSERT/DELETE DATA` and the planner's per-BGP scratch use it.
+- `GraphPattern` stays as scratch storage: the planner's per-BGP input (`TreeJoinExecutor.ReorderBySelectivity`) and
+  the tree parser's path, SERVICE and quoted-triple expansion. (Update templates are `TemplateQuad[]` and
+  `INSERT/DELETE DATA` is `QuadData[]` since 1.8.25.)
 
 ### D2. Execute: one route
 
@@ -133,11 +143,28 @@ modifiers, temporal clause) and stops building a `GraphPattern` for the WHERE.
   The modifier layer (`FromMaterializedSimple`) already evaluates SELECT expressions per row, which is what
   `EmptyPattern` duplicated.
 
+  **Done first, 2026-10-27 (with the LIMIT 0 and silent-drop fixes):** `WhereClause.GroupStart` is recorded by
+  `ParseWhereClause` and carried as `QueryBuffer.WhereGroupStart`; the three brace-guessing methods are deleted (the
+  guess had made a CONSTRUCT without top-level triples evaluate its template as the WHERE). SELECT, ASK and CONSTRUCT
+  evaluate every WHERE through the tree: `EmptyPattern`, its constructor, `ExecuteEmptyPatternToMaterialized`,
+  `ExecuteAsk`'s pattern-less evaluator and its three delegating branches, and CONSTRUCT's `PatternCount == 0` gate
+  are deleted, with the BIND re-evaluation and UNION-BIND fields only `EmptyPattern` set. The tree route keeps zero rows
+  for an aggregate without GROUP BY, so `COUNT(*)` over no solutions is one row with 0 (it returned no row, with or
+  without triple patterns). `EmptyGroupTests` (20) cover E1, E5–E7, A1, A2, C1, C3, C4 and C2. DESCRIBE, the flat
+  parse, and the rest of this decision remain.
+
 ### D3. DESCRIBE without WHERE
 
 `DESCRIBE <iri> …` describes the IRIs it names (§16.4). It is evaluated over one empty solution, so `DescribeResults`
 gets the constant targets and no bound variables. A DESCRIBE with a WHERE describes its constant targets and the
 values its variables take in the WHERE's solutions.
+
+Found while routing the empty WHERE (1.8.24): DESCRIBE has never described anything through the facade.
+`SparqlEngine.ExecuteTriples` runs `Execute()`, the SELECT path, and reads each row's first three bindings as a
+triple; `ExecuteDescribe` is reached only by direct callers. `ParseDescribeQuery` reads `*` but not the target list,
+so after `DESCRIBE ?s` or `DESCRIBE <iri>` it never sees the WHERE keyword: `DESCRIBE ?s WHERE { … }` has no WHERE
+group. D3 therefore also parses [11] DescribeQuery's `( VarOrIri+ | '*' )` and routes the facade through
+`ExecuteDescribe`.
 
 ### D4. Sub-SELECT
 
@@ -161,25 +188,114 @@ from slots (`BuildGraphPattern`) goes with them.
 `EnumerateDirectChildren`. The solution-modifier part, read from the parsed modifiers, is unchanged. EXPLAIN then
 shows what executes, including the group forms in the table above.
 
+Each tree node kind maps to one operator (Q1). Nineteen of the twenty-two operator types exist already; three are added:
+
+| Tree node (`PatternKind`) | Operator | Symbol | Notes |
+|---|---|---|---|
+| `Triple`, no path | `TriplePatternScan` | ⊳ | As today, with the planner's estimate when a store is given |
+| `Triple` with a property path | **`PathScan`** (new) | ⇝ | The path as written, e.g. `?s <a>/<b>* ?o`. Today it is shown as a join of `<a>` and `<b>` with `?` for the middle term |
+| `GroupHeader` | `NestedLoopJoin` | ⋈ | "Join *n* patterns"; its children in source order, the order `TreeJoinExecutor` runs them (`reorderBgp` is off by default). A group with one child is shown as that child |
+| `UnionHeader` | `Union` | ∪ | One child per branch, any number of branches |
+| `OptionalHeader` | `LeftOuterJoin` | ⟕ | Its group as the child, FILTERs included |
+| `MinusTriple`, `MinusHeader` | `Minus` | − | Its group as the child |
+| `GraphHeader` | `GraphScan` / `GraphVariable` | ▣ / ▢ | Its group as the child |
+| `ExistsHeader` | **`Exists`** (new) | ∃ | Under the FILTER that contains it, with its group as the child |
+| `NotExistsHeader` | **`NotExists`** (new) | ∄ | Likewise |
+| `Filter` | `Filter` | σ | Last in the group it belongs to; a FILTER applies to its whole group |
+| `Bind` | `Bind` | ← | At its position in the group |
+| `ValuesHeader` (+ `ValuesEntry`) | `Values` | ≡ | At its position; the description names the variables and the row count |
+| `SubSelectHeader` | `SubQuery` | ⊂ | The sub-SELECT's own plan, modifiers and WHERE, as children |
+| `ServiceHeader` | `Service` | ⇄ | Endpoint and SILENT; the remote WHERE is not planned |
+
+The node walk also fixes four defects of today's EXPLAIN that have nothing to do with the flat parse's grammar:
+- Every plan shows `⌊ LIMIT 0`, because 0 is the no-limit value. A Slice node appears only when the query has LIMIT
+  or OFFSET.
+- A FILTER inside OPTIONAL is drawn at the outer level.
+- FILTER EXISTS / NOT EXISTS is not drawn at all, and the second branch of `{ … } UNION { BIND(…) }` is drawn empty.
+- In the text format, a node's descendants lose the `│` line of the levels above them.
+
+EXPLAIN ANALYZE still reports totals only, now from the one route (D2). The JSON format gains the three operator
+names, and `docs/architecture/technical/sparql-reference.md` lists all twenty-two symbols (it lists nine today).
+
 ### D7. SELECT * is the WHERE's in-scope variables
 
 The in-scope variables of the tree (§18.2.1, computed once from the parsed tree) are the variable list of a
 `SELECT *`, including variables bound in no row. This is what the facade's result header needs; see *Related* for the
 facade defect that header is part of.
 
-## Open questions (to settle before Accepted)
+## Open questions (all resolved 2026-10-27)
 
-- **Q1. EXPLAIN's vocabulary.** `SparqlExplain` (885 lines) has operator types for the shapes the flat pattern
-  modelled. Which tree node kinds it has no operator for (sub-SELECT, SERVICE, VALUES, EXISTS, MINUS, property paths,
-  GRAPH variables) needs reading `ExplainOperatorType` and the EXPLAIN tests before D6 is sized.
-- **Q2. Parser-structure tests.** About 240 assertions in 15 test files read the flat parse: `WhereClause.Pattern`,
-  `PatternCount`, `GetPattern(i)`. The largest are `SparqlParserTests` (71), `QueryExecutorTests.Service` (41),
-  `.Subquery` (36) and `.Filter` (27). Each either becomes a result assertion through the facade, or an assertion on
-  the parsed tree. The policy is to assert behavior unless the test is about the parser, and where the line falls is
-  decided per file before implementation.
-- **Q3. `Query` struct size and stack.** `GraphPattern` is a large inline struct (`MaxTriplePatterns = 32`,
-  `MaxFilters = 16`, …) inside `Query`. Removing it from `Query` should lower every parse frame. How much is measured
-  (ADR-009), not assumed.
+- **Q1. EXPLAIN's vocabulary. Resolved 2026-10-27.** `ExplainOperatorType` already has operators for sub-SELECT,
+  SERVICE, VALUES, MINUS and GRAPH variables; only paths and EXISTS / NOT EXISTS lack one. D6 maps every
+  `PatternKind` to an operator and adds `PathScan`, `Exists` and `NotExists`. The 20 `SparqlExplainTests` assert
+  symbols and words (⊳, ⋈ "Join", ⟕ "OPTIONAL", ∪ "Alternative", σ "FILTER", ⌊ "LIMIT 10", …) that the mapping keeps,
+  so they stand unchanged; one test per row of the D6 table is added, plus S1 and S10. Evidence: a probe of
+  `SparqlEngine.Explain` on 1.8.24 over nine shapes. The 3-way UNION threw; the other eight drew a wrong or partial plan.
+- **Q2. Parser-structure tests. Resolved 2026-10-27.** The rule: a test asserts behavior unless its subject is the
+  parser, and a test of the parser asserts on the tree. A census of `tests/Mercury.Tests` on 1.8.25 found five kinds
+  of dependence on code D1, D2 and D5 delete:
+
+  | Kind | Size | Where | What happens |
+  |---|---|---|---|
+  | A. Setup assertions in tests that execute | 40 tests, ~84 assertions | Subquery, Service, PropertyPath, Filter, Patterns, QueryForms, Graph | Deleted. The result assertions after them are the test; a construct the parser failed to recognize would fail them. |
+  | B. Parser-structure tests | ~50 tests, ~110 assertions | SparqlParserTests (WHERE cases), Service (10), Subquery (4), PropertyPath (6), SparqlStar (3), Filter, Patterns, SubqueryAggregate | Rewritten against the tree, in the `PatternTreeParserTests` style (node kinds, spans, children, path kind, quoted-triple expansion): one test per construct, not one per old test. |
+  | C. `QueryBuffer` WHERE flags | 11 tests, 24 assertions | PatternSlotTests | Deleted with the fields (D5). The `PatternSlot` / `PatternArray` tests stay. |
+  | D. Dead `FilterAnalyzer` code | 16 of 17 tests | FilterPushdownTests | Deleted with the code. `GetFilterVariables`, `ContainsExists`, `GetEarliestApplicablePattern`, `AnalyzeFilters`, `BuildLevelFilters` and `GetUnpushableFilters` read the flat pattern and have no production caller; production filter placement is the tree's, and `DetectTextMatchFilters` (the one live method) reads the tree. The one test that executes a query becomes a facade test. |
+  | E. Test-only execution entries | 60 `ExecuteToMaterialized` calls (6 files), 14 buffer-constructor executors (Graph) | QueryExecutorTests.* | Rewritten to run through `SparqlEngine.Query`, the path production uses. `ExecuteToMaterialized`, `MaterializedQueryResults`, `WrapResultsAsMaterialized`, the `QueryBuffer` constructor of `QueryExecutor` and `BuildGraphPattern` are deleted (D2, D5). These tests exercised an execution path production never runs. |
+
+  Not affected: Update-template and CONSTRUCT-template assertions (`TemplateQuad`, `ConstructTemplate` stay), and
+  `PlannerSpikeDiagnosticTests`, which has no assertion and is deleted as a finished spike. Kinds C, D and E are
+  deletions of code that is dead or test-only; they can land before D1, as their own steps.
+
+- **Q3. `Query` struct size and stack. Resolved 2026-10-27, measured on 1.8.25** (M5 Max, arm64, macOS, Release
+  build). Method: struct sizes with `Unsafe.SizeOf` by reflection; each method's frame from the JIT's own prologue
+  (`DOTNET_JitDisasm`, fully optimized and Tier 0); and the smallest thread stack a query completes on, by binary
+  search with one child process per trial.
+
+  | Struct | Size |
+  |---|---|
+  | `Query` | 17,784 B |
+  | `GraphPattern` (the flat WHERE, inside `Query`) | 15,544 B (87% of `Query`; ADR-009 estimated ~4 KB) |
+  | `SubSelect` / `ConstructTemplate` / `SelectClause` | 2,064 / 1,156 / 396 B |
+  | `UpdateOperation` | 360 B (two `GraphPattern` templates, ~31 KB, until 1.8.25) |
+
+  | Frame (fully optimized) | Size | Frame | Size |
+  |---|---|---|---|
+  | `ParseSelectQuery` | 53,184 B | `ParseGroupBodyTree` (recursive) | 31,184 B |
+  | `ParseQueryInternal` | 51,440 B | `EmitTriple` | 15,760 B |
+  | `ParseConstructQuery` | 50,400 B | `TreeJoinExecutor.AddPathPatterns` | 15,872 B |
+  | `SparqlEngine.QueryCore` | 35,856 B | `ParseGroupTree` | 2,208 B |
+  | `ParseWhereClause` | 31,136 B | `ParseGroupGraphPattern` | 17,696 B |
+
+  | Smallest stack that completes | Fully optimized | Tier 0 |
+  |---|---|---|
+  | `SELECT * { ?s ?p ?o }` | 182 KB | 166 KB |
+  | a SELECT with OPTIONAL, sub-SELECT, MINUS, NOT EXISTS, GROUP BY, ORDER BY | 197 KB | 182 KB |
+  | `INSERT { GRAPH … } WHERE { GRAPH … { … OPTIONAL … } }` (no flat WHERE since ADR-052) | 103 KB | 71 KB |
+  | groups nested 5 / 10 deep | 213 / 371 KB | 197 / 229 KB |
+  | OPTIONAL nested 5 / 10 deep | 229 / 386 KB | 166 / 213 KB |
+
+  Managed threads get 1,548 KB here (`new Thread()` and the thread pool; the main thread 8 MB), and 1 MB on Windows.
+  Nesting deeper than 10 is a parse error (`SparqlParser.DefaultMaxDepth`), so the worst case is about 390 KB: a
+  quarter of a macOS thread, 38% of a Windows one.
+
+  What this says:
+  1. **The flat parse costs about 80 KB of every query.** A SELECT needs 182 KB where an Update, which has had no flat
+     WHERE since ADR-052, needs 103 KB. The difference is `ParseWhereClause` and `ParseGroupGraphPattern` (49 KB)
+     plus the `Query` copies in `ParseQueryInternal`, `ParseSelectQuery` and `QueryCore`. D1 removes both: the flat
+     frames go, and `Query` drops to about 2.2 KB.
+  2. **Each nesting level costs about 32 KB, and D1 as first written does not remove it.** The tree parser borrows two
+     flat-parser routines into throwaway `GraphPattern`s: `ParseService` (to step over a SERVICE clause) and
+     `AddTriplePatternOrExpand` (quoted triples, blank-node property lists, collections). When optimized, `EmitTriple`
+     is inlined into the recursive `ParseGroupBodyTree`, which therefore carries both 15.5 KB structs at every level.
+     Both routines belong to the flat family D1 deletes, so **D1 re-homes them in the tree parser**: a SERVICE clause is
+     stepped over as a balanced group and recorded by span, and the expansions write their triples into the
+     `PatternArray` directly. The recursive frame then holds no `GraphPattern`.
+  3. **`TreeJoinExecutor.AddPathPatterns` (16 KB)** holds a scratch `GraphPattern` at execution time. It runs once per
+     path triple, not per nesting level, so it is outside this ADR.
+
+  Validation step 4 re-runs these measurements after D1. Targets: a SELECT within 15 KB of the Update case, and each
+  nesting level under 4 KB.
 
 ## Consequences
 
@@ -214,10 +330,10 @@ facade defect that header is part of.
 3. **Differential:** results identical before and after for every W3C query, and for a corpus of real MCP recall
    queries (the lucy skill's shapes: `GRAPH ?g` unions, text:match, OPTIONAL, AS OF). Any difference must be a table
    defect being fixed.
-4. **Stack** (ADR-009): smallest thread stack for a representative query set before and after (Q3), measured the way
-   ADR-052 did.
+4. **Stack** (ADR-009): the Q3 measurements (frames, and the smallest completing stack for the same query set), re-run
+   after D1 with the same method. Targets: a SELECT within 15 KB of the Update case; each nesting level under 4 KB.
 5. **Parse cost:** parse time of the W3C query corpus before and after, since each query now parses once.
-6. **EXPLAIN:** the existing EXPLAIN tests pass or are updated per Q1, and EXPLAIN of S1 shows the UNION and GRAPH it
+6. **EXPLAIN:** the 20 existing EXPLAIN tests pass unchanged, one new test per D6 row passes, and EXPLAIN of S1 shows the UNION and GRAPH it
    runs.
 7. **Dogfood:** a `mercury_query` with `{ … } UNION { GRAPH ?g { … } }`, and `DESCRIBE <iri>` against the memory
    store.
