@@ -306,6 +306,13 @@ facade defect that header is part of.
   Validation step 4 re-runs these measurements after D1. Targets: a SELECT within 15 KB of the Update case, and each
   nesting level under 4 KB.
 
+  **Measured after D1 (2026-10-27, same method):** `Query` 17,784 → 2,232 B (`WhereClause` 4 B); frames
+  `ParseSelectQuery` 53,184 → 6,528 B, `ParseQueryInternal` 51,440 → 4,784 B, `SparqlEngine.QueryCore` 35,856 →
+  4,752 B, `ParseGroupBodyTree` 31,184 → 96 B. Smallest completing stack (fully optimized, 8 KB resolution): simple
+  SELECT 182 → 23 KB, the complex SELECT 197 → 39 KB, the Update 103 → 23 KB, 10 nested groups 371 → 39 KB,
+  10 nested OPTIONALs 386 → 23 KB. Both targets are met: a SELECT now needs what the Update does, and a nesting level
+  under 2 KB.
+
 ## Consequences
 
 - **Positive:**

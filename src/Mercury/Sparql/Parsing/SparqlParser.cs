@@ -28,7 +28,6 @@ internal ref partial struct SparqlParser
     private int _constructListNodeCounter; // Counter for synthetic list node blank nodes within CONSTRUCT template
     private int _currentDepth; // Current recursion depth for subqueries, paths, quoted triples
     private readonly int _maxDepth; // Maximum allowed recursion depth
-    private int _scopeDepth; // Current nested group scope depth for BIND/FILTER scoping
 
     // Default maximum query depth (subqueries, property paths, quoted triples)
     public const int DefaultMaxDepth = 10;
@@ -526,144 +525,6 @@ internal ref partial struct SparqlParser
         var iriLength = _position - iriStart;
 
         prologue.AddPrefixRange(prefixStart, prefixLength, iriStart, iriLength);
-    }
-
-    /// <summary>
-    /// Parse a triple pattern and add it as optional.
-    /// </summary>
-    private bool TryParseOptionalTriplePattern(ref GraphPattern pattern)
-    {
-        SkipWhitespace();
-
-        if (IsAtEnd() || Peek() == '}')
-            return false;
-
-        var subject = ParseTerm();
-        if (subject.Type == TermType.Variable && subject.Length == 0)
-            return false;
-
-        SkipWhitespace();
-        var predicate = ParseTerm();
-
-        SkipWhitespace();
-        var obj = ParseTerm();
-
-        pattern.AddOptionalPattern(new TriplePattern
-        {
-            Subject = subject,
-            Predicate = predicate,
-            Object = obj
-        });
-
-        return true;
-    }
-
-    /// <summary>
-    /// Try to parse a triple pattern (subject predicate object)
-    /// Supports property paths in the predicate position.
-    /// Expands SPARQL-star quoted triples to reification patterns.
-    /// Handles semicolon-separated predicate-object lists: ?s :p1 ?o1; :p2 ?o2
-    /// </summary>
-    private bool TryParseTriplePattern(ref GraphPattern pattern)
-    {
-        SkipWhitespace();
-
-        // Check if we're at end of pattern
-        if (IsAtEnd() || Peek() == '}')
-            return false;
-
-        var subject = ParseTerm();
-        if (subject.Type == TermType.Variable && subject.Length == 0)
-            return false;
-
-        SkipWhitespace();
-
-        // syn-bad-pname-08/09: Check for incomplete triple pattern (subject only)
-        // If we hit '.' or '}' immediately after subject, the pattern is incomplete
-        // EXCEPTION: Blank node property lists [ :p :o ] are complete patterns on their own
-        if (Peek() == '.' || Peek() == '}')
-        {
-            // Blank node property lists starting with '[' ARE complete patterns
-            // They contain their own predicate-object pairs within the brackets
-            if (subject.IsBlankNode && _source[subject.Start] == '[')
-            {
-                // This is a valid standalone blank node property list pattern
-                // The patterns inside are not expanded here - they're captured in the term
-                pattern.AddPattern(new TriplePattern
-                {
-                    Subject = subject,
-                    Predicate = default,
-                    Object = default,
-                    Path = default
-                });
-                return true;
-            }
-            throw new SparqlParseException("Incomplete triple pattern - expected predicate and object after subject");
-        }
-
-        // Parse predicate - may be a property path
-        var (predicate, path) = ParsePredicateOrPath();
-
-        // Check that we got a valid predicate
-        if (predicate.Length == 0 && path.Type == PathType.None)
-        {
-            throw new SparqlParseException("Incomplete triple pattern - expected predicate");
-        }
-
-        SkipWhitespace();
-
-        // Check for incomplete triple pattern (subject and predicate only)
-        if (Peek() == '.' || Peek() == '}')
-        {
-            throw new SparqlParseException("Incomplete triple pattern - expected object after predicate");
-        }
-
-        var obj = ParseTerm();
-
-        // Check that we got a valid object. A synthetic term (negative marker offset — e.g. an empty collection ()
-        // is rdf:nil at offset -8) is valid even though its Length is 0; only a real zero-length term is missing.
-        if (obj.Length == 0 && obj.Start >= 0)
-        {
-            throw new SparqlParseException("Incomplete triple pattern - expected object");
-        }
-
-        // Add the first pattern
-        AddTriplePatternOrExpand(ref pattern, subject, predicate, obj, path);
-
-        // Handle semicolon-separated predicate-object lists (same subject)
-        // Grammar: PropertyListNotEmpty ::= Verb ObjectList ( ';' ( Verb ObjectList )? )*
-        SkipWhitespace();
-        while (Peek() == ';')
-        {
-            Advance(); // Skip ';'
-            SkipWhitespace();
-
-            // Check for empty predicate-object after semicolon (valid: "?s :p ?o ;")
-            if (IsAtEnd() || Peek() == '}' || Peek() == '.')
-                break;
-
-            // Check for keywords that indicate end of property list
-            var span = PeekSpan(8);
-            if ((span.Length >= 6 && span[..6].Equals("FILTER", StringComparison.OrdinalIgnoreCase)) ||
-                (span.Length >= 8 && span[..8].Equals("OPTIONAL", StringComparison.OrdinalIgnoreCase)) ||
-                (span.Length >= 5 && span[..5].Equals("MINUS", StringComparison.OrdinalIgnoreCase)) ||
-                (span.Length >= 4 && span[..4].Equals("BIND", StringComparison.OrdinalIgnoreCase)) ||
-                (span.Length >= 6 && span[..6].Equals("VALUES", StringComparison.OrdinalIgnoreCase)) ||
-                (span.Length >= 7 && span[..7].Equals("SERVICE", StringComparison.OrdinalIgnoreCase)) ||
-                (span.Length >= 5 && span[..5].Equals("GRAPH", StringComparison.OrdinalIgnoreCase)))
-                break;
-
-            // Parse next predicate-object pair with same subject
-            var (nextPredicate, nextPath) = ParsePredicateOrPath();
-            SkipWhitespace();
-            var nextObj = ParseTerm();
-
-            AddTriplePatternOrExpand(ref pattern, subject, nextPredicate, nextObj, nextPath);
-
-            SkipWhitespace();
-        }
-
-        return true;
     }
 
     /// <summary>
@@ -1186,55 +1047,6 @@ internal ref partial struct SparqlParser
         finally
         {
             DecrementDepth();
-        }
-    }
-
-    /// <summary>
-    /// Expand a sequence path into a GraphClause (for patterns inside GRAPH { } blocks).
-    /// Similar to ExpandSequencePath but targets GraphClause instead of GraphPattern.
-    /// </summary>
-    private void ExpandSequencePathIntoGraphClause(ref GraphClause graphClause, Term subject, Term obj, PropertyPath path)
-    {
-        // Generate synthetic intermediate variable
-        var seqIndex = _seqVarCounter++;
-        var intermediateTerm = Term.Variable(-(seqIndex + 200), 0);
-
-        // Re-parse left and right path segments
-        var (leftPredicate, leftPath) = ParsePathSegment(path.LeftStart, path.LeftLength);
-        var (rightPredicate, rightPath) = ParsePathSegment(path.RightStart, path.RightLength);
-
-        // Add left pattern: subject -> intermediate
-        if (leftPath.Type == PathType.Sequence)
-        {
-            // Recursively expand nested sequence on left side
-            ExpandSequencePathIntoGraphClause(ref graphClause, subject, intermediateTerm, leftPath);
-        }
-        else
-        {
-            graphClause.AddPattern(new TriplePattern
-            {
-                Subject = subject,
-                Predicate = leftPredicate,
-                Object = intermediateTerm,
-                Path = leftPath
-            });
-        }
-
-        // Add right pattern: intermediate -> object
-        if (rightPath.Type == PathType.Sequence)
-        {
-            // Recursively expand nested sequence on right side
-            ExpandSequencePathIntoGraphClause(ref graphClause, intermediateTerm, obj, rightPath);
-        }
-        else
-        {
-            graphClause.AddPattern(new TriplePattern
-            {
-                Subject = intermediateTerm,
-                Predicate = rightPredicate,
-                Object = obj,
-                Path = rightPath
-            });
         }
     }
 
@@ -2413,24 +2225,6 @@ internal ref partial struct SparqlParser
         }
 
         return Term.BlankNode(start, _position - start);
-    }
-
-    /// <summary>
-    /// Skip until closing brace (for unsupported constructs)
-    /// </summary>
-    private void SkipUntilClosingBrace()
-    {
-        var depth = 0;
-        while (!IsAtEnd())
-        {
-            var ch = Advance();
-            if (ch == '{') depth++;
-            else if (ch == '}')
-            {
-                if (depth == 0) break;
-                depth--;
-            }
-        }
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

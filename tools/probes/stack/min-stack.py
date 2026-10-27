@@ -10,7 +10,7 @@ def ok(kb,kind,env):
 def minkb(kind,env):
     hi=4096
     if not ok(hi,kind,env): return f">{hi}"
-    lo=64
+    lo=8
     while hi-lo>8:
         mid=(lo+hi)//2
         res=ok(mid,kind,env)
