@@ -212,10 +212,6 @@ internal ref partial struct QueryResults
             // Increment bnode row seed for this new row so BNODE(str) yields a fresh blank node per row.
             FilterEvaluator.IncrementBnodeRowSeed();
 
-            if (_hasBinds)
-            {
-                EvaluateBindExpressions();
-            }
 
             EvaluateSelectExpressions();
 

@@ -40,9 +40,6 @@ internal ref partial struct QueryResults
     private HashSet<int>? _seenHashes;
 
     // UNION support
-    private bool _unionBranchActive;
-    private readonly int _firstBranchBindCount;  // BINDs before UNION branch
-    private readonly bool _hasUnionBindsOnly;    // True if UNION branch has only BINDs (no patterns)
 
     // ORDER BY support
     private readonly OrderByClause _orderBy;
@@ -54,8 +51,6 @@ internal ref partial struct QueryResults
     private readonly bool _isMaterialized;
     private int _materializedIndex;
 
-    // BIND support
-    private readonly bool _hasBinds;
 
     // MINUS support
     private readonly bool _hasMinus;
@@ -95,9 +90,6 @@ internal ref partial struct QueryResults
     private readonly bool _hasHaving;
     private readonly HavingClause _having;
 
-    // Empty pattern support (for queries like SELECT (expr AS ?x) WHERE { BIND(...) })
-    private readonly bool _isEmptyPattern;
-    private bool _emptyPatternReturned;
 
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     public static QueryResults Empty()
@@ -105,57 +97,6 @@ internal ref partial struct QueryResults
         var result = new QueryResults();
         result._isEmpty = true;
         return result;
-    }
-
-    /// <summary>
-    /// Create QueryResults for an empty pattern (WHERE {}) that still evaluates BIND/FILTER/SELECT expressions.
-    /// Returns exactly one row with the computed expression values.
-    /// NoInlining prevents stack frame merging with caller (ADR-003).
-    /// </summary>
-    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-    internal static QueryResults EmptyPattern(Patterns.QueryBuffer buffer, ReadOnlySpan<char> source,
-        Binding[] bindings, char[] stringBuffer, SelectClause selectClause, QuadStore? store = null)
-    {
-        return new QueryResults(buffer, source, bindings, stringBuffer, selectClause, store, isEmptyPattern: true);
-    }
-
-    /// <summary>
-    /// Private constructor for empty pattern results (WHERE {}) with BIND/FILTER/SELECT expressions.
-    /// </summary>
-    private QueryResults(Patterns.QueryBuffer buffer, ReadOnlySpan<char> source,
-        Binding[] bindings, char[] stringBuffer, SelectClause selectClause, QuadStore? store, bool isEmptyPattern)
-    {
-        _isEmptyPattern = isEmptyPattern;
-        _emptyPatternReturned = false;
-        _buffer = buffer;
-        _source = source;
-        _bindings = bindings;
-        _stringBuffer = stringBuffer;
-        _bindingTable = new BindingTable(bindings, stringBuffer);
-        _selectClause = selectClause;
-        _store = store;
-        _hasBinds = buffer.HasBinds;
-        _hasFilters = buffer.HasFilters;
-        _hasExists = buffer.HasExists;
-        var groupBy = buffer.GetGroupByClause();
-        _hasGroupBy = groupBy.HasGroupBy || selectClause.HasRealAggregates;
-        _groupBy = groupBy;
-        var having = buffer.GetHavingClause();
-        _having = having;
-        _hasHaving = having.HasHaving;
-        // Initialize other required fields to defaults
-        _isEmpty = false;
-        _hasOptional = false;
-        _limitOffset = buffer.LimitOffset;
-        _distinct = false;
-        _orderBy = default;
-        _hasOrderBy = false;
-        _hasMinus = false;
-        _hasValues = false;
-        _hasPostQueryValues = false;
-        _isMaterialized = false;
-        _firstBranchBindCount = 0;
-        _hasUnionBindsOnly = false;
     }
 
     /// <summary>
@@ -267,14 +208,12 @@ internal ref partial struct QueryResults
         _returned = 0;
         _distinct = distinct;
         _seenHashes = distinct ? new HashSet<int>() : null;
-        _unionBranchActive = false;
         _orderBy = orderBy;
         _hasOrderBy = true; // Force use of MoveNextOrdered() to iterate pre-collected results
         _sortedResults = rows;
         _sortedIndex = -1;
         _isMaterialized = true;  // grouped-collection path (MoveNextUnorderedForCollection) iterates the pre-materialized rows
         _materializedIndex = -1;
-        _hasBinds = false;
         _hasMinus = false;
         _hasValues = false;
         _hasPostQueryValues = false;
@@ -319,14 +258,12 @@ internal ref partial struct QueryResults
         _returned = 0;
         _distinct = distinct;
         _seenHashes = distinct ? new HashSet<int>() : null;
-        _unionBranchActive = false;
         _orderBy = orderBy;
         _hasOrderBy = true; // Force use of MoveNextOrdered() to iterate pre-collected results
         _sortedResults = rows;
         _sortedIndex = -1;
         _isMaterialized = true;  // Enable iteration from pre-materialized list
         _materializedIndex = -1;
-        _hasBinds = false;
         _hasMinus = false;
         _hasValues = false;
         // A trailing (post-query) VALUES is JOINED into the rows during materialization (ExecuteGraphViaTree →
@@ -368,14 +305,12 @@ internal ref partial struct QueryResults
         _returned = 0;
         _distinct = distinct;
         _seenHashes = distinct ? new HashSet<int>() : null;
-        _unionBranchActive = false;
         _orderBy = default;
         _hasOrderBy = false;
         _sortedResults = EmptyMaterializedRows; // unused: MoveNextGrouped reads _groupedResults, not _sortedResults
         _sortedIndex = -1;
         _isMaterialized = true;
         _materializedIndex = -1;
-        _hasBinds = false;
         _hasMinus = false;
         _hasValues = false;
         _hasPostQueryValues = false;
@@ -411,12 +346,10 @@ internal ref partial struct QueryResults
         _returned = 0;
         _distinct = distinct;
         _seenHashes = distinct ? new HashSet<int>() : null;
-        _unionBranchActive = false;
         _orderBy = default;
         _hasOrderBy = true; // Use MoveNextOrdered() to iterate pre-collected results
         _sortedResults = rows;
         _sortedIndex = -1;
-        _hasBinds = false;
         _hasMinus = false;
         _hasValues = false;
         _hasPostQueryValues = false;
@@ -451,12 +384,10 @@ internal ref partial struct QueryResults
         _returned = 0;
         _distinct = distinct;
         _seenHashes = distinct ? new HashSet<int>() : null;
-        _unionBranchActive = false;
         _orderBy = default;
         _hasOrderBy = true;
         _sortedResults = rows;
         _sortedIndex = -1;
-        _hasBinds = false;
         _hasMinus = false;
         _hasValues = false;
         _hasPostQueryValues = false;
@@ -495,54 +426,6 @@ internal ref partial struct QueryResults
         // Explicit GROUP BY over empty correctly yields zero rows, so it still short-circuits.
         if (_isEmpty && !(_selectClause.HasRealAggregates && !_groupBy.HasGroupBy)) return false;
 
-        // Empty pattern (WHERE { BIND(...) }) - return exactly one row with computed expressions
-        if (_isEmptyPattern)
-        {
-            if (_emptyPatternReturned)
-                return false;
-
-            _emptyPatternReturned = true;
-
-            // The one solution is the whole sequence: an OFFSET skips it, and LIMIT 0 returns none.
-            if (_limitOffset.Offset > 0 || _limitOffset.LimitReached(0))
-                return false;
-
-            // Increment bnode row seed for this new row - ensures BNODE(str) produces
-            // different bnodes for different rows (same string in same row → same bnode)
-            FilterEvaluator.IncrementBnodeRowSeed();
-
-            // Evaluate BIND expressions first (e.g., BIND(UUID() AS ?uuid))
-            if (_hasBinds)
-            {
-                EvaluateBindExpressions();
-            }
-
-            // Evaluate SELECT expressions (e.g., (STRLEN(STR(?uuid)) AS ?length))
-            EvaluateSelectExpressions();
-
-            // Apply FILTER - if fails, return empty result set
-            if (_hasFilters)
-            {
-                if (!EvaluateFilters())
-                {
-                    _bindingTable.Clear();
-                    return false;
-                }
-            }
-
-            // Apply EXISTS/NOT EXISTS filters
-            if (_hasExists)
-            {
-                if (!EvaluateExistsFilters())
-                {
-                    _bindingTable.Clear();
-                    return false;
-                }
-            }
-
-            return true;
-        }
-
         // GROUP BY requires collecting all results first, then grouping
         if (_hasGroupBy)
         {
@@ -556,7 +439,7 @@ internal ref partial struct QueryResults
         }
 
         // ADR-047 d2: the streaming scan path is gone — every materialized ctor sets _hasOrderBy / _hasGroupBy /
-        // _isEmptyPattern, so one of the branches above always handles the row presentation. This fallthrough is
+        // so one of the branches above always handles the row presentation. This fallthrough is
         // unreachable; returning false is the safe terminal.
         return false;
     }

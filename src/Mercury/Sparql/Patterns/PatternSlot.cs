@@ -945,6 +945,9 @@ internal sealed class QueryBuffer : IDisposable
     public bool SelectAll { get; set; }
     public LimitOffsetClause LimitOffset { get; set; }
 
+    /// <summary>Source offset of the WHERE group's '{' (<see cref="WhereClause.GroupStart"/>); -1 without one.</summary>
+    public int WhereGroupStart { get; set; } = -1;
+
     // Source span offsets for lazily-evaluated expressions
     public int BaseUriStart { get; set; }
     public int BaseUriLength { get; set; }
@@ -1645,6 +1648,7 @@ internal static class QueryBufferAdapter
         buffer.SelectDistinct = query.SelectClause.Distinct || query.SelectClause.Reduced;
         buffer.SelectAll = query.SelectClause.SelectAll;
         buffer.LimitOffset = query.SolutionModifier.LimitOffset;
+        buffer.WhereGroupStart = query.WhereClause.GroupStart;
         buffer.BaseUriStart = query.Prologue.BaseUriStart;
         buffer.BaseUriLength = query.Prologue.BaseUriLength;
 

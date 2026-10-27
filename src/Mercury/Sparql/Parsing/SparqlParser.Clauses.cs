@@ -709,7 +709,7 @@ internal ref partial struct SparqlParser
         }
 
         var datasets = ParseDatasetClauses();
-        var whereClause = new WhereClause();
+        var whereClause = new WhereClause { GroupStart = -1 };
 
         // Optional WHERE clause for DESCRIBE
         SkipWhitespace();
@@ -1407,9 +1407,10 @@ internal ref partial struct SparqlParser
         }
 
         SkipWhitespace();
+        int groupStart = Peek() == '{' ? _position : -1;
         var pattern = ParseGroupGraphPattern();
 
-        return new WhereClause { Pattern = pattern };
+        return new WhereClause { Pattern = pattern, GroupStart = groupStart };
     }
 
     /// <summary>

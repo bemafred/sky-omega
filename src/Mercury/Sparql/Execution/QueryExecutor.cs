@@ -303,7 +303,9 @@ internal partial class QueryExecutor : IDisposable
             return topk;
 
         var rows = ExecuteGraphViaTree();
-        if (rows.Count == 0)
+        // No solutions is no rows, except for an aggregate without GROUP BY: it groups the empty sequence into one
+        // group (COUNT 0), so the rows go to the modifier layer, which synthesizes that group (§18.5).
+        if (rows.Count == 0 && !(_buffer.GetSelectClause().HasRealAggregates && !_buffer.GetGroupByClause().HasGroupBy))
             return QueryResults.Empty();
 
         var bindings = new Binding[64];
@@ -336,7 +338,7 @@ internal partial class QueryExecutor : IDisposable
         if (_buffer.GetOrderByClause().HasOrderBy) return false; // ORDER BY — fall back (a no-op on one row, but keep the gate tight)
         if (_buffer.SelectDistinct) return false;                // query-level DISTINCT — fall back
 
-        int whereStart = FindWhereGroupStart();
+        int whereStart = _buffer.WhereGroupStart;
         const int treeBytes = PatternSlot.Size * 1024;
         var treeBuffer = System.Buffers.ArrayPool<byte>.Shared.Rent(treeBytes);
         try
@@ -405,7 +407,7 @@ internal partial class QueryExecutor : IDisposable
         if (capacity64 <= 0 || capacity64 > capCap) return false;
         int capacity = (int)capacity64;
 
-        int whereStart = FindWhereGroupStart();
+        int whereStart = _buffer.WhereGroupStart;
         const int treeBytes = PatternSlot.Size * 1024;
         var treeBuffer = System.Buffers.ArrayPool<byte>.Shared.Rent(treeBytes);
         try
@@ -440,7 +442,7 @@ internal partial class QueryExecutor : IDisposable
     /// </summary>
     private List<MaterializedRow> ExecuteGraphViaTree(int askExistenceCap = 0)
     {
-        int whereStart = FindWhereGroupStart();
+        int whereStart = _buffer.WhereGroupStart;
         // Pool the pattern-tree buffer — it is per-query setup, not the hot path, but renting keeps the GRAPH path's
         // per-query allocation bounded by the result rows rather than a fixed ~64 KB buffer each call.
         const int treeBytes = PatternSlot.Size * 1024;
@@ -492,119 +494,6 @@ internal partial class QueryExecutor : IDisposable
         }
     }
 
-    /// <summary>
-    /// Locate THIS-statement's WHERE-group opening '{'. The source can be a whole multi-statement UPDATE (a naive text
-    /// search for "WHERE" would find the wrong statement, and the first '{' is the DELETE/INSERT template), so anchor on
-    /// the buffer, which is per-statement.
-    /// <para>
-    /// Primary: bound the search by this statement's earliest triple-pattern term (a per-statement offset) and take the
-    /// WHERE keyword at or before it; the WHERE group's '{' is the first '{' after that keyword. That skips a preceding
-    /// DELETE/INSERT template '{ … }' and any earlier statement's WHERE. Crucially it is also robust to a GRAPH header
-    /// nested inside EXISTS / MINUS / a sub-group: keying off the first graph header (the fallback below) would pick the
-    /// brace of THAT nested group, so the tree parsed and ran only the sub-pattern as the whole query — dropping the
-    /// outer BGP and the EXISTS/MINUS semantics (this is the exists-graph-variable over-match,
-    /// ck:bug-findwheregroupstart-nested-graph).
-    /// </para>
-    /// <para>
-    /// Fallback (no top-level triple, or no WHERE keyword — e.g. a GRAPH-clause-only group <c>SELECT * { GRAPH ?g { … } }</c>):
-    /// the WHERE group encloses the GRAPH clause, so the '{' is the one immediately before the first (outermost,
-    /// document-order) graph header's term.
-    /// </para>
-    /// </summary>
-    private int FindWhereGroupStart()
-    {
-        int firstTerm = FirstPatternTermStart();
-        if (firstTerm >= 0)
-        {
-            int whereKw = LastWhereKeywordAtOrBefore(firstTerm);
-            if (whereKw >= 0)
-            {
-                int brace = _source.IndexOf('{', whereKw);
-                if (brace >= 0 && brace <= firstTerm) return brace;
-            }
-        }
-
-        var patterns = _buffer.GetPatterns();
-        var headers = patterns.EnumerateGraphHeaders();
-        if (headers.MoveNext())
-        {
-            int termStart = System.Math.Min(headers.Current.GraphTermStart, _source.Length - 1);
-            int brace = _source.LastIndexOf('{', termStart);
-            if (brace >= 0) return brace;
-        }
-
-        return _source.IndexOf('{');
-    }
-
-    /// <summary>The least source offset among this statement's cached triple-pattern subjects, or -1 if there are none.</summary>
-    private int FirstPatternTermStart()
-    {
-        ref readonly var pattern = ref _cachedPattern;
-        int min = -1;
-        for (int i = 0; i < pattern.PatternCount; i++)
-        {
-            int s = pattern.GetPattern(i).Subject.Start;
-            if (s >= 0 && (min < 0 || s < min)) min = s;
-        }
-        // A sub-SELECT-only WHERE has no top-level triple to anchor on, but its content still sits INSIDE the WHERE
-        // group — anchor on the sub-query's earliest term (pattern subject / projected var / aggregate alias) so
-        // FindWhereGroupStart locates THIS statement's WHERE. Without it, an `INSERT { … } WHERE { SELECT (COUNT(*) …) }`
-        // in a multi-statement UPDATE falls back to IndexOf('{'), which grabs the INSERT template brace.
-        for (int q = 0; q < pattern.SubQueryCount; q++)
-        {
-            var sq = pattern.GetSubQuery(q);
-            for (int i = 0; i < sq.PatternCount; i++)
-            {
-                int s = sq.GetPattern(i).Subject.Start;
-                if (s >= 0 && (min < 0 || s < min)) min = s;
-            }
-            for (int i = 0; i < sq.Select.ProjectedVariableCount; i++)
-            {
-                int s = sq.Select.GetProjectedVariable(i).Start;
-                if (s >= 0 && (min < 0 || s < min)) min = s;
-            }
-            for (int i = 0; i < sq.Select.AggregateCount; i++)
-            {
-                int s = sq.Select.GetAggregate(i).AliasStart;
-                if (s >= 0 && (min < 0 || s < min)) min = s;
-            }
-        }
-        return min;
-    }
-
-    /// <summary>
-    /// The start index of the last standalone "WHERE" keyword token (case-insensitive, with non-alphanumeric
-    /// boundaries) at or before <paramref name="limit"/>, or -1 if there is none. String literals are skipped so a
-    /// "where" inside one is not mistaken for the keyword. Anchors the WHERE group within a multi-statement UPDATE.
-    /// </summary>
-    private int LastWhereKeywordAtOrBefore(int limit)
-    {
-        int found = -1;
-        int depth = 0; // brace depth — a WHERE nested in a sub-SELECT / EXISTS / group body sits at depth > 0 and is NOT
-                       // this statement's group opener (the same nested-WHERE over-match the flip fixed for GRAPH/EXISTS).
-        for (int i = 0; i + 5 <= _source.Length && i <= limit; i++)
-        {
-            char ch = _source[i];
-            if (ch == '"' || ch == '\'')
-            {
-                i++;
-                while (i < _source.Length && _source[i] != ch) { if (_source[i] == '\\') i++; i++; }
-                continue;
-            }
-            if (ch == '{') { depth++; continue; }
-            if (ch == '}') { if (depth > 0) depth--; continue; }
-            if (depth != 0) continue; // only a top-level WHERE opens this statement's group
-            if ((ch | 0x20) != 'w' || (_source[i + 1] | 0x20) != 'h' || (_source[i + 2] | 0x20) != 'e'
-                || (_source[i + 3] | 0x20) != 'r' || (_source[i + 4] | 0x20) != 'e')
-                continue;
-            if (i > 0 && (char.IsLetterOrDigit(_source[i - 1]) || _source[i - 1] == '_')) continue;
-            int after = i + 5;
-            if (after < _source.Length && (char.IsLetterOrDigit(_source[after]) || _source[after] == '_')) continue;
-            found = i;
-        }
-        return found;
-    }
-
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     internal MaterializedQueryResults ExecuteToMaterialized()
     {
@@ -624,16 +513,6 @@ internal partial class QueryExecutor : IDisposable
         // ISparqlServiceExecutor and joins. The old separate FROM/SERVICE/cross-graph executor paths are deleted, as is
         // the temp-store ServiceMaterializer (ADR-048 federation = the tree's bound-join, not a second join-back).
 
-        // Empty pattern case
-        if (_buffer.TriplePatternCount == 0)
-        {
-            // A sub-SELECT-only, VALUES-only, or SERVICE-only WHERE has no top-level triples but is real content — route
-            // it to the tree (SubSelectStep / ValuesStep / ServiceStep), not the empty-pattern path (ADR-047 B1/B3).
-            if (_buffer.HasSubQueries || _buffer.HasValues || _buffer.HasService)
-                return WrapResultsAsMaterialized(ExecuteGraphViaTree());
-            // For empty patterns with BIND/expressions, execute and collect results
-            return ExecuteEmptyPatternToMaterialized();
-        }
 
         // ADR-047 A3: the regular (non-carve-out) WHERE materializes through the unified tree — identical to the GRAPH
         // case above (WrapResultsAsMaterialized over ExecuteGraphViaTree). The tree has already applied the BGP join,
@@ -653,125 +532,6 @@ internal partial class QueryExecutor : IDisposable
             return MaterializedQueryResults.Empty();
 
         var bindings = new Binding[16];
-        return new MaterializedQueryResults(results, bindings, _stringBuffer,
-            _buffer.LimitOffset, _buffer.SelectDistinct);
-    }
-
-    /// <summary>
-    /// Execute an empty pattern (WHERE {}) and return materialized results.
-    /// For empty patterns with BIND/expressions, returns a single row with evaluated expressions.
-    /// </summary>
-    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-    private MaterializedQueryResults ExecuteEmptyPatternToMaterialized()
-    {
-        var selectClause = _buffer.GetSelectClause();
-        if (selectClause.AggregateCount == 0 && !_buffer.HasBinds && !_buffer.HasFilters && !_buffer.HasExists)
-            return MaterializedQueryResults.Empty();
-
-        // For empty patterns with expressions, return a single row with evaluated expressions
-        var bindings = new Binding[16];
-        var bindingTable = new BindingTable(bindings, _stringBuffer);
-
-        // Get base IRI for relative IRI resolution
-        var baseIri = _buffer.BaseUriLength > 0
-            ? _source.AsSpan(_buffer.BaseUriStart, _buffer.BaseUriLength)
-            : ReadOnlySpan<char>.Empty;
-
-        // Evaluate BIND expressions first (e.g., BIND(UUID() AS ?uuid))
-        if (_buffer.HasBinds)
-        {
-            ref readonly var pattern = ref _cachedPattern;
-            for (int i = 0; i < _buffer.BindCount; i++)
-            {
-                var bind = pattern.GetBind(i);
-                var expr = _source.AsSpan(bind.ExprStart, bind.ExprLength);
-                var varName = _source.AsSpan(bind.VarStart, bind.VarLength);
-
-                var evaluator = new FilterEvaluator(expr);
-                var value = evaluator.EvaluateToValue(
-                    bindings.AsSpan(0, bindingTable.Count),
-                    bindingTable.Count,
-                    _stringBuffer,
-                    _prefixMappings, _source, baseIri);
-
-                // Bind the result using typed overloads
-                switch (value.Type)
-                {
-                    case ValueType.Integer:
-                        bindingTable.Bind(varName, value.IntegerValue);
-                        break;
-                    case ValueType.Double:
-                        bindingTable.Bind(varName, value.DoubleValue);
-                        break;
-                    case ValueType.Boolean:
-                        bindingTable.Bind(varName, value.BooleanValue);
-                        break;
-                    case ValueType.String:
-                    case ValueType.Uri:
-                        bindingTable.Bind(varName, value.StringValue);
-                        break;
-                }
-            }
-        }
-
-        // Evaluate SELECT expressions (e.g., (BNODE() AS ?b1))
-        for (int i = 0; i < selectClause.AggregateCount; i++)
-        {
-            var agg = selectClause.GetAggregate(i);
-
-            // Only evaluate non-aggregate expressions (Function == None)
-            if (agg.Function != AggregateFunction.None) continue;
-
-            // Skip if no expression to evaluate
-            if (agg.VariableLength == 0) continue;
-
-            // Get expression and alias
-            var expr = _source.AsSpan(agg.VariableStart, agg.VariableLength);
-            var aliasName = _source.AsSpan(agg.AliasStart, agg.AliasLength);
-
-            // Evaluate the expression
-            var evaluator = new FilterEvaluator(expr);
-            var value = evaluator.EvaluateToValue(
-                bindings.AsSpan(0, bindingTable.Count),
-                bindingTable.Count,
-                _stringBuffer,
-                _prefixMappings, _source, baseIri);
-
-            // Bind the result to the alias variable
-            switch (value.Type)
-            {
-                case ValueType.Integer:
-                    bindingTable.Bind(aliasName, value.IntegerValue);
-                    break;
-                case ValueType.Double:
-                    bindingTable.Bind(aliasName, value.DoubleValue);
-                    break;
-                case ValueType.Boolean:
-                    bindingTable.Bind(aliasName, value.BooleanValue);
-                    break;
-                case ValueType.String:
-                case ValueType.Uri:
-                    bindingTable.Bind(aliasName, value.StringValue);
-                    break;
-            }
-        }
-
-        // Evaluate FILTER if any (may reject the single row)
-        if (_buffer.HasFilters)
-        {
-            ref readonly var pattern = ref _cachedPattern;
-            for (int i = 0; i < pattern.FilterCount; i++)
-            {
-                var filter = pattern.GetFilter(i);
-                var filterExpr = _source.AsSpan(filter.Start, filter.Length);
-                var filterEvaluator = new FilterEvaluator(filterExpr);
-                if (!filterEvaluator.Evaluate(bindings.AsSpan(0, bindingTable.Count),
-                    bindingTable.Count, _stringBuffer, _buffer.Prefixes, _source))
-                    return MaterializedQueryResults.Empty();
-            }
-        }
-
-        var results = new List<MaterializedRow> { new MaterializedRow(bindingTable) };
         return new MaterializedQueryResults(results, bindings, _stringBuffer,
             _buffer.LimitOffset, _buffer.SelectDistinct);
     }
@@ -798,44 +558,12 @@ internal partial class QueryExecutor : IDisposable
         // tree); a sub-SELECT joined with outer triples falls through to the default tree dispatch. The old separate
         // sub-query executor path is deleted.
 
-        // Check for GRAPH clauses - use _buffer to avoid large struct copies
-        // A query with GRAPH but no direct triple patterns (only patterns inside GRAPH)
-        // Call ExecuteGraphClausesToList() which returns List<MaterializedRow>? (8 bytes)
-        // instead of QueryResults (~22KB) to reduce stack pressure
-        if (_buffer.HasGraph && _buffer.TriplePatternCount == 0)
-        {
-            // ADR-045 cutover: route GRAPH queries through the unified zero-GC tree executor ("a default graph is
-            // also a graph") and the shared FromMaterializedSimple modifier layer — the same one the default path
-            // uses. This replaces the divergent ExecuteGraphClausesToList + FromMaterializedWithGraphContext path.
-            return ExecuteViaTreeMaterialized();
-        }
-
-        // ADR-047 B3: SERVICE (federation) runs through the unified tree like everything else — a SERVICE clause is a
-        // ServiceHeader the tree's ServiceStep evaluates against the injected ISparqlServiceExecutor and joins with the
-        // outer rows. UNION-with-SERVICE, OPTIONAL { SERVICE }, multiple SERVICE, and SERVICE ?ep all fall out of the
-        // tree's existing UnionHeader / OptionalHeader / sequential-Join machinery — no per-shape orchestration. The old
-        // SERVICE executor path is deleted, as is the temp-store ServiceMaterializer (ADR-048 federation = the bound-join).
-
-        if (_buffer.TriplePatternCount == 0)
-        {
-            // A WHERE with no top-level triples is NOT necessarily empty. VALUES-only inline data, a sub-SELECT-only
-            // body ({ SELECT … }), or a SERVICE-only body is real content the unified tree materializes — the
-            // empty-pattern path below only checks aggregate/BIND/FILTER/EXISTS, so it would wrongly return nothing.
-            // ADR-047 B1/B3: route those to the tree (SubSelectStep / ValuesStep / ServiceStep).
-            if (_buffer.HasValues || _buffer.HasSubQueries || _buffer.HasService)
-                return ExecuteViaTreeMaterialized();
-
-            // Check if there are BIND, FILTER, EXISTS, or SELECT expressions to evaluate
-            // (e.g., SELECT (REPLACE(...) AS ?new) WHERE {} or SELECT ?x WHERE { BIND(UUID() AS ?x) })
-            var selectClause = _buffer.GetSelectClause();
-            if (selectClause.AggregateCount > 0 || _buffer.HasBinds || _buffer.HasFilters || _buffer.HasExists)
-            {
-                // Empty pattern with expressions - return one row with computed values
-                var emptyBindings = new Binding[16];
-                return QueryResults.EmptyPattern(_buffer, _source.AsSpan(), emptyBindings, _stringBuffer, selectClause, _store);
-            }
+        // Every WHERE, with or without top-level triple patterns, is a group the tree evaluates: {} is one empty
+        // solution that BIND extends and FILTER removes (§18.2). There is no separate evaluator for a WHERE without
+        // triples (ADR-055 D2). Only DESCRIBE may have no WHERE group at all; it then has no solutions here (ADR-055 D3
+        // gives DESCRIBE <iri> its own evaluation).
+        if (_buffer.WhereGroupStart < 0)
             return QueryResults.Empty();
-        }
 
         // ADR-047 B2: a FROM dataset (default-graph clauses) runs through the unified tree like everything else — the
         // FROM graphs are passed to the TreeJoinExecutor as _defaultGraphs, and a default-context pattern scans their
@@ -900,101 +628,7 @@ internal partial class QueryExecutor : IDisposable
     /// </summary>
     public bool ExecuteAsk()
     {
-        // Check for GRAPH clauses - delegate to Execute()
-        if (_buffer.HasGraph)
-        {
-            var results = Execute();
-            try { return results.MoveNext(); }
-            finally { results.Dispose(); }
-        }
-
-        // Check for subqueries - delegate to Execute()
-        if (_buffer.HasSubQueries)
-        {
-            var results = Execute();
-            try { return results.MoveNext(); }
-            finally { results.Dispose(); }
-        }
-
-        // Check for SERVICE clauses - delegate to Execute()
-        if (_buffer.HasService)
-        {
-            var results = Execute();
-            try { return results.MoveNext(); }
-            finally { results.Dispose(); }
-        }
-
-        ref readonly var pattern = ref _cachedPattern;
-
-        // Build binding storage (needed for empty pattern with filters too)
-        var bindings = new Binding[16];
-        var stringBuffer = _stringBuffer;
-        var bindingTable = new BindingTable(bindings, stringBuffer);
-
-        // Empty pattern: if there are binds/filters, evaluate them
-        // ASK { BIND(RAND() AS ?r) FILTER(DATATYPE(?r) = xsd:double) } should work
-        if (pattern.PatternCount == 0)
-        {
-            // First evaluate any BIND expressions
-            if (_buffer.BindCount > 0)
-            {
-                var baseIri = _buffer.BaseUriLength > 0
-                    ? _source.AsSpan(_buffer.BaseUriStart, _buffer.BaseUriLength)
-                    : ReadOnlySpan<char>.Empty;
-
-                for (int i = 0; i < _buffer.BindCount; i++)
-                {
-                    var bind = pattern.GetBind(i);
-                    var expr = _source.AsSpan(bind.ExprStart, bind.ExprLength);
-                    var varName = _source.AsSpan(bind.VarStart, bind.VarLength);
-
-                    var evaluator = new FilterEvaluator(expr);
-                    var value = evaluator.EvaluateToValue(
-                        bindings.AsSpan(0, bindingTable.Count),
-                        bindingTable.Count,
-                        stringBuffer,
-                        _prefixMappings, _source, baseIri);
-
-                    // Bind the result using typed overloads
-                    switch (value.Type)
-                    {
-                        case ValueType.Integer:
-                            bindingTable.Bind(varName, value.IntegerValue);
-                            break;
-                        case ValueType.Double:
-                            bindingTable.Bind(varName, value.DoubleValue);
-                            break;
-                        case ValueType.Boolean:
-                            bindingTable.Bind(varName, value.BooleanValue);
-                            break;
-                        case ValueType.String:
-                        case ValueType.Uri:
-                            bindingTable.Bind(varName, value.StringValue);
-                            break;
-                    }
-                }
-            }
-
-            if (_buffer.FilterCount > 0)
-            {
-                // Evaluate all filters - all must pass for ASK to return true
-                for (int i = 0; i < _buffer.FilterCount; i++)
-                {
-                    var filter = pattern.GetFilter(i);
-                    var filterExpr = _source.AsSpan(filter.Start, filter.Length);
-                    var evaluator = new FilterEvaluator(filterExpr);
-                    if (!evaluator.Evaluate(bindings.AsSpan(0, bindingTable.Count), bindingTable.Count, stringBuffer, _buffer.Prefixes, _source))
-                        return false;
-                }
-                return true;
-            }
-            // Has BINDs but no filters - return true if we got here
-            if (_buffer.BindCount > 0)
-                return true;
-            return false;
-        }
-
-        // ADR-047 A2/B2: a non-empty WHERE's existence goes through the unified tree — the same evaluator SELECT and
+        // ADR-047 A2/B2: a WHERE's existence goes through the unified tree, GRAPH, sub-SELECT and SERVICE included — the same evaluator SELECT and
         // CONSTRUCT use. A pure BGP short-circuits at the first matched row (askExistenceCap: 1, safe because nothing
         // filters after the join); a group with FILTER / EXISTS / an operator is evaluated whole (the tree's existence
         // primitive, the one ExistsBodyHasMatch uses) and tested non-empty. An all-OPTIONAL group keeps the empty-row
@@ -1020,10 +654,8 @@ internal partial class QueryExecutor : IDisposable
         var bindings = new Binding[16];
         var stringBuffer = _stringBuffer;
 
-        // A CONSTRUCT WHERE with neither top-level triples nor a sub-SELECT is genuinely empty. A sub-SELECT-only WHERE
-        // ({ SELECT … }) IS real content (the tree's SubSelectStep evaluates it), so it must NOT short-circuit to empty.
-        if (pattern.PatternCount == 0 && !_buffer.HasSubQueries)
-            return ConstructResults.Empty();
+        // A WHERE without top-level triples is still a group with solutions ({} has one; BIND, VALUES and GRAPH
+        // bring their own), so every CONSTRUCT WHERE goes to the tree (ADR-055 D2).
 
         // ADR-047 A2/B2/C2: the WHERE — BGP, FROM dataset, OR a sub-SELECT — evaluates through the unified tree; the
         // materialized rows (all variables bound, no projection) ConstructResults reads via .Current. C2 routed
