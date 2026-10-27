@@ -2,7 +2,7 @@
 
 ## Status
 
-**Status:** Accepted — 2026-10-27 (Proposed → Accepted the same day, after Q1 and Q2 were settled)
+**Status:** Completed — 2026-10-27 (Proposed → Accepted → Completed the same day; released in 1.8.23)
 
 Found while settling ADR-053's Q1 (how a correction is recorded). On a Cognitive store, a SPARQL DELETE removes the
 fact from every point-in-time view, including views from before the delete, so the store loses the history it exists to
@@ -358,8 +358,14 @@ insert) is already correct for a store without valid time. Reference and Minimal
    - A `ck:` resume point AS OF 2026-06-08 returns the `nextAction` that held then.
 
    The copy was taken while `mercury-mcp` was running; the live repair runs with it stopped.
-5. **Dogfood:** pending. It needs `mercury` and `mercury-mcp` installed from this change, `mercury-mcp` stopped for the
-   repair, and the MCP reconnected for the AS OF query.
+5. **Live repair and dogfood** (1.8.23):
+   - With `mercury-mcp` stopped, the live MCP pool was backed up.
+   - `mercury --store mcp --repair-deletes --dry-run` found 323 entries in 96 events, the same as the copy.
+   - The repair with `--restore` for the 2026-05-30 event ended 204 and restored 119. A second dry run found 0.
+   - Over the reconnected MCP, the status of `<https://sky-omega.org/bugs/mercury-update-where-legacy-pattern>` AS OF
+     2026-10-27T06:00Z is `"open"`, and now it is `"fixed"`. `urn:sky-omega:session:2026-05-30` has 184 triples.
+   - A fresh `DELETE { … ?old } INSERT { … "Completed" }` of ADR-054's own status, sent over MCP, returns `"Proposed"`
+     AS OF the second before it and `"Completed"` now.
 
 ## References
 
