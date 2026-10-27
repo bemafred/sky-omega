@@ -7,7 +7,8 @@ $ScriptDir = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path
 $NupkgDir = Join-Path $ScriptDir "nupkg"
 
 Write-Host "Building and packing Sky Omega tools..."
-dotnet pack (Join-Path $ScriptDir "SkyOmega.sln") -c Release -o $NupkgDir -p:PackageReadmeFile=""
+dotnet build (Join-Path $ScriptDir "SkyOmega.sln") -c Release
+dotnet pack (Join-Path $ScriptDir "SkyOmega.sln") -c Release --no-build -o $NupkgDir -p:PackageReadmeFile=""
 
 Write-Host ""
 Write-Host "Installing tools..."

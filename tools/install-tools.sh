@@ -8,7 +8,8 @@ SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 NUPKG_DIR="$SCRIPT_DIR/nupkg"
 
 echo "Building and packing Sky Omega tools..."
-dotnet pack "$SCRIPT_DIR/SkyOmega.sln" -c Release -o "$NUPKG_DIR" -p:PackageReadmeFile=""
+dotnet build "$SCRIPT_DIR/SkyOmega.sln" -c Release
+dotnet pack "$SCRIPT_DIR/SkyOmega.sln" -c Release --no-build -o "$NUPKG_DIR" -p:PackageReadmeFile=""
 
 echo ""
 echo "Installing tools..."
