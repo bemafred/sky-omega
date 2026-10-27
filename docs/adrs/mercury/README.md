@@ -54,3 +54,4 @@
 | [ADR-049](ADR-049-unified-expression-evaluator.md) | One SPARQL Expression Evaluator — FILTER and BIND share `[110] Expression` (spec-mandated unification; fixed FILTER-arithmetic and BIND-`\|\|` conformance gaps; BindExpressionEvaluator deleted, divergence S2 closed) | Completed (2026-06-21) |
 | [ADR-050](ADR-050-growable-result-binding-buffer.md) | Growable Result-Binding Buffer — Eliminate the Silent Overflow-Drop; Specify the Literal-Size Policy (= MaxAtomSize) | Completed (2026-06-22) |
 | [ADR-051](ADR-051-trigram-index-over-iris.md) | Trigram Index over IRIs — Fast Fuzzy Recall over IRI Names (extend the object-literal-only scope; Lucy's associative-recall primitive) | Proposed (2026-06-23) |
+| [ADR-052](ADR-052-update-where-one-pattern-path.md) | One Pattern Path for SPARQL UPDATE — Parse and Evaluate the Update WHERE Through the Pattern Tree (silent data loss and silent over-deletion from six count-gated routes) | Accepted (2026-10-27) |
