@@ -98,29 +98,6 @@ internal ref partial struct QueryResults
         result._isEmpty = true;
         return result;
     }
-
-    /// <summary>
-    /// Create QueryResults from pre-materialized rows.
-    /// Used for subquery joins where results are collected eagerly to avoid stack overflow.
-    /// NoInlining prevents stack frame merging with caller (ADR-003).
-    /// </summary>
-    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-    internal static QueryResults FromMaterialized(List<MaterializedRow> rows, Patterns.QueryBuffer buffer,
-        ReadOnlySpan<char> source, QuadStore store, Binding[] bindings, char[] stringBuffer,
-        LimitOffsetClause limitOffset = default, bool distinct = false, OrderByClause orderBy = default,
-        GroupByClause groupBy = default, SelectClause selectClause = default, HavingClause having = default)
-    {
-        // If actual ORDER BY is specified, sort the materialized results
-        if (orderBy.HasOrderBy && rows.Count > 1)
-        {
-            var sourceStr = source.ToString();
-            rows.Sort(new MaterializedRowComparer(orderBy, sourceStr));
-        }
-
-        return new QueryResults(rows, buffer, source, store, bindings, stringBuffer,
-            limitOffset, distinct, orderBy, groupBy, selectClause, having);
-    }
-
     /// <summary>
     /// Create QueryResults from pre-materialized rows without requiring the full GraphPattern.
     /// This overload avoids stack overflow by not passing the large GraphPattern struct.
@@ -185,49 +162,6 @@ internal ref partial struct QueryResults
     {
         return new QueryResults(rows, bindings, stringBuffer, limitOffset, distinct);
     }
-
-    /// <summary>
-    /// Private constructor for pre-materialized results.
-    /// </summary>
-    private QueryResults(List<MaterializedRow> rows, Patterns.QueryBuffer buffer, ReadOnlySpan<char> source,
-        QuadStore store, Binding[] bindings, char[] stringBuffer,
-        LimitOffsetClause limitOffset, bool distinct, OrderByClause orderBy,
-        GroupByClause groupBy, SelectClause selectClause, HavingClause having)
-    {
-        _buffer = buffer;
-        _source = source;
-        _store = store;
-        _bindings = bindings;
-        _stringBuffer = stringBuffer;
-        _bindingTable = new BindingTable(bindings, stringBuffer);
-        _hasFilters = buffer?.HasFilters ?? false; // Evaluate filters for GRAPH clause results
-        _hasOptional = false;
-        _isEmpty = rows.Count == 0;
-        _limitOffset = limitOffset;
-        _skipped = 0;
-        _returned = 0;
-        _distinct = distinct;
-        _seenHashes = distinct ? new HashSet<int>() : null;
-        _orderBy = orderBy;
-        _hasOrderBy = true; // Force use of MoveNextOrdered() to iterate pre-collected results
-        _sortedResults = rows;
-        _sortedIndex = -1;
-        _isMaterialized = true;  // grouped-collection path (MoveNextUnorderedForCollection) iterates the pre-materialized rows
-        _materializedIndex = -1;
-        _hasMinus = false;
-        _hasValues = false;
-        _hasPostQueryValues = false;
-        _hasExists = buffer?.HasExists ?? false;
-        _groupBy = groupBy;
-        _selectClause = selectClause;
-        // Enable grouping for explicit GROUP BY OR implicit aggregation (aggregates without GROUP BY)
-        _hasGroupBy = groupBy.HasGroupBy || selectClause.HasRealAggregates;
-        _groupedResults = null;
-        _groupedIndex = -1;
-        _having = having;
-        _hasHaving = having.HasHaving;
-    }
-
     /// <summary>
     /// Private constructor for pre-materialized results without pattern.
     /// Used for simple materialized iteration where pattern access is not needed.
