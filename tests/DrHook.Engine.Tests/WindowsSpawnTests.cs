@@ -73,9 +73,10 @@ public sealed class WindowsSpawnTests
         using Process process = Process.GetProcessById(child.ProcessId);
         try
         {
-            ProcessThread mainThread = process.Threads.Cast<ProcessThread>().Single();
-            Assert.Equal(System.Diagnostics.ThreadState.Wait, mainThread.ThreadState);
-            Assert.Equal(ThreadWaitReason.Suspended, mainThread.WaitReason);
+            // Held: the child does nothing until Resume. (Not its main thread's ThreadState: a CREATE_SUSPENDED
+            // thread is suspended by a kernel APC it runs when first scheduled, so until then it reads Ready, not
+            // Wait/Suspended — observed on omega-windows under load.) A running `cmd /c echo` exits in tens of ms.
+            Assert.False(process.WaitForExit(500), "The child ran and exited before Resume.");
 
             WindowsSpawn.Resume(child);
 

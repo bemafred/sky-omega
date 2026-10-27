@@ -10,10 +10,10 @@
 // even amid a STOPPING event flood — substrate doesn't drop or reorder.
 //
 // At integration scale: target's RunThrowCatchLoop throws + catches in a tight loop,
-// generating Exception (STOPPING) callbacks. Substrate attaches; receives Break stop from
-// --debug startup; arms a no-match exception filter (auto-resumes all Exception stops via
-// substrate's WaitForStop loop); Resumes past Break; calls session.Pause(); awaits Pause
-// stop arrival. Assertion: Pause stop arrives within reasonable budget despite STOPPING flood.
+// generating Exception (STOPPING) callbacks. Substrate attaches; arms a no-match exception filter
+// (auto-resumes all Exception stops via substrate's WaitForStop loop); runs to a breakpoint inside
+// the loop, so the flood is known to be running; calls session.Pause(); awaits Pause stop
+// arrival. Assertion: Pause stop arrives within reasonable budget despite STOPPING flood.
 
 using System;
 using System.Diagnostics;
@@ -50,7 +50,7 @@ public sealed class ConcurrentPauseStopTest
 
             using (DebugSession session = DebugSession.AttachAndOwn(pid, new NullSink()))
             {
-                AssertPauseStopSurfacesUnderStoppingFlood(session);
+                AssertPauseStopSurfacesUnderStoppingFlood(session, IntegrationTargetPaths.MtpTargetSource());
             }
 
             bool exitedNaturally = bootstrap.WaitForExit(5000);
@@ -63,37 +63,45 @@ public sealed class ConcurrentPauseStopTest
         }
     }
 
-    /// <summary>The substrate-correctness assertion shared by both MTP + VSTest variants.
-    /// Arm exception filter (so Exception stops auto-resume); allow target to make progress
-    /// in the throw/catch loop; PauseRequest; assert a Pause stop arrives despite the
-    /// STOPPING flood. Consumes any initial Break stop transparently — substrate-correctness
-    /// hypothesis is about Pause-stop-surfacing-under-STOPPING-flood, not the initial
-    /// stop type (which differs between MTP --debug and VSTest VSTEST_HOST_DEBUG).</summary>
-    private static void AssertPauseStopSurfacesUnderStoppingFlood(DebugSession session)
+    /// <summary>The substrate-correctness assertion shared by both MTP + VSTest variants: a Pause stop surfaces
+    /// while the target's throw/catch loop floods the pump with STOPPING (Exception) callbacks.
+    ///
+    /// The flood must actually be running when Pause is requested, so sync on the target, never on the clock
+    /// (finding 94). This used to settle 100 ms after the attach and Pause: an attach that landed early (the
+    /// VSTest PID is printed before the testhost is up, finding 91) paused the testhost before the loop, so the
+    /// assertion passed without a flood, and Dispose then SIGTERMed the testhost mid-handshake, leaving
+    /// vstest.console waiting out its connection timeout (the bootstrap missed its 10 s exit, ~1 in 20 runs on
+    /// omega-ubuntu and under host load on omega). Now: Pause for a stop however early the attach landed, arm a
+    /// breakpoint on the loop's throw (FLOOD_RUNNING_HERE), run to it, then Pause mid-flood.</summary>
+    private static void AssertPauseStopSurfacesUnderStoppingFlood(DebugSession session, string targetSource)
     {
         // Arm no-match exception filter — substrate's WaitForStop auto-resumes Exception
         // stops via the filter loop. Pause and Break stops surface unaltered.
         session.ArmExceptionFilter("NoSuchTypeWillMatch");
 
-        // Brief settle — target makes progress (Break stop fires if runner uses
-        // Debugger.Break(); Exception stops from throw/catch fire and auto-resume).
-        Thread.Sleep(100);
+        int markerLine = Array.FindIndex(File.ReadAllLines(targetSource), l => l.Contains("FLOOD_RUNNING_HERE", StringComparison.Ordinal)) + 1;
+        Assert.IsTrue(markerLine > 0, $"FLOOD_RUNNING_HERE marker not found in {targetSource}.");
 
-        // Issue PauseRequest while target is mid-flood.
         session.Pause();
-
-        // Drain pending stops until Pause arrives. With filter armed, Exception stops
-        // auto-resume — only Break and Pause surface. Break may queue ahead of Pause
-        // (substrate FIFO order); consume it via Resume.
         StopInfo? stop = session.WaitForStop(TimeSpan.FromSeconds(5));
-        Assert.IsNotNull(stop, "No stop arrived within 5s after Pause request — substrate FIFO serialization may have dropped the request.");
-        if (stop!.Reason == StopReason.Break)
+        Assert.IsNotNull(stop, "No stop within 5s of the first Pause.");
+        int breakpointId = session.SetBreakpointAtLine(Path.GetFileName(targetSource), markerLine);
+        Assert.AreNotEqual(0, breakpointId, $"Failed to set a breakpoint at {Path.GetFileName(targetSource)}:{markerLine}.");
+        do
         {
-            // MTP --debug startup Break stop — consume and await Pause.
             session.Resume();
-            stop = session.WaitForStop(TimeSpan.FromSeconds(5));
-            Assert.IsNotNull(stop, "Pause stop did not arrive within 5s after consuming Break.");
+            stop = session.WaitForStop(TimeSpan.FromSeconds(30));
+            Assert.IsNotNull(stop, "The throw/catch loop's breakpoint was not hit within 30s.");
         }
+        while (stop!.Reason is StopReason.Break or StopReason.Pause);
+        Assert.AreEqual(StopReason.Breakpoint, stop.Reason);
+        Assert.IsTrue(session.RemoveBreakpoint(breakpointId), "Could not remove the throw/catch loop's breakpoint.");
+
+        // Resume into the flood (~50 throws over ~500 ms) and request a Pause while it runs.
+        session.Resume();
+        session.Pause();
+        stop = session.WaitForStop(TimeSpan.FromSeconds(5));
+        Assert.IsNotNull(stop, "No stop arrived within 5s after Pause request — substrate FIFO serialization may have dropped the request.");
         Assert.AreEqual(StopReason.Pause, stop!.Reason,
             $"Expected Pause stop; got {stop.Reason}. Substrate didn't serialize Pause correctly amid STOPPING flood.");
 
@@ -115,15 +123,11 @@ public sealed class ConcurrentPauseStopTest
 
             using (DebugSession session = DebugSession.AttachAndOwn(testHostPid, new NullSink()))
             {
-                AssertPauseStopSurfacesUnderStoppingFlood(session);
+                AssertPauseStopSurfacesUnderStoppingFlood(session, IntegrationTargetPaths.VstestTargetSource());
             }
 
-            // 10s budget matching other VSTest tests. Earlier iterations of this test
-            // needed 30s because the original WaitForStop pattern (expecting Break first)
-            // failed assertion in VSTest variant — substrate's Dispose then got tangled in
-            // vstest tree teardown. After refactoring to arm filter first + drain
-            // transparently (AssertPauseStopSurfacesUnderStoppingFlood), success path runs
-            // in <1s; 10s is comfortable.
+            // 10s budget matching other VSTest tests: the [Fact] is past the handshake (its loop's breakpoint
+            // was hit), so the bootstrap's exit does not wait on vstest.console's connection timeout.
             bool exitedNaturally = dotnetTest.WaitForExit(10000);
             Assert.IsTrue(exitedNaturally,
                 "VSTest dotnet-test bootstrap did not exit naturally within 10s.");

@@ -69,7 +69,9 @@ public sealed class IdleFact
     {
         for (int i = 0; i < 50; i++)
         {
-            try { throw new InvalidOperationException("drhook-integration-stopping"); }
+            // ConcurrentPauseStopTest runs to a breakpoint on the FLOOD_RUNNING_HERE marker before it Pauses: the
+            // hit proves the flood is running (and, under VSTest, that the handshake is over; finding 94).
+            try { throw new InvalidOperationException("drhook-integration-stopping"); } // FLOOD_RUNNING_HERE
             catch { /* first-chance Exception callback */ }
             Thread.Sleep(10);
         }
