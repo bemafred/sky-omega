@@ -25,10 +25,7 @@ internal ref partial struct QueryResults
     private Binding[]? _bindings;
     private char[]? _stringBuffer;
     private BindingTable _bindingTable;
-    private readonly bool _hasFilters;
-    private readonly bool _hasOptional;
     private bool _isEmpty;
-    private FilterEvaluator _filterEvaluator;
 
     // LIMIT/OFFSET support
     private readonly LimitOffsetClause _limitOffset;
@@ -52,29 +49,15 @@ internal ref partial struct QueryResults
     private int _materializedIndex;
 
 
-    // MINUS support
-    private readonly bool _hasMinus;
 
-    // VALUES support (inline VALUES in pattern slots)
-    private readonly bool _hasValues;
 
-    // Post-query VALUES support (VALUES clause after WHERE clause)
-    private readonly bool _hasPostQueryValues;
     // For join semantics: track iteration through VALUES rows for current base solution
-    private int _valuesJoinRowIndex;
 
-    // EXISTS/NOT EXISTS support
-    private readonly bool _hasExists;
 
     // Debug properties
-    internal bool HasExists => _hasExists;
     internal bool HasOrderBy => _hasOrderBy;
 
     // Expanded term storage for prefix resolution in EXISTS/MINUS evaluation
-    private string? _expandedSubject;
-    private string? _expandedPredicate;
-    private string? _expandedObject;
-    private string? _literalScratch; // ADR-044: scratch owner for canonicalized literals
 
     // Graph context for EXISTS/MINUS evaluation inside GRAPH clauses
     private string? _graphContext;
@@ -184,8 +167,6 @@ internal ref partial struct QueryResults
         _bindings = bindings;
         _stringBuffer = stringBuffer;
         _bindingTable = new BindingTable(bindings, stringBuffer);
-        _hasFilters = false; // Filters already applied during materialization
-        _hasOptional = false;
         _isEmpty = rows.Count == 0;
         _limitOffset = limitOffset;
         _skipped = 0;
@@ -198,12 +179,8 @@ internal ref partial struct QueryResults
         _sortedIndex = -1;
         _isMaterialized = true;  // Enable iteration from pre-materialized list
         _materializedIndex = -1;
-        _hasMinus = false;
-        _hasValues = false;
         // A trailing (post-query) VALUES is JOINED into the rows during materialization (ExecuteGraphViaTree →
         // JoinPostQueryValues), not filtered here — so the presentation does not re-apply it.
-        _hasPostQueryValues = false;
-        _hasExists = false;
         _groupBy = groupBy;
         _selectClause = selectClause;
         // Enable grouping for explicit GROUP BY OR implicit aggregation (aggregates without GROUP BY)
@@ -231,8 +208,6 @@ internal ref partial struct QueryResults
         _bindings = bindings;
         _stringBuffer = stringBuffer;
         _bindingTable = new BindingTable(bindings, stringBuffer);
-        _hasFilters = false;
-        _hasOptional = false;
         _isEmpty = groups.Count == 0;
         _limitOffset = limitOffset;
         _skipped = 0;
@@ -245,10 +220,6 @@ internal ref partial struct QueryResults
         _sortedIndex = -1;
         _isMaterialized = true;
         _materializedIndex = -1;
-        _hasMinus = false;
-        _hasValues = false;
-        _hasPostQueryValues = false;
-        _hasExists = false;
         _groupBy = default;
         _selectClause = selectClause;
         _hasGroupBy = true;        // present via MoveNextGrouped
@@ -272,8 +243,6 @@ internal ref partial struct QueryResults
         _bindings = bindings;
         _stringBuffer = stringBuffer;
         _bindingTable = new BindingTable(bindings, stringBuffer);
-        _hasFilters = false;
-        _hasOptional = false;
         _isEmpty = rows.Count == 0;
         _limitOffset = limitOffset;
         _skipped = 0;
@@ -284,10 +253,6 @@ internal ref partial struct QueryResults
         _hasOrderBy = true; // Use MoveNextOrdered() to iterate pre-collected results
         _sortedResults = rows;
         _sortedIndex = -1;
-        _hasMinus = false;
-        _hasValues = false;
-        _hasPostQueryValues = false;
-        _hasExists = false;
         _groupBy = default;
         _selectClause = default;
         _hasGroupBy = false;
@@ -310,8 +275,6 @@ internal ref partial struct QueryResults
         _bindings = bindings;
         _stringBuffer = stringBuffer;
         _bindingTable = new BindingTable(bindings, stringBuffer);
-        _hasFilters = false;
-        _hasOptional = false;
         _isEmpty = rows.Count == 0;
         _limitOffset = limitOffset;
         _skipped = 0;
@@ -322,10 +285,6 @@ internal ref partial struct QueryResults
         _hasOrderBy = true;
         _sortedResults = rows;
         _sortedIndex = -1;
-        _hasMinus = false;
-        _hasValues = false;
-        _hasPostQueryValues = false;
-        _hasExists = false;
         _groupBy = default;
         _selectClause = default;
         _hasGroupBy = false;
@@ -375,95 +334,6 @@ internal ref partial struct QueryResults
         // ADR-047 d2: the streaming scan path is gone — every materialized ctor sets _hasOrderBy / _hasGroupBy /
         // so one of the branches above always handles the row presentation. This fallthrough is
         // unreachable; returning false is the safe terminal.
-        return false;
-    }
-
-    /// <summary>
-    /// Try to find the next matching VALUES row for the current base solution.
-    /// Returns true if a matching row was found, false if no more rows match.
-    /// In SPARQL semantics, VALUES is a join, not a filter:
-    /// - If a variable is bound and matches the VALUES value → match
-    /// - If a variable is unbound and VALUES value is not UNDEF → introduce binding and match
-    /// - If a variable is bound but doesn't match → no match
-    /// </summary>
-    private bool TryNextValuesJoinRow()
-    {
-        if (_buffer == null || !_buffer.HasPostQueryValues) return false;
-
-        var postValues = _buffer.PostQueryValues;
-        if (!postValues.HasValues) return false;
-
-        int varCount = postValues.VariableCount;
-        if (varCount == 0) return false;
-
-        int rowCount = postValues.RowCount;
-
-        // Allocate once outside loop to avoid CA2014 warning (stackalloc in loop)
-        // Track which variable indices need bindings introduced (unbound in solution, non-UNDEF in VALUES)
-        Span<int> unboundVarIndices = stackalloc int[varCount];
-
-        // Continue from where we left off
-        while (_valuesJoinRowIndex < rowCount)
-        {
-            int row = _valuesJoinRowIndex++;
-
-            bool rowMatches = true;
-            int unboundCount = 0;
-
-            for (int varIdx = 0; varIdx < varCount; varIdx++)
-            {
-                var (varStart, varLength) = postValues.GetVariable(varIdx);
-                var varName = _source.Slice(varStart, varLength);
-
-                var (valStart, valLength) = postValues.GetValueAt(row, varIdx);
-
-                // UNDEF matches anything (including unbound)
-                if (valLength == -1)
-                    continue;
-
-                // Find binding for this variable
-                var bindingIdx = _bindingTable.FindBinding(varName);
-                if (bindingIdx < 0)
-                {
-                    // Variable not bound - VALUES can introduce a binding (join semantics)
-                    // Record the index so we can add bindings later
-                    unboundVarIndices[unboundCount++] = varIdx;
-                    continue;
-                }
-
-                var valuesValue = _source.Slice(valStart, valLength);
-                var expandedValue = ExpandPrefixedName(valuesValue);
-                var boundValue = _bindingTable.GetString(bindingIdx);
-
-                // Handle string literal comparison
-                if (!CompareValuesMatch(boundValue, expandedValue))
-                {
-                    rowMatches = false;
-                    break;
-                }
-            }
-
-            if (rowMatches)
-            {
-                // Introduce bindings for unbound variables
-                for (int i = 0; i < unboundCount; i++)
-                {
-                    var varIdx = unboundVarIndices[i];
-                    var (varStart, varLength) = postValues.GetVariable(varIdx);
-                    var varName = _source.Slice(varStart, varLength);
-                    var (valStart, valLength) = postValues.GetValueAt(row, varIdx);
-                    var valuesValue = _source.Slice(valStart, valLength);
-                    var expandedValue = ExpandPrefixedName(valuesValue);
-
-                    // Use generic Bind - the value is already in the correct format
-                    // (URIs have angle brackets, literals have quotes)
-                    _bindingTable.Bind(varName, expandedValue);
-                }
-                return true;
-            }
-        }
-
-        // No more matching rows
         return false;
     }
 

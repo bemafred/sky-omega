@@ -56,27 +56,6 @@ internal ref partial struct QueryResults
                 EvaluateSelectExpressions();
             }
 
-            // Apply regular FILTER clauses (for pre-materialized results from GRAPH clauses)
-            if (_hasFilters)
-            {
-                if (!EvaluateFilters())
-                    continue; // FILTER condition failed
-            }
-
-            // Apply EXISTS/NOT EXISTS filters (for pre-materialized results from GRAPH clauses)
-            if (_hasExists)
-            {
-                if (!EvaluateExistsFilters())
-                    continue; // EXISTS condition failed
-            }
-
-            // Apply MINUS - exclude matching rows
-            if (_hasMinus)
-            {
-                if (MatchesMinusPattern())
-                    continue; // Matches MINUS, skip this row
-            }
-
             if (!KeepAfterDistinctAndOffset())
                 continue;
             return true;
@@ -138,28 +117,6 @@ internal ref partial struct QueryResults
     }
 
     /// <summary>
-    /// Compare two rows according to ORDER BY conditions.
-    /// </summary>
-    private static int CompareRowsStatic(MaterializedRow a, MaterializedRow b, OrderByClause orderBy, string source)
-    {
-        for (int i = 0; i < orderBy.Count; i++)
-        {
-            var cond = orderBy.GetCondition(i);
-            var varName = source.AsSpan(cond.VariableStart, cond.VariableLength);
-
-            var aValue = a.GetValueByName(varName);
-            var bValue = b.GetValueByName(varName);
-
-            int cmp = CompareValues(aValue, bValue);
-            if (cmp != 0)
-            {
-                return cond.Direction == OrderDirection.Descending ? -cmp : cmp;
-            }
-        }
-        return 0;
-    }
-
-    /// <summary>
     /// Compare two values, handling numeric comparison when possible.
     /// </summary>
     private static int CompareValues(ReadOnlySpan<char> a, ReadOnlySpan<char> b)
@@ -204,40 +161,10 @@ internal ref partial struct QueryResults
                 _bindingTable.BindWithHash(row.GetHash(i), row.GetValue(i));
             }
 
-            if (_hasOptional)
-            {
-                TryMatchOptionalPatterns();
-            }
-
             // Increment bnode row seed for this new row so BNODE(str) yields a fresh blank node per row.
             FilterEvaluator.IncrementBnodeRowSeed();
 
-
             EvaluateSelectExpressions();
-
-            if (_hasFilters && !EvaluateFilters())
-                continue;
-
-            if (_hasExists && !EvaluateExistsFilters())
-                continue;
-
-            if (_hasMinus)
-            {
-                if (MatchesMinusPattern())
-                    continue;
-            }
-
-            if (_hasValues)
-            {
-                if (!MatchesValuesConstraint())
-                    continue;
-            }
-
-            if (_hasPostQueryValues)
-            {
-                if (!MatchesPostQueryValuesConstraint())
-                    continue;
-            }
 
             return true;
         }
