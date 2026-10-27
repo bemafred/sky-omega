@@ -1409,10 +1409,13 @@ internal ref partial struct SparqlParser
         }
 
         SkipWhitespace();
-        int groupStart = Peek() == '{' ? _position : -1;
-        var pattern = ParseGroupGraphPattern();
+        if (Peek() != '{')
+            throw new SparqlParseException($"Expected '{{' to open the WHERE group (position {_position})");
 
-        return new WhereClause { Pattern = pattern, GroupStart = groupStart };
+        // [53] GroupGraphPattern, parsed once, into the pattern tree execution evaluates from here (ADR-055 D1)
+        int groupStart = _position;
+        ParseWhereGroup(groupStart);
+        return new WhereClause { GroupStart = groupStart };
     }
 
     /// <summary>

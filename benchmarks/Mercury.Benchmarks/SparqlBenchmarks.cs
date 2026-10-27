@@ -55,7 +55,7 @@ public class SparqlParserBenchmarks
     {
         var parser = new SparqlParser(_simpleQuery.AsSpan());
         var query = parser.ParseQuery();
-        return query.WhereClause.Pattern.PatternCount;
+        return query.WhereClause.GroupStart;
     }
 
     [Benchmark(Description = "Parse 3-pattern query")]
@@ -63,7 +63,7 @@ public class SparqlParserBenchmarks
     {
         var parser = new SparqlParser(_threePatternQuery.AsSpan());
         var query = parser.ParseQuery();
-        return query.WhereClause.Pattern.PatternCount;
+        return query.WhereClause.GroupStart;
     }
 
     [Benchmark(Description = "Parse complex query (10 patterns + modifiers)")]
@@ -71,7 +71,7 @@ public class SparqlParserBenchmarks
     {
         var parser = new SparqlParser(_complexQuery.AsSpan());
         var query = parser.ParseQuery();
-        return query.WhereClause.Pattern.PatternCount;
+        return query.WhereClause.GroupStart;
     }
 
     [Benchmark(Description = "Parse property path query")]
@@ -79,7 +79,7 @@ public class SparqlParserBenchmarks
     {
         var parser = new SparqlParser(_propertyPathQuery.AsSpan());
         var query = parser.ParseQuery();
-        return query.WhereClause.Pattern.PatternCount;
+        return query.WhereClause.GroupStart;
     }
 }
 

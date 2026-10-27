@@ -121,6 +121,7 @@ internal ref partial struct SparqlParser
     /// </summary>
     private void ParseGroupBodyTree(scoped ref PatternArray pa, int depth)
     {
+        int groupFirstSlot = pa.Count; // this group's children (and their subtrees) are appended from here
         while (true)
         {
             SkipWhitespace();
@@ -165,7 +166,7 @@ internal ref partial struct SparqlParser
 
             if (KeywordIs(span, "BIND"))
             {
-                EmitBindTree(ref pa, depth);
+                EmitBindTree(ref pa, depth, groupFirstSlot);
                 continue;
             }
 
@@ -290,9 +291,19 @@ internal ref partial struct SparqlParser
         SkipWhitespace();
         if (Peek() != '{')
             throw new SparqlParseException($"Expected '{{' after {keyword.ToString()}");
-        Advance(); // consume '{'
 
         int header = pa.BeginGroupHeader(headerKind);
+        int open = _position;
+        Advance(); // consume '{'
+        SkipWhitespace();
+        if (KeywordIs(PeekSpan(6), "SELECT"))
+        {
+            // [53] GroupGraphPattern ::= '{' SubSelect '}': the block is a sub-SELECT, its header's one child
+            _position = open;
+            ParseGroupTree(ref pa, depth + 1);
+            pa.EndGroupHeader(header);
+            return;
+        }
         ParseGroupBodyTree(ref pa, depth + 1);
         pa.EndGroupHeader(header);
 
@@ -319,6 +330,12 @@ internal ref partial struct SparqlParser
             return false;
 
         SkipWhitespace();
+        // [75] TriplesSameSubject ::= TriplesNode PropertyList: a blank-node property list or collection may stand alone
+        if ((Peek() == '.' || Peek() == '}') && (IsBlankNodePropertyList(subject) || IsCollection(subject)))
+        {
+            EmitStandaloneTriplesNode(ref pa, subject);
+            return true;
+        }
         int pathStart = _position;
         var (predicate, path) = ParsePredicateOrPath();
         int pathLength = _position - pathStart;
@@ -516,7 +533,7 @@ internal ref partial struct SparqlParser
     /// paren-depth 0) and the target variable span, emitting a Bind leaf at the current depth. The tree executor
     /// evaluates children in document order, so a BIND's position is structural — no per-slot evaluation index.
     /// </summary>
-    private void EmitBindTree(scoped ref PatternArray pa, int depth)
+    private void EmitBindTree(scoped ref PatternArray pa, int depth, int groupFirstSlot)
     {
         ConsumeKeyword("BIND");
         SkipWhitespace();
@@ -577,6 +594,7 @@ internal ref partial struct SparqlParser
         if (Peek() == ')')
             Advance(); // consume ')'
 
+        ThrowIfInScope(ref pa, groupFirstSlot, varStart, varLength);
         pa.AddBind(exprStart, exprLength, varStart, varLength, scopeDepth: depth);
     }
 
@@ -610,6 +628,67 @@ internal ref partial struct SparqlParser
     {
         var dataBlock = new GraphPattern();
         ParseValues(ref dataBlock);
+    }
+
+    /// <summary>
+    /// [60] Bind: the variable a BIND assigns must not be in scope already (SPARQL 1.1 §18.2.1; syntax-BINDscope6-8).
+    /// In scope are the variables of the group's earlier triples at any depth (so a nested group or UNION branch
+    /// binds them), earlier BINDs and GRAPH variables; MINUS and [NOT] EXISTS bodies bind nothing outside themselves.
+    /// </summary>
+    private void ThrowIfInScope(scoped ref PatternArray pa, int groupFirstSlot, int varStart, int varLength)
+    {
+        var name = _source.Slice(varStart + 1, varLength - 1); // without the sigil: ?x and $x are one variable
+        for (int i = groupFirstSlot; i < pa.Count; i++)
+        {
+            var slot = pa[i];
+            switch (slot.Kind)
+            {
+                case PatternKind.Triple:
+                    if (SameVariable(slot.SubjectType, slot.SubjectStart, slot.SubjectLength, name) ||
+                        SameVariable(slot.PredicateType, slot.PredicateStart, slot.PredicateLength, name) ||
+                        SameVariable(slot.ObjectType, slot.ObjectStart, slot.ObjectLength, name))
+                        throw new SparqlParseException($"BIND target variable {_source.Slice(varStart, varLength).ToString()} is already in scope - cannot rebind");
+                    break;
+                case PatternKind.Bind:
+                    if (SameVariable(TermType.Variable, slot.BindVarStart, slot.BindVarLength, name))
+                        throw new SparqlParseException($"BIND target variable {_source.Slice(varStart, varLength).ToString()} is already in scope - cannot rebind");
+                    break;
+                case PatternKind.GraphHeader:
+                    if (SameVariable(slot.GraphTermType, slot.GraphTermStart, slot.GraphTermLength, name))
+                        throw new SparqlParseException($"BIND target variable {_source.Slice(varStart, varLength).ToString()} is already in scope - cannot rebind");
+                    break;
+                case PatternKind.MinusHeader:
+                    i = slot.ChildStartIndex + slot.ChildCount - 1;
+                    break;
+                case PatternKind.ExistsHeader:
+                case PatternKind.NotExistsHeader:
+                    i = slot.ExistsChildStart + slot.ExistsChildCount - 1;
+                    break;
+            }
+        }
+    }
+
+    private bool SameVariable(TermType type, int start, int length, ReadOnlySpan<char> nameWithoutSigil)
+        => type == TermType.Variable && start >= 0 && length > 1 && _source.Slice(start + 1, length - 1).SequenceEqual(nameWithoutSigil);
+
+    /// <summary>A blank-node property list or collection standing alone as a triple pattern: its triples only.</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void EmitStandaloneTriplesNode(scoped ref PatternArray pa, Term node)
+    {
+        var expanded = new GraphPattern();
+        if (IsBlankNodePropertyList(node))
+            ExpandBlankNodePropertyList(ref expanded, node);
+        else
+            ExpandCollection(ref expanded, node);
+        for (int i = 0; i < expanded.PatternCount; i++)
+        {
+            var tp = expanded.GetPattern(i);
+            pa.AddTriple(
+                tp.Subject.Type, tp.Subject.Start, tp.Subject.Length,
+                tp.Predicate.Type, tp.Predicate.Start, tp.Predicate.Length,
+                tp.Object.Type, tp.Object.Start, tp.Object.Length,
+                tp.Path.Type, tp.Path.Iri.Start, tp.Path.Iri.Length);
+        }
     }
 
     /// <summary>
