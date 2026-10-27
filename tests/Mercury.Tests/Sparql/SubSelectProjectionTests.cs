@@ -87,4 +87,48 @@ public class SubSelectProjectionTests : PooledStoreTestBase
         var row = Assert.Single(result.Rows!);
         Assert.Contains(expected.Trim('"'), row.Values.First());
     }
+
+    [Fact]
+    public void SubSelectStar_BraceInAStringInItsWhere_ProjectsEveryVariable()
+    {
+        // SELECT * projects its WHERE's variables. The WHERE used to end at the first '}' a character scan found,
+        // the one inside the string, so ?z was not projected.
+        Store.AddCurrent("<http://ex/s>", "<http://ex/p>", "<http://ex/o>");
+        Store.AddCurrent("<http://ex/s>", "<http://ex/q>", "<http://ex/z>");
+
+        var result = SparqlEngine.Query(Store,
+            "SELECT ?z WHERE { { SELECT * WHERE { ?s <http://ex/p> ?o FILTER(STR(?o) != \"}\") ?s <http://ex/q> ?z } } }",
+            TestContext.Current.CancellationToken);
+
+        Assert.True(result.Success, result.ErrorMessage);
+        var row = Assert.Single(result.Rows!);
+        Assert.Equal("<http://ex/z>", row["z"]);
+    }
+
+    [Theory]
+    [InlineData("SELECT * WHERE { { SELECT ?o WHERE { ?s <http://ex/p> ?o } } BIND(1 AS ?o) }")]
+    [InlineData("SELECT * WHERE { { SELECT (COUNT(?o) AS ?n) WHERE { ?s <http://ex/p> ?o } } BIND(1 AS ?n) }")]
+    [InlineData("SELECT * WHERE { { SELECT * WHERE { ?s <http://ex/p> ?o } } BIND(1 AS ?o) }")]
+    public void Bind_ToAVariableAnEarlierSubSelectProjects_IsAnError(string query)
+    {
+        // SPARQL 1.1 §18.2.1: a BIND's variable must not be in scope already
+        var result = SparqlEngine.Query(Store, query, TestContext.Current.CancellationToken);
+
+        Assert.False(result.Success);
+    }
+
+    [Fact]
+    public void Bind_ToAVariableAnEarlierSubSelectDoesNotProject_IsAllowed()
+    {
+        // ?s is in the sub-SELECT's WHERE but not in its projection, so it is not in scope outside it
+        Store.AddCurrent("<http://ex/s>", "<http://ex/p>", "<http://ex/o>");
+
+        var result = SparqlEngine.Query(Store, "SELECT ?o ?s WHERE { { SELECT ?o WHERE { ?s <http://ex/p> ?o } } BIND(1 AS ?s) }",
+            TestContext.Current.CancellationToken);
+
+        Assert.True(result.Success, result.ErrorMessage);
+        var row = Assert.Single(result.Rows!);
+        Assert.Equal("<http://ex/o>", row["o"]);
+        Assert.Equal("1", row["s"]);
+    }
 }

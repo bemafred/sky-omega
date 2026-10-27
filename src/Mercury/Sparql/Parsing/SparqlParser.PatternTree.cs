@@ -26,7 +26,7 @@ namespace SkyOmega.Mercury.Sparql.Parsing;
 // HANDLED (the full common pattern grammar):
 //   GroupGraphPattern '{' … '}'        → GroupHeader        |  GRAPH (VarOrIri) '{' … '}'  → GraphHeader
 //   { … } UNION { … } …                → UnionHeader        |  OPTIONAL '{' … '}'           → OptionalHeader
-//   MINUS '{' … '}'                    → MinusHeader        |  { SELECT … }                 → SubSelectHeader
+//   MINUS '{' … '}'                    → MinusHeader        |  { SELECT … }                 → SubSelectHeader over its WHERE
 //   SERVICE [SILENT] ep '{' … '}'      → ServiceHeader      |  FILTER [NOT] EXISTS { … }    → (Not)ExistsHeader
 //   TriplesBlock (';' property-list shorthand; RDF-star quoted triples and blank-node property lists expand
 //     via AddTriplePatternOrExpand; ALL property-path forms ^ / | * + ? ( ) ! carried as the full path span)
@@ -62,23 +62,9 @@ internal ref partial struct SparqlParser
     }
 
     /// <summary>
-    /// ADR-047: parse a sub-SELECT's clauses (SelectClause / WhereClause / SolutionModifier) at <paramref name="position"/>
-    /// over THIS parser's source — the FULL query — so the resulting clause offsets (projected variables, aggregate
-    /// aliases, ORDER BY keys) index the same source the executor evaluates the body against. One source/offset regime
-    /// for the whole sub-SELECT: the body's prefixed names expand against the same prologue the outer query uses, with
-    /// no substring re-base (the substring/separate-source split sliced the body's source with prologue-relative prefix
-    /// offsets — ArgumentOutOfRange on any prefixed inner term).
-    /// </summary>
-    internal SubSelect ParseSubSelectCoreAt(int position)
-    {
-        _position = position;
-        return ParseSubSelectCore();
-    }
-
-    /// <summary>
     /// [53] GroupGraphPattern ::= '{' ( SubSelect | GroupGraphPatternSub ) '}'
-    /// A <c>{ SELECT … }</c> body is a sub-SELECT, captured as a SubSelectHeader leaf carrying its source span
-    /// (re-parsed and evaluated as a nested query). Otherwise emits a GroupHeader over the body. Returns the index.
+    /// A <c>{ SELECT … }</c> body is a sub-SELECT, a SubSelectHeader whose child is its WHERE group (ADR-055 D4).
+    /// Otherwise emits a GroupHeader over the body. Returns the index.
     /// </summary>
     private int ParseGroupTree(scoped ref PatternArray pa, int depth)
     {
@@ -94,13 +80,9 @@ internal ref partial struct SparqlParser
         int header;
         if (KeywordIs(PeekSpan(6), "SELECT"))
         {
-            // SubSelect: parse it with the shipping sub-SELECT parser purely to advance past it, and carry the
-            // source span on the slot — the evaluator re-parses it (for the solution modifiers) and walks its
-            // WHERE through the uniform path with the active graph threaded in.
-            int subStart = _position;
-            ParseSubSelectCore();
-            int subLength = _position - subStart;
-            header = pa.AddSubSelectHeader(subStart, subLength);
+            // SubSelect: its WHERE is a child subtree, evaluated with the active graph threaded in
+            header = pa.Count;
+            ParseSubSelectTree(ref pa, depth);
         }
         else
         {
@@ -264,9 +246,7 @@ internal ref partial struct SparqlParser
             // sub-SELECT span as a SubSelectHeader child of the GraphHeader; the evaluator threads the active graph into
             // it, so an aggregating sub-SELECT is computed PER graph (one row per named graph, count 0 for empty ones).
             // (The double-braced form GRAPH g { { SELECT … } } already reaches this via ParseGroupOrUnionTree below.)
-            int subStart = _position;
-            ParseSubSelectCore();
-            pa.AddSubSelectHeader(subStart, _position - subStart);
+            ParseSubSelectTree(ref pa, depth + 1);
         }
         else
         {
@@ -633,8 +613,10 @@ internal ref partial struct SparqlParser
     /// <summary>
     /// [60] Bind: the variable a BIND assigns must not be in scope already (SPARQL 1.1 §18.2.1; syntax-BINDscope6-8).
     /// In scope are the variables of the group's earlier triples at any depth (so a nested group or UNION branch
-    /// binds them), earlier BINDs and GRAPH variables; MINUS and [NOT] EXISTS bodies bind nothing outside themselves.
+    /// binds them), earlier BINDs and GRAPH variables, and what an earlier sub-SELECT projects (with <c>SELECT *</c>,
+    /// the variables of its WHERE); MINUS and [NOT] EXISTS bodies bind nothing outside themselves.
     /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)] // the sub-SELECT case reads its clauses; keep them out of the recursive parse
     private void ThrowIfInScope(scoped ref PatternArray pa, int groupFirstSlot, int varStart, int varLength)
     {
         var name = _source.Slice(varStart + 1, varLength - 1); // without the sigil: ?x and $x are one variable
@@ -664,6 +646,26 @@ internal ref partial struct SparqlParser
                 case PatternKind.NotExistsHeader:
                     i = slot.ExistsChildStart + slot.ExistsChildCount - 1;
                     break;
+                case PatternKind.SubSelectHeader:
+                {
+                    var select = new SparqlParser(_source).ParseSubSelectClausesAt(slot.GraphTermStart, slot.SubSelectModifiersStart).Select;
+                    if (select.SelectAll)
+                        break; // it projects its WHERE's variables: the scan goes on into its WHERE
+                    for (int v = 0; v < select.ProjectedVariableCount; v++)
+                    {
+                        var (start, length) = select.GetProjectedVariable(v);
+                        if (SameVariable(TermType.Variable, start, length, name))
+                            throw new SparqlParseException($"BIND target variable {_source.Slice(varStart, varLength).ToString()} is already in scope - cannot rebind");
+                    }
+                    for (int a = 0; a < select.AggregateCount; a++)
+                    {
+                        var alias = select.GetAggregate(a);
+                        if (SameVariable(TermType.Variable, alias.AliasStart, alias.AliasLength, name))
+                            throw new SparqlParseException($"BIND target variable {_source.Slice(varStart, varLength).ToString()} is already in scope - cannot rebind");
+                    }
+                    i = slot.ChildStartIndex + slot.ChildCount - 1; // its other variables are not in scope here
+                    break;
+                }
             }
         }
     }

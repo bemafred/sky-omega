@@ -43,7 +43,7 @@ internal enum PatternKind : byte
     UnionHeader = 11,    // children are the union branches (each a GroupHeader)
     OptionalHeader = 12, // child is one GroupHeader
     MinusHeader = 13,    // child is one GroupHeader (block form of MINUS)
-    SubSelectHeader = 14, // { SELECT … } — a leaf carrying the sub-SELECT source span (re-parsed on evaluation)
+    SubSelectHeader = 14, // { SELECT … } — child is its WHERE group; carries its source span and where its modifiers start
     ServiceHeader = 15,   // SERVICE [SILENT] ep { … } — a leaf carrying the SERVICE source span (re-parsed on evaluation)
 }
 
@@ -144,6 +144,9 @@ internal ref struct PatternSlot
     public ref int GraphTermLength => ref MemoryMarshal.AsRef<int>(_span.Slice(12, 4));
     public ref int ChildStartIndex => ref MemoryMarshal.AsRef<int>(_span.Slice(16, 4));
     public ref int ChildCount => ref MemoryMarshal.AsRef<int>(_span.Slice(20, 4));
+
+    /// <summary>SubSelectHeader only: source offset of the sub-SELECT's SolutionModifier, just past its WHERE group.</summary>
+    public ref int SubSelectModifiersStart => ref MemoryMarshal.AsRef<int>(_span.Slice(24, 4));
     
     // ───────────────────────────────────────────────────────────────────────
     // Variant: ExistsHeader / NotExistsHeader
@@ -191,13 +194,13 @@ internal ref struct PatternSlot
 
     /// <summary>
     /// True for headers that carry a child-range at the GraphHeader layout
-    /// (ChildStartIndex@16 / ChildCount@20): GraphHeader plus the ADR-045 nestable group headers.
-    /// (ExistsHeader uses a different offset and is excluded.)
+    /// (ChildStartIndex@16 / ChildCount@20): GraphHeader, the ADR-045 nestable group headers and SubSelectHeader.
+    /// (ExistsHeader uses a different offset and is excluded.) The one list every subtree walk reads.
     /// </summary>
     public readonly bool IsNestableGroup =>
         Kind == PatternKind.GraphHeader || Kind == PatternKind.GroupHeader ||
         Kind == PatternKind.UnionHeader || Kind == PatternKind.OptionalHeader ||
-        Kind == PatternKind.MinusHeader;
+        Kind == PatternKind.MinusHeader || Kind == PatternKind.SubSelectHeader;
 
     /// <summary>
     /// Clear slot for reuse
@@ -344,18 +347,29 @@ internal ref struct PatternArray
     }
     
     /// <summary>
-    /// Add a sub-SELECT leaf (ADR-045): <c>{ SELECT … }</c>. The full sub-SELECT source span is carried on the
-    /// slot (re-parsed on evaluation); it has no in-tree children. Returns the slot index. Reuses the GraphHeader
-    /// term-span fields (GraphTermStart@8 / GraphTermLength@12) to hold the span.
+    /// Begin a sub-SELECT (ADR-055 D4): <c>SELECT … WHERE { … } modifiers</c> starting at <paramref name="sourceStart"/>.
+    /// Its WHERE group follows as its one child, parsed once with every other group. Returns the header index.
     /// </summary>
-    public int AddSubSelectHeader(int sourceStart, int sourceLength)
+    public int BeginSubSelect(int sourceStart)
     {
         int headerIndex = _count;
         var slot = AllocateSlot();
         slot.Kind = PatternKind.SubSelectHeader;
         slot.GraphTermStart = sourceStart;
-        slot.GraphTermLength = sourceLength;
+        slot.ChildStartIndex = _count; // the WHERE group follows
+        slot.ChildCount = 0;
         return headerIndex;
+    }
+
+    /// <summary>
+    /// End a sub-SELECT: records its WHERE subtree, where its solution modifiers start, and its source end (exclusive).
+    /// </summary>
+    public void EndSubSelect(int headerIndex, int modifiersStart, int sourceEnd)
+    {
+        var header = this[headerIndex];
+        header.ChildCount = _count - header.ChildStartIndex;
+        header.SubSelectModifiersStart = modifiersStart;
+        header.GraphTermLength = sourceEnd - header.GraphTermStart;
     }
 
     /// <summary>
@@ -447,20 +461,10 @@ internal ref struct PatternArray
         for (int i = subtreeStart + 1; i < _count; i++)
         {
             var s = this[i];
-            switch (s.Kind)
-            {
-                case PatternKind.GraphHeader:
-                case PatternKind.GroupHeader:
-                case PatternKind.UnionHeader:
-                case PatternKind.OptionalHeader:
-                case PatternKind.MinusHeader:
-                    s.ChildStartIndex += 1;
-                    break;
-                case PatternKind.ExistsHeader:
-                case PatternKind.NotExistsHeader:
-                    s.ExistsChildStart += 1;
-                    break;
-            }
+            if (s.IsNestableGroup)
+                s.ChildStartIndex += 1;
+            else if (s.Kind is PatternKind.ExistsHeader or PatternKind.NotExistsHeader)
+                s.ExistsChildStart += 1;
         }
 
         // Write the wrapping header into the freed slot; EndGroupHeader recomputes ChildCount once branches close.
@@ -474,20 +478,16 @@ internal ref struct PatternArray
 
     /// <summary>
     /// Index one past the subtree rooted at <paramref name="index"/> (its next-sibling position).
-    /// Group-like headers (Graph/Group/Union/Optional/Minus) span their flattened child-range; EXISTS headers
+    /// Group-like headers (<see cref="PatternSlot.IsNestableGroup"/>) span their flattened child-range; EXISTS headers
     /// span theirs; a VALUES header spans its trailing entries; every other slot is a single-slot leaf.
     /// </summary>
     public static int SubtreeEnd(Span<byte> buffer, int index)
     {
         var slot = new PatternSlot(buffer.Slice(index * PatternSlot.Size, PatternSlot.Size));
+        if (slot.IsNestableGroup)
+            return slot.ChildStartIndex + slot.ChildCount;
         switch (slot.Kind)
         {
-            case PatternKind.GraphHeader:
-            case PatternKind.GroupHeader:
-            case PatternKind.UnionHeader:
-            case PatternKind.OptionalHeader:
-            case PatternKind.MinusHeader:
-                return slot.ChildStartIndex + slot.ChildCount;
             case PatternKind.ExistsHeader:
             case PatternKind.NotExistsHeader:
                 return slot.ExistsChildStart + slot.ExistsChildCount;
@@ -527,15 +527,11 @@ internal ref struct PatternArray
     public PatternArraySlice GetChildren(int headerIndex)
     {
         var header = this[headerIndex];
-        return header.Kind switch
-        {
-            PatternKind.GraphHeader or PatternKind.GroupHeader or PatternKind.UnionHeader
-                or PatternKind.OptionalHeader or PatternKind.MinusHeader =>
-                new PatternArraySlice(_buffer, header.ChildStartIndex, header.ChildCount),
-            PatternKind.ExistsHeader or PatternKind.NotExistsHeader => 
-                new PatternArraySlice(_buffer, header.ExistsChildStart, header.ExistsChildCount),
-            _ => default
-        };
+        if (header.IsNestableGroup)
+            return new PatternArraySlice(_buffer, header.ChildStartIndex, header.ChildCount);
+        return header.Kind is PatternKind.ExistsHeader or PatternKind.NotExistsHeader
+            ? new PatternArraySlice(_buffer, header.ExistsChildStart, header.ExistsChildCount)
+            : default;
     }
     
     /// <summary>

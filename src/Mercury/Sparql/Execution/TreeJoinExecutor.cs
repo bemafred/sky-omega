@@ -769,23 +769,13 @@ internal sealed class TreeJoinExecutor
     private List<MaterializedRow> SubSelectStep(ref PatternArray pa, int headerIndex, string activeGraph, List<MaterializedRow> input)
     {
         var slot = pa[headerIndex];
-        int subStart = slot.GraphTermStart; // absolute offset of the sub-SELECT in _source
 
-        // ADR-047 — evaluate the sub-SELECT in the ONE source/offset regime. Parse its clauses AND its body at absolute
-        // offsets over _source, the same string the prologue prefixes index, so a prefixed name in the body expands
-        // against the same source. (The old code sliced subSrc/innerWhere substrings and handed them to a second
-        // executor as its source, while the prefix mappings still indexed the outer prologue — so prefix expansion
-        // sliced the substring at a prologue offset and threw ArgumentOutOfRange on any prefixed inner term.)
-        var sub = new SparqlParser(_source.AsSpan()).ParseSubSelectCoreAt(subStart);
-
-        int whereBrace = sub.WhereGroupStart; // recorded by the sub-SELECT's parser
-        int whereClose = MatchBrace(_source, whereBrace);
-        var innerBuffer = new byte[PatternSlot.Size * 256];
-        var innerPa = new PatternArray(innerBuffer);
-        int innerRoot = new SparqlParser(_source.AsSpan()).ParsePatternTreeAt(whereBrace, ref innerPa);
+        // ADR-047 — one source/offset regime: the clauses are read at absolute offsets over _source, the string the
+        // prologue prefixes index. ADR-055 D4 — the WHERE is the header's child subtree, parsed once with the query.
+        var sub = new SparqlParser(_source.AsSpan()).ParseSubSelectClausesAt(slot.GraphTermStart, slot.SubSelectModifiersStart);
         var innerBag = new TreeJoinExecutor(_store, _source, _prefixes, _prefixSource, _serviceExecutor,
                 _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _namedGraphs, _defaultGraphs)
-            .Evaluate(ref innerPa, innerRoot, activeGraph);
+            .Evaluate(ref pa, slot.ChildStartIndex, activeGraph);
 
         // A trailing VALUES inside the sub-SELECT joins its WHERE solutions BEFORE the modifier layer (W3C inline02).
         // sub.Values offsets index _source (parsed at absolute offset above), so the shared join reuses _source.
@@ -801,7 +791,7 @@ internal sealed class TreeJoinExecutor
         var qr = QueryResults.FromMaterializedSimple(innerBag, _source.AsSpan(), _store, qrBindings, qrStringBuffer,
             sub.LimitOffset, sub.Select.Distinct || sub.Select.Reduced, sub.OrderBy, sub.GroupBy, selectClause, sub.Having, buffer: null, prefixes: _prefixes);
 
-        var outNames = OutputVarNames(sub, _source, whereBrace, whereClose);
+        var outNames = OutputVarNames(sub, _source, slot.GraphTermStart, slot.SubSelectModifiersStart);
         var projected = new List<MaterializedRow>();
         var bindingArray = ArrayPool<Binding>.Shared.Rent(64);
         var charArray = ArrayPool<char>.Shared.Rent(1 << 13);
@@ -828,15 +818,15 @@ internal sealed class TreeJoinExecutor
         return Join(input, projected);
     }
 
-    private static List<string> OutputVarNames(SubSelect sub, string source, int whereBrace, int whereClose)
+    private static List<string> OutputVarNames(SubSelect sub, string source, int selectStart, int modifiersStart)
     {
         var names = new List<string>();
         var seen = new HashSet<string>();
         if (sub.Select.SelectAll)
         {
-            // SELECT * — the output variables are the body's variables, in first-seen order, scanned over the body's
-            // span (whereBrace..whereClose) in the one source.
-            for (int i = whereBrace; i <= whereClose && i < source.Length; i++)
+            // SELECT * — the output variables are the body's variables, in first-seen order, scanned over the source
+            // before the modifiers ("SELECT *" itself names none). ADR-055 D7 replaces the scan with the in-scope set.
+            for (int i = selectStart; i < modifiersStart && i < source.Length; i++)
             {
                 if (source[i] != '?') continue;
                 int j = i + 1;

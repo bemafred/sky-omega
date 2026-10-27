@@ -564,7 +564,7 @@ internal sealed class SparqlExplainer
                 return new ExplainNode { OperatorType = ExplainOperatorType.Service, Description = (brace > 0 ? span[..brace] : span).Trim().ToString() };
             }
             case PatternKind.SubSelectHeader:
-                return SubSelectNode(slot.GraphTermStart);
+                return SubSelectNode(ref tree, index);
             default:
                 return new ExplainNode { OperatorType = ExplainOperatorType.Query, Description = slot.Kind.ToString() };
         }
@@ -635,10 +635,11 @@ internal sealed class SparqlExplainer
         return node;
     }
 
-    /// <summary>A sub-SELECT's own plan: its modifiers above its WHERE.</summary>
-    private ExplainNode SubSelectNode(int subSelectStart)
+    /// <summary>A sub-SELECT's own plan: its modifiers above its WHERE, the header's child subtree.</summary>
+    private ExplainNode SubSelectNode(ref PatternArray tree, int index)
     {
-        var sub = new SparqlParser(_source.AsSpan()).ParseSubSelectCoreAt(subSelectStart);
+        var slot = tree[index];
+        var sub = new SparqlParser(_source.AsSpan()).ParseSubSelectClausesAt(slot.GraphTermStart, slot.SubSelectModifiersStart);
         var node = new ExplainNode
         {
             OperatorType = ExplainOperatorType.SubQuery,
@@ -669,8 +670,7 @@ internal sealed class SparqlExplainer
             current.Children.Add(group);
             current = group;
         }
-        if (sub.WhereGroupStart >= 0)
-            AddWhere(current, sub.WhereGroupStart);
+        current.Children.Add(NodeFor(ref tree, slot.ChildStartIndex));
         return node;
     }
 

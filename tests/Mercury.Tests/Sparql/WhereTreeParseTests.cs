@@ -222,7 +222,7 @@ public class WhereTreeParseTests
     [Theory]
     [InlineData("SELECT ?person WHERE { { SELECT ?person WHERE { ?person <http://xmlns.com/foaf/0.1/name> ?name } } }", 1, 0)]
     [InlineData("PREFIX : <http://ex/> SELECT ?g WHERE { { SELECT (GROUP_CONCAT(?o) AS ?g) WHERE { [] :p1 ?o } } }", 0, 1)]
-    public void SubSelect_IsALeafWhoseProjectionAndWhereReparse(string query, int projected, int expressions)
+    public void SubSelect_OwnsItsWhereAsItsChild(string query, int projected, int expressions)
     {
         var parsed = new SparqlParser(query.AsSpan()).ParseQuery();
         var tree = new PatternArray(new byte[PatternSlot.Size * 64]);
@@ -230,16 +230,30 @@ public class WhereTreeParseTests
 
         var children = tree.EnumerateDirectChildren(root);
         Assert.True(children.MoveNext());
-        Assert.Equal(PatternKind.SubSelectHeader, children.Current.Kind);
-        var sub = new SparqlParser(query.AsSpan()).ParseSubSelectCoreAt(children.Current.GraphTermStart);
+        var header = children.Current;
+        int headerIndex = children.CurrentIndex;
+        Assert.Equal(PatternKind.SubSelectHeader, header.Kind);
+        Assert.False(children.MoveNext());
+        Assert.StartsWith("SELECT", query.Substring(header.GraphTermStart, header.GraphTermLength));
+        Assert.EndsWith("}", query.Substring(header.GraphTermStart, header.GraphTermLength).TrimEnd()); // the span ends past trailing whitespace
+
+        var where = tree.EnumerateDirectChildren(headerIndex);
+        Assert.True(where.MoveNext());
+        Assert.Equal(PatternKind.GroupHeader, where.Current.Kind);
+        int whereIndex = where.CurrentIndex;
+        Assert.False(where.MoveNext());
+        var triples = tree.EnumerateDirectChildren(whereIndex);
+        Assert.True(triples.MoveNext());
+        Assert.Equal(PatternKind.Triple, triples.Current.Kind);
+        Assert.False(triples.MoveNext());
+
+        var sub = new SparqlParser(query.AsSpan()).ParseSubSelectClausesAt(header.GraphTermStart, header.SubSelectModifiersStart);
         Assert.Equal(projected, sub.Select.ProjectedVariableCount);
         Assert.Equal(expressions, sub.Select.AggregateCount);
-        Assert.True(sub.WhereGroupStart > children.Current.GraphTermStart);
-        Assert.Equal('{', query[sub.WhereGroupStart]);
     }
 
     [Fact]
-    public void SubSelect_Nested_IsALeafInsideTheOuterSubSelectsWhere()
+    public void SubSelect_Nested_IsAChildOfTheOuterSubSelectsWhere()
     {
         const string query = "PREFIX ex: <http://ex/> SELECT * WHERE { { SELECT * WHERE { { SELECT ?x WHERE { ?x ex:p ?y } } } } }";
         var parsed = new SparqlParser(query.AsSpan()).ParseQuery();
@@ -248,18 +262,24 @@ public class WhereTreeParseTests
 
         var children = tree.EnumerateDirectChildren(root);
         Assert.True(children.MoveNext());
-        Assert.Equal(PatternKind.SubSelectHeader, children.Current.Kind);
-        var middle = new SparqlParser(query.AsSpan()).ParseSubSelectCoreAt(children.Current.GraphTermStart);
-        Assert.True(middle.Select.SelectAll);
+        var middle = children.Current;
+        Assert.Equal(PatternKind.SubSelectHeader, middle.Kind);
+        Assert.True(new SparqlParser(query.AsSpan()).ParseSubSelectClausesAt(middle.GraphTermStart, middle.SubSelectModifiersStart).Select.SelectAll);
 
-        var innerTree = new PatternArray(new byte[PatternSlot.Size * 64]);
-        int innerRoot = new SparqlParser(query.AsSpan()).ParsePatternTreeAt(middle.WhereGroupStart, ref innerTree);
-        var inner = innerTree.EnumerateDirectChildren(innerRoot);
-        Assert.True(inner.MoveNext());
-        Assert.Equal(PatternKind.SubSelectHeader, inner.Current.Kind);
-        var innermost = new SparqlParser(query.AsSpan()).ParseSubSelectCoreAt(inner.Current.GraphTermStart);
-        Assert.False(innermost.Select.SelectAll);
-        Assert.Equal(1, innermost.Select.ProjectedVariableCount);
+        // The middle sub-SELECT's WHERE is the group { { SELECT ?x … } }, whose one child is the innermost sub-SELECT
+        var middleWhere = tree.EnumerateDirectChildren(children.CurrentIndex);
+        Assert.True(middleWhere.MoveNext());
+        Assert.Equal(PatternKind.GroupHeader, middleWhere.Current.Kind);
+        var inMiddleWhere = tree.EnumerateDirectChildren(middleWhere.CurrentIndex);
+        Assert.True(inMiddleWhere.MoveNext());
+        Assert.Equal(PatternKind.SubSelectHeader, inMiddleWhere.Current.Kind);
+        var innermost = inMiddleWhere.Current;
+        var clauses = new SparqlParser(query.AsSpan()).ParseSubSelectClausesAt(innermost.GraphTermStart, innermost.SubSelectModifiersStart);
+        Assert.False(clauses.Select.SelectAll);
+        Assert.Equal(1, clauses.Select.ProjectedVariableCount);
+
+        // Every slot, the innermost triple included, is in the one tree
+        Assert.Equal(6, tree.Count); // root, middle header, its WHERE group, innermost header, its WHERE group, triple
     }
 
     [Theory]

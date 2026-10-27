@@ -1,4 +1,5 @@
 using System;
+using System.Runtime.CompilerServices;
 using SkyOmega.Mercury.Sparql.Types;
 using SkyOmega.Mercury.Sparql.Patterns;
 
@@ -212,12 +213,12 @@ internal ref partial struct SparqlParser
             var tree = new PatternArray(treeBuffer.AsSpan(0, treeBytes));
             int root = new SparqlParser(_source).ParsePatternTreeAt(whereGroupStart, ref tree);
             if (tree[root].Kind == PatternKind.SubSelectHeader)
-                ThrowOnSubSelectAliasConflict(tree[root].GraphTermStart, selectAliasHashes[..selectAliasCount]);
+                ThrowOnSubSelectAliasConflict(tree[root], selectAliasHashes[..selectAliasCount]);
             var e = tree.EnumerateDirectChildren(root);
             while (e.MoveNext())
             {
                 if (e.Current.Kind == PatternKind.SubSelectHeader)
-                    ThrowOnSubSelectAliasConflict(e.Current.GraphTermStart, selectAliasHashes[..selectAliasCount]);
+                    ThrowOnSubSelectAliasConflict(e.Current, selectAliasHashes[..selectAliasCount]);
             }
         }
         finally
@@ -227,10 +228,10 @@ internal ref partial struct SparqlParser
     }
 
     /// <summary>syntax-SELECTscope2: an outer SELECT alias must not reuse a variable the sub-SELECT at
-    /// <paramref name="subSelectStart"/> projects.</summary>
-    private void ThrowOnSubSelectAliasConflict(int subSelectStart, scoped ReadOnlySpan<int> aliasHashes)
+    /// <paramref name="subSelect"/> projects.</summary>
+    private void ThrowOnSubSelectAliasConflict(PatternSlot subSelect, scoped ReadOnlySpan<int> aliasHashes)
     {
-        var subquery = new SparqlParser(_source).ParseSubSelectCoreAt(subSelectStart);
+        var subquery = new SparqlParser(_source).ParseSubSelectClausesAt(subSelect.GraphTermStart, subSelect.SubSelectModifiersStart);
         int projected = subquery.Select.ProjectedVariableCount;
         for (int j = 0; j < projected + subquery.Select.AggregateCount; j++)
         {
@@ -1359,434 +1360,55 @@ internal ref partial struct SparqlParser
     }
 
     /// <summary>
-    /// [8] SubSelect ::= SelectClause WhereClause SolutionModifier ValuesClause
-    /// Parses a nested SELECT query inside { }.
+    /// [8] SubSelect ::= SelectClause WhereClause SolutionModifier ValuesClause, parsed into the pattern tree at the
+    /// cursor (ADR-055 D4): a SubSelectHeader whose one child is the WHERE group, parsed by the same group parser as
+    /// every other group. The header records where the solution modifiers start, so its clauses can be read again
+    /// without its WHERE (<see cref="ParseSubSelectClausesAt"/>).
     /// </summary>
-    private SubSelect ParseSubSelect()
+    private void ParseSubSelectTree(scoped ref PatternArray pa, int depth)
     {
-        IncrementDepth("Subquery");
-        try
-        {
-            return ParseSubSelectCore();
-        }
-        finally
-        {
-            DecrementDepth();
-        }
+        int header = pa.BeginSubSelect(_position);
+        ParseSubSelectHead();
+        ParseGroupTree(ref pa, depth + 1); // [17] WhereClause ::= 'WHERE'? GroupGraphPattern
+        SkipWhitespace();
+        int modifiersStart = _position;
+        ParseSubSelectTail();
+        pa.EndSubSelect(header, modifiersStart, _position);
     }
 
-    internal SubSelect ParseSubSelectCore()
+    /// <summary>[9] SelectClause and the optional WHERE keyword: moves the cursor to the WHERE group.</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)] // keeps the clause structs out of the recursive group parser's frame
+    private void ParseSubSelectHead()
     {
-        var subSelect = new SubSelect();
-
-        // [9] SelectClause, the one parse a query's projection uses too
-        subSelect.Select = ParseSelectClause();
-
+        ParseSelectClause();
         SkipWhitespace();
-
-        // Parse WHERE keyword (optional per SPARQL grammar)
-        var span = PeekSpan(5);
-        if (span.Length >= 5 && span[..5].Equals("WHERE", StringComparison.OrdinalIgnoreCase))
+        if (KeywordIs(PeekSpan(5), "WHERE"))
         {
             ConsumeKeyword("WHERE");
             SkipWhitespace();
         }
+    }
 
-        // Parse the nested { } block
-        subSelect.WhereGroupStart = Peek() == '{' ? _position : -1;
-        if (Peek() == '{')
-        {
-            Advance(); // Skip '{'
-            ParseSubSelectPatterns(ref subSelect);
-            SkipWhitespace();
-            if (Peek() == '}')
-                Advance(); // Skip '}'
-        }
+    /// <summary>SolutionModifier ValuesClause: moves the cursor past the sub-SELECT.</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void ParseSubSelectTail()
+    {
+        var modifiers = new SubSelect();
+        ParseSubSelectSolutionModifiers(ref modifiers);
+    }
 
-        SkipWhitespace();
-
-        // Parse solution modifiers (ORDER BY, LIMIT, OFFSET)
+    /// <summary>
+    /// A sub-SELECT's clauses without its WHERE: the SelectClause at <paramref name="selectStart"/> and the solution
+    /// modifiers at <paramref name="modifiersStart"/>, both recorded on its SubSelectHeader.
+    /// </summary>
+    internal SubSelect ParseSubSelectClausesAt(int selectStart, int modifiersStart)
+    {
+        var subSelect = new SubSelect();
+        _position = selectStart;
+        subSelect.Select = ParseSelectClause();
+        _position = modifiersStart;
         ParseSubSelectSolutionModifiers(ref subSelect);
-
         return subSelect;
-    }
-
-    /// <summary>
-    /// Parse patterns inside a subquery's WHERE clause.
-    /// </summary>
-    private void ParseSubSelectPatterns(ref SubSelect subSelect)
-    {
-        SkipWhitespace();
-
-        // Check for UNION structure: { pattern } UNION { pattern }
-        if (Peek() == '{')
-        {
-            ParseSubSelectGroupOrUnion(ref subSelect);
-            return;
-        }
-
-        // Otherwise parse regular triple patterns
-        while (!IsAtEnd() && Peek() != '}')
-        {
-            SkipWhitespace();
-
-            // Check for nested group/subquery: { ... } or { SELECT ... }
-            if (Peek() == '{')
-            {
-                ParseSubSelectNestedGroup(ref subSelect);
-                SkipWhitespace();
-                continue;
-            }
-
-            var span = PeekSpan(6);
-
-            // Check for FILTER
-            if (span.Length >= 6 && span[..6].Equals("FILTER", StringComparison.OrdinalIgnoreCase))
-            {
-                ParseSubSelectFilter(ref subSelect);
-                continue;
-            }
-
-            // Check for GRAPH
-            if (span.Length >= 5 && span[..5].Equals("GRAPH", StringComparison.OrdinalIgnoreCase))
-            {
-                ParseSubSelectGraph(ref subSelect);
-                continue;
-            }
-
-            // Check for VALUES (inline data block inside WHERE)
-            if (span.Length >= 6 && span[..6].Equals("VALUES", StringComparison.OrdinalIgnoreCase))
-            {
-                subSelect.Values = ParseSubSelectValues();
-                continue;
-            }
-
-            // Parse triple pattern
-            if (!TryParseSubSelectTriplePattern(ref subSelect))
-                break;
-
-            SkipWhitespace();
-
-            // Optional dot after triple pattern
-            if (Peek() == '.')
-                Advance();
-        }
-    }
-
-    /// <summary>
-    /// Parse { pattern } UNION { pattern } UNION ... structure inside a subquery.
-    /// </summary>
-    private void ParseSubSelectGroupOrUnion(ref SubSelect subSelect)
-    {
-        // Parse first nested group
-        ParseSubSelectNestedGroup(ref subSelect);
-
-        SkipWhitespace();
-
-        // Check for UNION keyword
-        var span = PeekSpan(5);
-        if (span.Length >= 5 && span[..5].Equals("UNION", StringComparison.OrdinalIgnoreCase))
-        {
-            ConsumeKeyword("UNION");
-            SkipWhitespace();
-
-            // Mark where UNION patterns start
-            subSelect.HasUnion = true;
-            subSelect.UnionStartIndex = subSelect.PatternCount;
-
-            // Parse remaining UNION branches
-            while (true)
-            {
-                ParseSubSelectNestedGroup(ref subSelect);
-                SkipWhitespace();
-
-                // Check for another UNION
-                span = PeekSpan(5);
-                if (span.Length >= 5 && span[..5].Equals("UNION", StringComparison.OrdinalIgnoreCase))
-                {
-                    ConsumeKeyword("UNION");
-                    SkipWhitespace();
-                    continue;
-                }
-
-                break;
-            }
-        }
-    }
-
-    /// <summary>
-    /// Parse a nested { } group inside a subquery.
-    /// Handles: triple patterns, FILTER, GRAPH, nested SELECT subqueries, and nested groups.
-    /// </summary>
-    private void ParseSubSelectNestedGroup(ref SubSelect subSelect)
-    {
-        SkipWhitespace();
-        if (Peek() != '{')
-            throw new SparqlParseException("Expected '{' for nested group pattern");
-
-        Advance(); // Skip '{'
-        SkipWhitespace();
-
-        // Check for nested SELECT subquery: { SELECT ... }
-        var selectSpan = PeekSpan(6);
-        if (selectSpan.Length >= 6 && selectSpan[..6].Equals("SELECT", StringComparison.OrdinalIgnoreCase))
-        {
-            // Parse the nested subquery and add to this subselect
-            var nestedSubSelect = ParseSubSelect();
-            subSelect.AddSubQuery(nestedSubSelect);
-
-            SkipWhitespace();
-            if (Peek() == '}')
-                Advance(); // Skip closing '}'
-            return;
-        }
-
-        // Parse patterns inside the nested group
-        while (!IsAtEnd() && Peek() != '}')
-        {
-            SkipWhitespace();
-
-            // Check for another nested group (which may contain a subquery)
-            if (Peek() == '{')
-            {
-                ParseSubSelectNestedGroup(ref subSelect);
-                SkipWhitespace();
-                continue;
-            }
-
-            // Check for FILTER
-            var span = PeekSpan(6);
-            if (span.Length >= 6 && span[..6].Equals("FILTER", StringComparison.OrdinalIgnoreCase))
-            {
-                ParseSubSelectFilter(ref subSelect);
-                continue;
-            }
-
-            // Check for GRAPH
-            if (span.Length >= 5 && span[..5].Equals("GRAPH", StringComparison.OrdinalIgnoreCase))
-            {
-                ParseSubSelectGraph(ref subSelect);
-                continue;
-            }
-
-            // Parse triple pattern
-            if (!TryParseSubSelectTriplePattern(ref subSelect))
-                break;
-
-            SkipWhitespace();
-
-            // Optional dot after triple pattern
-            if (Peek() == '.')
-                Advance();
-        }
-
-        SkipWhitespace();
-        if (Peek() == '}')
-            Advance(); // Skip '}'
-    }
-
-    /// <summary>
-    /// Parse GRAPH clause inside a subquery.
-    /// </summary>
-    private void ParseSubSelectGraph(ref SubSelect subSelect)
-    {
-        ConsumeKeyword("GRAPH");
-        SkipWhitespace();
-
-        // Parse graph IRI or variable
-        var graphTerm = ParseTerm();
-        SkipWhitespace();
-
-        // Store the graph context so subquery executor knows to filter by graph
-        subSelect.GraphContext = graphTerm;
-
-        // Expect { }
-        if (Peek() != '{')
-            throw new SparqlParseException("Expected '{' after GRAPH");
-
-        Advance(); // Skip '{'
-        SkipWhitespace();
-
-        // Parse patterns inside GRAPH block
-        while (!IsAtEnd() && Peek() != '}')
-        {
-            SkipWhitespace();
-
-            // Check for FILTER
-            var span = PeekSpan(6);
-            if (span.Length >= 6 && span[..6].Equals("FILTER", StringComparison.OrdinalIgnoreCase))
-            {
-                ParseSubSelectFilter(ref subSelect);
-                continue;
-            }
-
-            // Record pattern count before parsing
-            int patternIndexBefore = subSelect.PatternCount;
-
-            // Parse triple pattern
-            if (!TryParseSubSelectTriplePattern(ref subSelect))
-                break;
-
-            // Mark any newly added patterns as being inside a GRAPH block
-            // This enables proper handling of UNION branches with mixed GRAPH/default patterns
-            for (int i = patternIndexBefore; i < subSelect.PatternCount; i++)
-            {
-                subSelect.SetPatternInGraphBlock(i);
-            }
-
-            SkipWhitespace();
-
-            // Optional dot after triple pattern
-            if (Peek() == '.')
-                Advance();
-        }
-
-        SkipWhitespace();
-        if (Peek() == '}')
-            Advance(); // Skip '}'
-    }
-
-    /// <summary>
-    /// Parse a FILTER expression inside a subquery.
-    /// [68] Constraint ::= BrackettedExpression | BuiltInCall | FunctionCall
-    /// </summary>
-    private void ParseSubSelectFilter(ref SubSelect subSelect)
-    {
-        ConsumeKeyword("FILTER");
-        SkipWhitespace();
-
-        int exprStart;
-        int exprEnd;
-
-        if (Peek() == '(')
-        {
-            // BrackettedExpression: FILTER(expr)
-            exprStart = _position;
-            Advance(); // Skip '('
-            int depth = 1;
-            while (!IsAtEnd() && depth > 0)
-            {
-                var c = Peek();
-                if (c == '(') depth++;
-                else if (c == ')') depth--;
-                Advance();
-            }
-            exprEnd = _position;
-        }
-        else if (char.IsLetter(Peek()))
-        {
-            // BuiltInCall or FunctionCall: FILTER CONTAINS(...) or FILTER fn:func(...)
-            exprStart = _position;
-
-            // Skip the function name (may include namespace prefix like fn:)
-            while (!IsAtEnd() && (char.IsLetterOrDigit(Peek()) || Peek() == '_' || Peek() == ':'))
-                Advance();
-
-            SkipWhitespace();
-
-            // Parse function arguments if present
-            if (Peek() == '(')
-            {
-                int depth = 1;
-                Advance(); // Skip '('
-                while (!IsAtEnd() && depth > 0)
-                {
-                    var c = Peek();
-                    if (c == '(') depth++;
-                    else if (c == ')') depth--;
-                    Advance();
-                }
-            }
-            exprEnd = _position;
-        }
-        else
-        {
-            // Fallback: consume until delimiter
-            exprStart = _position;
-            while (!IsAtEnd() && Peek() != '.' && Peek() != '}')
-                Advance();
-            exprEnd = _position;
-        }
-
-        subSelect.AddFilter(new FilterExpr { Start = exprStart, Length = exprEnd - exprStart });
-    }
-
-    /// <summary>
-    /// Try to parse a triple pattern inside a subquery.
-    /// </summary>
-    private bool TryParseSubSelectTriplePattern(ref SubSelect subSelect)
-    {
-        SkipWhitespace();
-
-        // Check if we're at end of pattern
-        if (IsAtEnd() || Peek() == '}')
-            return false;
-
-        // Parse subject
-        var subject = ParseTerm();
-        if (subject.Type == TermType.Variable && subject.Length == 0)
-            return false;
-
-        // Check if subject is a blank node property list
-        Term actualSubject = subject;
-        if (IsBlankNodePropertyList(subject))
-        {
-            actualSubject = ExpandBlankNodePropertyListForSubSelect(ref subSelect, subject);
-        }
-
-        SkipWhitespace();
-
-        // Parse predicate
-        var predicate = ParseTerm();
-
-        SkipWhitespace();
-
-        // Parse object
-        var obj = ParseTerm();
-
-        // Check if object is a blank node property list
-        Term actualObject = obj;
-        if (IsBlankNodePropertyList(obj))
-        {
-            actualObject = ExpandBlankNodePropertyListForSubSelect(ref subSelect, obj);
-        }
-
-        subSelect.AddPattern(new TriplePattern { Subject = actualSubject, Predicate = predicate, Object = actualObject });
-
-        // Handle semicolon-separated predicate-object lists (same subject)
-        SkipWhitespace();
-        while (Peek() == ';')
-        {
-            Advance(); // Skip ';'
-            SkipWhitespace();
-
-            // Check for empty predicate-object after semicolon
-            if (IsAtEnd() || Peek() == '}' || Peek() == '.')
-                break;
-
-            // Check for FILTER keyword
-            var span = PeekSpan(6);
-            if (span.Length >= 6 && span[..6].Equals("FILTER", StringComparison.OrdinalIgnoreCase))
-                break;
-
-            // Parse next predicate-object pair with same subject
-            var nextPredicate = ParseTerm();
-            SkipWhitespace();
-            var nextObj = ParseTerm();
-
-            // Check if object is a blank node property list
-            Term actualNextObj = nextObj;
-            if (IsBlankNodePropertyList(nextObj))
-            {
-                actualNextObj = ExpandBlankNodePropertyListForSubSelect(ref subSelect, nextObj);
-            }
-
-            subSelect.AddPattern(new TriplePattern { Subject = actualSubject, Predicate = nextPredicate, Object = actualNextObj });
-
-            SkipWhitespace();
-        }
-
-        return true;
     }
 
     /// <summary>

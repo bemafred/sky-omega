@@ -984,21 +984,11 @@ internal sealed class GraphTreeEvaluator
         List<Dictionary<string, string>> input)
     {
         var slot = pa[headerIndex];
-        string subSrc = _source.Substring(slot.GraphTermStart, slot.GraphTermLength);
 
-        // The sub-SELECT's solution modifiers (parsed by the shipping sub-SELECT parser; offsets into subSrc).
-        var sub = new SparqlParser(subSrc.AsSpan()).ParseSubSelectCore();
-
-        // Walk the inner WHERE through the uniform path, threading the active graph; evaluated independently of
-        // the outer bindings (a sub-SELECT is its own scope), then joined.
-        int open = subSrc.IndexOf('{');
-        int close = MatchBrace(subSrc, open);
-        string innerWhere = subSrc.Substring(open, close - open + 1);
-        var innerBuffer = new byte[PatternSlot.Size * 256];
-        var innerPa = new PatternArray(innerBuffer);
-        int innerRoot = new SparqlParser(innerWhere.AsSpan()).ParsePatternTree(ref innerPa);
-        var innerEval = new GraphTreeEvaluator(_store, innerWhere, _prefixes, _prefixSource, _serviceExecutor);
-        var innerBag = innerEval.Evaluate(ref innerPa, innerRoot, activeGraph);
+        // The sub-SELECT's clauses (offsets into _source), and its WHERE, the header's child subtree, walked through
+        // the uniform path with the active graph threaded in: a sub-SELECT is its own scope, joined afterwards.
+        var sub = new SparqlParser(_source.AsSpan()).ParseSubSelectClausesAt(slot.GraphTermStart, slot.SubSelectModifiersStart);
+        var innerBag = Evaluate(ref pa, slot.ChildStartIndex, activeGraph);
 
         // Apply the solution modifiers via the shipping layer (project/distinct/group/aggregate/having/order/limit).
         var rows = new List<MaterializedRow>();
@@ -1013,11 +1003,11 @@ internal sealed class GraphTreeEvaluator
         var selectClause = sub.Select;
         var qrBindings = new Binding[64];
         var qrStringBuffer = new char[16384];
-        var qr = QueryResults.FromMaterializedSimple(rows, subSrc.AsSpan(), _store, qrBindings, qrStringBuffer,
+        var qr = QueryResults.FromMaterializedSimple(rows, _source.AsSpan(), _store, qrBindings, qrStringBuffer,
             sub.LimitOffset, sub.Select.Distinct, sub.OrderBy, sub.GroupBy, selectClause, sub.Having);
 
         // Read the modified rows back over the projected/aggregated output variables.
-        var outNames = OutputVarNames(sub, subSrc, innerBag);
+        var outNames = OutputVarNames(sub, _source, innerBag);
         var results = new List<Dictionary<string, string>>();
         while (qr.MoveNext())
         {
