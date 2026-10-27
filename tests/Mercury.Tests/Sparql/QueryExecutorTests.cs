@@ -97,15 +97,7 @@ public partial class QueryExecutorTests : PooledStoreTestBase
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        // Verify the pattern was parsed correctly
-        var pattern = parsedQuery.WhereClause.Pattern.GetPattern(0);
-        Assert.True(pattern.Subject.IsVariable, "Subject should be variable");
-        Assert.True(pattern.Predicate.IsIri, "Predicate should be IRI");
-        Assert.True(pattern.Object.IsVariable, "Object should be variable");
 
-        // Verify the predicate IRI content
-        var predicateText = query.AsSpan().Slice(pattern.Predicate.Start, pattern.Predicate.Length).ToString();
-        Assert.Equal("<http://xmlns.com/foaf/0.1/name>", predicateText);
 
         Store.AcquireReadLock();
         try

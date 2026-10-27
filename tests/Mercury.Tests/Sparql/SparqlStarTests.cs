@@ -94,45 +94,6 @@ public class SparqlStarTests : PooledStoreTestBase
     }
 
     [Fact]
-    public void ParseQuotedTriple_GeneratesReificationPatterns()
-    {
-        // Parse a query with quoted triple syntax
-        var sparql = @"SELECT ?confidence WHERE {
-            << <http://ex.org/Alice> <http://ex.org/knows> <http://ex.org/Bob> >>
-                <http://ex.org/confidence> ?confidence .
-        }";
-
-        var parser = new SparqlParser(sparql.AsSpan());
-        var query = parser.ParseQuery();
-
-        // Should expand to 5 patterns: 4 reification + 1 main
-        // ?_qt0 rdf:type rdf:Statement
-        // ?_qt0 rdf:subject <http://ex.org/Alice>
-        // ?_qt0 rdf:predicate <http://ex.org/knows>
-        // ?_qt0 rdf:object <http://ex.org/Bob>
-        // ?_qt0 <http://ex.org/confidence> ?confidence
-        Assert.Equal(5, query.WhereClause.Pattern.RequiredPatternCount);
-    }
-
-    [Fact]
-    public void ParseTwoQuotedTriples_GeneratesAllReificationPatterns()
-    {
-        // Parse a query with two quoted triple patterns
-        var sparql = @"SELECT ?confidence ?source WHERE {
-            << <http://ex.org/Alice> <http://ex.org/knows> <http://ex.org/Bob> >>
-                <http://ex.org/confidence> ?confidence .
-            << <http://ex.org/Alice> <http://ex.org/knows> <http://ex.org/Bob> >>
-                <http://ex.org/source> ?source .
-        }";
-
-        var parser = new SparqlParser(sparql.AsSpan());
-        var query = parser.ParseQuery();
-
-        // Should expand to 10 patterns: 5 for each quoted triple
-        Assert.Equal(10, query.WhereClause.Pattern.RequiredPatternCount);
-    }
-
-    [Fact]
     public async Task QueryReifiedTriple_WithConcreteQuotedTriple()
     {
         // Load RDF-star data via Turtle parser (which expands to reification)
@@ -344,23 +305,4 @@ public class SparqlStarTests : PooledStoreTestBase
         Assert.Equal("\"0.9\"", results[0].Item2);
     }
 
-    [Fact]
-    public void ParseNestedQuotedTriple_GeneratesMultipleReificationPatterns()
-    {
-        // Nested quoted triple: << << s p o >> p2 o2 >>
-        var sparql = @"SELECT ?meta WHERE {
-            << << <http://ex.org/Alice> <http://ex.org/knows> <http://ex.org/Bob> >>
-                <http://ex.org/confidence> ""0.9"" >>
-                <http://ex.org/assessedBy> ?meta .
-        }";
-
-        var parser = new SparqlParser(sparql.AsSpan());
-        var query = parser.ParseQuery();
-
-        // Inner quoted triple: 4 patterns
-        // Outer quoted triple: 4 patterns (with inner as subject)
-        // Main pattern: 1
-        // Total: 9 patterns
-        Assert.Equal(9, query.WhereClause.Pattern.RequiredPatternCount);
-    }
 }

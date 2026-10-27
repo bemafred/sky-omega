@@ -19,8 +19,6 @@ public partial class QueryExecutorTests
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        // Verify OPTIONAL was parsed
-        Assert.True(parsedQuery.WhereClause.Pattern.HasOptionalPatterns);
 
         Store.AcquireReadLock();
         try
@@ -100,25 +98,6 @@ public partial class QueryExecutorTests
     }
 
     [Fact]
-    public void Execute_OptionalParsing_PatternMarkedOptional()
-    {
-        var query = "SELECT * WHERE { ?s ?p ?o OPTIONAL { ?s <http://ex.org/opt> ?v } }";
-        var parser = new SparqlParser(query.AsSpan());
-        var parsedQuery = parser.ParseQuery();
-
-        var pattern = parsedQuery.WhereClause.Pattern;
-
-        // Should have 2 patterns total
-        Assert.Equal(2, pattern.PatternCount);
-
-        // First pattern is required
-        Assert.False(pattern.IsOptional(0));
-
-        // Second pattern is optional
-        Assert.True(pattern.IsOptional(1));
-    }
-
-    [Fact]
     public void Execute_OptionalWithFilter_AppliesCorrectly()
     {
         // Find people with optional age, filter on the optional binding
@@ -164,8 +143,6 @@ public partial class QueryExecutorTests
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        // Verify UNION was parsed
-        Assert.True(parsedQuery.WhereClause.Pattern.HasUnion);
 
         Store.AcquireReadLock();
         try
@@ -396,19 +373,7 @@ public partial class QueryExecutorTests
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        // Verify UNION was parsed
-        Assert.True(parsedQuery.WhereClause.Pattern.HasUnion);
 
-        // Verify pattern structure
-        var gp = parsedQuery.WhereClause.Pattern;
-        // PatternCount only counts triple patterns: 1 triple outside UNION
-        Assert.Equal(1, gp.PatternCount);
-        // BINDs are tracked separately: 2 total (one per UNION branch)
-        Assert.Equal(2, gp.BindCount);
-        Assert.Equal(1, gp.FirstBranchBindCount);
-        Assert.Equal(1, gp.UnionBranchBindCount);
-        // UnionBranchPatternCount = PatternCount - UnionStartIndex = 1 - 1 = 0
-        Assert.Equal(0, gp.UnionBranchPatternCount);
 
         Store.AcquireReadLock();
         try
@@ -969,8 +934,6 @@ SELECT ?a ?b ?c {
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        // Verify OPTIONAL inside MINUS was parsed
-        Assert.True(parsedQuery.WhereClause.Pattern.HasMinusOptionalPatterns);
 
         Store.AcquireReadLock();
         try

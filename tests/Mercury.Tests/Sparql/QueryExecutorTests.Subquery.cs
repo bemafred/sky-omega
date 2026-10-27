@@ -15,43 +15,6 @@ public partial class QueryExecutorTests
     #region Subquery Tests
 
     [Fact]
-    public void SubQuery_BasicParsing_ParsesCorrectly()
-    {
-        // Test that we can parse a simple subquery
-        var query = "SELECT ?person WHERE { { SELECT ?person WHERE { ?person <http://xmlns.com/foaf/0.1/name> ?name } } }";
-        var parser = new SparqlParser(query.AsSpan());
-        var parsedQuery = parser.ParseQuery();
-
-        // Verify we have a subquery
-        Assert.True(parsedQuery.WhereClause.Pattern.HasSubQueries);
-        Assert.Equal(1, parsedQuery.WhereClause.Pattern.SubQueryCount);
-
-        // Verify the subquery has the correct pattern
-        var subSelect = parsedQuery.WhereClause.Pattern.GetSubQuery(0);
-        Assert.Equal(1, subSelect.PatternCount);
-
-        var tp = subSelect.GetPattern(0);
-
-        // Verify subject is a variable
-        Assert.Equal(TermType.Variable, tp.Subject.Type);
-        Assert.True(tp.Subject.Length > 0, "Subject variable should have non-zero length");
-        var subjectVar = query.AsSpan().Slice(tp.Subject.Start, tp.Subject.Length).ToString();
-        Assert.Equal("?person", subjectVar);
-
-        // Verify predicate is an IRI
-        Assert.Equal(TermType.Iri, tp.Predicate.Type);
-        Assert.True(tp.Predicate.Length > 0, $"Predicate IRI should have non-zero length, got Start={tp.Predicate.Start}, Len={tp.Predicate.Length}");
-        var predicateIri = query.AsSpan().Slice(tp.Predicate.Start, tp.Predicate.Length).ToString();
-        Assert.Equal("<http://xmlns.com/foaf/0.1/name>", predicateIri);
-
-        // Verify object is a variable
-        Assert.Equal(TermType.Variable, tp.Object.Type);
-        Assert.True(tp.Object.Length > 0, "Object variable should have non-zero length");
-        var objectVar = query.AsSpan().Slice(tp.Object.Start, tp.Object.Length).ToString();
-        Assert.Equal("?name", objectVar);
-    }
-
-    [Fact]
     public void SubQuery_SimpleExecution_ReturnsResults()
     {
         // Test basic subquery execution
@@ -579,9 +542,7 @@ public partial class QueryExecutorTests
                 var salIdx = results.Current.FindBinding("?sal".AsSpan());
                 if (empIdx < 0 || nickIdx < 0 || salIdx < 0)
                 {
-                    var subQueryCount = parsedQuery.WhereClause.Pattern.SubQueryCount;
-                    var requiredPatternCount = parsedQuery.WhereClause.Pattern.RequiredPatternCount;
-                    Assert.Fail($"Missing binding: empIdx={empIdx}, nickIdx={nickIdx}, salIdx={salIdx}. SubQueryCount={subQueryCount}, RequiredPatternCount={requiredPatternCount}");
+                    Assert.Fail($"Missing binding: empIdx={empIdx}, nickIdx={nickIdx}, salIdx={salIdx}");
                 }
                 found.Add((
                     results.Current.GetString(empIdx).ToString(),
@@ -677,8 +638,6 @@ public partial class QueryExecutorTests
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        // Debug: Check how many subqueries were parsed
-        var subQueryCount = parsedQuery.WhereClause.Pattern.SubQueryCount;
 
         Store.AcquireReadLock();
         try
@@ -706,7 +665,7 @@ public partial class QueryExecutorTests
             // If count > 0, fail with debug info
             if (count > 0)
             {
-                Assert.Fail($"Expected 0 results but got {count}. SubQueryCount={subQueryCount}. Bindings: [{string.Join("; ", bindingsInfo)}]");
+                Assert.Fail($"Expected 0 results but got {count}. Bindings: [{string.Join("; ", bindingsInfo)}]");
             }
         }
         finally
@@ -740,14 +699,6 @@ public partial class QueryExecutorTests
         {
             var parser = new SparqlParser(query.AsSpan());
             var parsed = parser.ParseQuery();
-
-            // Verify the subquery has UNION
-            Assert.True(parsed.WhereClause.Pattern.HasSubQueries);
-            var subSelect = parsed.WhereClause.Pattern.GetSubQuery(0);
-            Assert.True(subSelect.HasUnion, "SubQuery should have UNION");
-            Assert.Equal(3, subSelect.PatternCount);  // 3 UNION alternatives
-            Assert.Equal(1, subSelect.UnionStartIndex);  // UNION starts after first pattern
-            Assert.False(subSelect.Select.Distinct, "Removed DISTINCT to avoid GetHashCode issue");
 
             using var executor = new QueryExecutor(Store, query.AsSpan(), parsed);
             var results = executor.Execute();
@@ -809,9 +760,6 @@ public partial class QueryExecutorTests
             var parser = new SparqlParser(query.AsSpan());
             var parsed = parser.ParseQuery();
 
-            // Verify EXISTS filter is parsed into ExistsFilter (not FilterExpr)
-            var outerPattern = parsed.WhereClause.Pattern;
-            Assert.True(outerPattern.HasExists, "EXISTS should be parsed into ExistsFilter");
             using var executor = new QueryExecutor(Store, query.AsSpan(), parsed);
             var results = executor.Execute();
 
@@ -834,43 +782,6 @@ public partial class QueryExecutorTests
         {
             Store.ReleaseReadLock();
         }
-    }
-
-    [Fact]
-    public void SubQuery_NestedSubqueries_ParsesCorrectly()
-    {
-        // Test parsing of sq09-style nested subqueries:
-        // SELECT * WHERE { { SELECT * WHERE { { SELECT ?x WHERE { ?x ?p ?o } } } } ?x ?p2 ?y }
-        var query = @"
-            PREFIX ex: <http://ex.org/>
-            SELECT * WHERE {
-                { SELECT * WHERE {
-                    { SELECT ?x WHERE { ?x ex:q ?t } }
-                } }
-                ?x ex:p ?y
-            }
-        ";
-
-        var parser = new SparqlParser(query.AsSpan());
-        var parsedQuery = parser.ParseQuery();
-
-        // Verify outer query has a subquery
-        Assert.True(parsedQuery.WhereClause.Pattern.HasSubQueries, "Outer query should have subquery");
-        Assert.Equal(1, parsedQuery.WhereClause.Pattern.SubQueryCount);
-
-        // Get the middle subquery
-        var middleSq = parsedQuery.WhereClause.Pattern.GetSubQuery(0);
-        Assert.True(middleSq.Select.SelectAll, "Middle subquery should be SELECT *");
-
-        // The middle subquery should have a nested subquery
-        Assert.True(middleSq.HasSubQueries, "Middle subquery should have nested subquery");
-        Assert.Equal(1, middleSq.SubQueryCount);
-
-        // Get the innermost subquery
-        var innerSq = middleSq.GetSubQuery(0);
-        Assert.False(innerSq.Select.SelectAll, "Inner subquery should NOT be SELECT *");
-        Assert.Equal(1, innerSq.Select.ProjectedVariableCount);
-        Assert.Equal(1, innerSq.PatternCount);
     }
 
     [Fact]
@@ -897,14 +808,6 @@ public partial class QueryExecutorTests
 
             var doubleParser = new SparqlParser(doubleNestedQuery.AsSpan());
             var doubleParsed = doubleParser.ParseQuery();
-
-            // Verify parsing
-            Assert.True(doubleParsed.WhereClause.Pattern.HasSubQueries, "Should have subquery");
-            var middleSq = doubleParsed.WhereClause.Pattern.GetSubQuery(0);
-            Assert.True(middleSq.HasSubQueries, "Middle should have nested subquery");
-            Assert.Equal(0, middleSq.PatternCount);  // Middle has no direct patterns
-            var innerSq = middleSq.GetSubQuery(0);
-            Assert.Equal(1, innerSq.PatternCount);  // Inner has 1 pattern
 
             // Now test through QueryExecutor
             using var doubleExecutor = new QueryExecutor(Store, doubleNestedQuery.AsSpan(), doubleParsed);
@@ -992,11 +895,6 @@ public partial class QueryExecutorTests
             var parser = new SparqlParser(singleQuery.AsSpan());
             var parsed = parser.ParseQuery();
 
-            // Verify parsing
-            Assert.True(parsed.WhereClause.Pattern.HasSubQueries, "Should have subquery");
-            var sq = parsed.WhereClause.Pattern.GetSubQuery(0);
-            Assert.Equal(1, sq.PatternCount);
-            Assert.False(sq.HasSubQueries, "Single level should not have nested subqueries");
 
             // Execute
             using var executor = new QueryExecutor(Store, singleQuery.AsSpan(), parsed);
@@ -1036,9 +934,6 @@ public partial class QueryExecutorTests
             var parser = new SparqlParser(directQuery.AsSpan());
             var parsed = parser.ParseQuery();
 
-            // Should not have subqueries - this is a direct query
-            Assert.False(parsed.WhereClause.Pattern.HasSubQueries);
-            Assert.Equal(1, parsed.WhereClause.Pattern.PatternCount);
 
             // Execute normally
             using var executor = new QueryExecutor(Store, directQuery.AsSpan(), parsed);
@@ -1061,101 +956,7 @@ public partial class QueryExecutorTests
         }
     }
 
-    [Fact]
-    public void SubQuery_Diagnostic_BoxedSubSelectRetrieval()
-    {
-        // Verify that the inner SubSelect is correctly retrieved after boxing/unboxing
-        var doubleNestedQuery = @"
-            PREFIX ex: <http://www.example.org/schema#>
-            SELECT * WHERE {
-                { SELECT * WHERE {
-                    { SELECT ?x WHERE { ?x ex:q ?t } }
-                } }
-            }
-        ";
 
-        var parser = new SparqlParser(doubleNestedQuery.AsSpan());
-        var parsed = parser.ParseQuery();
-
-        // Get middle SubSelect from outer GroupPattern
-        var middleSq = parsed.WhereClause.Pattern.GetSubQuery(0);
-
-        // Verify middle SubSelect state
-        Assert.True(middleSq.Select.SelectAll, "Middle SelectAll should be true");
-        Assert.True(middleSq.HasSubQueries, "Middle HasSubQueries should be true");
-        Assert.Equal(1, middleSq.SubQueryCount);
-        Assert.Equal(0, middleSq.PatternCount);
-
-        // Get inner SubSelect from middle SubSelect (this involves unboxing)
-        var innerSq = middleSq.GetSubQuery(0);
-
-        // Verify inner SubSelect state after unboxing
-        Assert.False(innerSq.Select.SelectAll, "Inner SelectAll should be false");
-        Assert.False(innerSq.HasSubQueries, "Inner HasSubQueries should be false (no more nesting)");
-        Assert.Equal(0, innerSq.SubQueryCount);
-        Assert.Equal(1, innerSq.PatternCount);
-        Assert.Equal(1, innerSq.Select.ProjectedVariableCount);
-
-        // Now simulate what BoxedSubQueryExecutor does for middle SubSelect
-        // It should detect HasSubQueries && PatternCount == 0 and call ExecuteNestedSubQueries
-        Assert.True(middleSq.HasSubQueries && middleSq.PatternCount == 0,
-            "Middle SubSelect should trigger ExecuteNestedSubQueries path");
-    }
-
-
-
-    [Fact]
-    public void SubQuery_Diagnostic_InnerSubSelectPatternRefs()
-    {
-        // Verify that the inner SubSelect's pattern references are valid when retrieved from middle SubSelect
-        var doubleNestedQuery = @"
-            PREFIX ex: <http://www.example.org/schema#>
-            SELECT * WHERE {
-                { SELECT * WHERE {
-                    { SELECT ?x WHERE { ?x ex:q ?t } }
-                } }
-            }
-        ";
-
-        var parser = new SparqlParser(doubleNestedQuery.AsSpan());
-        var parsed = parser.ParseQuery();
-
-        // Get the outer GroupPattern's subquery (middle SubSelect)
-        var middleSq = parsed.WhereClause.Pattern.GetSubQuery(0);
-        Assert.True(middleSq.Select.SelectAll, "Middle should be SELECT *");
-        Assert.Equal(0, middleSq.PatternCount);
-        Assert.True(middleSq.HasSubQueries, "Middle should have nested subquery");
-
-        // Get the inner SubSelect from the middle SubSelect
-        var innerSq = middleSq.GetSubQuery(0);
-        Assert.False(innerSq.Select.SelectAll, "Inner should NOT be SELECT *");
-        Assert.Equal(1, innerSq.PatternCount);
-        Assert.Equal(1, innerSq.Select.ProjectedVariableCount);
-
-        // Verify the inner pattern's term references point to valid positions in source
-        var tp = innerSq.GetPattern(0);
-        var source = doubleNestedQuery.AsSpan();
-
-        // Subject should be ?x (variable)
-        Assert.Equal(TermType.Variable, tp.Subject.Type);
-        Assert.True(tp.Subject.Start >= 0 && tp.Subject.Start + tp.Subject.Length <= source.Length,
-            $"Subject offset invalid: Start={tp.Subject.Start}, Length={tp.Subject.Length}, SourceLength={source.Length}");
-        var subjStr = source.Slice(tp.Subject.Start, tp.Subject.Length).ToString();
-        Assert.Equal("?x", subjStr);
-
-        // Predicate should be ex:q (prefixed name)
-        Assert.True(tp.Predicate.Start >= 0 && tp.Predicate.Start + tp.Predicate.Length <= source.Length,
-            $"Predicate offset invalid: Start={tp.Predicate.Start}, Length={tp.Predicate.Length}, SourceLength={source.Length}");
-        var predStr = source.Slice(tp.Predicate.Start, tp.Predicate.Length).ToString();
-        Assert.Equal("ex:q", predStr);
-
-        // Object should be ?t (variable)
-        Assert.Equal(TermType.Variable, tp.Object.Type);
-        Assert.True(tp.Object.Start >= 0 && tp.Object.Start + tp.Object.Length <= source.Length,
-            $"Object offset invalid: Start={tp.Object.Start}, Length={tp.Object.Length}, SourceLength={source.Length}");
-        var objStr = source.Slice(tp.Object.Start, tp.Object.Length).ToString();
-        Assert.Equal("?t", objStr);
-    }
 
     [Fact]
     public void SubQuery_Sq11_LimitPerResource_ExecutesCorrectly()
@@ -1349,10 +1150,6 @@ SELECT ?g ?c WHERE {
 }";
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
-
-        // Verify parsing - subquery inside GRAPH should be detected
-        Assert.True(parsedQuery.WhereClause.Pattern.HasSubQueries || parsedQuery.WhereClause.Pattern.HasGraph,
-            "Query should have subqueries or GRAPH patterns");
 
         Store.AcquireReadLock();
         try

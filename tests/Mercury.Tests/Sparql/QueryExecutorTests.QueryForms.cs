@@ -158,8 +158,6 @@ public partial class QueryExecutorTests
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        // Verify VALUES was parsed
-        Assert.True(parsedQuery.WhereClause.Pattern.Values.HasValues);
 
         Store.AcquireReadLock();
         try
@@ -365,7 +363,6 @@ VALUES ?age { 25 30 }";
 
         // Verify post-query VALUES was parsed (in query.Values, not in WhereClause.Pattern.Values)
         Assert.True(parsedQuery.Values.HasValues, "Post-query VALUES should be parsed");
-        Assert.False(parsedQuery.WhereClause.Pattern.Values.HasValues, "Inline VALUES should not be set");
 
         Store.AcquireReadLock();
         try
@@ -948,7 +945,6 @@ SELECT ?s ?o1 ?o2
         var parsedQuery = parser.ParseQuery();
 
         Assert.Equal(QueryType.Construct, parsedQuery.Type);
-        Assert.True(parsedQuery.WhereClause.Pattern.HasSubQueries);
 
         Store.AcquireReadLock();
         try

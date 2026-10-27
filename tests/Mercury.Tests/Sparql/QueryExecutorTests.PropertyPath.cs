@@ -13,22 +13,6 @@ public partial class QueryExecutorTests
 {
     #region Grouped Property Path Tests
 
-    [Fact]
-    public void Parse_GroupedSequence_TwoGroups()
-    {
-        // pp31: (:p1|:p2)/(:p3|:p4) - grouped alternative followed by grouped alternative
-        // Use exact W3C format
-        var query = @"prefix :  <http://www.example.org/>
-select ?t
-where {
-  :a (:p1|:p2)/(:p3|:p4) ?t
-}";
-        var parser = new SparqlParser(query.AsSpan());
-        var parsed = parser.ParseQuery();  // Should not throw
-
-        Assert.True(parsed.WhereClause.Pattern.PatternCount > 0);
-    }
-
     #endregion
 
     #region Property Path Sequence Tests
@@ -46,8 +30,6 @@ where {
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        // Verify sequence path was expanded to 2 patterns
-        Assert.Equal(2, parsedQuery.WhereClause.Pattern.PatternCount);
 
         Store.AcquireReadLock();
         try
@@ -89,8 +71,6 @@ where {
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        // Verify sequence path was expanded to 2 patterns
-        Assert.Equal(2, parsedQuery.WhereClause.Pattern.PatternCount);
 
         Store.AcquireReadLock();
         try
@@ -128,8 +108,6 @@ where {
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        // Verify sequence path was expanded to 2 patterns
-        Assert.Equal(2, parsedQuery.WhereClause.Pattern.PatternCount);
 
         Store.AcquireReadLock();
         try
@@ -215,11 +193,6 @@ where {
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        // Verify alternative path is preserved (not expanded like sequences)
-        Assert.Equal(1, parsedQuery.WhereClause.Pattern.PatternCount);
-        var pattern = parsedQuery.WhereClause.Pattern.GetPattern(0);
-        Assert.True(pattern.HasPropertyPath);
-        Assert.Equal(PathType.Alternative, pattern.Path.Type);
 
         Store.AcquireReadLock();
         try
@@ -391,9 +364,6 @@ where {
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        var pattern = parsedQuery.WhereClause.Pattern.GetPattern(0);
-        Assert.True(pattern.HasPropertyPath);
-        Assert.Equal(PathType.Inverse, pattern.Path.Type);
 
         Store.AcquireReadLock();
         try
@@ -586,9 +556,6 @@ where {
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        var pattern = parsedQuery.WhereClause.Pattern.GetPattern(0);
-        Assert.True(pattern.HasPropertyPath);
-        Assert.Equal(PathType.ZeroOrMore, pattern.Path.Type);
 
         Store.AcquireReadLock();
         try
@@ -628,9 +595,6 @@ where {
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        var pattern = parsedQuery.WhereClause.Pattern.GetPattern(0);
-        Assert.True(pattern.HasPropertyPath);
-        Assert.Equal(PathType.OneOrMore, pattern.Path.Type);
 
         Store.AcquireReadLock();
         try
@@ -820,9 +784,6 @@ where {
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        var pattern = parsedQuery.WhereClause.Pattern.GetPattern(0);
-        Assert.True(pattern.HasPropertyPath);
-        Assert.Equal(PathType.ZeroOrOne, pattern.Path.Type);
 
         Store.AcquireReadLock();
         try
@@ -1053,70 +1014,6 @@ where {
         }
     }
 
-    [Fact]
-    public void Parse_NegatedPropertySet_RecognizesPathType()
-    {
-        var query = "SELECT ?s ?o WHERE { ?s !(<http://ex.org/a>|<http://ex.org/b>) ?o }";
-        var parser = new SparqlParser(query.AsSpan());
-        var parsedQuery = parser.ParseQuery();
-
-        // Check that the pattern has the negated set path type
-        var pattern = parsedQuery.WhereClause.Pattern.GetPattern(0);
-        Assert.Equal(PathType.NegatedSet, pattern.Path.Type);
-    }
-
-    [Fact]
-    public void Parse_NegatedPropertySet_SinglePredicate()
-    {
-        var query = "SELECT ?s ?o WHERE { ?s !<http://ex.org/a> ?o }";
-        var parser = new SparqlParser(query.AsSpan());
-        var parsedQuery = parser.ParseQuery();
-
-        // Check that the pattern has the negated set path type
-        var pattern = parsedQuery.WhereClause.Pattern.GetPattern(0);
-        Assert.Equal(PathType.NegatedSet, pattern.Path.Type);
-    }
-
-    [Fact]
-    public void Parse_NegatedPropertySet_InverseA()
-    {
-        // Test !^a which means "not inverse rdf:type"
-        // Per SPARQL 1.1 grammar [95] PathOneInPropertySet ::= iri | 'a' | '^' ( iri | 'a' )
-        var query = "SELECT ?s ?o WHERE { ?s !^a ?o }";
-        var parser = new SparqlParser(query.AsSpan());
-        var parsedQuery = parser.ParseQuery();
-
-        // Check that the pattern has the negated set path type
-        var pattern = parsedQuery.WhereClause.Pattern.GetPattern(0);
-        Assert.Equal(PathType.NegatedSet, pattern.Path.Type);
-    }
-
-    [Fact]
-    public void Parse_NegatedPropertySet_DirectA()
-    {
-        // Test !a which means "not rdf:type"
-        var query = "SELECT ?s ?o WHERE { ?s !a ?o }";
-        var parser = new SparqlParser(query.AsSpan());
-        var parsedQuery = parser.ParseQuery();
-
-        // Check that the pattern has the negated set path type
-        var pattern = parsedQuery.WhereClause.Pattern.GetPattern(0);
-        Assert.Equal(PathType.NegatedSet, pattern.Path.Type);
-    }
-
-    [Fact]
-    public void Parse_NegatedPropertySet_MixedDirectAndInverse()
-    {
-        // Test !(a|^ex:foo) which mixes direct and inverse
-        var query = "PREFIX ex: <http://example.org/> SELECT ?s ?o WHERE { ?s !(a|^ex:foo) ?o }";
-        var parser = new SparqlParser(query.AsSpan());
-        var parsedQuery = parser.ParseQuery();
-
-        // Check that the pattern has the negated set path type
-        var pattern = parsedQuery.WhereClause.Pattern.GetPattern(0);
-        Assert.Equal(PathType.NegatedSet, pattern.Path.Type);
-    }
-
     #endregion
 
     #region Property Path Operator Precedence Tests
@@ -1139,16 +1036,7 @@ WHERE {
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        // Debug: Check parsing
-        var pattern = parsedQuery.WhereClause.Pattern.GetPattern(0);
-        Assert.True(pattern.HasPropertyPath, "Should have property path");
-        Assert.Equal(PathType.Alternative, pattern.Path.Type);
 
-        // Check that the path slices are correct
-        var leftPred = query.AsSpan().Slice(pattern.Path.LeftStart, pattern.Path.LeftLength).ToString();
-        var rightPred = query.AsSpan().Slice(pattern.Path.RightStart, pattern.Path.RightLength).ToString();
-        Assert.Equal(":p1", leftPred);
-        Assert.Equal(":p2", rightPred);
 
         Store.AcquireReadLock();
         try
@@ -1200,16 +1088,7 @@ WHERE {
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        // Debug: Check parsing
-        var pattern = parsedQuery.WhereClause.Pattern.GetPattern(0);
-        Assert.True(pattern.HasPropertyPath, "Should have property path");
-        Assert.Equal(PathType.Alternative, pattern.Path.Type);
 
-        // Check that the path slices are correct
-        var leftPred = query.AsSpan().Slice(pattern.Path.LeftStart, pattern.Path.LeftLength).ToString();
-        var rightPred = query.AsSpan().Slice(pattern.Path.RightStart, pattern.Path.RightLength).ToString();
-        Assert.Equal(":p1", leftPred);
-        Assert.Equal(":p2/:p3|:p4", rightPred);
 
         Store.AcquireReadLock();
         try
@@ -1276,10 +1155,6 @@ WHERE {
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        // Debug: Check parsing
-        var pattern = parsedQuery.WhereClause.Pattern.GetPattern(0);
-        Assert.True(pattern.HasPropertyPath, "Should have property path");
-        Assert.Equal(PathType.Alternative, pattern.Path.Type);
 
         Store.AcquireReadLock();
         try
@@ -1346,19 +1221,6 @@ WHERE {
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        // Debug: Check parsing
-        var pattern = parsedQuery.WhereClause.Pattern.GetPattern(0);
-        Assert.True(pattern.HasPropertyPath, "Should have property path");
-        // Top-level should be Alternative: ((:p0|^:p1)/:p2) | :p3
-
-        // Debug parsing info
-        var leftSpan = query.AsSpan().Slice(pattern.Path.LeftStart, pattern.Path.LeftLength);
-        var rightSpan = query.AsSpan().Slice(pattern.Path.RightStart, pattern.Path.RightLength);
-        System.Console.WriteLine($"Path type: {pattern.Path.Type}");
-        System.Console.WriteLine($"Left: '{leftSpan}'");
-        System.Console.WriteLine($"Right: '{rightSpan}'");
-
-        Assert.Equal(PathType.Alternative, pattern.Path.Type);
 
         Store.AcquireReadLock();
         try

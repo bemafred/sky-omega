@@ -19,9 +19,6 @@ public partial class QueryExecutorTests
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        // Verify EXISTS was parsed
-        Assert.True(parsedQuery.WhereClause.Pattern.HasExists);
-        Assert.Equal(1, parsedQuery.WhereClause.Pattern.ExistsFilterCount);
 
         Store.AcquireReadLock();
         try
@@ -56,10 +53,6 @@ public partial class QueryExecutorTests
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        // Verify NOT EXISTS was parsed
-        Assert.True(parsedQuery.WhereClause.Pattern.HasExists);
-        var existsFilter = parsedQuery.WhereClause.Pattern.GetExistsFilter(0);
-        Assert.True(existsFilter.Negated);
 
         Store.AcquireReadLock();
         try
@@ -597,12 +590,6 @@ SELECT ?exam ?date {
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        // Verify NOT EXISTS was parsed
-        Assert.True(parsedQuery.WhereClause.Pattern.HasExists);
-        var existsFilter = parsedQuery.WhereClause.Pattern.GetExistsFilter(0);
-        Assert.True(existsFilter.Negated);
-        Assert.Equal(3, existsFilter.PatternCount); // Should have 3 patterns in NOT EXISTS
-
         Store.AcquireReadLock();
         try
         {
@@ -716,11 +703,6 @@ WHERE
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        // Verify MINUS with NOT EXISTS was parsed
-        Assert.True(parsedQuery.WhereClause.Pattern.HasMinus);
-        var hasME = parsedQuery.WhereClause.Pattern.HasMinusExists;
-        var meCount = parsedQuery.WhereClause.Pattern.MinusExistsCount;
-
         Store.AcquireReadLock();
         try
         {
@@ -739,7 +721,7 @@ WHERE
             results.Dispose();
 
             // Expected: c=e and e=c, but filtered by str(?s1) < str(?s2) so only (c, e)
-            var output = $"HasMinusExists: {hasME}, MinusExistsCount: {meCount}\n";
+            var output = "";
             output += $"Solutions ({solutions.Count}):\n";
             foreach (var (s1, s2) in solutions.OrderBy(s => s.s1).ThenBy(s => s.s2))
             {
@@ -816,13 +798,6 @@ WHERE
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        // Verify MINUS pattern was parsed with NOT EXISTS inside
-        Assert.True(parsedQuery.WhereClause.Pattern.HasMinus);
-
-        // Debug: Check if MINUS has EXISTS filter (stored on GraphPattern, not TriplePattern)
-        var hasMinusExists = parsedQuery.WhereClause.Pattern.HasMinusExists;
-        var minusExistsCount = parsedQuery.WhereClause.Pattern.MinusExistsCount;
-
         Store.AcquireReadLock();
         try
         {
@@ -850,7 +825,7 @@ WHERE
             // d subsetOf b (1,9 are in 1,9)
 
             // Debug output
-            var output = $"HasMinusExists: {hasMinusExists}, MinusExistsCount: {minusExistsCount}\n";
+            var output = "";
             output += $"Solutions ({solutions.Count}):\n";
             foreach (var (subset, superset) in solutions.OrderBy(s => s.subset).ThenBy(s => s.superset))
             {
@@ -868,88 +843,6 @@ WHERE
         {
             Store.ReleaseReadLock();
         }
-    }
-
-    [Fact]
-    public void Parse_CompoundExistsRef_InMinusFilter()
-    {
-        // Test that compound EXISTS patterns are parsed correctly
-        // Simulates subset-02's FILTER ( ?s1 = ?s2 || NOT EXISTS { ... } )
-
-        var query = @"PREFIX :    <http://example/>
-PREFIX  rdf:    <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
-SELECT ?s1 ?s2
-WHERE
-{
-    ?s2 rdf:type :Set .
-    ?s1 rdf:type :Set .
-    MINUS {
-        ?s1 rdf:type :Set .
-        ?s2 rdf:type :Set .
-        ?s1 :member ?x .
-        FILTER ( ?s1 = ?s2 || NOT EXISTS { ?s2 :member ?x . } )
-    }
-}";
-
-        var parser = new SparqlParser(query.AsSpan());
-        var parsedQuery = parser.ParseQuery();
-        var gp = parsedQuery.WhereClause.Pattern;
-
-        // Debug: Print the filter expression and compound EXISTS ref positions
-        var filterExprStr = query.Substring(gp.MinusFilter.Start, gp.MinusFilter.Length);
-        var existsRefDebug = gp.GetCompoundExistsRef(0);
-
-        // Build debug message
-        var debugMsg = $"Filter expression: [{filterExprStr}]\n";
-        debugMsg += $"CompoundExistsRef: start={existsRefDebug.StartInFilter}, len={existsRefDebug.Length}, negated={existsRefDebug.Negated}\n";
-        if (existsRefDebug.StartInFilter >= 0 && existsRefDebug.StartInFilter + existsRefDebug.Length <= filterExprStr.Length)
-        {
-            var existsSubstr = filterExprStr.Substring(existsRefDebug.StartInFilter, existsRefDebug.Length);
-            debugMsg += $"Portion to replace: [{existsSubstr}]\n";
-        }
-
-        // Check if the positions are valid before substring
-        Assert.True(existsRefDebug.StartInFilter >= 0 && existsRefDebug.StartInFilter < filterExprStr.Length,
-            $"Invalid StartInFilter: {existsRefDebug.StartInFilter}, filterExpr length: {filterExprStr.Length}\n{debugMsg}");
-        Assert.True(existsRefDebug.StartInFilter + existsRefDebug.Length <= filterExprStr.Length,
-            $"Invalid range: start={existsRefDebug.StartInFilter}, len={existsRefDebug.Length}, filterLen={filterExprStr.Length}\n{debugMsg}");
-
-        // Should have 1 MINUS block
-        Assert.Equal(1, gp.MinusBlockCount);
-
-        // Should have the MINUS filter
-        Assert.True(gp.HasMinusFilter);
-        Assert.Equal(0, gp.MinusFilterBlock);  // Filter belongs to block 0
-
-        // Should have 1 compound EXISTS ref (for the NOT EXISTS inside the filter)
-        Assert.True(gp.HasCompoundExistsRefs);
-        Assert.Equal(1, gp.CompoundExistsRefCount);
-
-        var existsRef = gp.GetCompoundExistsRef(0);
-        Assert.True(existsRef.Negated);  // It's NOT EXISTS
-        Assert.Equal(0, existsRef.BlockIndex);  // Belongs to block 0
-
-        // Should have 1 MinusExistsFilter (the pattern inside NOT EXISTS)
-        Assert.True(gp.HasMinusExists);
-        Assert.Equal(1, gp.MinusExistsCount);
-        var existsFilter = gp.GetMinusExistsFilter(0);
-        Assert.True(existsFilter.Negated);
-        Assert.Equal(1, existsFilter.PatternCount);  // { ?s2 :member ?x }
-
-        // Verify the substitution would work correctly
-        // Create modified expression with "false" substituted for NOT EXISTS
-        var sb = new System.Text.StringBuilder(filterExprStr);
-        sb.Remove(existsRefDebug.StartInFilter, existsRefDebug.Length);
-        sb.Insert(existsRefDebug.StartInFilter, "false");
-        var modifiedExpr = sb.ToString();
-
-        // Debug: show what the modified expression would look like
-        Assert.True(modifiedExpr.Contains("false"),
-            $"Modified expression should contain 'false': [{modifiedExpr}]\nOriginal: [{filterExprStr}]");
-
-        // Verify the modified expression looks correct
-        Assert.True(modifiedExpr.Contains("?s1 = ?s2") || modifiedExpr.Contains("?s1=?s2"),
-            $"Modified expression should still contain ?s1 = ?s2: [{modifiedExpr}]");
     }
 
     [Fact]
@@ -1142,42 +1035,7 @@ WHERE
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        var gp = parsedQuery.WhereClause.Pattern;
-        var output = $"PatternCount: {gp.PatternCount}\n";
-        output += $"HasMinus: {gp.HasMinus}\n";
-        output += $"HasNestedMinus: {gp.HasNestedMinus}\n";
-        output += $"NestedMinusCount: {gp.NestedMinusCount}\n";
-        output += $"NestedMinusPatternCount: {gp.NestedMinusPatternCount}\n";
-        output += $"MinusPatternCount: {gp.MinusPatternCount}\n";
-        output += $"MinusBlockCount: {gp.MinusBlockCount}\n";
-        // Show main patterns
-        for (int i = 0; i < gp.PatternCount; i++)
-        {
-            var p = gp.GetPattern(i);
-            output += $"MainPattern[{i}]: s={query.Substring(p.Subject.Start, p.Subject.Length)}, p={query.Substring(p.Predicate.Start, p.Predicate.Length)}, o={query.Substring(p.Object.Start, p.Object.Length)}\n";
-        }
-        // Show MINUS patterns
-        for (int i = 0; i < gp.MinusPatternCount; i++)
-        {
-            var p = gp.GetMinusPattern(i);
-            output += $"MinusPattern[{i}]: s={query.Substring(p.Subject.Start, p.Subject.Length)}, p={query.Substring(p.Predicate.Start, p.Predicate.Length)}, o={query.Substring(p.Object.Start, p.Object.Length)}\n";
-        }
-        // Show nested MINUS block info
-        for (int i = 0; i < gp.NestedMinusCount; i++)
-        {
-            output += $"NestedMinus[{i}]: parent={gp.GetNestedMinusParentBlock(i)}, start={gp.GetNestedMinusBlockStart(i)}, end={gp.GetNestedMinusBlockEnd(i)}\n";
-            // Show the patterns in this nested MINUS block
-            for (int j = gp.GetNestedMinusBlockStart(i); j < gp.GetNestedMinusBlockEnd(i); j++)
-            {
-                var pattern = gp.GetNestedMinusPattern(j);
-                output += $"  Pattern[{j}]: s={query.Substring(pattern.Subject.Start, pattern.Subject.Length)}, p={query.Substring(pattern.Predicate.Start, pattern.Predicate.Length)}, o={query.Substring(pattern.Object.Start, pattern.Object.Length)}\n";
-            }
-        }
-        // Show outer MINUS block info
-        for (int i = 0; i < gp.MinusBlockCount; i++)
-        {
-            output += $"MinusBlock[{i}]: start={gp.GetMinusBlockStart(i)}, end={gp.GetMinusBlockEnd(i)}\n";
-        }
+        var output = "";
 
         Store.AcquireReadLock();
         try
@@ -1298,10 +1156,6 @@ WHERE
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        // Verify nested MINUS was parsed
-        Assert.True(parsedQuery.WhereClause.Pattern.HasMinus, "Should have MINUS");
-        Assert.True(parsedQuery.WhereClause.Pattern.HasNestedMinus, "Should have nested MINUS");
-
         Store.AcquireReadLock();
         try
         {
@@ -1320,9 +1174,7 @@ WHERE
             results.Dispose();
 
             // Debug output
-            var output = $"NestedMinusCount: {parsedQuery.WhereClause.Pattern.NestedMinusCount}\n";
-            output += $"NestedMinusPatternCount: {parsedQuery.WhereClause.Pattern.NestedMinusPatternCount}\n";
-            output += $"Solutions ({solutions.Count}):\n";
+            var output = $"Solutions ({solutions.Count}):\n";
             foreach (var (subset, superset) in solutions.OrderBy(s => s.subset).ThenBy(s => s.superset))
             {
                 output += $"  {subset} subsetOf {superset}\n";

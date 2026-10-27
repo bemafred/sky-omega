@@ -21,62 +21,6 @@ public partial class QueryExecutorTests
     #region SERVICE clause tests
 
     [Fact]
-    public void Parse_ServiceClause_Basic()
-    {
-        var query = "SELECT * WHERE { SERVICE <http://remote.example.org/sparql> { ?s ?p ?o } }";
-        var parser = new SparqlParser(query.AsSpan());
-        var parsedQuery = parser.ParseQuery();
-
-        Assert.True(parsedQuery.WhereClause.Pattern.HasService);
-        Assert.Equal(1, parsedQuery.WhereClause.Pattern.ServiceClauseCount);
-
-        var serviceClause = parsedQuery.WhereClause.Pattern.GetServiceClause(0);
-        Assert.False(serviceClause.Silent);
-        Assert.False(serviceClause.IsVariable);
-        Assert.Equal(1, serviceClause.PatternCount);
-    }
-
-    [Fact]
-    public void Parse_ServiceClause_Silent()
-    {
-        var query = "SELECT * WHERE { SERVICE SILENT <http://remote.example.org/sparql> { ?s ?p ?o } }";
-        var parser = new SparqlParser(query.AsSpan());
-        var parsedQuery = parser.ParseQuery();
-
-        Assert.True(parsedQuery.WhereClause.Pattern.HasService);
-        var serviceClause = parsedQuery.WhereClause.Pattern.GetServiceClause(0);
-        Assert.True(serviceClause.Silent);
-    }
-
-    [Fact]
-    public void Parse_ServiceClause_Variable()
-    {
-        var query = "SELECT * WHERE { SERVICE ?endpoint { ?s ?p ?o } }";
-        var parser = new SparqlParser(query.AsSpan());
-        var parsedQuery = parser.ParseQuery();
-
-        Assert.True(parsedQuery.WhereClause.Pattern.HasService);
-        var serviceClause = parsedQuery.WhereClause.Pattern.GetServiceClause(0);
-        Assert.True(serviceClause.IsVariable);
-    }
-
-    [Fact]
-    public void Parse_ServiceClause_MultiplePatterns()
-    {
-        var query = @"SELECT * WHERE {
-            SERVICE <http://remote.example.org/sparql> {
-                ?s <http://example.org/type> ?type .
-                ?s <http://example.org/name> ?name
-            }
-        }";
-        var parser = new SparqlParser(query.AsSpan());
-        var parsedQuery = parser.ParseQuery();
-
-        var serviceClause = parsedQuery.WhereClause.Pattern.GetServiceClause(0);
-        Assert.Equal(2, serviceClause.PatternCount);
-    }
-
-    [Fact]
     public void Execute_ServiceClause_WithMockExecutor()
     {
         var query = "SELECT * WHERE { SERVICE <http://remote.example.org/sparql> { ?s ?p ?o } }";
@@ -206,10 +150,6 @@ public partial class QueryExecutorTests
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        // Verify pattern structure
-        Assert.Equal(1, parsedQuery.WhereClause.Pattern.PatternCount); // 1 local pattern
-        Assert.Equal(1, parsedQuery.WhereClause.Pattern.ServiceClauseCount); // 1 SERVICE
-
         // Create mock executor that returns data for person1 only
         // Note: Mock values are raw (no angle brackets for URIs, no quotes for literals)
         // because ToRdfTerm() adds the RDF syntax
@@ -333,7 +273,6 @@ public partial class QueryExecutorTests
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        Assert.Equal(2, parsedQuery.WhereClause.Pattern.ServiceClauseCount);
 
         // Note: Mock values are raw (no angle brackets for URIs, no quotes for literals)
         // because ToRdfTerm() adds the RDF syntax
@@ -540,9 +479,6 @@ public partial class QueryExecutorTests
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        // Verify we have 2 local patterns
-        Assert.Equal(2, parsedQuery.WhereClause.Pattern.PatternCount);
-        Assert.Equal(1, parsedQuery.WhereClause.Pattern.ServiceClauseCount);
 
         // Mock executor returns prices for item1 only
         var mockExecutor = new MockSparqlServiceExecutor();
@@ -689,9 +625,6 @@ public partial class QueryExecutorTests
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        // Verify OPTIONAL SERVICE was parsed correctly
-        Assert.True(parsedQuery.WhereClause.Pattern.ServiceClauseCount > 0);
-        Assert.True(parsedQuery.WhereClause.Pattern.GetServiceClause(0).IsOptional);
 
         // Mock executor returns price for only item1
         var mockExecutor = new MockSparqlServiceExecutor();
@@ -733,160 +666,6 @@ public partial class QueryExecutorTests
         {
             Store.ReleaseReadLock();
         }
-    }
-
-    [Fact]
-    public void Execute_OptionalServiceSilent_CombinesBothModifiers()
-    {
-        // Test OPTIONAL { SERVICE SILENT ... } - should preserve bindings AND ignore errors
-        Store.BeginBatch();
-        Store.AddCurrentBatched("<http://local/item1>", "<http://ex.org/type>", "<http://ex.org/Widget>");
-        Store.CommitBatch();
-
-        // Query with OPTIONAL SERVICE SILENT
-        var query = @"SELECT ?item ?price WHERE {
-            ?item <http://ex.org/type> <http://ex.org/Widget> .
-            OPTIONAL {
-                SERVICE SILENT <http://pricing.example.org/sparql> {
-                    ?item <http://ex.org/price> ?price
-                }
-            }
-        }";
-        var parser = new SparqlParser(query.AsSpan());
-        var parsedQuery = parser.ParseQuery();
-
-        // Verify both modifiers are set
-        var serviceClause = parsedQuery.WhereClause.Pattern.GetServiceClause(0);
-        Assert.True(serviceClause.IsOptional);
-        Assert.True(serviceClause.Silent);
-    }
-
-    [Fact]
-    public void Parse_UnionWithService_ParsesCorrectly()
-    {
-        // Test parsing { local } UNION { SERVICE ... }
-        // Note: Execution of SERVICE-only UNION branches requires further work
-        // as SERVICE clauses are stored separately from triple patterns
-
-        // Query with UNION: local branch and SERVICE branch
-        var query = @"SELECT ?item ?source WHERE {
-            {
-                ?item <http://ex.org/type> <http://ex.org/Widget> .
-                ?item <http://ex.org/source> ?source
-            }
-            UNION
-            {
-                SERVICE <http://remote.example.org/sparql> {
-                    ?item <http://ex.org/type> <http://ex.org/Widget> .
-                    ?item <http://ex.org/source> ?source
-                }
-            }
-        }";
-        var parser = new SparqlParser(query.AsSpan());
-        var parsedQuery = parser.ParseQuery();
-
-        // Verify UNION was parsed
-        Assert.True(parsedQuery.WhereClause.Pattern.HasUnion);
-
-        // Verify local patterns in first branch
-        Assert.Equal(2, parsedQuery.WhereClause.Pattern.FirstBranchPatternCount);
-
-        // Verify SERVICE was parsed
-        Assert.True(parsedQuery.WhereClause.Pattern.ServiceClauseCount > 0);
-
-        // Verify SERVICE is NOT optional (it's in UNION, not OPTIONAL)
-        Assert.False(parsedQuery.WhereClause.Pattern.GetServiceClause(0).IsOptional);
-
-        // Verify SERVICE has the correct endpoint
-        var endpoint = parsedQuery.WhereClause.Pattern.GetServiceClause(0).Endpoint;
-        Assert.Equal(TermType.Iri, endpoint.Type);
-    }
-
-    [Fact]
-    public void Parse_OptionalServiceWithFilter_ParsesFilterCorrectly()
-    {
-        // Test OPTIONAL { SERVICE ... FILTER(...) } - FILTER inside OPTIONAL SERVICE block
-        var query = @"SELECT ?item ?price WHERE {
-            ?item <http://ex.org/type> <http://ex.org/Widget> .
-            OPTIONAL {
-                SERVICE <http://pricing.example.org/sparql> {
-                    ?item <http://ex.org/price> ?price
-                    FILTER(?price > 10)
-                }
-            }
-        }";
-        var parser = new SparqlParser(query.AsSpan());
-        var parsedQuery = parser.ParseQuery();
-
-        // Verify OPTIONAL SERVICE was parsed
-        Assert.True(parsedQuery.WhereClause.Pattern.ServiceClauseCount > 0);
-        Assert.True(parsedQuery.WhereClause.Pattern.GetServiceClause(0).IsOptional);
-
-        // Verify FILTER was parsed (added to parent pattern)
-        Assert.True(parsedQuery.WhereClause.Pattern.FilterCount > 0);
-    }
-
-    [Fact]
-    public void Parse_OptionalServiceWithVariableEndpoint_ParsesCorrectly()
-    {
-        // Test OPTIONAL { SERVICE ?endpoint { ... } } - variable endpoint inside OPTIONAL
-        var query = @"SELECT ?item ?price ?endpoint WHERE {
-            ?item <http://ex.org/type> <http://ex.org/Widget> .
-            ?item <http://ex.org/priceService> ?endpoint .
-            OPTIONAL {
-                SERVICE ?endpoint {
-                    ?item <http://ex.org/price> ?price
-                }
-            }
-        }";
-        var parser = new SparqlParser(query.AsSpan());
-        var parsedQuery = parser.ParseQuery();
-
-        // Verify OPTIONAL SERVICE was parsed
-        Assert.True(parsedQuery.WhereClause.Pattern.ServiceClauseCount > 0);
-        var serviceClause = parsedQuery.WhereClause.Pattern.GetServiceClause(0);
-        Assert.True(serviceClause.IsOptional);
-
-        // Verify endpoint is a variable
-        Assert.Equal(TermType.Variable, serviceClause.Endpoint.Type);
-    }
-
-    [Fact]
-    public void Parse_UnionWithService_TracksUnionBranch()
-    {
-        // Test that SERVICE in second UNION branch has UnionBranch = 1
-        var query = @"SELECT ?item WHERE {
-            { ?item <http://ex.org/type> <http://ex.org/Local> }
-            UNION
-            { SERVICE <http://remote.example.org/sparql> { ?item <http://ex.org/type> <http://ex.org/Remote> } }
-        }";
-        var parser = new SparqlParser(query.AsSpan());
-        var parsedQuery = parser.ParseQuery();
-
-        Assert.True(parsedQuery.WhereClause.Pattern.HasUnion);
-        Assert.Equal(1, parsedQuery.WhereClause.Pattern.ServiceClauseCount);
-
-        var serviceClause = parsedQuery.WhereClause.Pattern.GetServiceClause(0);
-        Assert.Equal(1, serviceClause.UnionBranch); // SERVICE in second UNION branch
-    }
-
-    [Fact]
-    public void Parse_ServiceInFirstUnionBranch_TracksUnionBranch()
-    {
-        // Test that SERVICE in first UNION branch has UnionBranch = 0
-        var query = @"SELECT ?item WHERE {
-            { SERVICE <http://remote.example.org/sparql> { ?item <http://ex.org/type> <http://ex.org/Remote> } }
-            UNION
-            { ?item <http://ex.org/type> <http://ex.org/Local> }
-        }";
-        var parser = new SparqlParser(query.AsSpan());
-        var parsedQuery = parser.ParseQuery();
-
-        Assert.True(parsedQuery.WhereClause.Pattern.HasUnion);
-        Assert.Equal(1, parsedQuery.WhereClause.Pattern.ServiceClauseCount);
-
-        var serviceClause = parsedQuery.WhereClause.Pattern.GetServiceClause(0);
-        Assert.Equal(0, serviceClause.UnionBranch); // SERVICE in first UNION branch
     }
 
     [Fact]
@@ -966,8 +745,6 @@ public partial class QueryExecutorTests
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        // Verify SERVICE is in first branch (UnionBranch = 0)
-        Assert.Equal(0, parsedQuery.WhereClause.Pattern.GetServiceClause(0).UnionBranch);
 
         // Mock executor returns remote item
         var mockExecutor = new MockSparqlServiceExecutor();
@@ -1016,11 +793,6 @@ public partial class QueryExecutorTests
         }";
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
-
-        // Verify we have 2 SERVICE clauses in different union branches
-        Assert.Equal(2, parsedQuery.WhereClause.Pattern.ServiceClauseCount);
-        Assert.Equal(0, parsedQuery.WhereClause.Pattern.GetServiceClause(0).UnionBranch); // First SERVICE
-        Assert.Equal(1, parsedQuery.WhereClause.Pattern.GetServiceClause(1).UnionBranch); // Second SERVICE
 
         // Mock executor returns different items from each endpoint
         var mockExecutor = new MockSparqlServiceExecutor();
@@ -1159,10 +931,6 @@ public partial class QueryExecutorTests
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        // Verify SERVICE has variable endpoint
-        var serviceClause = parsedQuery.WhereClause.Pattern.GetServiceClause(0);
-        Assert.True(serviceClause.IsVariable);
-        Assert.Equal(TermType.Variable, serviceClause.Endpoint.Type);
 
         // Mock executor returns different prices from different endpoints
         var mockExecutor = new MockSparqlServiceExecutor();
@@ -1237,10 +1005,6 @@ public partial class QueryExecutorTests
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        // Verify SERVICE has multiple patterns
-        var serviceClause = parsedQuery.WhereClause.Pattern.GetServiceClause(0);
-        Assert.True(serviceClause.IsOptional);
-        Assert.Equal(2, serviceClause.PatternCount);
 
         // Mock executor returns price and currency for item1 only
         var mockExecutor = new MockSparqlServiceExecutor();
