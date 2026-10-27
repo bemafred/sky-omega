@@ -437,9 +437,11 @@ public class UpdateExecutorTests : PooledStoreTestBase
         var operation = parser.ParseUpdate();
 
         Assert.Equal(QueryType.DeleteWhere, operation.Type);
-        Assert.Equal(1, operation.WhereClause.Pattern.PatternCount);
+        // ADR-052: the QuadPattern is the delete template, and its '{' is recorded as the WHERE group.
+        Assert.Equal(update.IndexOf('{'), operation.WhereGroupStart);
+        Assert.Equal(1, operation.DeleteTemplate.PatternCount);
 
-        var tp = operation.WhereClause.Pattern.GetPattern(0);
+        var tp = operation.DeleteTemplate.GetPattern(0);
         var subject = update.AsSpan(tp.Subject.Start, tp.Subject.Length);
         var predicate = update.AsSpan(tp.Predicate.Start, tp.Predicate.Length);
         var obj = update.AsSpan(tp.Object.Start, tp.Object.Length);

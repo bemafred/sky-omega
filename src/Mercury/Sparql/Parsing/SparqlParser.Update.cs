@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using SkyOmega.Mercury.Sparql.Patterns;
 using SkyOmega.Mercury.Sparql.Types;
 
 namespace SkyOmega.Mercury.Sparql.Parsing;
@@ -54,6 +55,9 @@ internal ref partial struct SparqlParser
     /// <summary>
     /// Parse DELETE WHERE { QuadPattern }
     /// [40] DeleteWhere ::= 'DELETE WHERE' QuadPattern
+    /// DELETE WHERE QuadPattern means DELETE QuadPattern WHERE { QuadPattern } (SPARQL 1.1 Update §3.1.3.3), so the
+    /// QuadPattern is parsed as the delete template ([52] Quads: triples and GRAPH blocks only, so a FILTER or
+    /// OPTIONAL is rejected as the spec requires) and recorded as the WHERE group (ADR-052).
     /// </summary>
     private UpdateOperation ParseDeleteWhere(Prologue prologue)
     {
@@ -62,21 +66,48 @@ internal ref partial struct SparqlParser
         ConsumeKeyword("WHERE");
         SkipWhitespace();
 
-        // Parse the pattern as both delete template and where clause
-        var pattern = new GraphPattern();
-        ExpectChar('{');
-        SkipWhitespace();
-        ParseGroupGraphPatternSub(ref pattern);
-        SkipWhitespace();
-        ExpectChar('}');
-
-        return new UpdateOperation
+        var op = new UpdateOperation
         {
             Type = QueryType.DeleteWhere,
             Prologue = prologue,
-            DeleteTemplate = pattern,
-            WhereClause = new WhereClause { Pattern = pattern }
+            WhereGroupStart = _position
         };
+
+        ExpectChar('{');
+        SkipWhitespace();
+        ParseQuadTemplateBody(ref op.DeleteTemplate);
+        SkipWhitespace();
+        ExpectChar('}');
+
+        // The same text is evaluated as a group, so the group grammar must read it to the same end.
+        int templateEnd = _position;
+        ParseWhereGroup(op.WhereGroupStart);
+        if (_position != templateEnd)
+            throw new SparqlParseException($"DELETE WHERE accepts only triples and GRAPH blocks (position {op.WhereGroupStart})");
+
+        return op;
+    }
+
+    /// <summary>
+    /// ADR-052: parse the Update WHERE group at <paramref name="groupStart"/> (its opening '{') with the pattern-tree
+    /// grammar queries use, leaving the cursor after its closing '}'. Parsing here, during
+    /// <see cref="ParseUpdateSequence"/>, keeps ADR-046's rule: a syntax error anywhere means nothing is executed.
+    /// The tree itself is discarded; the executor parses it again from the same offset when the operation runs,
+    /// as a query does.
+    /// </summary>
+    private void ParseWhereGroup(int groupStart)
+    {
+        const int treeBytes = PatternSlot.Size * 1024;
+        var treeBuffer = System.Buffers.ArrayPool<byte>.Shared.Rent(treeBytes);
+        try
+        {
+            var tree = new PatternArray(treeBuffer.AsSpan(0, treeBytes));
+            ParsePatternTreeAt(groupStart, ref tree);
+        }
+        finally
+        {
+            System.Buffers.ArrayPool<byte>.Shared.Return(treeBuffer);
+        }
     }
 
     /// <summary>
@@ -169,29 +200,14 @@ internal ref partial struct SparqlParser
         if (usingClauses.Count > 0)
             op.UsingClauses = usingClauses.ToArray();
 
-        // WHERE clause - inlined ParseGroupGraphPattern() to reduce call depth
         // [53] GroupGraphPattern ::= '{' ( SubSelect | GroupGraphPatternSub ) '}'
-        // Parse directly into op.WhereClause.Pattern (same stack-saving strategy)
+        // ADR-052: the same grammar a query's WHERE uses — the pattern tree. Record where the group opens.
         ConsumeKeyword("WHERE");
         SkipWhitespace();
-        if (Peek() == '{')
-        {
-            Advance();
-            SkipWhitespace();
-            var span = PeekSpan(6);
-            if (span.Length >= 6 && span[..6].Equals("SELECT", StringComparison.OrdinalIgnoreCase))
-            {
-                var subSelect = ParseSubSelect();
-                op.WhereClause.Pattern.AddSubQuery(subSelect);
-            }
-            else
-            {
-                ParseGroupGraphPatternSub(ref op.WhereClause.Pattern);
-            }
-            SkipWhitespace();
-            if (Peek() == '}')
-                Advance();
-        }
+        if (Peek() != '{')
+            throw new SparqlParseException($"Expected '{{' after WHERE but found '{Peek()}'");
+        op.WhereGroupStart = _position;
+        ParseWhereGroup(op.WhereGroupStart);
 
         return op;
     }
@@ -663,20 +679,6 @@ internal ref partial struct SparqlParser
         }
 
         return (0, 0, TermType.Iri); // No term found
-    }
-
-    /// <summary>
-    /// Parse QuadPattern - pattern within { } that may contain variables
-    /// </summary>
-    private GraphPattern ParseQuadPattern()
-    {
-        var pattern = new GraphPattern();
-        ExpectChar('{');
-        SkipWhitespace();
-        ParseGroupGraphPatternSub(ref pattern);
-        SkipWhitespace();
-        ExpectChar('}');
-        return pattern;
     }
 
     /// <summary>

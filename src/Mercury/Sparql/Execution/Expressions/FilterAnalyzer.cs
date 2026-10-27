@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
+using SkyOmega.Mercury.Sparql.Patterns;
 using SkyOmega.Mercury.Sparql.Types;
 using SkyOmega.Mercury.Sparql.Execution.Operators;
 
@@ -347,24 +348,25 @@ internal static class FilterAnalyzer
     }
 
     /// <summary>
-    /// Detect text:match(?var, "constant") filters suitable for trigram pre-filtering.
-    /// Only filters where the variable is bound to an object position qualify.
+    /// Detect text:match(?var, "constant") filters suitable for trigram pre-filtering, over the pattern tree every
+    /// WHERE is evaluated from (a query's and an Update's — ADR-052). Only a FILTER that is a direct child of the
+    /// root group qualifies, and only for a variable that a direct-child triple of the root binds in object
+    /// position: that triple is required for every solution, so narrowing its object to the term's candidates
+    /// can drop no solution the FILTER would keep.
     /// </summary>
-    public static List<TextMatchHint>? DetectTextMatchFilters(
-        in GraphPattern pattern,
-        ReadOnlySpan<char> source,
-        int[]? patternOrder = null)
+    public static List<TextMatchHint>? DetectTextMatchFilters(ref PatternArray tree, int root, ReadOnlySpan<char> source)
     {
-        int filterCount = pattern.FilterCount;
-        if (filterCount == 0)
-            return null;
+        if (tree[root].Kind != PatternKind.GroupHeader)
+            return null; // a bare sub-SELECT / SERVICE WHERE: its own filters sit in its own query
 
         List<TextMatchHint>? hints = null;
-
-        for (int i = 0; i < filterCount; i++)
+        var filters = tree.EnumerateDirectChildren(root);
+        while (filters.MoveNext())
         {
-            var filter = pattern.GetFilter(i);
-            var expr = source.Slice(filter.Start, filter.Length);
+            var filter = filters.Current;
+            if (filter.Kind != PatternKind.Filter)
+                continue;
+            var expr = source.Slice(filter.FilterStart, filter.FilterLength);
 
             // Trigram pre-filter safety: a text:match inside a DISJUNCTION is not a required conjunct of the filter,
             // so restricting the variable to that one term's candidate atoms would drop rows that satisfy ANOTHER
@@ -374,98 +376,81 @@ internal static class FilterAnalyzer
             if (ContainsDisjunction(expr))
                 continue;
 
-            // Skip leading parenthesis (FilterExpr Start is after FILTER keyword, includes parens)
-            var inner = expr;
-            if (inner.Length > 0 && inner[0] == '(')
-                inner = inner.Slice(1);
-            // Trim trailing paren
-            if (inner.Length > 0 && inner[inner.Length - 1] == ')')
-                inner = inner.Slice(0, inner.Length - 1);
-            inner = inner.Trim();
-
-            // Detect text:match( or match( prefix
-            int funcStart = -1;
-            if (inner.StartsWith("text:match(", StringComparison.Ordinal))
-                funcStart = 11;
-            else if (inner.StartsWith("match(", StringComparison.Ordinal))
-                funcStart = 6;
-
-            if (funcStart < 0)
+            if (!TryReadTextMatch(expr, out var varName, out var searchTerm))
                 continue;
 
-            var args = inner.Slice(funcStart);
-
-            // First arg must be ?variable
-            if (args.Length < 2 || args[0] != '?')
-                continue;
-
-            // Extract variable name
-            int varEnd = 1;
-            while (varEnd < args.Length && IsVarChar(args[varEnd]))
-                varEnd++;
-
-            if (varEnd <= 1)
-                continue;
-
-            var varName = args.Slice(1, varEnd - 1);
-            int varHash = ComputeHash(varName);
-
-            // Skip whitespace and comma
-            int pos = varEnd;
-            while (pos < args.Length && (args[pos] == ' ' || args[pos] == ','))
-                pos++;
-
-            // Second arg must be "constant"
-            if (pos >= args.Length || args[pos] != '"')
-                continue;
-
-            // Extract the constant string (between quotes)
-            int strStart = pos + 1;
-            int strEnd = strStart;
-            while (strEnd < args.Length && args[strEnd] != '"')
-                strEnd++;
-
-            if (strEnd >= args.Length)
-                continue;
-
-            var searchTerm = args.Slice(strStart, strEnd - strStart).ToString();
-
-            // Find which pattern level binds this variable in the object position
-            int patternCount = pattern.RequiredPatternCount;
-            int objectLevel = -1;
-
-            for (int level = 0; level < patternCount; level++)
+            bool boundAsObject = false;
+            var triples = tree.EnumerateDirectChildren(root);
+            while (triples.MoveNext())
             {
-                int patternIdx = patternOrder != null && level < patternOrder.Length
-                    ? patternOrder[level]
-                    : level;
-
-                var tp = pattern.GetPattern(patternIdx);
-                if (tp.Object.IsVariable)
+                var triple = triples.Current;
+                if (triple.Kind != PatternKind.Triple || triple.ObjectType != TermType.Variable)
+                    continue;
+                var objVar = source.Slice(triple.ObjectStart + 1, triple.ObjectLength - 1); // skip '?'
+                if (objVar.SequenceEqual(varName))
                 {
-                    var objVarName = source.Slice(tp.Object.Start + 1, tp.Object.Length - 1); // skip ?
-                    if (ComputeHash(objVarName) == varHash)
-                    {
-                        objectLevel = level;
-                        break;
-                    }
+                    boundAsObject = true;
+                    break;
                 }
             }
-
-            if (objectLevel < 0)
+            if (!boundAsObject)
                 continue;
 
             hints ??= new List<TextMatchHint>();
-            hints.Add(new TextMatchHint
-            {
-                SearchTerm = searchTerm,
-                PatternLevel = objectLevel,
-                FilterIndex = i,
-                VarName = varName.ToString() // the object variable, so the tree can map by variable (it reorders levels)
-            });
+            hints.Add(new TextMatchHint { SearchTerm = searchTerm, VarName = varName.ToString() });
         }
 
         return hints;
+    }
+
+    /// <summary>
+    /// Read <c>text:match(?var, "constant")</c> (or <c>match(…)</c>) from a FILTER expression span, with or without
+    /// its enclosing parentheses. Returns the variable name without '?' and the constant without quotes.
+    /// </summary>
+    private static bool TryReadTextMatch(ReadOnlySpan<char> expr, out ReadOnlySpan<char> varName, out string searchTerm)
+    {
+        varName = default;
+        searchTerm = "";
+
+        var inner = expr.Trim();
+        if (inner.Length > 0 && inner[0] == '(')
+            inner = inner.Slice(1).Trim();
+
+        int funcStart;
+        if (inner.StartsWith("text:match(", StringComparison.Ordinal))
+            funcStart = 11;
+        else if (inner.StartsWith("match(", StringComparison.Ordinal))
+            funcStart = 6;
+        else
+            return false;
+
+        var args = inner.Slice(funcStart);
+
+        // First arg must be ?variable
+        if (args.Length < 2 || args[0] != '?')
+            return false;
+        int varEnd = 1;
+        while (varEnd < args.Length && IsVarChar(args[varEnd]))
+            varEnd++;
+        if (varEnd <= 1)
+            return false;
+
+        // Skip whitespace and comma; the second arg must be "constant"
+        int pos = varEnd;
+        while (pos < args.Length && (args[pos] == ' ' || args[pos] == ','))
+            pos++;
+        if (pos >= args.Length || args[pos] != '"')
+            return false;
+        int strStart = pos + 1;
+        int strEnd = strStart;
+        while (strEnd < args.Length && args[strEnd] != '"')
+            strEnd++;
+        if (strEnd >= args.Length)
+            return false;
+
+        varName = args.Slice(1, varEnd - 1);
+        searchTerm = args.Slice(strStart, strEnd - strStart).ToString();
+        return true;
     }
 
     #endregion
@@ -497,12 +482,6 @@ internal struct TextMatchHint
     /// <summary>The constant search string from text:match(?var, "constant").</summary>
     public string SearchTerm;
 
-    /// <summary>Pattern level where the variable is bound as the object.</summary>
-    public int PatternLevel;
-
-    /// <summary>Index of the filter in the graph pattern.</summary>
-    public int FilterIndex;
-
-    /// <summary>The object variable name (without '?') — the tree maps trigram candidates by variable, not level.</summary>
+    /// <summary>The object variable name (without '?') — the tree maps trigram candidates by variable.</summary>
     public string VarName;
 }

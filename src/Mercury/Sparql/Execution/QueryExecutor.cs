@@ -129,35 +129,7 @@ internal partial class QueryExecutor : IDisposable
         // Extract prefix mappings for subquery execution (shared with the other executors)
         _prefixMappings = PrefixExpander.Extract(in _prologue);
 
-        _defaultGraphs = null;
-        _namedGraphs = null;
-
-        // Extract dataset clauses into arrays (using buffer instead of query)
-        // Semantics:
-        //   - _namedGraphs = null: no dataset clause, all named graphs accessible
-        //   - _namedGraphs = empty array: USING specified without USING NAMED, named graphs inaccessible
-        //   - _namedGraphs = [g1, g2, ...]: USING NAMED specified, only those graphs accessible
-        if (_buffer.Datasets != null && _buffer.Datasets.Length > 0)
-        {
-            var defaultList = new List<string>();
-            var namedList = new List<string>();
-
-            foreach (var ds in _buffer.Datasets)
-            {
-                // Expand prefixed names like :g1 to full IRIs like <http://example.org/g1>
-                var rawIri = source.Slice(ds.GraphIri.Start, ds.GraphIri.Length);
-                var iri = ExpandPrefixedName(rawIri).ToString();
-                if (ds.IsNamed)
-                    namedList.Add(iri);
-                else
-                    defaultList.Add(iri);
-            }
-
-            if (defaultList.Count > 0) _defaultGraphs = defaultList.ToArray();
-            // W3C SPARQL spec: When USING is present without USING NAMED, named graphs become inaccessible
-            // This is signaled by setting _namedGraphs to empty array (vs null = no restriction)
-            _namedGraphs = namedList.Count > 0 ? namedList.ToArray() : Array.Empty<string>();
-        }
+        ResolveDataset(_buffer.Datasets, source, _prefixMappings, out _defaultGraphs, out _namedGraphs);
 
         _serviceExecutor = serviceExecutor;
 
@@ -250,29 +222,41 @@ internal partial class QueryExecutor : IDisposable
             _rangeEnd = ParseDateTimeOffset(endStr);
         }
 
-        // Extract datasets from buffer
-        // Semantics:
-        //   - _namedGraphs = null: no dataset clause, all named graphs accessible
-        //   - _namedGraphs = empty array: USING specified without USING NAMED, named graphs inaccessible
-        //   - _namedGraphs = [g1, g2, ...]: USING NAMED specified, only those graphs accessible
-        if (buffer.Datasets != null && buffer.Datasets.Length > 0)
+        ResolveDataset(buffer.Datasets, source, _prefixMappings, out _defaultGraphs, out _namedGraphs);
+    }
+
+    /// <summary>
+    /// Resolve a dataset clause list — a query's FROM / FROM NAMED or an Update's USING / USING NAMED — into the
+    /// tree executor's graph sets (prefixed names expanded against <paramref name="prefixes"/>):
+    /// <list type="bullet">
+    /// <item><paramref name="defaultGraphs"/>: null = the store's unnamed default graph; [g…] = those graphs, whose
+    /// merge is the default graph.</item>
+    /// <item><paramref name="namedGraphs"/>: null = no dataset clause, every named graph is accessible; empty = a
+    /// dataset without FROM NAMED / USING NAMED, so no named graph is; [g…] = only those.</item>
+    /// </list>
+    /// </summary>
+    internal static void ResolveDataset(DatasetClause[]? datasets, ReadOnlySpan<char> source, PrefixMapping[]? prefixes,
+        out string[]? defaultGraphs, out string[]? namedGraphs)
+    {
+        defaultGraphs = null;
+        namedGraphs = null;
+        if (datasets == null || datasets.Length == 0)
+            return;
+
+        var defaultList = new List<string>();
+        var namedList = new List<string>();
+        foreach (var ds in datasets)
         {
-            var defaultList = new List<string>();
-            var namedList = new List<string>();
-
-            foreach (var ds in buffer.Datasets)
-            {
-                var iri = source.Slice(ds.GraphIri.Start, ds.GraphIri.Length).ToString();
-                if (ds.IsNamed)
-                    namedList.Add(iri);
-                else
-                    defaultList.Add(iri);
-            }
-
-            if (defaultList.Count > 0) _defaultGraphs = defaultList.ToArray();
-            // W3C SPARQL spec: When USING is present without USING NAMED, named graphs become inaccessible
-            _namedGraphs = namedList.Count > 0 ? namedList.ToArray() : Array.Empty<string>();
+            var rawIri = source.Slice(ds.GraphIri.Start, ds.GraphIri.Length);
+            var iri = PrefixExpander.TryExpand(rawIri, prefixes, source) ?? rawIri.ToString();
+            if (ds.IsNamed)
+                namedList.Add(iri);
+            else
+                defaultList.Add(iri);
         }
+
+        if (defaultList.Count > 0) defaultGraphs = defaultList.ToArray();
+        namedGraphs = namedList.Count > 0 ? namedList.ToArray() : Array.Empty<string>();
     }
 
     public void Dispose()
@@ -492,15 +476,7 @@ internal partial class QueryExecutor : IDisposable
 
             // ADR-024: text:match trigram pre-filter — resolve candidate object atom IDs per text:match variable so the
             // tree's scan filters at the index level (candidate-narrowing that is mandatory at scale).
-            Dictionary<string, HashSet<long>>? trigramMap = null;
-            var textHints = FilterAnalyzer.DetectTextMatchFilters(in _cachedPattern, _source.AsSpan(), null);
-            if (textHints != null)
-                foreach (var hint in textHints)
-                {
-                    var candidates = _store.QueryTrigramCandidates(hint.SearchTerm.AsSpan());
-                    if (candidates.Count > 0)
-                        (trigramMap ??= new Dictionary<string, HashSet<long>>())[hint.VarName] = new HashSet<long>(candidates);
-                }
+            var trigramMap = TreeJoinExecutor.ResolveTrigramCandidates(_store, ref tree, root, _source);
 
             var executor = new TreeJoinExecutor(_store, _source, _prefixMappings, _source, _serviceExecutor,
                 _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _namedGraphs, _defaultGraphs, ReorderBgpInTree, trigramMap);

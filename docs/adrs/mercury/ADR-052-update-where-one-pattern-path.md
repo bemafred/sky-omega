@@ -2,7 +2,7 @@
 
 ## Status
 
-**Status:** Accepted — 2026-10-27 (Proposed → Accepted the same day, after review)
+**Status:** Completed — 2026-10-27 (Proposed → Accepted → Completed the same day)
 
 Found by dogfooding on 2026-10-27: a Mercury memory write in the DrHook finding 99 session failed to parse. Reproduced
 on source 1.8.21 with a facade-level script (`SparqlEngine.Update` then `SparqlEngine.Query`; table below). This
@@ -127,7 +127,7 @@ this one is accepted. Not yet checked: how the Turtle and N-Triples loaders stor
     sub-SELECT, SERVICE and property paths, nested in any combination. These defects can no longer be represented,
     because no second grammar or route exists to leave a shape out of.
   - The silent deletions (#4, #5) and silent losses (#1, #2, #6) stop.
-  - About 300 lines of `UpdateExecutor` go away.
+  - About 300 lines of `UpdateExecutor` go away (measured: 1,263 → 856).
 - **Negative / risk:**
   - Stack depth. The deleted routes were written to avoid stack overflows (ADR-009). The tree path keeps the large
     structs off the stack and pools its buffer, but this must be measured, not assumed: run the ADR-009 deep-nesting
@@ -162,3 +162,47 @@ this one is accepted. Not yet checked: how the Turtle and N-Triples loaders stor
 4. **Stack:** the ADR-009 tests pass through the new route; record the worst-case stack depth.
 5. **Dogfood:** rerun the Mercury MCP update that failed on 2026-10-27, a `DELETE … INSERT … WHERE { OPTIONAL { GRAPH
    … } }` memory-status rewrite, and confirm it applies in one request.
+
+## Implementation (2026-10-27)
+
+Implemented as decided. What changed, and what the validation measured:
+
+- **Parse.** `UpdateOperation.WhereClause` is gone; `WhereGroupStart` records the WHERE group's `{`.
+  - `ParseModify` parses the group with `ParsePatternTreeAt` (via `ParseWhereGroup`) during `ParseUpdateSequence`, so ADR-046's "a syntax error anywhere runs nothing" still holds.
+  - `ParseDeleteWhere` parses the QuadPattern as the delete template (`ParseQuadTemplateBody`, the [52] Quads grammar) and records the same `{` as the WHERE. The group grammar must then read the text to the same end, or the request is rejected. So `DELETE WHERE { … FILTER(…) }` is now a syntax error, as the spec requires (it used to be accepted).
+  - The tree parser now requires every group, GRAPH, OPTIONAL, MINUS and EXISTS body to be closed by its `}`; it used to tolerate a missing one. That exposed a latent **query** bug: the tree's triple block did not handle `,` object lists ([79] ObjectList), so it stopped at the `,` and silently dropped the rest of the group (`{ ?s :p ?a, ?b . ?s :q ?c }` lost `?s :q ?c`). W3C `constructwhere03` had passed by accident. Fixed (`EmitObjectListTail`) and covered by a SELECT and an Update test.
+  - The `SparqlParser.PatternTree.cs` header is corrected (decision 5).
+- **Evaluate.** `UpdateExecutor.EvaluateWhere` runs `TreeJoinExecutor.Evaluate` over the recorded offset. The dataset is USING / USING NAMED when present; otherwise WITH is the default graph and every named graph stays accessible; otherwise the store's default graph. Modify and DELETE WHERE share it. All six routes listed in decision 2 are deleted, along with the synthesized `Query`.
+- **Instantiate.** One `InstantiateTemplate(GraphPattern, MaterializedRow, activeGraph, sink)` serves DELETE, INSERT and DELETE WHERE. A binding becomes a term through the new `LiteralForm.TermForBinding`: an expression result (BIND, a sub-SELECT projection) is carried as a bare lexical form (`"b"` → `b`), so a template must wrap a simple literal in quotes and type a numeric or boolean one. Before this ADR no surviving route produced such a binding, which is why the gap was invisible.
+- **Shared, not copied.**
+  - `QueryExecutor.ResolveDataset` is the one FROM/USING resolver. `QueryExecutor` had two copies that had drifted: the `QueryBuffer` constructor did not expand prefixed dataset IRIs.
+  - `TreeJoinExecutor.ResolveTrigramCandidates` and a tree-based `FilterAnalyzer.DetectTextMatchFilters` replace the legacy-`GraphPattern` detector. Queries and Updates both use them, so text:match pre-filtering now applies to an Update WHERE too (risk item 3).
+
+**Validation results**
+
+1. Facade tests: `tests/Mercury.Tests/Sparql/UpdateWherePatternTests.cs`, 31 tests. Before the change, 12 failed: the six table rows, plus OPTIONAL+BIND, USING overriding WITH, a missing `}`, and FILTER in DELETE WHERE. All 31 pass after it.
+2. Equivalence: a Theory compares `SELECT *` row counts with the triples an Update writes, over eight group shapes. All equal.
+3. Conformance: the whole Mercury suite, W3C included, passes (4,756 passed, 7 skipped, 0 failed). Mercury.Solid.Tests passes 25/25.
+4. Stack: smallest thread stack at which an Update succeeds, measured by bisection in child processes (Debug build, macOS arm64):
+
+   | Update | Before | After |
+   |---|---|---|
+   | WITH + 1-triple DELETE | 833 KB | 577 KB |
+   | WITH + 2-triple INSERT | 833 KB | 577 KB |
+   | DELETE WHERE { GRAPH … } | 817 KB | 593 KB |
+   | INSERT with a 100-triple template | 833 KB | 577 KB |
+   | INSERT … WHERE with OPTIONAL nested 9 deep (the parser's limit is 10) | could not parse | 721 KB |
+
+   The worst case, 721 KB, is under the 1 MB Windows default.
+5. Performance (risk item 2): `WITH <g> DELETE { ?s <p> ?o } WHERE { ?s <p> ?o }` over 10,000 matches in a
+   20,000-triple graph, Release build, 3 timed runs after a warm-up: before, median 12.9 s (min 4.3 s); after,
+   median 5.2 s (min 4.6 s). The minimums are equal and the runs are noisy, so there is no regression, and no
+   speed-up is claimed. Both are slow in absolute terms; the time was not attributed (WHERE vs. the delete batch),
+   so that is an open question, not a finding.
+6. Dogfood: passed live over `mercury-mcp` 1.8.22. The `DELETE … INSERT … WHERE { OPTIONAL { GRAPH … } BIND(…) }` rewrite that failed on 2026-10-27 changed the bug node's status from `open` to `fixed` (4 triples affected: 1 deleted, 3 inserted). A VALUES-only and a BIND-only WHERE wrote 3 triples, where before they wrote 0.
+
+**Left for follow-ups (not in this ADR):**
+
+- Queries still locate their WHERE with `FindWhereGroupStart` (decision 4).
+- `TriplePatternScan.CanonicalBoundValue` types a Double-tagged binding as `xsd:double` and passes a bare String through. `TermForBinding` types by lexical form (as `CanonicalizeNumericOrBoolean` does) and quotes a bare String. Converging the scan onto `TermForBinding` belongs to ADR-053's single term-materialization path.
+- An INSERT template's blank node is the same node for every solution (one scope per operation). SPARQL 1.1 Update §3.1.3 asks for a fresh one per solution. This behavior is unchanged here and not yet covered.

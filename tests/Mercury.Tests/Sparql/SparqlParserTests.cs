@@ -735,7 +735,7 @@ public class SparqlParserTests
 
         Assert.Equal(QueryType.DeleteWhere, result.Type);
         Assert.True(result.DeleteTemplate.PatternCount > 0);
-        Assert.True(result.WhereClause.Pattern.PatternCount > 0);
+        Assert.Equal(update.IndexOf('{'), result.WhereGroupStart);
     }
 
     [Fact]
@@ -750,7 +750,7 @@ public class SparqlParserTests
         Assert.Equal(QueryType.Modify, result.Type);
         Assert.True(result.DeleteTemplate.PatternCount > 0);
         Assert.True(result.InsertTemplate.PatternCount > 0);
-        Assert.True(result.WhereClause.Pattern.PatternCount > 0);
+        Assert.Equal(update.LastIndexOf('{'), result.WhereGroupStart);
     }
 
     [Fact]

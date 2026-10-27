@@ -690,6 +690,7 @@ internal sealed class MaterializedRow
 
     public int GetHash(int index) => _hashes[index];
     public ReadOnlySpan<char> GetValue(int index) => _values[index];
+    public BindingValueType GetValueType(int index) => _types[index];
 
     public ReadOnlySpan<char> GetValueByName(ReadOnlySpan<char> name)
     {

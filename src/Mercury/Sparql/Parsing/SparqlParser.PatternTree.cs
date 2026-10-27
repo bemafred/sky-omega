@@ -9,12 +9,11 @@ namespace SkyOmega.Mercury.Sparql.Parsing;
 //
 // "A default graph is also a graph; one path, active-graph as a parameter."
 //
-// This is the future single parse path. It is built ALONGSIDE the shipping flat
-// parser (SparqlParser.Clauses.cs / SparqlParser.cs) and is TEST/HARNESS-ONLY
-// until the Step 4 cutover — the ~4,500 conformance tests keep running through the
-// untouched shipping path. It reuses the shipping leaf-parsers verbatim (ParseTerm,
-// ParsePredicateOrPath, ParseValuesValue) and the cursor primitives (Peek/Advance/
-// SkipWhitespace/PeekSpan/ConsumeKeyword); ONLY the group-structure assembly is new.
+// This is the group grammar every WHERE is evaluated with: a query's (since the ADR-045/047
+// cutover, TreeJoinExecutor runs every query WHERE from this tree) and an Update's (ADR-052:
+// Modify's WHERE and DELETE WHERE's QuadPattern are parsed only here). It reuses the shared
+// leaf-parsers verbatim (ParseTerm, ParsePredicateOrPath, ParseValues) and the cursor
+// primitives (Peek/Advance/SkipWhitespace/PeekSpan/ConsumeKeyword).
 //
 // The win is structural, not behavioural: GRAPH recurses into the SAME group-body
 // parser as everything else, so BIND / VALUES / FILTER / nested groups inside GRAPH
@@ -31,11 +30,11 @@ namespace SkyOmega.Mercury.Sparql.Parsing;
 //   TriplesBlock (';' property-list shorthand; RDF-star quoted triples and blank-node property lists expand
 //     via AddTriplePatternOrExpand; ALL property-path forms ^ / | * + ? ( ) ! carried as the full path span)
 //   FILTER (BrackettedExpression | BuiltInCall) → Filter    |  BIND ( Expr AS Var )         → Bind
-//   VALUES Var '{' … '}' (single-variable form) → ValuesHeader + ValuesEntry
+//   VALUES DataBlock (single- and multi-variable forms) → ValuesHeader carrying the clause span
+//   RDF collections ( '(' a b c ')' ) expand to rdf:first / rdf:rest triples via AddTriplePatternOrExpand
 //
-// STILL DEFERRED (each throws SparqlParseException rather than guessing — to be eliminated before cutover, not
-// left, per ck:lesson-deferral-is-the-divergence): multi-variable VALUES ( '(' ?a ?b ')' … ) and RDF collections
-// ( '(' a b c ')' ).
+// Every group, GRAPH, OPTIONAL, MINUS and EXISTS body must be closed by its '}'; an unclosed one is a syntax
+// error, never a guess (this parser is the only one an Update WHERE passes through).
 // ═══════════════════════════════════════════════════════════════════════════
 
 internal ref partial struct SparqlParser
@@ -110,8 +109,7 @@ internal ref partial struct SparqlParser
         }
 
         SkipWhitespace();
-        if (Peek() == '}')
-            Advance(); // consume '}'
+        ExpectChar('}'); // an unclosed group is a syntax error, not content to guess at
         return header;
     }
 
@@ -276,8 +274,7 @@ internal ref partial struct SparqlParser
         pa.EndGraph(header);
 
         SkipWhitespace();
-        if (Peek() == '}')
-            Advance(); // consume '}'
+        ExpectChar('}'); // an unclosed group is a syntax error, not content to guess at
     }
 
     /// <summary>
@@ -300,8 +297,7 @@ internal ref partial struct SparqlParser
         pa.EndGroupHeader(header);
 
         SkipWhitespace();
-        if (Peek() == '}')
-            Advance(); // consume '}'
+        ExpectChar('}'); // an unclosed group is a syntax error, not content to guess at
     }
 
     /// <summary>
@@ -336,6 +332,7 @@ internal ref partial struct SparqlParser
             throw new SparqlParseException("Incomplete triple pattern - expected object");
 
         EmitTriple(ref pa, subject, predicate, obj, path, pathStart, pathLength);
+        EmitObjectListTail(ref pa, subject, predicate, path, pathStart, pathLength);
 
         // PropertyListNotEmpty ::= Verb ObjectList ( ';' ( Verb ObjectList )? )*
         SkipWhitespace();
@@ -357,10 +354,31 @@ internal ref partial struct SparqlParser
                 throw new SparqlParseException("Incomplete triple pattern - expected object after ';'");
 
             EmitTriple(ref pa, subject, nextPredicate, nextObj, nextPath, nextPathStart, nextPathLength);
+            EmitObjectListTail(ref pa, subject, nextPredicate, nextPath, nextPathStart, nextPathLength);
             SkipWhitespace();
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// [79] ObjectList ::= Object ( ',' Object )* — after the first object, each ',' adds another triple with the same
+    /// subject and verb. Without this the body loop stopped at the ',' and the rest of the group was never parsed.
+    /// </summary>
+    private void EmitObjectListTail(scoped ref PatternArray pa, Term subject, Term predicate, PropertyPath path,
+        int pathStart, int pathLength)
+    {
+        SkipWhitespace();
+        while (Peek() == ',')
+        {
+            Advance(); // consume ','
+            SkipWhitespace();
+            var obj = ParseTerm();
+            if (obj.Length == 0 && obj.Start >= 0)
+                throw new SparqlParseException("Incomplete triple pattern - expected object after ','");
+            EmitTriple(ref pa, subject, predicate, obj, path, pathStart, pathLength);
+            SkipWhitespace();
+        }
     }
 
     /// <summary>
@@ -453,8 +471,8 @@ internal ref partial struct SparqlParser
             ParseGroupBodyTree(ref pa, depth + 1);
             pa.EndExists(header);
             SkipWhitespace();
-            if (Peek() == '}') Advance();
-            if (paren) { SkipWhitespace(); if (Peek() == ')') Advance(); }
+            ExpectChar('}');
+            if (paren) { SkipWhitespace(); ExpectChar(')'); }
             return;
         }
 

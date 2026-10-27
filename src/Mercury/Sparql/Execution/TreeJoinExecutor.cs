@@ -86,6 +86,28 @@ internal sealed class TreeJoinExecutor
         _trigramCandidatesByVar = trigramCandidatesByVar;
     }
 
+    /// <summary>
+    /// ADR-024: the text:match trigram pre-filter for the WHERE tree at <paramref name="root"/> — for each qualifying
+    /// text:match variable (see <see cref="FilterAnalyzer.DetectTextMatchFilters"/>), the candidate object atom IDs
+    /// the tree's scan filters at the index level. Null when no filter qualifies. Shared by queries and Updates.
+    /// </summary>
+    public static Dictionary<string, HashSet<long>>? ResolveTrigramCandidates(QuadStore store, ref PatternArray tree,
+        int root, string source)
+    {
+        var hints = FilterAnalyzer.DetectTextMatchFilters(ref tree, root, source.AsSpan());
+        if (hints == null)
+            return null;
+
+        Dictionary<string, HashSet<long>>? candidatesByVar = null;
+        foreach (var hint in hints)
+        {
+            var candidates = store.QueryTrigramCandidates(hint.SearchTerm.AsSpan());
+            if (candidates.Count > 0)
+                (candidatesByVar ??= new Dictionary<string, HashSet<long>>())[hint.VarName] = new HashSet<long>(candidates);
+        }
+        return candidatesByVar;
+    }
+
     /// <summary>The trigram candidate object atom IDs for a pattern whose object is a text:match variable (simple
     /// forward pattern only — the candidate filter is an object-position pre-filter), or null.</summary>
     private HashSet<long>? ObjectCandidatesFor(in TriplePattern p)

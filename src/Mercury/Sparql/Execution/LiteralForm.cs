@@ -1,6 +1,7 @@
 using System;
 using System.Text;
 using SkyOmega.Mercury.Rdf;
+using SkyOmega.Mercury.Sparql.Types;
 
 namespace SkyOmega.Mercury.Sparql.Execution;
 
@@ -112,6 +113,30 @@ internal static class LiteralForm
             return scratchOwner.AsSpan();
         }
         return token;
+    }
+
+    /// <summary>
+    /// The RDF term a binding denotes, in the stored form. A binding from a triple scan, VALUES or GRAPH is already a
+    /// full term (<c>&lt;iri&gt;</c>, <c>"literal"…</c>, <c>_:b</c>) and is returned verbatim. An expression result
+    /// (BIND, a sub-SELECT projection) carries a bare lexical form: a numeric or boolean one (its tag says so) becomes
+    /// its typed literal, as <see cref="CanonicalizeNumericOrBoolean"/> writes it; any other is a simple literal,
+    /// whose stored form wraps the already-decoded lexical in quotes (ADR-044). Used wherever a binding becomes a
+    /// stored or matched term: a scan seeded by a bound variable, and an Update template (ADR-052).
+    /// </summary>
+    public static ReadOnlySpan<char> TermForBinding(ReadOnlySpan<char> value, BindingValueType type, out string? scratchOwner)
+    {
+        scratchOwner = null;
+        if (type is BindingValueType.Integer or BindingValueType.Double or BindingValueType.Boolean)
+            return CanonicalizeNumericOrBoolean(value, out scratchOwner);
+
+        if (value.Length == 0)
+            return value;
+        char c = value[0];
+        if (c is '<' or '"' || (c == '_' && value.Length > 1 && value[1] == ':'))
+            return value;
+
+        scratchOwner = string.Concat("\"".AsSpan(), value, "\"".AsSpan());
+        return scratchOwner.AsSpan();
     }
 
     /// <summary>
