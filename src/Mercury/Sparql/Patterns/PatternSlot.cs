@@ -1370,55 +1370,6 @@ internal sealed class QueryBuffer : IDisposable
         return template;
     }
 
-    /// <summary>
-    /// Build a GraphPattern from stored data.
-    /// This creates a copy on the heap for operators that still need GraphPattern.
-    /// </summary>
-    public GraphPattern BuildGraphPattern()
-    {
-        ThrowIfDisposed();
-        var gp = new GraphPattern();
-        var patterns = GetPatterns();
-        int tripleIndex = 0;
-
-        for (int i = 0; i < patterns.Count; i++)
-        {
-            var slot = patterns[i];
-            switch (slot.Kind)
-            {
-                case PatternKind.Triple:
-                    var tp = new TriplePattern
-                    {
-                        Subject = new Term { Type = slot.SubjectType, Start = slot.SubjectStart, Length = slot.SubjectLength },
-                        Predicate = new Term { Type = slot.PredicateType, Start = slot.PredicateStart, Length = slot.PredicateLength },
-                        Object = new Term { Type = slot.ObjectType, Start = slot.ObjectStart, Length = slot.ObjectLength },
-                        Path = new PropertyPath { Type = slot.PathKind, Iri = new Term { Start = slot.PathIriStart, Length = slot.PathIriLength } }
-                    };
-                    // Check if this pattern should be optional
-                    if ((OptionalFlags & (1u << tripleIndex)) != 0)
-                        gp.AddOptionalPattern(tp);
-                    else
-                        gp.AddPattern(tp);
-                    tripleIndex++;
-                    break;
-                case PatternKind.Filter:
-                    gp.AddFilter(new FilterExpr { Start = slot.FilterStart, Length = slot.FilterLength });
-                    break;
-                case PatternKind.Bind:
-                    gp.AddBind(new BindExpr
-                    {
-                        ExprStart = slot.BindExprStart,
-                        ExprLength = slot.BindExprLength,
-                        VarStart = slot.BindVarStart,
-                        VarLength = slot.BindVarLength
-                    });
-                    break;
-            }
-        }
-
-        return gp;
-    }
-
     public void Dispose()
     {
         if (_disposed) return;

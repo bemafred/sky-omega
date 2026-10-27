@@ -22,16 +22,13 @@ public partial class QueryExecutorTests
         Store.CommitBatch();
 
         var query = "SELECT * WHERE { GRAPH <http://example.org/graph1> { ?s ?p ?o } }";
-
-        // Use buffer-based constructor to avoid storing large Query struct
-        var buffer = ParseToBuffer(query);
+        var parsed = new SparqlParser(query.AsSpan()).ParseQuery();
 
         Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(Store, query.AsSpan(), buffer);
-            // Use ExecuteToMaterialized() to avoid stack overflow from large QueryResults struct
-            var results = executor.ExecuteToMaterialized();
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsed);
+            var results = executor.Execute();
 
             int count = 0;
             while (results.MoveNext())
@@ -59,12 +56,12 @@ public partial class QueryExecutorTests
 
         // Query default graph - should NOT find Eve
         var query = "SELECT * WHERE { <http://example.org/Eve> ?p ?o }";
-        var buffer = ParseToBuffer(query);
+        var parsed = new SparqlParser(query.AsSpan()).ParseQuery();
 
         Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(Store, query.AsSpan(), buffer);
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsed);
             var results = executor.Execute();
 
             int count = 0;
@@ -92,13 +89,13 @@ public partial class QueryExecutorTests
         Store.CommitBatch();
 
         var query = "SELECT ?name WHERE { GRAPH <http://example.org/graph3> { <http://example.org/Frank> <http://xmlns.com/foaf/0.1/name> ?name } }";
-        var buffer = ParseToBuffer(query);
+        var parsed = new SparqlParser(query.AsSpan()).ParseQuery();
 
         Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(Store, query.AsSpan(), buffer);
-            var results = executor.ExecuteToMaterialized();
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsed);
+            var results = executor.Execute();
 
             var names = new List<string>();
             while (results.MoveNext())
@@ -128,13 +125,13 @@ public partial class QueryExecutorTests
         Store.CommitBatch();
 
         var query = "SELECT ?name ?age WHERE { GRAPH <http://example.org/graph4> { ?person <http://xmlns.com/foaf/0.1/name> ?name . ?person <http://xmlns.com/foaf/0.1/age> ?age } }";
-        var buffer = ParseToBuffer(query);
+        var parsed = new SparqlParser(query.AsSpan()).ParseQuery();
 
         Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(Store, query.AsSpan(), buffer);
-            var results = executor.ExecuteToMaterialized();
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsed);
+            var results = executor.Execute();
 
             int count = 0;
             while (results.MoveNext())
@@ -161,13 +158,13 @@ public partial class QueryExecutorTests
     public void Execute_GraphClause_NonExistentGraph_ReturnsEmpty()
     {
         var query = "SELECT * WHERE { GRAPH <http://example.org/nonexistent> { ?s ?p ?o } }";
-        var buffer = ParseToBuffer(query);
+        var parsed = new SparqlParser(query.AsSpan()).ParseQuery();
 
         Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(Store, query.AsSpan(), buffer);
-            var results = executor.ExecuteToMaterialized();
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsed);
+            var results = executor.Execute();
 
             int count = 0;
             while (results.MoveNext())
@@ -195,13 +192,13 @@ public partial class QueryExecutorTests
         Store.CommitBatch();
 
         var query = "SELECT ?g ?s ?name WHERE { GRAPH ?g { ?s <http://xmlns.com/foaf/0.1/name> ?name } }";
-        var buffer = ParseToBuffer(query);
+        var parsed = new SparqlParser(query.AsSpan()).ParseQuery();
 
         Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(Store, query.AsSpan(), buffer);
-            var results = executor.ExecuteToMaterialized();
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsed);
+            var results = executor.Execute();
 
             var foundGraphs = new HashSet<string>();
             var foundNames = new HashSet<string>();
@@ -240,13 +237,13 @@ public partial class QueryExecutorTests
         Store.CommitBatch();
 
         var query = "SELECT ?g WHERE { GRAPH ?g { ?s <http://xmlns.com/foaf/0.1/name> \"Kate\" } }";
-        var buffer = ParseToBuffer(query);
+        var parsed = new SparqlParser(query.AsSpan()).ParseQuery();
 
         Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(Store, query.AsSpan(), buffer);
-            var results = executor.ExecuteToMaterialized();
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsed);
+            var results = executor.Execute();
 
             var graphs = new List<string>();
             while (results.MoveNext())
@@ -276,13 +273,13 @@ public partial class QueryExecutorTests
         Store.CommitBatch();
 
         var query = "SELECT ?g ?s WHERE { GRAPH ?g { ?s ?p ?o } }";
-        var buffer = ParseToBuffer(query);
+        var parsed = new SparqlParser(query.AsSpan()).ParseQuery();
 
         Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(Store, query.AsSpan(), buffer);
-            var results = executor.ExecuteToMaterialized();
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsed);
+            var results = executor.Execute();
 
             var foundGraphs = new HashSet<string>();
             while (results.MoveNext())
@@ -314,13 +311,13 @@ public partial class QueryExecutorTests
         Store.CommitBatch();
 
         var query = "SELECT ?g ?name ?age WHERE { GRAPH ?g { ?person <http://xmlns.com/foaf/0.1/name> ?name . ?person <http://xmlns.com/foaf/0.1/age> ?age } }";
-        var buffer = ParseToBuffer(query);
+        var parsed = new SparqlParser(query.AsSpan()).ParseQuery();
 
         Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(Store, query.AsSpan(), buffer);
-            var results = executor.ExecuteToMaterialized();
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsed);
+            var results = executor.Execute();
 
             int count = 0;
             while (results.MoveNext())
@@ -362,13 +359,13 @@ public partial class QueryExecutorTests
             GRAPH <http://example.org/namesGraph> { ?person <http://xmlns.com/foaf/0.1/name> ?name }
             GRAPH <http://example.org/agesGraph> { ?person <http://xmlns.com/foaf/0.1/age> ?age }
         }";
-        var buffer = ParseToBuffer(query);
+        var parsed = new SparqlParser(query.AsSpan()).ParseQuery();
 
         Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(Store, query.AsSpan(), buffer);
-            var results = executor.ExecuteToMaterialized();
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsed);
+            var results = executor.Execute();
 
             var found = new List<(string name, string age)>();
             while (results.MoveNext())
@@ -406,13 +403,13 @@ public partial class QueryExecutorTests
             GRAPH <http://example.org/labelsGraph> { ?item <http://example.org/label> ?label }
             GRAPH ?g { ?item <http://example.org/price> ?price }
         }";
-        var buffer = ParseToBuffer(query);
+        var parsed = new SparqlParser(query.AsSpan()).ParseQuery();
 
         Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(Store, query.AsSpan(), buffer);
-            var results = executor.ExecuteToMaterialized();
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsed);
+            var results = executor.Execute();
 
             var found = new List<(string g, string label, string price)>();
             while (results.MoveNext())
@@ -455,13 +452,13 @@ public partial class QueryExecutorTests
             GRAPH <http://example.org/graphA> { ?s <http://example.org/p> ?v1 }
             GRAPH <http://example.org/graphB> { ?s <http://example.org/q> ?v2 }
         }";
-        var buffer = ParseToBuffer(query);
+        var parsed = new SparqlParser(query.AsSpan()).ParseQuery();
 
         Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(Store, query.AsSpan(), buffer);
-            var results = executor.ExecuteToMaterialized();
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsed);
+            var results = executor.Execute();
 
             int count = 0;
             while (results.MoveNext())
@@ -480,7 +477,7 @@ public partial class QueryExecutorTests
 
     #endregion
 
-    // ADR-047 B2: FROM (default-graph dataset) runs through the unified tree. These exercise ExecuteToMaterialized
+    // ADR-047 B2: FROM (default-graph dataset) runs through the unified tree. These exercise Execute()
     // (which routes FROM to the tree — _defaultGraphs reach the TreeJoinExecutor, whose default-context scan unions the
     // FROM graphs), NOT the dead ExecuteFromToMaterialized / CrossGraphMultiPatternScan slot path. The cutover IS the
     // test: certifying the new path, including the multi-pattern cross-graph join (Execute_FromWithJoin).
@@ -504,7 +501,7 @@ public partial class QueryExecutorTests
         try
         {
             using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
-            var results = executor.ExecuteToMaterialized();
+            var results = executor.Execute();
 
             var subjects = new List<string>();
             while (results.MoveNext())
@@ -544,7 +541,7 @@ public partial class QueryExecutorTests
         try
         {
             using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
-            var results = executor.ExecuteToMaterialized();
+            var results = executor.Execute();
 
             var subjects = new HashSet<string>();
             while (results.MoveNext())
@@ -604,13 +601,13 @@ public partial class QueryExecutorTests
                       FROM NAMED <http://example.org/restrictGraph1>
                       FROM NAMED <http://example.org/restrictGraph2>
                       WHERE { GRAPH ?g { ?s <http://example.org/type> ?type } }";
-        var buffer = ParseToBuffer(query);
+        var parsed = new SparqlParser(query.AsSpan()).ParseQuery();
 
         Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(Store, query.AsSpan(), buffer);
-            var results = executor.ExecuteToMaterialized();
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsed);
+            var results = executor.Execute();
 
             var graphs = new HashSet<string>();
             var items = new HashSet<string>();
@@ -697,7 +694,7 @@ public partial class QueryExecutorTests
         try
         {
             using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
-            var results = executor.ExecuteToMaterialized();
+            var results = executor.Execute();
 
             var subjects = new HashSet<string>();
             while (results.MoveNext())
@@ -739,7 +736,7 @@ public partial class QueryExecutorTests
         try
         {
             using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
-            var results = executor.ExecuteToMaterialized();
+            var results = executor.Execute();
 
             var foundJoin = false;
             while (results.MoveNext())
@@ -820,9 +817,7 @@ SELECT * WHERE {
             Assert.Equal(0, executor.BufferTriplePatternCount);
             Assert.False(executor.BufferHasSubQueries, "Executor buffer should not have subqueries");
 
-            // Use the specialized GRAPH+EXISTS method that returns lightweight MaterializedQueryResults
-            // to avoid the ~22KB QueryResults struct on the stack
-            var results = executor.ExecuteToMaterialized();
+            var results = executor.Execute();
 
             var subjects = new System.Collections.Generic.List<string>();
             while (results.MoveNext())
@@ -913,13 +908,13 @@ SELECT ?s WHERE {
         ?a <http://example/pred> <http://example/obj>
     }
 }";
-        var bufferNoMinus = ParseToBuffer(queryNoMinus);
+        var parsedNoMinus = new SparqlParser(queryNoMinus.AsSpan()).ParseQuery();
 
         Store.AcquireReadLock();
         try
         {
-            using var executorNoMinus = new QueryExecutor(Store, queryNoMinus.AsSpan(), bufferNoMinus);
-            var resultsNoMinus = executorNoMinus.ExecuteToMaterialized();
+            using var executorNoMinus = new QueryExecutor(Store, queryNoMinus.AsSpan(), parsedNoMinus);
+            var resultsNoMinus = executorNoMinus.Execute();
 
             int count = 0;
             while (resultsNoMinus.MoveNext())
@@ -944,13 +939,13 @@ SELECT ?s WHERE {
         }
     }
 }";
-        var buffer = ParseToBuffer(query);
+        var parsed = new SparqlParser(query.AsSpan()).ParseQuery();
 
         Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(Store, query.AsSpan(), buffer);
-            var results = executor.ExecuteToMaterialized();
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsed);
+            var results = executor.Execute();
 
             int count = 0;
             while (results.MoveNext())

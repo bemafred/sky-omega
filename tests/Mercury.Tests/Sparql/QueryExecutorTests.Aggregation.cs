@@ -831,13 +831,11 @@ public partial class QueryExecutorTests
         var simpleQuery = @"SELECT ?s ?o WHERE { ?s <http://example.org/val> ?o }";
         var simpleParser = new SparqlParser(simpleQuery.AsSpan());
         var simpleParsed = simpleParser.ParseQuery();
-
-        // Use ExecuteToMaterialized() to avoid stack overflow from ~22KB QueryResults struct
         Store.AcquireReadLock();
         try
         {
             var simpleExecutor = new QueryExecutor(Store, simpleQuery.AsSpan(), simpleParsed);
-            var simpleResults = simpleExecutor.ExecuteToMaterialized();
+            var simpleResults = simpleExecutor.Execute();
             var rows = new List<string>();
             while (simpleResults.MoveNext())
             {
@@ -868,8 +866,6 @@ public partial class QueryExecutorTests
         Assert.Equal(AggregateFunction.Count, agg.Function);
         Assert.True(agg.Distinct);
 
-        // Note: Aggregation queries require Execute() not ExecuteToMaterialized()
-        // because MaterializedQueryResults doesn't support GROUP BY / aggregation
         Store.AcquireReadLock();
         try
         {

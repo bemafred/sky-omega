@@ -185,47 +185,6 @@ internal partial class QueryExecutor : IDisposable
     }
 
     /// <summary>
-    /// Alternative constructor that takes a pre-allocated QueryBuffer directly.
-    /// The caller transfers ownership of the buffer to the executor.
-    /// </summary>
-    internal QueryExecutor(QuadStore store, ReadOnlySpan<char> source, QueryBuffer buffer)
-        : this(store, source, buffer, null, null) { }
-
-    internal QueryExecutor(QuadStore store, ReadOnlySpan<char> source, QueryBuffer buffer,
-        ISparqlServiceExecutor? serviceExecutor)
-        : this(store, source, buffer, serviceExecutor, null) { }
-
-    internal QueryExecutor(QuadStore store, ReadOnlySpan<char> source, QueryBuffer buffer,
-        ISparqlServiceExecutor? serviceExecutor, IBufferManager? bufferManager)
-    {
-        _store = store;
-        _source = source.ToString();
-        _buffer = buffer;
-        _cachedPattern = buffer.BuildGraphPattern();  // Cache for scans
-        _bufferManager = bufferManager ?? PooledBufferManager.Shared;
-        _stringBuffer = _bufferManager.Rent<char>(1024).Array!;  // Pooled buffer for string operations
-        _serviceExecutor = serviceExecutor;
-        _maxJoinDepth = DefaultMaxJoinDepth;  // Use default join depth limit
-
-        // Extract temporal parameters from buffer
-        _temporalMode = buffer.TemporalMode;
-        if (_temporalMode == TemporalQueryMode.AsOf)
-        {
-            var timeStr = source.Slice(buffer.TimeStartStart, buffer.TimeStartLength);
-            _asOfTime = ParseDateTimeOffset(timeStr);
-        }
-        else if (_temporalMode == TemporalQueryMode.During)
-        {
-            var startStr = source.Slice(buffer.TimeStartStart, buffer.TimeStartLength);
-            var endStr = source.Slice(buffer.TimeEndStart, buffer.TimeEndLength);
-            _rangeStart = ParseDateTimeOffset(startStr);
-            _rangeEnd = ParseDateTimeOffset(endStr);
-        }
-
-        ResolveDataset(buffer.Datasets, source, _prefixMappings, out _defaultGraphs, out _namedGraphs);
-    }
-
-    /// <summary>
     /// Resolve a dataset clause list — a query's FROM / FROM NAMED or an Update's USING / USING NAMED — into the
     /// tree executor's graph sets (prefixed names expanded against <paramref name="prefixes"/>):
     /// <list type="bullet">
@@ -268,16 +227,6 @@ internal partial class QueryExecutor : IDisposable
             _bufferManager.Return(_stringBuffer);
     }
 
-    /// <summary>
-    /// Execute any query and return lightweight materialized results (~200 bytes).
-    /// Use this instead of Execute() to avoid stack overflow from large QueryResults struct (~22KB).
-    /// This method handles all query types: subqueries, GRAPH, SERVICE, FROM, and regular patterns.
-    /// Caller must hold read lock on store.
-    /// </summary>
-    /// <remarks>
-    /// ADR-003: This method follows the Buffer Pattern for stack safety by returning
-    /// MaterializedQueryResults (~200 bytes) instead of QueryResults (~22KB).
-    /// </remarks>
     /// <summary>
     /// Execute the WHERE through the unified tree executor and apply the shared solution-modifier layer. Used by
     /// every path the ADR-045 cutover routes to TreeJoinExecutor: GRAPH-only, VALUES-only, and VALUES + triple
@@ -492,48 +441,6 @@ internal partial class QueryExecutor : IDisposable
         {
             System.Buffers.ArrayPool<byte>.Shared.Return(treeBuffer);
         }
-    }
-
-    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-    internal MaterializedQueryResults ExecuteToMaterialized()
-    {
-        // ADR-047 B1: sub-queries route through the unified tree (SubSelectStep) — see Execute(). GRAPH-only falls into
-        // the GRAPH branch below; a sub-SELECT joined with outer triples falls through to the regular tree route.
-
-        // Check for GRAPH clauses (no top-level patterns)
-        if (_buffer.HasGraph && _buffer.TriplePatternCount == 0)
-        {
-            // ADR-045 cutover: the unified zero-GC tree executor (see ExecuteGraphViaTree).
-            return WrapResultsAsMaterialized(ExecuteGraphViaTree());
-        }
-
-        // ADR-047 B2/B3: FROM (default-graph dataset) and SERVICE (federation) materialize through the unified tree too.
-        // _defaultGraphs reaches the TreeJoinExecutor (see ExecuteGraphViaTree), whose default-context scan unions the
-        // FROM graphs; a SERVICE clause is a ServiceHeader the tree's ServiceStep evaluates against the injected
-        // ISparqlServiceExecutor and joins. The old separate FROM/SERVICE/cross-graph executor paths are deleted, as is
-        // the temp-store ServiceMaterializer (ADR-048 federation = the tree's bound-join, not a second join-back).
-
-
-        // ADR-047 A3: the regular (non-carve-out) WHERE materializes through the unified tree — identical to the GRAPH
-        // case above (WrapResultsAsMaterialized over ExecuteGraphViaTree). The tree has already applied the BGP join,
-        // FILTER and (NOT) EXISTS; MaterializedQueryResults applies LIMIT / OFFSET / DISTINCT. This is the test-only
-        // materialized entry (QueryExecutorTests); production SELECT goes through Execute(). The old
-        // ExecuteRegularPatternToMaterialized is now dead — deleted in phase C.
-        return WrapResultsAsMaterialized(ExecuteGraphViaTree());
-    }
-
-    /// <summary>
-    /// Helper to wrap List&lt;MaterializedRow&gt; into MaterializedQueryResults.
-    /// </summary>
-    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-    private MaterializedQueryResults WrapResultsAsMaterialized(List<MaterializedRow>? results)
-    {
-        if (results == null || results.Count == 0)
-            return MaterializedQueryResults.Empty();
-
-        var bindings = new Binding[16];
-        return new MaterializedQueryResults(results, bindings, _stringBuffer,
-            _buffer.LimitOffset, _buffer.SelectDistinct);
     }
 
     /// <summary>The store's result-row cap (<c>StorageOptions.MaxResultRows</c>; 0 = unbounded) — the drain loops

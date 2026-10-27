@@ -30,19 +30,6 @@ public partial class QueryExecutorTests : PooledStoreTestBase
         Store.AddCurrentBatched("<http://example.org/Charlie>", "<http://xmlns.com/foaf/0.1/age>", "\"35\"^^<http://www.w3.org/2001/XMLSchema#integer>");
         Store.CommitBatch();
     }
-
-    /// <summary>
-    /// Parse a query directly to QueryBuffer, avoiding storage of large Query struct on stack.
-    /// Uses [MethodImpl(NoInlining)] to ensure Query is in a separate stack frame that gets cleaned up.
-    /// </summary>
-    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-    private static SkyOmega.Mercury.Sparql.Patterns.QueryBuffer ParseToBuffer(string query)
-    {
-        var parser = new SparqlParser(query.AsSpan());
-        var parsedQuery = parser.ParseQuery();
-        return SkyOmega.Mercury.Sparql.Patterns.QueryBufferAdapter.FromQuery(in parsedQuery, query.AsSpan());
-    }
-
     [Fact]
     public void Execute_SinglePatternAllVariables_ReturnsAllTriples()
     {

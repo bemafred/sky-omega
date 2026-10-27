@@ -63,7 +63,7 @@ public partial class QueryExecutorTests
         try
         {
             using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
-            var results = executor.ExecuteToMaterialized();
+            var results = executor.Execute();
 
             var persons = new List<string>();
             while (results.MoveNext())
@@ -100,7 +100,7 @@ public partial class QueryExecutorTests
         try
         {
             using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
-            var results = executor.ExecuteToMaterialized();
+            var results = executor.Execute();
 
             int count = 0;
             while (results.MoveNext())
@@ -133,7 +133,7 @@ public partial class QueryExecutorTests
         try
         {
             using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
-            var results = executor.ExecuteToMaterialized();
+            var results = executor.Execute();
 
             int count = 0;
             while (results.MoveNext())
@@ -162,7 +162,7 @@ public partial class QueryExecutorTests
         try
         {
             using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
-            var results = executor.ExecuteToMaterialized();
+            var results = executor.Execute();
 
             int count = 0;
             while (results.MoveNext())
@@ -191,7 +191,7 @@ public partial class QueryExecutorTests
         try
         {
             using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
-            var results = executor.ExecuteToMaterialized();
+            var results = executor.Execute();
 
             while (results.MoveNext())
             {
@@ -228,7 +228,7 @@ public partial class QueryExecutorTests
         try
         {
             using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
-            var results = executor.ExecuteToMaterialized();
+            var results = executor.Execute();
 
             var names = new List<string>();
             while (results.MoveNext())
@@ -269,7 +269,7 @@ public partial class QueryExecutorTests
         try
         {
             using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
-            var results = executor.ExecuteToMaterialized();
+            var results = executor.Execute();
 
             var persons = new List<string>();
             while (results.MoveNext())
@@ -316,7 +316,7 @@ public partial class QueryExecutorTests
         try
         {
             using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
-            var results = executor.ExecuteToMaterialized();
+            var results = executor.Execute();
 
             var knowers = new List<string>();
             while (results.MoveNext())
@@ -355,7 +355,7 @@ public partial class QueryExecutorTests
         try
         {
             using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
-            var results = executor.ExecuteToMaterialized();
+            var results = executor.Execute();
 
             var resultList = new List<(string person, string age)>();
             while (results.MoveNext())
@@ -400,7 +400,7 @@ public partial class QueryExecutorTests
         try
         {
             using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
-            var results = executor.ExecuteToMaterialized();
+            var results = executor.Execute();
 
             var resultList = new List<(string person, string age)>();
             while (results.MoveNext())
@@ -445,7 +445,7 @@ public partial class QueryExecutorTests
         try
         {
             using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
-            var results = executor.ExecuteToMaterialized();
+            var results = executor.Execute();
 
             var resultList = new List<string>();
             while (results.MoveNext())
@@ -482,7 +482,7 @@ public partial class QueryExecutorTests
         try
         {
             using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
-            var results = executor.ExecuteToMaterialized();
+            var results = executor.Execute();
 
             int count = 0;
             while (results.MoveNext())
@@ -515,7 +515,7 @@ public partial class QueryExecutorTests
         try
         {
             using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
-            var results = executor.ExecuteToMaterialized();
+            var results = executor.Execute();
 
             var resultList = new List<(string person, string name, string age)>();
             while (results.MoveNext())
@@ -569,7 +569,7 @@ public partial class QueryExecutorTests
         try
         {
             using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
-            var results = executor.ExecuteToMaterialized();
+            var results = executor.Execute();
 
             var found = new List<(string employee, string nick, string sal)>();
             while (results.MoveNext())
@@ -630,7 +630,7 @@ public partial class QueryExecutorTests
         try
         {
             using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
-            var results = executor.ExecuteToMaterialized();
+            var results = executor.Execute();
 
             var found = new List<(string emp, string name, string label)>();
             while (results.MoveNext())
@@ -684,7 +684,7 @@ public partial class QueryExecutorTests
         try
         {
             using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
-            var results = executor.ExecuteToMaterialized();
+            var results = executor.Execute();
 
             int count = 0;
             var bindingsInfo = new List<string>();
@@ -750,7 +750,7 @@ public partial class QueryExecutorTests
             Assert.False(subSelect.Select.Distinct, "Removed DISTINCT to avoid GetHashCode issue");
 
             using var executor = new QueryExecutor(Store, query.AsSpan(), parsed);
-            var results = executor.ExecuteToMaterialized();
+            var results = executor.Execute();
 
             var terms = new HashSet<string>();
             while (results.MoveNext())
@@ -812,10 +812,8 @@ public partial class QueryExecutorTests
             // Verify EXISTS filter is parsed into ExistsFilter (not FilterExpr)
             var outerPattern = parsed.WhereClause.Pattern;
             Assert.True(outerPattern.HasExists, "EXISTS should be parsed into ExistsFilter");
-
-            // Use ExecuteToMaterialized() to avoid stack overflow from ~22KB QueryResults struct
             using var executor = new QueryExecutor(Store, query.AsSpan(), parsed);
-            var results = executor.ExecuteToMaterialized();
+            var results = executor.Execute();
 
             var xValues = new List<string>();
             while (results.MoveNext())
@@ -910,7 +908,7 @@ public partial class QueryExecutorTests
 
             // Now test through QueryExecutor
             using var doubleExecutor = new QueryExecutor(Store, doubleNestedQuery.AsSpan(), doubleParsed);
-            var doubleResults = doubleExecutor.ExecuteToMaterialized();
+            var doubleResults = doubleExecutor.Execute();
             int doubleCount = 0;
             while (doubleResults.MoveNext()) doubleCount++;
             doubleResults.Dispose();
@@ -947,9 +945,8 @@ public partial class QueryExecutorTests
             var fullParser = new SparqlParser(fullQuery.AsSpan());
             var fullParsed = fullParser.ParseQuery();
 
-            // Use ExecuteToMaterialized (the tree) to avoid stack overflow
             using var fullExecutor = new QueryExecutor(Store, fullQuery.AsSpan(), fullParsed);
-            var fullResults = fullExecutor.ExecuteToMaterialized();
+            var fullResults = fullExecutor.Execute();
 
             var rows = new List<(string x, string y)>();
             while (fullResults.MoveNext())
@@ -1003,7 +1000,7 @@ public partial class QueryExecutorTests
 
             // Execute
             using var executor = new QueryExecutor(Store, singleQuery.AsSpan(), parsed);
-            var results = executor.ExecuteToMaterialized();
+            var results = executor.Execute();
             int count = 0;
             while (results.MoveNext())
             {
@@ -1199,12 +1196,10 @@ public partial class QueryExecutorTests
                   }
                 } ORDER BY ?L
                 """;
-
-            // Use ExecuteToMaterialized() to avoid stack overflow from ~22KB QueryResults struct
             var fullParser = new SparqlParser(fullQuery.AsSpan());
             var fullParsed = fullParser.ParseQuery();
             using var fullExecutor = new QueryExecutor(Store, fullQuery.AsSpan(), fullParsed);
-            var fullResults = fullExecutor.ExecuteToMaterialized();
+            var fullResults = fullExecutor.Execute();
 
             var labels = new List<string>();
             while (fullResults.MoveNext())
@@ -1302,12 +1297,10 @@ public partial class QueryExecutorTests
                     {select * where {graph ?g {?x ?p ?y}}}
                 }
                 """;
-
-            // Use ExecuteToMaterialized() to avoid stack overflow from ~22KB QueryResults struct
             var parser = new SparqlParser(query.AsSpan());
             var parsed = parser.ParseQuery();
             using var executor = new QueryExecutor(Store, query.AsSpan(), parsed);
-            var results = executor.ExecuteToMaterialized();
+            var results = executor.Execute();
 
             var xValues = new List<string>();
             while (results.MoveNext())
@@ -1365,7 +1358,7 @@ SELECT ?g ?c WHERE {
         try
         {
             using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
-            var results = executor.ExecuteToMaterialized();
+            var results = executor.Execute();
 
             var rows = new List<(string g, string c)>();
             while (results.MoveNext())
