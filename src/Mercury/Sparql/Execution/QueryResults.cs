@@ -424,13 +424,9 @@ internal sealed class GroupedRow
     // Aggregate accumulators
     private readonly long[] _counts;
     private readonly double[] _sums;
-    private readonly double[] _mins;
-    private readonly double[] _maxes;
     private readonly decimal[] _decimalSums;    // For precise decimal arithmetic
-    private readonly decimal[] _decimalMins;
-    private readonly decimal[] _decimalMaxes;
-    private readonly string?[] _minTerms;   // MIN/MAX keep the winning value's ORIGINAL term (type fidelity) — re-formatting
-    private readonly string?[] _maxTerms;   // to xsd:decimal broke a join on the result (W3C sq08: ?x ex:p MAX(?y)).
+    private readonly string?[] _minTerms;   // MIN/MAX keep the winning term itself, ordered as ORDER BY orders it
+    private readonly string?[] _maxTerms;   // (§18.5.1.4–5); re-formatting it broke a join on the result (W3C sq08).
     private readonly bool[] _useDecimal;        // True if all values are decimal (not double/float)
     private readonly HashSet<string>?[] _distinctSets;
     private readonly List<string>?[] _concatValues;  // For GROUP_CONCAT
@@ -470,11 +466,7 @@ internal sealed class GroupedRow
         _aggExpressions = new string?[_aggCount];
         _counts = new long[_aggCount];
         _sums = new double[_aggCount];
-        _mins = new double[_aggCount];
-        _maxes = new double[_aggCount];
         _decimalSums = new decimal[_aggCount];
-        _decimalMins = new decimal[_aggCount];
-        _decimalMaxes = new decimal[_aggCount];
         _minTerms = new string?[_aggCount];
         _maxTerms = new string?[_aggCount];
         _useDecimal = new bool[_aggCount];
@@ -507,10 +499,6 @@ internal sealed class GroupedRow
             _aggExpressions[i] = isSimpleVariable ? null : varName.ToString();
 
             // Initialize accumulators
-            _mins[i] = double.MaxValue;
-            _maxes[i] = double.MinValue;
-            _decimalMins[i] = decimal.MaxValue;
-            _decimalMaxes[i] = decimal.MinValue;
             _useDecimal[i] = true; // Assume decimal until we see a double/float
             if (agg.Distinct)
             {
@@ -653,38 +641,14 @@ internal sealed class GroupedRow
                     }
                     break;
                 case AggregateFunction.Min:
-                    if (hasNumValue)
-                    {
-                        if (_minTerms[i] == null || numValue < _mins[i])
-                        {
-                            _mins[i] = numValue;
-                            _minTerms[i] = valueStr; // the winning value's original term — preserved verbatim
-                        }
-                        if (decimalValue < _decimalMins[i])
-                            _decimalMins[i] = decimalValue;
-                    }
-                    else if (valueStr != null)
-                    {
-                        // Bound but not numeric - SPARQL error propagation
-                        _hasError[i] = true;
-                    }
+                    if (valueStr != null &&
+                        (_minTerms[i] == null || MaterializedRowComparer.CompareValues(valueStr, _minTerms[i]) < 0))
+                        _minTerms[i] = valueStr;
                     break;
                 case AggregateFunction.Max:
-                    if (hasNumValue)
-                    {
-                        if (_maxTerms[i] == null || numValue > _maxes[i])
-                        {
-                            _maxes[i] = numValue;
-                            _maxTerms[i] = valueStr;
-                        }
-                        if (decimalValue > _decimalMaxes[i])
-                            _decimalMaxes[i] = decimalValue;
-                    }
-                    else if (valueStr != null)
-                    {
-                        // Bound but not numeric - SPARQL error propagation
-                        _hasError[i] = true;
-                    }
+                    if (valueStr != null &&
+                        (_maxTerms[i] == null || MaterializedRowComparer.CompareValues(valueStr, _maxTerms[i]) > 0))
+                        _maxTerms[i] = valueStr;
                     break;
                 case AggregateFunction.GroupConcat:
                     // GROUP_CONCAT concatenates the STR() lexical value of each term (SPARQL §18.5.1.7), not the raw
@@ -709,8 +673,7 @@ internal sealed class GroupedRow
             if (_hasError[i])
             {
                 var func = _aggFunctions[i];
-                if (func == AggregateFunction.Sum || func == AggregateFunction.Avg ||
-                    func == AggregateFunction.Min || func == AggregateFunction.Max)
+                if (func == AggregateFunction.Sum || func == AggregateFunction.Avg)
                 {
                     _aggValues[i] = "";
                     continue;
@@ -728,8 +691,7 @@ internal sealed class GroupedRow
                         ? FormatTypedLiteral(FormatDecimal(_decimalSums[i] / _counts[i]), XsdDecimal)
                         : FormatTypedLiteral((_sums[i] / _counts[i]).ToString(CultureInfo.InvariantCulture), XsdDouble))
                     : FormatTypedLiteral("0", XsdInteger),
-                // MIN/MAX return the winning value's ORIGINAL term (type-preserving, SPARQL §18.5.1.4/5), not a numeric
-                // re-format — so MAX(?y) of xsd:integer values stays integer and can join back into the graph (sq08).
+                // MIN/MAX return the winning term itself, so MAX(?y) of xsd:integer values can join back (sq08)
                 AggregateFunction.Min => _minTerms[i] ?? "",
                 AggregateFunction.Max => _maxTerms[i] ?? "",
                 AggregateFunction.GroupConcat => _concatValues[i] != null

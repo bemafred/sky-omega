@@ -762,7 +762,7 @@ internal sealed class MaterializedRowComparer : IComparer<MaterializedRow>
     /// is total; within a group they are ordered by the evaluator's <c>&lt;</c> (the operator mapping, ADR-056), and
     /// two that it doesn't order (equal values such as 1 and 01) by lexical form.
     /// </summary>
-    private static int CompareValues(ReadOnlySpan<char> a, ReadOnlySpan<char> b)
+    internal static int CompareValues(ReadOnlySpan<char> a, ReadOnlySpan<char> b)
     {
         var aType = GetTermType(a);
         var bType = GetTermType(b);

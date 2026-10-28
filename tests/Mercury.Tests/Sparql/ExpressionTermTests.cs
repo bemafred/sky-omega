@@ -294,4 +294,50 @@ public class ExpressionTermTests : PooledStoreTestBase
         Assert.Equal(new[] { "<http://ex/s3>", "<http://ex/s1>", "<http://ex/s2>" }, byString.Rows!.Select(r => r["s"]));
         Assert.Equal(new[] { "<http://ex/s1>", "<http://ex/s3>", "<http://ex/s2>" }, byValue.Rows!.Select(r => r["s"]));
     }
+
+    [Fact]
+    public void MinMax_OfDates_AreTheEarliestAndLatestDate()
+    {
+        // MIN and MAX order by ORDER BY's order (§18.5.1.4–5), so they take dates; through 1.8.29 they read numbers
+        // only, and a date made the aggregate an error. Found recalling memory over the MCP.
+        Store.AddCurrent("<http://ex/s1>", "<http://ex/p>", $"\"2026-10-03\"^^<{Xsd}date>");
+        Store.AddCurrent("<http://ex/s2>", "<http://ex/p>", $"\"2026-10-25\"^^<{Xsd}date>");
+        Store.AddCurrent("<http://ex/s3>", "<http://ex/p>", $"\"2026-05-23\"^^<{Xsd}date>");
+
+        var result = SparqlEngine.Query(Store,
+            "SELECT (MIN(?o) AS ?min) (MAX(?o) AS ?max) WHERE { ?s <http://ex/p> ?o }",
+            TestContext.Current.CancellationToken);
+
+        Assert.True(result.Success, result.ErrorMessage);
+        var row = Assert.Single(result.Rows!);
+        Assert.Equal($"\"2026-05-23\"^^<{Xsd}date>", row["min"]);
+        Assert.Equal($"\"2026-10-25\"^^<{Xsd}date>", row["max"]);
+    }
+
+    [Fact]
+    public void MinMax_OfMixedTerms_FollowTheOrderByOrder()
+    {
+        // IRIs sort before literals, and numbers before strings; the winner is the stored term itself ("02" kept)
+        Store.AddCurrent("<http://ex/s1>", "<http://ex/p>", $"\"02\"^^<{Xsd}integer>");
+        Store.AddCurrent("<http://ex/s2>", "<http://ex/p>", "\"b\"");
+        Store.AddCurrent("<http://ex/s3>", "<http://ex/p>", "<http://ex/o>");
+        Store.AddCurrent("<http://ex/s4>", "<http://ex/q>", $"\"02\"^^<{Xsd}integer>");
+        Store.AddCurrent("<http://ex/s5>", "<http://ex/q>", $"\"10\"^^<{Xsd}integer>");
+
+        var mixed = SparqlEngine.Query(Store,
+            "SELECT (MIN(?o) AS ?min) (MAX(?o) AS ?max) WHERE { ?s <http://ex/p> ?o }",
+            TestContext.Current.CancellationToken);
+        var numbers = SparqlEngine.Query(Store,
+            "SELECT (MIN(?o) AS ?min) (MAX(?o) AS ?max) WHERE { ?s <http://ex/q> ?o }",
+            TestContext.Current.CancellationToken);
+
+        Assert.True(mixed.Success, mixed.ErrorMessage);
+        Assert.True(numbers.Success, numbers.ErrorMessage);
+        var mixedRow = Assert.Single(mixed.Rows!);
+        Assert.Equal("<http://ex/o>", mixedRow["min"]);
+        Assert.Equal("\"b\"", mixedRow["max"]);
+        var numberRow = Assert.Single(numbers.Rows!);
+        Assert.Equal($"\"02\"^^<{Xsd}integer>", numberRow["min"]);
+        Assert.Equal($"\"10\"^^<{Xsd}integer>", numberRow["max"]);
+    }
 }

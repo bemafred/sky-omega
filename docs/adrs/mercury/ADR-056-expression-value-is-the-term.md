@@ -2,7 +2,7 @@
 
 ## Status
 
-**Status:** Accepted — 2026-10-28
+**Status:** Completed — 2026-10-28
 
 Split from [ADR-053](ADR-053-one-rdf-term-one-atom.md), whose D3 ("A binding → its stored form") needed the evaluator
 to keep the term. ADR-053 changes what the store holds and needs a migration, with two questions open (Q2, Q3). This
@@ -193,8 +193,15 @@ Today they compare as text.
 
 ## Implementation (2026-10-28)
 
-D1–D7 are implemented. Validation steps 1–5 pass; step 6 (dogfood through the MCP) waits for a release and a
-reconnect.
+D1–D7 are implemented, and validation steps 1–6 pass. Step 6 ran through the MCP at 1.8.29 (`318f12b`) on
+2026-10-28:
+- `FILTER(?d >= "2026-06-01"^^xsd:date)` over the stored `dcterms:date` values, with `ORDER BY DESC(?d)`, returned the
+  dates by value;
+- `FILTER(isNumeric(?o) && ?o > 1000)` matched stored `xsd:long` and `xsd:decimal` values, in both the full-IRI form
+  and the earlier writers' `^^xsd:long` form (D7).
+- **It found one bug:** `MIN` and `MAX` over dates were empty. They read numbers only, and SPARQL orders them as
+  ORDER BY does (§18.5.1.4–5). Fixed after the release: they now compare with ORDER BY's comparer
+  (`MaterializedRowComparer.CompareValues`). See `ExpressionTermTests.MinMax_*`.
 
 - **One carrier, one reader.** `Value` (`Sparql/Execution/Expressions/Value.cs`) holds the term and owns the operator
   mapping: `Equal`, `Order`, `SameTerm`, `EffectiveBoolean`, `Arithmetic`, `Negate` and `Plus`.
@@ -229,8 +236,8 @@ reconnect.
     as a number.
   - The ADR-049 function-form probe pins the typed results: `7 / 2` is `"3.5"^^xsd:decimal`, `CEIL(1.5)` is
     `"2.0"^^xsd:decimal`, `SECONDS` is a decimal.
-- **Not in scope, and still a copy:** the aggregate path reads a numeric argument with its own
-  `QueryResults.TryParseRdfNumeric`, not `Value`. SUM and AVG still carry decimals as doubles.
+- **Not in scope, and still a copy:** SUM and AVG read a numeric argument with their own
+  `QueryResults.TryParseRdfNumeric`, not `Value`, and carry decimals as doubles. MIN and MAX no longer use it.
 
 ## References
 
