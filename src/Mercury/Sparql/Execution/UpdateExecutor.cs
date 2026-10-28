@@ -39,15 +39,9 @@ internal class UpdateExecutor
     private string? _expandedTerm; // Buffer for expanded prefixed names
     private string? _literalScratch; // ADR-044: scratch owner for canonicalized literals
 
-    // Blank node scope tracking - per-statement bnode identity (W3C spec)
-    // Same bnode label within one statement = same node
-    // Same bnode label across statements = different nodes
+    // Blank-node scope: within one operation's data, or one solution of a template, a label (or a template node)
+    // names one node; every scope mints new nodes (SPARQL 1.1 Update §3.1.1, §3.1.3)
     private Dictionary<string, string>? _bnodeScope;
-
-    // Static counter to ensure globally unique blank node IDs across all operations
-    // Each operation creates a new UpdateExecutor, but they all share this counter
-    private static long s_globalBnodeCounter;
-    private long _bnodeBase;
 
     public UpdateExecutor(QuadStore store, ReadOnlySpan<char> source, UpdateOperation update)
         : this(store, source, update, null)
@@ -60,10 +54,6 @@ internal class UpdateExecutor
         _source = source.ToString();
         _update = update;
         _loadExecutor = loadExecutor;
-
-        // Reserve a unique bnode ID range for this operation
-        // Each operation gets 10 million IDs, ensuring no collisions between operations
-        _bnodeBase = Interlocked.Add(ref s_globalBnodeCounter, 10_000_000);
     }
 
     /// <summary>
@@ -138,28 +128,20 @@ internal class UpdateExecutor
         return new UpdateResult { Success = true, AffectedCount = totalAffected };
     }
 
+    /// <summary>INSERT DATA: the data instantiated once, as a template with no variables, in one batch.</summary>
     private UpdateResult ExecuteInsertData()
     {
-        if (_update.InsertData == null || _update.InsertData.Length == 0)
+        var quads = InstantiateData(_update.InsertData);
+        if (quads.Count == 0)
             return new UpdateResult { Success = true, AffectedCount = 0 };
 
         _store.BeginBatch();
         try
         {
-            foreach (var quad in _update.InsertData)
-            {
-                var subject = GetTermValue(quad.SubjectStart, quad.SubjectLength);
-                var predicate = GetTermValue(quad.PredicateStart, quad.PredicateLength);
-                var obj = GetTermValue(quad.ObjectStart, quad.ObjectLength);
-                var graph = quad.GraphLength > 0
-                    ? ExpandPrefixedName(_source.AsSpan(quad.GraphStart, quad.GraphLength))
-                    : ReadOnlySpan<char>.Empty;
-
-                _store.AddCurrentBatched(subject, predicate, obj, graph);
-            }
+            foreach (var (s, p, o, g) in quads)
+                _store.AddCurrentBatched(s, p, o, g);
             _store.CommitBatch();
-
-            return new UpdateResult { Success = true, AffectedCount = _update.InsertData.Length };
+            return new UpdateResult { Success = true, AffectedCount = quads.Count };
         }
         catch (Exception ex)
         {
@@ -168,29 +150,23 @@ internal class UpdateExecutor
         }
     }
 
+    /// <summary>DELETE DATA: the data instantiated once; the count is the quads that held.</summary>
     private UpdateResult ExecuteDeleteData()
     {
-        if (_update.DeleteData == null || _update.DeleteData.Length == 0)
+        var quads = InstantiateData(_update.DeleteData);
+        if (quads.Count == 0)
             return new UpdateResult { Success = true, AffectedCount = 0 };
 
         _store.BeginBatch();
         try
         {
             var deletedCount = 0;
-            foreach (var quad in _update.DeleteData)
+            foreach (var (s, p, o, g) in quads)
             {
-                var subject = GetTermValue(quad.SubjectStart, quad.SubjectLength);
-                var predicate = GetTermValue(quad.PredicateStart, quad.PredicateLength);
-                var obj = GetTermValue(quad.ObjectStart, quad.ObjectLength);
-                var graph = quad.GraphLength > 0
-                    ? ExpandPrefixedName(_source.AsSpan(quad.GraphStart, quad.GraphLength))
-                    : ReadOnlySpan<char>.Empty;
-
-                if (_store.DeleteCurrentBatched(subject, predicate, obj, graph))
+                if (_store.DeleteCurrentBatched(s, p, o, g))
                     deletedCount++;
             }
             _store.CommitBatch();
-
             return new UpdateResult { Success = true, AffectedCount = deletedCount };
         }
         catch (Exception ex)
@@ -198,6 +174,15 @@ internal class UpdateExecutor
             _store.RollbackBatch();
             return new UpdateResult { Success = false, ErrorMessage = ex.Message };
         }
+    }
+
+    /// <summary>[49] QuadData instantiated with no solution: a template without variables, one blank-node scope.</summary>
+    private List<(string s, string p, string o, string? g)> InstantiateData(TemplateQuad[]? data)
+    {
+        var quads = new List<(string s, string p, string o, string? g)>();
+        BeginBnodeScope();
+        InstantiateTemplate(data, new MaterializedRow(new BindingTable(Span<Binding>.Empty)), activeGraph: null, quads);
+        return quads;
     }
 
     /// <summary>
@@ -258,6 +243,7 @@ internal class UpdateExecutor
         {
             foreach (var row in EvaluateWhere(defaultGraphs, namedGraphs))
             {
+                BeginBnodeScope(); // each solution's template blank nodes are new nodes
                 InstantiateTemplate(_update.DeleteTemplate, row, withGraph, toDelete);
                 InstantiateTemplate(_update.InsertTemplate, row, withGraph, toInsert);
             }
@@ -325,6 +311,14 @@ internal class UpdateExecutor
     /// </summary>
     private string? InstantiateTerm(Term term, MaterializedRow row)
     {
+        // A template node (a collection's or a property list's node) is a blank node of the scope; -1..-8 are rdf: IRIs
+        if (term.Start < 0)
+        {
+            if (Operators.SyntheticTerms.IsListNodeOffset(term.Start))
+                return GetScopedBlankNode("#" + Operators.SyntheticTerms.ListNodeIndex(term.Start).ToString(System.Globalization.CultureInfo.InvariantCulture)).ToString();
+            return Operators.SyntheticTerms.GetSyntheticIri(term.Start).ToString();
+        }
+
         var termSpan = _source.AsSpan(term.Start, term.Length);
 
         if (term.Type == TermType.Variable)
@@ -806,11 +800,7 @@ internal class UpdateExecutor
         return ExpandPrefixedName(term);
     }
 
-    /// <summary>
-    /// Get or create a scoped blank node identifier.
-    /// Same label within one statement = same node.
-    /// Different operations get different IDs via unique _bnodeBase.
-    /// </summary>
+    /// <summary>The node <paramref name="label"/> names in the current scope, minted on its first use.</summary>
     private ReadOnlySpan<char> GetScopedBlankNode(ReadOnlySpan<char> label)
     {
         _bnodeScope ??= new Dictionary<string, string>();
@@ -819,9 +809,8 @@ internal class UpdateExecutor
         if (_bnodeScope.TryGetValue(labelStr, out var existing))
             return existing.AsSpan();
 
-        // Use _bnodeBase + scope count to generate globally unique IDs
-        // _bnodeBase is unique per UpdateExecutor instance
-        var newBnode = $"_:b{_bnodeBase + _bnodeScope.Count}";
+        // A new node: unique across operations, solutions and processes, so it never meets a node already stored
+        var newBnode = "_:g" + Guid.NewGuid().ToString("N");
         _bnodeScope[labelStr] = newBnode;
         _expandedTerm = newBnode; // Use existing buffer field for span lifetime
         return _expandedTerm.AsSpan();

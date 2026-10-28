@@ -299,201 +299,29 @@ internal ref partial struct SparqlParser
         };
     }
 
+    /// <summary>
+    /// [73] ConstructTemplate ::= '{' ConstructTriples? '}'; [74] ConstructTriples ::= TriplesSameSubject ( '.'
+    /// ConstructTriples? )?. Read by the one template grammar Update uses (<see cref="ParseTriplesTemplate"/>), with no
+    /// GRAPH block: collections, property lists, object lists and 'a' as in any template.
+    /// </summary>
     private ConstructTemplate ParseConstructTemplate()
     {
-        var template = new ConstructTemplate();
-        _constructListNodeCounter = 0;  // Reset counter for each template
-
-        // Expect '{'
+        _constructListNodeCounter = 0; // template nodes are numbered per template
         if (Peek() != '{')
             throw new SparqlParseException("Expected '{' in CONSTRUCT template");
-
         Advance();
+
+        var quads = new List<TemplateQuad>();
+        ParseTriplesTemplate(default, quads);
         SkipWhitespace();
-
-        // Parse triple patterns until '}'
-        while (!IsAtEnd() && Peek() != '}')
-        {
-            SkipWhitespace();
-            if (Peek() == '}')
-                break;
-
-            // Parse subject - check for collection first
-            Term subject;
-            if (Peek() == '(')
-            {
-                subject = ParseConstructCollection(ref template);
-            }
-            else
-            {
-                subject = ParseTerm();
-            }
-            if (subject.Type == TermType.Variable && subject.Length == 0)
-                break;
-
-            SkipWhitespace();
-
-            // Parse predicate
-            var predicate = ParseTerm();
-
-            SkipWhitespace();
-
-            // Parse object - check for collection first
-            Term obj;
-            if (Peek() == '(')
-            {
-                obj = ParseConstructCollection(ref template);
-            }
-            else
-            {
-                obj = ParseTerm();
-            }
-
-            template.AddPattern(new TriplePattern
-            {
-                Subject = subject,
-                Predicate = predicate,
-                Object = obj
-            });
-
-            SkipWhitespace();
-
-            // Handle semicolon-separated predicate-object lists (same subject)
-            // Grammar: PropertyListNotEmpty ::= Verb ObjectList ( ';' ( Verb ObjectList )? )*
-            while (Peek() == ';')
-            {
-                Advance(); // Skip ';'
-                SkipWhitespace();
-
-                // Check for empty predicate-object after semicolon (valid: "?s :p ?o ;")
-                if (IsAtEnd() || Peek() == '}' || Peek() == '.')
-                    break;
-
-                // Parse next predicate-object pair with same subject
-                predicate = ParseTerm();
-                SkipWhitespace();
-
-                // Parse object - check for collection first
-                if (Peek() == '(')
-                {
-                    obj = ParseConstructCollection(ref template);
-                }
-                else
-                {
-                    obj = ParseTerm();
-                }
-
-                template.AddPattern(new TriplePattern
-                {
-                    Subject = subject,
-                    Predicate = predicate,
-                    Object = obj
-                });
-
-                SkipWhitespace();
-            }
-
-            // Optional dot separator
-            if (Peek() == '.')
-            {
-                Advance();
-                SkipWhitespace();
-            }
-        }
-
         if (Peek() != '}')
             throw new SparqlParseException("Expected '}' in CONSTRUCT template");
-
         Advance();
+
+        var template = new ConstructTemplate();
+        foreach (var q in quads)
+            template.AddPattern(new TriplePattern { Subject = q.Subject, Predicate = q.Predicate, Object = q.Object });
         return template;
-    }
-
-    /// <summary>
-    /// Parse an RDF collection (list) in CONSTRUCT template and expand to rdf:first/rdf:rest patterns.
-    /// Returns a blank node term representing the list head.
-    /// </summary>
-    private Term ParseConstructCollection(ref ConstructTemplate template)
-    {
-        Advance(); // Skip '('
-        SkipWhitespace();
-
-        // Handle empty collection () = rdf:nil
-        if (Peek() == ')')
-        {
-            Advance();
-            // Return synthetic rdf:nil (offset -8)
-            return new Term { Type = TermType.Iri, Start = -8, Length = 0 };
-        }
-
-        // Generate first blank node for the list head
-        int headNodeIndex = _constructListNodeCounter++;
-        var headNode = new Term { Type = TermType.BlankNode, Start = SyntheticTerms.ListNode(headNodeIndex), Length = 0 };
-        var currentNode = headNode;
-        int currentNodeIndex = headNodeIndex;
-
-        // Parse list items
-        while (!IsAtEnd() && Peek() != ')')
-        {
-            SkipWhitespace();
-            if (Peek() == ')')
-                break;
-
-            // Parse item (could be a nested collection)
-            Term item;
-            if (Peek() == '(')
-            {
-                item = ParseConstructCollection(ref template);
-            }
-            else
-            {
-                item = ParseTerm();
-            }
-
-            // Add rdf:first triple: currentNode rdf:first item
-            // Predicate is synthetic rdf:first (offset -6)
-            template.AddPattern(new TriplePattern
-            {
-                Subject = currentNode,
-                Predicate = new Term { Type = TermType.Iri, Start = -6, Length = 0 },
-                Object = item
-            });
-
-            SkipWhitespace();
-
-            // Check if this is the last item
-            if (Peek() == ')')
-            {
-                // Add rdf:rest rdf:nil triple
-                // Predicate is synthetic rdf:rest (offset -7), Object is synthetic rdf:nil (offset -8)
-                template.AddPattern(new TriplePattern
-                {
-                    Subject = currentNode,
-                    Predicate = new Term { Type = TermType.Iri, Start = -7, Length = 0 },
-                    Object = new Term { Type = TermType.Iri, Start = -8, Length = 0 }
-                });
-            }
-            else
-            {
-                // Create next node and add rdf:rest triple to it
-                int nextNodeIndex = _constructListNodeCounter++;
-                var nextNode = new Term { Type = TermType.BlankNode, Start = SyntheticTerms.ListNode(nextNodeIndex), Length = 0 };
-
-                template.AddPattern(new TriplePattern
-                {
-                    Subject = currentNode,
-                    Predicate = new Term { Type = TermType.Iri, Start = -7, Length = 0 },
-                    Object = nextNode
-                });
-
-                currentNode = nextNode;
-                currentNodeIndex = nextNodeIndex;
-            }
-        }
-
-        if (Peek() == ')')
-            Advance();
-
-        return headNode;
     }
 
     /// <summary>[11] DescribeQuery ::= 'DESCRIBE' ( VarOrIri+ | '*' ) DatasetClause* WhereClause? SolutionModifier</summary>

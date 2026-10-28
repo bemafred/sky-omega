@@ -230,7 +230,7 @@ public class SparqlParserTests
 
         Assert.Equal(QueryType.InsertData, result.Type);
         Assert.Single(result.InsertData);
-        Assert.True(result.InsertData[0].GraphLength > 0);
+        Assert.True(result.InsertData[0].InGraphBlock);
     }
 
     // Regression: prefixed-datatype literal followed by ';' in a PropertyListNotEmpty
@@ -522,7 +522,7 @@ public class SparqlParserTests
 
         Assert.Equal(QueryType.InsertData, result.Type);
         Assert.Single(result.InsertData);
-        Assert.Equal(TermType.Literal, result.InsertData[0].ObjectType);
+        Assert.Equal(TermType.Literal, result.InsertData[0].Object.Type);
     }
 
     [Fact]
@@ -534,7 +534,7 @@ public class SparqlParserTests
 
         Assert.Equal(QueryType.InsertData, result.Type);
         Assert.Single(result.InsertData);
-        Assert.Equal(TermType.BlankNode, result.InsertData[0].SubjectType);
+        Assert.Equal(TermType.BlankNode, result.InsertData[0].Subject.Type);
     }
 
     #endregion

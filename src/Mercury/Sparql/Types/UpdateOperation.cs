@@ -8,9 +8,10 @@ internal struct UpdateOperation
     public QueryType Type;
     public Prologue Prologue;
 
-    // For INSERT DATA / DELETE DATA - inline triple data
-    public QuadData[] InsertData;
-    public QuadData[] DeleteData;
+    // INSERT DATA / DELETE DATA: [49] QuadData, a template without variables, read by the template grammar and
+    // instantiated as a template is
+    public TemplateQuad[] InsertData;
+    public TemplateQuad[] DeleteData;
 
     // For DELETE/INSERT ... WHERE - template patterns ([52] QuadPattern). DELETE WHERE's QuadPattern is its
     // DeleteTemplate as well as its WHERE.

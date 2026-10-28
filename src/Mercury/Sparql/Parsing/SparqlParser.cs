@@ -260,9 +260,39 @@ internal ref partial struct SparqlParser
     /// [29] Update ::= Prologue ( Update1 ( ';' Update )? )?
     /// Returns an array of operations that share the same prologue until a new prologue is encountered.
     /// </summary>
+    /// <summary>
+    /// A blank-node label in INSERT DATA or DELETE DATA names a node of that operation only, so one label may not appear
+    /// in the data of two operations of a request (SPARQL 1.1 Update §19.6, note 10; syntax-update-54). Templates may
+    /// share a label: each operation's template mints its own nodes (insert-where-same-bnode). Adds this operation's
+    /// labels.
+    /// </summary>
+    private readonly void ThrowIfBlankNodeLabelShared(UpdateOperation operation,
+        System.Collections.Generic.HashSet<string> labelsOfEarlierOperations)
+    {
+        var labels = new System.Collections.Generic.HashSet<string>();
+        foreach (var quads in new[] { operation.InsertData, operation.DeleteData })
+        {
+            if (quads == null) continue;
+            foreach (var q in quads)
+            {
+                foreach (var term in new[] { q.Subject, q.Object })
+                {
+                    if (term.IsBlankNode && term.Start >= 0 && term.Length > 2 && _source[term.Start] == '_')
+                        labels.Add(_source.Slice(term.Start, term.Length).ToString());
+                }
+            }
+        }
+        foreach (var label in labels)
+        {
+            if (!labelsOfEarlierOperations.Add(label))
+                throw new SparqlParseException($"Blank node label {label} is used in two operations of one request");
+        }
+    }
+
     public UpdateOperation[] ParseUpdateSequence()
     {
         var operations = new System.Collections.Generic.List<UpdateOperation>();
+        var labelsOfEarlierOperations = new System.Collections.Generic.HashSet<string>();
 
         // Parse the initial prologue ONCE at the start of the update request.
         // Per W3C SPARQL 1.1 Update spec, the prologue applies to the ENTIRE update request,
@@ -310,6 +340,7 @@ internal ref partial struct SparqlParser
             };
 
             operations.Add(operation);
+            ThrowIfBlankNodeLabelShared(operation, labelsOfEarlierOperations);
 
             SkipWhitespace();
 

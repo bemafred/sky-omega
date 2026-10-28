@@ -78,6 +78,42 @@ public class SparqlConformanceTests
     }
 
     [Theory]
+    [MemberData(nameof(GetUpdateSyntaxTests), W3CTestType.PositiveSyntax)]
+    public void Sparql11_PositiveUpdateSyntax(string _, W3CTestCase test)
+    {
+        Assert.SkipUnless(W3CTestContext.IsAvailable, "W3C test suite not available");
+        Assert.SkipUnless(File.Exists(test.ActionPath), $"Test file not found: {test.ActionPath}");
+
+        if (W3CTestContext.ShouldSkip(test.Id, out var reason))
+            Assert.SkipWhen(true, reason);
+
+        var update = File.ReadAllText(test.ActionPath);
+        _output.WriteLine($"Update:\n{update}");
+
+        // Positive Update syntax test: the Update parser reads it without error
+        var operations = new SparqlParser(update.AsSpan()).ParseUpdateSequence();
+        _output.WriteLine($"Parsed {operations.Length} operation(s)");
+    }
+
+    [Theory]
+    [MemberData(nameof(GetUpdateSyntaxTests), W3CTestType.NegativeSyntax)]
+    public void Sparql11_NegativeUpdateSyntax(string _, W3CTestCase test)
+    {
+        Assert.SkipUnless(W3CTestContext.IsAvailable, "W3C test suite not available");
+        Assert.SkipUnless(File.Exists(test.ActionPath), $"Test file not found: {test.ActionPath}");
+
+        if (W3CTestContext.ShouldSkip(test.Id, out var reason))
+            Assert.SkipWhen(true, reason);
+
+        var update = File.ReadAllText(test.ActionPath);
+        _output.WriteLine($"Update:\n{update}");
+
+        // Negative Update syntax test: the Update parser rejects it
+        var exception = Assert.ThrowsAny<Exception>(() => new SparqlParser(update.AsSpan()).ParseUpdateSequence());
+        _output.WriteLine($"Expected error: {exception.Message}");
+    }
+
+    [Theory]
     [MemberData(nameof(GetQueryEvalTests))]
     public async Task Sparql11_QueryEval(string _, W3CTestCase test)
     {
@@ -881,6 +917,21 @@ public class SparqlConformanceTests
             W3CTestSuite.Sparql11Query,
             W3CTestType.NegativeSyntax).GetAwaiter().GetResult();
 
+        foreach (var test in tests)
+        {
+            yield return new object[] { test.DisplayName, test };
+        }
+    }
+
+    /// <summary>The Update syntax tests (syntax-update-1 and -2) of <paramref name="type"/>, run with the Update parser.</summary>
+    public static IEnumerable<object[]> GetUpdateSyntaxTests(W3CTestType type)
+    {
+        if (!W3CTestContext.IsAvailable)
+            throw new InvalidOperationException(
+                $"W3C RDF test suite not found at '{W3CTestContext.TestsRoot}'. " +
+                "Run ./tools/update-submodules.sh (or .\\tools\\update-submodules.ps1) to initialize.");
+
+        var tests = W3CTestContext.LoadTestCasesAsync(W3CTestSuite.Sparql11Update, type).GetAwaiter().GetResult();
         foreach (var test in tests)
         {
             yield return new object[] { test.DisplayName, test };

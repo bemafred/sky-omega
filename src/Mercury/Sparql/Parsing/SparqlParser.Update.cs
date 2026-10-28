@@ -21,7 +21,11 @@ internal ref partial struct SparqlParser
         ConsumeKeyword("DATA");
         SkipWhitespace();
 
-        var quads = ParseQuadData();
+        // [49] QuadData ::= '{' Quads '}': a template without variables, read by the template grammar
+        ExpectChar('{');
+        var quads = ParseQuads();
+        ExpectChar('}');
+        ThrowIfVariables(quads, "INSERT DATA");
 
         return new UpdateOperation
         {
@@ -42,7 +46,11 @@ internal ref partial struct SparqlParser
         ConsumeKeyword("DATA");
         SkipWhitespace();
 
-        var quads = ParseQuadData();
+        ExpectChar('{');
+        var quads = ParseQuads();
+        ExpectChar('}');
+        ThrowIfVariables(quads, "DELETE DATA");
+        ThrowIfBlankNodes(quads, "DELETE DATA");
 
         return new UpdateOperation
         {
@@ -76,6 +84,7 @@ internal ref partial struct SparqlParser
         ExpectChar('{');
         op.DeleteTemplate = ParseQuads();
         ExpectChar('}');
+        ThrowIfBlankNodes(op.DeleteTemplate, "DELETE WHERE");
 
         // The same text is evaluated as a group, so the group grammar must read it to the same end.
         int templateEnd = _position;
@@ -151,6 +160,7 @@ internal ref partial struct SparqlParser
                 throw new SparqlParseException($"Expected '}}' but found '{Peek()}'");
             Advance();
             SkipWhitespace();
+            ThrowIfBlankNodes(op.DeleteTemplate, "a DELETE template");
         }
 
         if (TryConsumeKeyword("INSERT"))
@@ -408,273 +418,6 @@ internal ref partial struct SparqlParser
     }
 
     /// <summary>
-    /// Parse QuadData - triples within { } possibly with GRAPH blocks
-    /// </summary>
-    private QuadData[] ParseQuadData()
-    {
-        var quads = new List<QuadData>();
-
-        ExpectChar('{');
-        SkipWhitespace();
-
-        while (Peek() != '}' && !IsAtEnd())
-        {
-            if (TryConsumeKeyword("GRAPH"))
-            {
-                // GRAPH <iri> { triples } or GRAPH prefix:local { triples }
-                SkipWhitespace();
-                var graphStart = _position;
-                ParseIriOrPrefixedName();
-                var graphLen = _position - graphStart;
-                SkipWhitespace();
-                ExpectChar('{');
-                SkipWhitespace();
-
-                ParseTriplesIntoQuads(quads, graphStart, graphLen);
-
-                SkipWhitespace();
-                ExpectChar('}');
-            }
-            else
-            {
-                // Default graph triples
-                ParseTriplesIntoQuads(quads, 0, 0);
-            }
-
-            SkipWhitespace();
-        }
-
-        ExpectChar('}');
-        return quads.ToArray();
-    }
-
-    /// <summary>
-    /// Parse triples and add them to quads list with the specified graph.
-    /// </summary>
-    private void ParseTriplesIntoQuads(List<QuadData> quads, int graphStart, int graphLen)
-    {
-        while (Peek() != '}' && Peek() != '\0')
-        {
-            // Check for GRAPH keyword (nested or next block)
-            var span = PeekSpan(5);
-            if (span.Length >= 5 && span[..5].Equals("GRAPH", StringComparison.OrdinalIgnoreCase))
-                break;
-
-            // Parse subject
-            var (subStart, subLen, subType) = ParseTermForUpdate();
-            if (subLen == 0) break;
-
-            SkipWhitespace();
-
-            // Parse predicate-object list
-            while (true)
-            {
-                var (predStart, predLen, predType) = ParseTermForUpdate();
-                if (predLen == 0) break;
-
-                SkipWhitespace();
-
-                // Parse object list
-                while (true)
-                {
-                    var (objStart, objLen, objType) = ParseTermForUpdate();
-                    if (objLen == 0)
-                        throw new SparqlParseException("Expected object in triple");
-
-                    quads.Add(new QuadData
-                    {
-                        SubjectStart = subStart,
-                        SubjectLength = subLen,
-                        SubjectType = subType,
-                        PredicateStart = predStart,
-                        PredicateLength = predLen,
-                        PredicateType = predType,
-                        ObjectStart = objStart,
-                        ObjectLength = objLen,
-                        ObjectType = objType,
-                        GraphStart = graphStart,
-                        GraphLength = graphLen
-                    });
-
-                    SkipWhitespace();
-                    if (Peek() == ',')
-                    {
-                        Advance(); // Skip ','
-                        SkipWhitespace();
-                        continue;
-                    }
-                    break;
-                }
-
-                SkipWhitespace();
-                if (Peek() == ';')
-                {
-                    Advance(); // Skip ';'
-                    SkipWhitespace();
-                    // Check if there's another predicate or if we're done
-                    if (Peek() == '.' || Peek() == '}')
-                        break;
-                    continue;
-                }
-                break;
-            }
-
-            SkipWhitespace();
-            if (Peek() == '.')
-            {
-                Advance(); // Skip '.'
-                SkipWhitespace();
-            }
-        }
-    }
-
-    /// <summary>
-    /// Parse a term (IRI, literal, blank node) for Update operations.
-    /// Returns (start, length, type).
-    /// </summary>
-    private (int start, int length, TermType type) ParseTermForUpdate()
-    {
-        SkipWhitespace();
-        var start = _position;
-
-        if (Peek() == '<')
-        {
-            // IRI
-            Advance(); // <
-            while (!IsAtEnd() && Peek() != '>')
-                Advance();
-            if (Peek() == '>') Advance();
-            return (start, _position - start, TermType.Iri);
-        }
-
-        if (Peek() == '"' || Peek() == '\'')
-        {
-            // Literal
-            var quote = Advance();
-            // Check for long literal (""" or ''')
-            if (Peek() == quote)
-            {
-                Advance();
-                if (Peek() == quote)
-                {
-                    // Long literal
-                    Advance();
-                    while (!IsAtEnd())
-                    {
-                        if (Peek() == quote)
-                        {
-                            Advance();
-                            if (Peek() == quote)
-                            {
-                                Advance();
-                                if (Peek() == quote)
-                                {
-                                    Advance();
-                                    break;
-                                }
-                            }
-                        }
-                        else
-                        {
-                            Advance();
-                        }
-                    }
-                }
-                // else empty string ""
-            }
-            else
-            {
-                // Short literal
-                while (!IsAtEnd() && Peek() != quote && Peek() != '\n')
-                {
-                    if (Peek() == '\\') Advance(); // Skip escape
-                    Advance();
-                }
-                if (Peek() == quote) Advance();
-            }
-            // Handle language tag or datatype
-            if (Peek() == '@')
-            {
-                Advance();
-                while (!IsAtEnd() && (char.IsLetterOrDigit(Peek()) || Peek() == '-'))
-                    Advance();
-            }
-            else if (Peek() == '^' && _position + 1 < _source.Length && _source[_position + 1] == '^')
-            {
-                Advance(); Advance(); // ^^
-                // Parse datatype IRI — either full <...> or a PrefixedName like xsd:date.
-                // SPARQL 1.1 Update grammar productions [129] RDFLiteral and [136] iri
-                // both allow PrefixedName in the ^^ slot; the previous code only accepted
-                // <iri> form, which caused the parser to stop mid-literal and misread the
-                // trailing "xsd:date ;" as a new triple. Regression tests pin this behavior.
-                if (Peek() == '<')
-                {
-                    Advance();
-                    while (!IsAtEnd() && Peek() != '>')
-                        Advance();
-                    if (Peek() == '>') Advance();
-                }
-                else if (char.IsLetter(Peek()) || Peek() == ':')
-                {
-                    while (!IsAtEnd() && (char.IsLetterOrDigit(Peek()) || Peek() == '_' || Peek() == '-' || Peek() == ':'))
-                        Advance();
-                }
-            }
-            return (start, _position - start, TermType.Literal);
-        }
-
-        if (Peek() == '_' && _position + 1 < _source.Length && _source[_position + 1] == ':')
-        {
-            // Blank node _:label
-            Advance(); Advance(); // _:
-            while (!IsAtEnd() && (char.IsLetterOrDigit(Peek()) || Peek() == '_' || Peek() == '-'))
-                Advance();
-            return (start, _position - start, TermType.BlankNode);
-        }
-
-        if (VariableName.IsSigil(Peek()))
-        {
-            // Variable
-            Advance();
-            while (!IsAtEnd() && (char.IsLetterOrDigit(Peek()) || Peek() == '_'))
-                Advance();
-            return (start, _position - start, TermType.Variable);
-        }
-
-        if (char.IsLetter(Peek()) || Peek() == ':')
-        {
-            // Prefixed name or keyword
-            while (!IsAtEnd() && (char.IsLetterOrDigit(Peek()) || Peek() == '_' || Peek() == '-' || Peek() == ':'))
-                Advance();
-            return (start, _position - start, TermType.Iri);  // Prefixed names resolve to IRIs
-        }
-
-        if (char.IsDigit(Peek()) || Peek() == '+' || Peek() == '-')
-        {
-            // Numeric literal
-            if (Peek() == '+' || Peek() == '-') Advance();
-            while (!IsAtEnd() && char.IsDigit(Peek()))
-                Advance();
-            if (Peek() == '.')
-            {
-                Advance();
-                while (!IsAtEnd() && char.IsDigit(Peek()))
-                    Advance();
-            }
-            if (Peek() == 'e' || Peek() == 'E')
-            {
-                Advance();
-                if (Peek() == '+' || Peek() == '-') Advance();
-                while (!IsAtEnd() && char.IsDigit(Peek()))
-                    Advance();
-            }
-            return (start, _position - start, TermType.Literal);
-        }
-
-        return (0, 0, TermType.Iri); // No term found
-    }
-
-    /// <summary>
     /// The body of a QuadPattern template (DELETE / INSERT / DELETE WHERE), from after its '{' to before its '}'.
     /// [50] Quads ::= TriplesTemplate? ( QuadsNotTriples '.'? TriplesTemplate? )*
     /// [51] QuadsNotTriples ::= 'GRAPH' VarOrIri '{' TriplesTemplate? '}'
@@ -715,10 +458,13 @@ internal ref partial struct SparqlParser
     /// <summary>
     /// [52] TriplesTemplate ::= TriplesSameSubject ( '.' TriplesTemplate? )?, adding each triple to
     /// <paramref name="quads"/> in <paramref name="graph"/>. Stops before a '}' or a GRAPH keyword.
-    /// [75] TriplesSameSubject ::= VarOrTerm PropertyListNotEmpty
+    /// [75] TriplesSameSubject ::= VarOrTerm PropertyListNotEmpty | TriplesNode PropertyList
     /// [77] PropertyListNotEmpty ::= Verb ObjectList ( ';' ( Verb ObjectList )? )*
     /// [78] Verb ::= VarOrIri | 'a'        [79] ObjectList ::= Object ( ',' Object )*
-    /// A template takes a Verb, not a property path: a path has no single triple to instantiate.
+    /// The one template grammar: Update's DATA and templates, and CONSTRUCT's template. A collection or a blank-node
+    /// property list is a template node (<see cref="Execution.Operators.SyntheticTerms.ListNode"/>), a new blank node
+    /// each time the template is instantiated, with its triples added here. A template takes a Verb, not a property
+    /// path: a path has no single triple to instantiate.
     /// </summary>
     private void ParseTriplesTemplate(Term graph, List<TemplateQuad> quads)
     {
@@ -731,51 +477,133 @@ internal ref partial struct SparqlParser
             if (span.Length >= 5 && span[..5].Equals("GRAPH", StringComparison.OrdinalIgnoreCase))
                 return;
 
-            var subject = ParseTerm();
-            if (subject.Length == 0 && subject.Start >= 0)
+            var written = ParseTerm();
+            if (written.Length == 0 && written.Start >= 0)
                 throw new SparqlParseException($"Expected a triple in the template at position {_position}");
+            var subject = TemplateNode(written, graph, quads);
 
-            // PropertyListNotEmpty
-            while (true)
+            // A TriplesNode may stand alone ([] PropertyList, with PropertyList empty)
+            SkipWhitespace();
+            if (subject.Start < 0 && (IsAtEnd() || Peek() is '.' or '}'))
             {
-                SkipWhitespace();
-                var (verb, path) = ParsePredicateOrPath();
-                if (path.Type != PathType.None)
-                    throw new SparqlParseException($"A property path is not allowed in an Update template (position {_position})");
-                if (verb.Length == 0 && verb.Start >= 0)
-                    throw new SparqlParseException($"Expected a predicate in the template at position {_position}");
-
-                // ObjectList
-                while (true)
-                {
-                    SkipWhitespace();
-                    var obj = ParseTerm();
-                    if (obj.Length == 0 && obj.Start >= 0)
-                        throw new SparqlParseException($"Expected an object in the template at position {_position}");
-                    quads.Add(new TemplateQuad { Subject = subject, Predicate = verb, Object = obj, Graph = graph });
-
-                    SkipWhitespace();
-                    if (Peek() != ',')
-                        break;
-                    Advance();
-                }
-
-                if (Peek() != ';')
-                    break;
-                // ';' may repeat and may end the list: "?s :p ?o ; ; ." and "?s :p ?o ;" are both valid
-                while (Peek() == ';')
-                {
-                    Advance();
-                    SkipWhitespace();
-                }
-                if (IsAtEnd() || Peek() == '.' || Peek() == '}')
-                    break;
+                if (Peek() == '.') Advance();
+                continue;
             }
+
+            ParseTemplatePropertyList(subject, graph, quads);
 
             SkipWhitespace();
             if (Peek() != '.')
                 return;
             Advance();
+        }
+    }
+
+    /// <summary>[77] PropertyListNotEmpty for <paramref name="subject"/>, up to a '.', '}' or ']'.</summary>
+    private void ParseTemplatePropertyList(Term subject, Term graph, List<TemplateQuad> quads)
+    {
+        while (true)
+        {
+            SkipWhitespace();
+            var (verb, path) = ParsePredicateOrPath();
+            if (path.Type != PathType.None)
+                throw new SparqlParseException($"A property path is not allowed in a template (position {_position})");
+            if (verb.Length == 0 && verb.Start >= 0)
+                throw new SparqlParseException($"Expected a predicate in the template at position {_position}");
+
+            // ObjectList
+            while (true)
+            {
+                SkipWhitespace();
+                var written = ParseTerm();
+                if (written.Length == 0 && written.Start >= 0)
+                    throw new SparqlParseException($"Expected an object in the template at position {_position}");
+                var obj = TemplateNode(written, graph, quads);
+                quads.Add(new TemplateQuad { Subject = subject, Predicate = verb, Object = obj, Graph = graph });
+
+                SkipWhitespace();
+                if (Peek() != ',')
+                    break;
+                Advance();
+            }
+
+            if (Peek() != ';')
+                return;
+            // ';' may repeat and may end the list: "?s :p ?o ; ; ." and "?s :p ?o ;" are both valid
+            while (Peek() == ';')
+            {
+                Advance();
+                SkipWhitespace();
+            }
+            if (IsAtEnd() || Peek() is '.' or '}' or ']')
+                return;
+        }
+    }
+
+    /// <summary>
+    /// A template term as instantiated: a collection ( … ) or a blank-node property list [ … ] becomes a new template
+    /// node with its triples added to <paramref name="quads"/>; an empty collection is rdf:nil; any other term is
+    /// itself.
+    /// </summary>
+    private Term TemplateNode(Term term, Term graph, List<TemplateQuad> quads)
+    {
+        bool collection = IsCollection(term);
+        if (!collection && !IsBlankNodePropertyList(term))
+            return term;
+
+        int saved = _position;
+        _position = term.Start + 1; // past '(' or '['
+        SkipWhitespace();
+        Term node;
+        if (collection)
+        {
+            node = Peek() == ')' ? new Term { Type = TermType.Iri, Start = -8, Length = 0 } : NewTemplateNode();
+            var current = node;
+            while (!IsAtEnd() && Peek() != ')')
+            {
+                var item = TemplateNode(ParseTerm(), graph, quads);
+                quads.Add(new TemplateQuad { Subject = current, Predicate = new Term { Type = TermType.Iri, Start = -6, Length = 0 }, Object = item, Graph = graph });
+                SkipWhitespace();
+                var rest = Peek() == ')' ? new Term { Type = TermType.Iri, Start = -8, Length = 0 } : NewTemplateNode();
+                quads.Add(new TemplateQuad { Subject = current, Predicate = new Term { Type = TermType.Iri, Start = -7, Length = 0 }, Object = rest, Graph = graph });
+                current = rest;
+            }
+        }
+        else
+        {
+            node = NewTemplateNode();
+            if (Peek() != ']')
+                ParseTemplatePropertyList(node, graph, quads);
+            SkipWhitespace();
+            if (Peek() != ']')
+                throw new SparqlParseException($"Expected ']' at position {_position}");
+        }
+        _position = saved;
+        return node;
+    }
+
+    /// <summary>A new template node, numbered per request.</summary>
+    private Term NewTemplateNode() =>
+        new() { Type = TermType.BlankNode, Start = Execution.Operators.SyntheticTerms.ListNode(_constructListNodeCounter++), Length = 0 };
+
+    /// <summary>[49] QuadData: a data block holds no variables (SPARQL 1.1 Update §19.6, note 8).</summary>
+    private readonly void ThrowIfVariables(TemplateQuad[] quads, string where)
+    {
+        foreach (var q in quads)
+        {
+            if (q.Subject.IsVariable || q.Predicate.IsVariable || q.Object.IsVariable || (q.InGraphBlock && q.Graph.IsVariable))
+                throw new SparqlParseException($"Variables are not allowed in {where}");
+        }
+    }
+
+    /// <summary>DELETE DATA, a DELETE template and DELETE WHERE hold no blank nodes (§19.6, notes 7 and 9).</summary>
+    private readonly void ThrowIfBlankNodes(TemplateQuad[]? quads, string where)
+    {
+        if (quads == null) return;
+        foreach (var q in quads)
+        {
+            if (q.Subject.IsBlankNode || q.Object.IsBlankNode)
+                throw new SparqlParseException($"Blank nodes are not allowed in {where}");
         }
     }
 
