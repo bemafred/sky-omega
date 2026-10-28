@@ -308,9 +308,14 @@ internal ref partial struct SparqlParser
         // [75] TriplesSameSubject ::= TriplesNode PropertyList: a blank-node property list or collection may stand alone
         if ((Peek() == '.' || Peek() == '}') && (IsBlankNodePropertyList(subject) || IsCollection(subject)))
         {
-            EmitStandaloneTriplesNode(ref pa, subject);
+            EmitTriplesNode(ref pa, subject);
             return true;
         }
+        // A subject that is a node of its own ([ … ], [], a collection, a quoted triple) is one node for the whole property
+        // list: expanded once, its node is the subject of every triple below (expanded per triple, each got a node of its
+        // own, so `[] :p ?a ; :q ?b` was a cross product)
+        if (IsBlankNodePropertyList(subject) || IsCollection(subject) || subject.IsQuotedTriple)
+            subject = EmitTriplesNode(ref pa, subject);
         int pathStart = _position;
         var (predicate, path) = ParsePredicateOrPath();
         int pathLength = _position - pathStart;
@@ -628,22 +633,29 @@ internal ref partial struct SparqlParser
         }
     }
 
-    /// <summary>A blank-node property list or collection standing alone as a triple pattern: its triples only.</summary>
+    /// <summary>
+    /// A blank-node property list, collection or quoted triple: adds its triples and returns its node (a join variable, a
+    /// list head, or a reifier), for the triples that use it.
+    /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private void EmitStandaloneTriplesNode(scoped ref PatternArray pa, Term node)
+    private Term EmitTriplesNode(scoped ref PatternArray pa, Term node)
     {
         var expanded = new TriplePatternList();
         try
         {
+            Term head;
             if (IsBlankNodePropertyList(node))
-                ExpandBlankNodePropertyList(ref expanded, node);
+                head = ExpandBlankNodePropertyList(ref expanded, node);
+            else if (IsCollection(node))
+                head = ExpandCollection(ref expanded, node);
             else
-                ExpandCollection(ref expanded, node);
+                head = ExpandQuotedTriple(ref expanded, node);
             for (int i = 0; i < expanded.Count; i++)
             {
                 var tp = expanded[i];
                 AddTreeTriple(ref pa, tp.Subject, tp.Predicate, tp.Object, tp.Path.Type, tp.Path.Iri.Start, tp.Path.Iri.Length);
             }
+            return head;
         }
         finally
         {

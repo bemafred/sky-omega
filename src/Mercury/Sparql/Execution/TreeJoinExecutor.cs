@@ -341,11 +341,18 @@ internal sealed class TreeJoinExecutor
             }
             case PatternKind.OptionalHeader:
             {
+                // LeftJoin(input, P) (§18.2.2.6). Seeding P with the row is a pushdown of the join, which gives the
+                // bottom-up answer only for the variables P's required part binds. A variable P binds only through a
+                // nested OPTIONAL is left out of the seed and joined afterwards: seeded, the nested OPTIONAL could not
+                // bind it, and the row would join P's other solutions (W3C nested-opt-1).
+                var optionalOnly = OptionalOnlyVariables(ref pa, ci);
                 var output = new List<MaterializedRow>();
                 foreach (var row in input)
                 {
-                    var single = new List<MaterializedRow> { row };
+                    var single = new List<MaterializedRow> { optionalOnly.Count == 0 ? row : Without(row, optionalOnly) };
                     var ext = EvalGroup(ref pa, ci, activeGraph, single);
+                    if (optionalOnly.Count > 0 && ext.Count > 0)
+                        ext = Join(new List<MaterializedRow> { row }, ext);
                     if (ext.Count > 0) output.AddRange(ext);
                     else output.Add(row); // left join: preserve the row when the optional has no match
                 }
@@ -835,6 +842,70 @@ internal sealed class TreeJoinExecutor
             projection.Dispose();
         }
         return names;
+    }
+
+    /// <summary>
+    /// The variables (by hash) the group headed at <paramref name="group"/> (an OPTIONAL header, whose children are its
+    /// group's patterns) binds only inside a nested OPTIONAL: in scope through
+    /// an OPTIONAL child, but bound by none of its required children (triples, BIND, VALUES, GRAPH, nested groups,
+    /// UNION, sub-SELECT, SERVICE). FILTER, MINUS and EXISTS bind nothing.
+    /// </summary>
+    private HashSet<int> OptionalOnlyVariables(ref PatternArray pa, int group)
+    {
+        var required = new HashSet<int>();
+        var optional = new HashSet<int>();
+        var parser = new SparqlParser(_source.AsSpan());
+        var children = pa.EnumerateDirectChildren(group);
+        while (children.MoveNext())
+        {
+            var child = children.Current;
+            HashSet<int>? into = child.Kind switch
+            {
+                PatternKind.OptionalHeader => optional,
+                PatternKind.Filter or PatternKind.MinusHeader or PatternKind.ExistsHeader or PatternKind.NotExistsHeader => null,
+                _ => required,
+            };
+            if (into == null)
+                continue;
+            int end = child.IsNestableGroup ? child.ChildStartIndex + child.ChildCount : children.CurrentIndex + 1;
+            var variables = new InScopeVariables(_source.AsSpan());
+            try
+            {
+                parser.AddInScopeVariables(ref pa, children.CurrentIndex, end, ref variables);
+                for (int i = 0; i < variables.Count; i++)
+                    into.Add(VariableName.Hash(variables[i]));
+            }
+            finally
+            {
+                variables.Dispose();
+            }
+        }
+        optional.ExceptWith(required);
+        return optional;
+    }
+
+    /// <summary><paramref name="row"/> without its bindings of <paramref name="variables"/> (by hash).</summary>
+    private static MaterializedRow Without(MaterializedRow row, HashSet<int> variables)
+    {
+        var bindingArray = ArrayPool<Binding>.Shared.Rent(64);
+        var charArray = ArrayPool<char>.Shared.Rent(1 << 13);
+        try
+        {
+            var table = new BindingTable(bindingArray.AsSpan(0, 64), charArray.AsSpan(0, 1 << 13));
+            for (int i = 0; i < row.BindingCount; i++)
+            {
+                if (!variables.Contains(row.GetHash(i)))
+                    table.BindWithHash(row.GetHash(i), row.GetValue(i), row.GetValueType(i));
+            }
+            var kept = new MaterializedRow(table);
+            table.ReturnGrownBuffer();
+            return kept;
+        }
+        finally
+        {
+            ArrayPool<Binding>.Shared.Return(bindingArray);
+            ArrayPool<char>.Shared.Return(charArray);
+        }
     }
 
     // ── shared composition helpers (over MaterializedRow) ───────────────────────────────────────────────

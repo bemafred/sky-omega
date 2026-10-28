@@ -54,7 +54,6 @@ public static class W3CTestContext
     /// </summary>
     private static readonly Dictionary<string, string> Sparql10Triage = new()
     {
-        ["data-r2/algebra/manifest#nested-opt-1"] = "SPARQL 1.0 triage: nested and complex OPTIONAL",
         ["data-r2/basic/manifest#base-prefix-1"] = "SPARQL 1.0 triage: relative IRIs are not resolved against BASE",
         ["data-r2/basic/manifest#base-prefix-2"] = "SPARQL 1.0 triage: relative IRIs are not resolved against BASE",
         ["data-r2/basic/manifest#base-prefix-4"] = "SPARQL 1.0 triage: relative IRIs are not resolved against BASE",
@@ -111,8 +110,6 @@ public static class W3CTestContext
         ["data-r2/open-world/manifest#open-eq-10"] = "SPARQL 1.0 triage: value equality and term identity of literals (unknown datatypes, lexical forms, language-tag case)",
         ["data-r2/open-world/manifest#open-eq-11"] = "SPARQL 1.0 triage: value equality and term identity of literals (unknown datatypes, lexical forms, language-tag case)",
         ["data-r2/open-world/manifest#open-eq-12"] = "SPARQL 1.0 triage: value equality and term identity of literals (unknown datatypes, lexical forms, language-tag case)",
-        ["data-r2/optional/manifest#dawg-optional-complex-2"] = "SPARQL 1.0 triage: nested and complex OPTIONAL",
-        ["data-r2/optional/manifest#dawg-optional-complex-3"] = "SPARQL 1.0 triage: nested and complex OPTIONAL",
         ["data-r2/regex/manifest#dawg-regex-003"] = "SPARQL 1.0 triage: REGEX escapes and the q flag",
         ["data-r2/regex/manifest#regex-no-metacharacters"] = "SPARQL 1.0 triage: REGEX escapes and the q flag",
         ["data-r2/regex/manifest#regex-no-metacharacters-case-insensitive"] = "SPARQL 1.0 triage: REGEX escapes and the q flag",
