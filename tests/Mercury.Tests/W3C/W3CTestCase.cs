@@ -30,8 +30,12 @@ public sealed record W3CTestCase(
     (string Path, string GraphIri)[]? ActionGraphData = null,
     string? ExpectedDefaultGraphPath = null,
     (string Path, string GraphIri)[]? ExpectedNamedGraphs = null,
-    string? Approval = null)
+    string? Approval = null,
+    string? ResultCardinality = null)
 {
+    /// <summary>mf:resultCardinality mf:LaxCardinality: the result's row multiplicities are not fixed (REDUCED).</summary>
+    public bool HasLaxCardinality => ResultCardinality?.EndsWith("#LaxCardinality>", System.StringComparison.Ordinal) == true;
+
     /// <summary>
     /// False when the working group rejected the test (dawgt:approval NotApproved or Withdrawn): it is not normative.
     /// Approved and Proposed tests, and tests with no approval property, are run; much of the SPARQL 1.1 suite is

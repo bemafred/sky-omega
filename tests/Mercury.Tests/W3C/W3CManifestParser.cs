@@ -376,7 +376,8 @@ public sealed class W3CManifestParser
             ActionGraphData: actionGraphData,
             ExpectedDefaultGraphPath: expectedDefaultGraphPath,
             ExpectedNamedGraphs: expectedNamedGraphs,
-            Approval: props.TryGetValue(DawgtApproval, out var approval) && approval.Count > 0 ? approval[0] : null);
+            Approval: props.TryGetValue(DawgtApproval, out var approval) && approval.Count > 0 ? approval[0] : null,
+            ResultCardinality: props.TryGetValue($"<{MF}resultCardinality>", out var cardinality) && cardinality.Count > 0 ? cardinality[0] : null);
     }
 
     /// <summary>

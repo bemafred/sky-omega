@@ -17,8 +17,18 @@ public static class SparqlResultComparer
     /// <param name="expected">The expected result set.</param>
     /// <param name="actual">The actual result set.</param>
     /// <param name="ordered">If true, row order matters (for ORDER BY queries).</param>
-    public static string? Compare(SparqlResultSet expected, SparqlResultSet actual, bool ordered = false)
+    /// <param name="lax">
+    /// mf:resultCardinality mf:LaxCardinality (REDUCED): a row may occur any number of times from once to its count
+    /// without REDUCED, so the two are compared as sets of distinct rows.
+    /// </param>
+    public static string? Compare(SparqlResultSet expected, SparqlResultSet actual, bool ordered = false, bool lax = false)
     {
+        if (lax && !expected.IsBoolean && !actual.IsBoolean)
+        {
+            expected = DistinctRows(expected);
+            actual = DistinctRows(actual);
+        }
+
         // Handle boolean results (ASK queries)
         if (expected.IsBoolean || actual.IsBoolean)
         {
@@ -57,6 +67,23 @@ public static class SparqlResultComparer
         {
             return CompareUnordered(expected, actual);
         }
+    }
+
+    /// <summary>The distinct rows of <paramref name="results"/>, by their bindings.</summary>
+    private static SparqlResultSet DistinctRows(SparqlResultSet results)
+    {
+        var distinct = new SparqlResultSet();
+        foreach (var variable in results.Variables)
+            distinct.AddVariable(variable);
+        var seen = new HashSet<string>();
+        foreach (var row in results.Rows)
+        {
+            var key = string.Join("|", row.GetBindings().OrderBy(b => b.Key, StringComparer.Ordinal)
+                .Select(b => b.Key + "=" + b.Value.ToNormalizedString()));
+            if (seen.Add(key))
+                distinct.AddRow(row);
+        }
+        return distinct;
     }
 
     /// <summary>

@@ -199,6 +199,21 @@ public class SparqlConformanceTests
             _output.WriteLine($"Injected FROM NAMED for: {string.Join(", ", namedGraphIris)}");
         }
 
+        // The files a query names in FROM / FROM NAMED: the SPARQL 1.0 dataset tests give their data only there. Each
+        // is loaded into the graph the rewrite below names it (<urn:w3c:file>), once.
+        var loadedGraphFiles = new HashSet<string>(test.GraphDataPaths?.Select(Path.GetFileName).OfType<string>() ?? []);
+        foreach (System.Text.RegularExpressions.Match from in System.Text.RegularExpressions.Regex.Matches(query,
+                     @"FROM\s+(NAMED\s+)?<([^<>:]+\.[a-zA-Z]+)>", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+        {
+            var file = from.Groups[2].Value;
+            var path = Path.Combine(Path.GetDirectoryName(test.ActionPath)!, file);
+            if (File.Exists(path) && loadedGraphFiles.Add(file))
+            {
+                var count = await LoadDataToNamedGraphAsync(store, path, $"<urn:w3c:{file}>", baseUri: $"urn:w3c:{file}");
+                _output.WriteLine($"Loaded {file}, named in FROM, into <urn:w3c:{file}> ({count} triples)");
+            }
+        }
+
         // Preprocess query to resolve relative GRAPH IRIs
         // W3C tests use relative IRIs like GRAPH <exists02.ttl> which need to match our file: scheme
         query = ResolveRelativeGraphIris(query);
@@ -404,7 +419,7 @@ public class SparqlConformanceTests
         _output.WriteLine($"Got {actual.Count} results");
 
         // Compare results using full validation with blank node isomorphism
-        var comparisonError = SparqlResultComparer.Compare(expected, actual, ordered: hasOrderBy);
+        var comparisonError = SparqlResultComparer.Compare(expected, actual, ordered: hasOrderBy, lax: test.HasLaxCardinality);
 
         if (comparisonError != null)
         {
