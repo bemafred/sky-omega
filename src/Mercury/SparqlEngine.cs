@@ -85,7 +85,7 @@ public static class SparqlEngine
                         ExecutionTime = sw.Elapsed
                     },
                     QueryType.Construct => ExecuteConstruct(executor, parseTime, sw),
-                    QueryType.Describe => ExecuteTriples(executor, ExecutionResultKind.Describe, parseTime, sw),
+                    QueryType.Describe => ExecuteDescribe(executor, parseTime, sw),
                     _ => new QueryResult
                     {
                         Success = false,
@@ -407,18 +407,17 @@ public static class SparqlEngine
         };
     }
 
-    private static QueryResult ExecuteTriples(QueryExecutor executor, ExecutionResultKind kind, TimeSpan parseTime, Stopwatch sw)
+    private static QueryResult ExecuteDescribe(QueryExecutor executor, TimeSpan parseTime, Stopwatch sw)
     {
         var triples = new List<(string Subject, string Predicate, string Object)>();
-        var results = executor.Execute();
+        var results = executor.ExecuteDescribe();
         try
         {
             long maxResultRows = executor.MaxResultRows; // unbounded-result guard
             while (results.MoveNext())
             {
-                var b = results.Current;
-                if (b.Count >= 3)
-                    triples.Add((b.GetString(0).ToString(), b.GetString(1).ToString(), b.GetString(2).ToString()));
+                var triple = results.Current;
+                triples.Add((triple.Subject.ToString(), triple.Predicate.ToString(), triple.Object.ToString()));
                 ResultLimitExceededException.ThrowIfExceeded(maxResultRows, triples.Count);
             }
         }
@@ -430,7 +429,7 @@ public static class SparqlEngine
         return new QueryResult
         {
             Success = true,
-            Kind = kind,
+            Kind = ExecutionResultKind.Describe,
             Triples = triples,
             ParseTime = parseTime,
             ExecutionTime = sw.Elapsed

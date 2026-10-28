@@ -166,6 +166,13 @@ so after `DESCRIBE ?s` or `DESCRIBE <iri>` it never sees the WHERE keyword: `DES
 group. D3 therefore also parses [11] DescribeQuery's `( VarOrIri+ | '*' )` and routes the facade through
 `ExecuteDescribe`.
 
+Implemented 2026-10-28. The targets are a `DescribeClause` read from the source by `SparqlParser.DescribeTargetReader`,
+which the parser checks them with and `ExecuteDescribe` collects them with. Variable targets take their values from
+`Execute()`, so the solution modifiers apply. `DescribeResults` describes each resource once, returns a triple between
+two described resources once, and grows its buffer for long literals. CONSTRUCT now reads its solutions from
+`Execute()` too: its own row source had ignored ORDER BY with LIMIT, and OFFSET. `DescribeTests` (12) and
+`ConstructSolutionTests` (3).
+
 ### D4. Sub-SELECT
 
 `TreeJoinExecutor`'s sub-SELECT step evaluates the tree at `SubSelect.WhereGroupStart`, not at the first `{` after

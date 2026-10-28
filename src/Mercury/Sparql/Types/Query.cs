@@ -6,7 +6,7 @@ internal struct Query
     public Prologue Prologue;
     public SelectClause SelectClause;
     public ConstructTemplate ConstructTemplate;
-    public bool DescribeAll;
+    public DescribeClause Describe;
     public DatasetClause[] Datasets;
     public WhereClause WhereClause;
     public SolutionModifier SolutionModifier;

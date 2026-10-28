@@ -1,59 +1,42 @@
 using System;
 using System.Buffers;
+using System.Collections.Generic;
 using SkyOmega.Mercury.Sparql.Types;
 using SkyOmega.Mercury.Storage;
 
 namespace SkyOmega.Mercury.Sparql.Execution;
 
 /// <summary>
-/// Results from DESCRIBE query execution. Yields triples describing matched resources.
-/// For each resource, returns triples where the resource appears as subject or object.
-/// Must be disposed to return pooled resources.
+/// The triples a DESCRIBE returns (SPARQL 1.1 §16.4): for each resource, the current triples with it as subject, then
+/// those with it as object. A triple is returned once: one whose subject is also described is returned with that
+/// subject, not again as another resource's object. Must be disposed to return its buffer.
 /// </summary>
 internal ref struct DescribeResults
 {
-    private readonly QuadStore _store;
-    private QueryResults _queryResults;
-    private Binding[]? _bindings;
-    private char[]? _stringBuffer;
-    private bool _isEmpty;
-    private bool _describeAll;
-
-    // State for iterating through resources and their triples
-    private HashSet<string> _describedResources;
-    private Queue<string> _pendingResources;
-    private TemporalResultEnumerator _currentEnumerator;
-    private bool _queryingAsSubject;  // true = querying as subject, false = querying as object
+    private readonly QuadStore? _store;
+    private readonly List<string>? _resources;
+    private readonly HashSet<string>? _described;
+    private int _next;
     private string? _currentResource;
-    private bool _initialized;
+    private bool _queryingAsSubject;
+    private TemporalResultEnumerator _currentEnumerator;
 
-    // Current triple
     private ConstructedTriple _current;
-    private char[] _outputBuffer;
+    private char[]? _outputBuffer;
 
-    public static DescribeResults Empty()
-    {
-        var result = new DescribeResults();
-        result._isEmpty = true;
-        return result;
-    }
+    public static DescribeResults Empty() => default;
 
-    internal DescribeResults(QuadStore store, QueryResults queryResults,
-        Binding[] bindings, char[] stringBuffer, bool describeAll)
+    /// <param name="store">The store to describe from.</param>
+    /// <param name="resources">The IRIs and blank nodes to describe, each once, in the order to describe them.</param>
+    internal DescribeResults(QuadStore store, List<string> resources)
     {
         _store = store;
-        _queryResults = queryResults;
-        _bindings = bindings;
-        _stringBuffer = stringBuffer;
-        _isEmpty = false;
-        _describeAll = describeAll;
-
-        _describedResources = new HashSet<string>();
-        _pendingResources = new Queue<string>();
-        _currentEnumerator = default;
-        _queryingAsSubject = true;
+        _resources = resources;
+        _described = new HashSet<string>(resources);
+        _next = 0;
         _currentResource = null;
-        _initialized = false;
+        _queryingAsSubject = true;
+        _currentEnumerator = default;
         _current = default;
         _outputBuffer = ArrayPool<char>.Shared.Rent(2048);
     }
@@ -62,45 +45,41 @@ internal ref struct DescribeResults
 
     public bool MoveNext()
     {
-        if (_isEmpty)
+        if (_store == null)
             return false;
 
         while (true)
         {
-            // Try to get next triple from current enumerator
             if (_currentResource != null)
             {
                 while (_currentEnumerator.MoveNext())
                 {
                     var triple = _currentEnumerator.Current;
 
-                    // Copy triple to output buffer
-                    int pos = 0;
-                    var subjectStart = pos;
-                    triple.Subject.CopyTo(_outputBuffer.AsSpan(pos));
-                    pos += triple.Subject.Length;
-                    var subjectLen = triple.Subject.Length;
+                    // As an object: a triple whose subject is described is that subject's
+                    if (!_queryingAsSubject && _described!.Contains(triple.Subject.ToString()))
+                        continue;
 
-                    var predicateStart = pos;
-                    triple.Predicate.CopyTo(_outputBuffer.AsSpan(pos));
-                    pos += triple.Predicate.Length;
-                    var predicateLen = triple.Predicate.Length;
-
-                    var objectStart = pos;
-                    triple.Object.CopyTo(_outputBuffer.AsSpan(pos));
-                    var objectLen = triple.Object.Length;
+                    int length = triple.Subject.Length + triple.Predicate.Length + triple.Object.Length;
+                    if (_outputBuffer!.Length < length)
+                    {
+                        ArrayPool<char>.Shared.Return(_outputBuffer);
+                        _outputBuffer = ArrayPool<char>.Shared.Rent(length);
+                    }
+                    var output = _outputBuffer.AsSpan();
+                    triple.Subject.CopyTo(output);
+                    triple.Predicate.CopyTo(output.Slice(triple.Subject.Length));
+                    triple.Object.CopyTo(output.Slice(triple.Subject.Length + triple.Predicate.Length));
 
                     _current = new ConstructedTriple(
-                        _outputBuffer.AsSpan(subjectStart, subjectLen),
-                        _outputBuffer.AsSpan(predicateStart, predicateLen),
-                        _outputBuffer.AsSpan(objectStart, objectLen));
-
+                        output.Slice(0, triple.Subject.Length),
+                        output.Slice(triple.Subject.Length, triple.Predicate.Length),
+                        output.Slice(triple.Subject.Length + triple.Predicate.Length, triple.Object.Length));
                     return true;
                 }
 
                 _currentEnumerator.Dispose();
 
-                // Switch from subject query to object query
                 if (_queryingAsSubject)
                 {
                     _queryingAsSubject = false;
@@ -111,61 +90,28 @@ internal ref struct DescribeResults
                     continue;
                 }
 
-                // Done with this resource, move to next
                 _currentResource = null;
                 _queryingAsSubject = true;
             }
 
-            // Get next resource to describe
-            if (_pendingResources.Count > 0)
-            {
-                _currentResource = _pendingResources.Dequeue();
-                _currentEnumerator = _store.QueryCurrent(
-                    _currentResource.AsSpan(),
-                    ReadOnlySpan<char>.Empty,
-                    ReadOnlySpan<char>.Empty);
-                continue;
-            }
+            if (_next == _resources!.Count)
+                return false;
 
-            // Get more resources from query results
-            if (!_initialized || _queryResults.MoveNext())
-            {
-                _initialized = true;
-                var currentBindings = _queryResults.Current;
-
-                // Collect all IRI/blank node values from bindings
-                for (int i = 0; i < currentBindings.Count; i++)
-                {
-                    var value = currentBindings.GetString(i);
-                    var valueStr = value.ToString();
-
-                    // Only describe IRIs and blank nodes (skip literals)
-                    if (value.Length > 0 && (value[0] == '<' || value[0] == '_'))
-                    {
-                        if (!_describedResources.Contains(valueStr))
-                        {
-                            _describedResources.Add(valueStr);
-                            _pendingResources.Enqueue(valueStr);
-                        }
-                    }
-                }
-
-                continue;
-            }
-
-            // No more results
-            return false;
+            _currentResource = _resources[_next++];
+            _currentEnumerator = _store.QueryCurrent(
+                _currentResource.AsSpan(),
+                ReadOnlySpan<char>.Empty,
+                ReadOnlySpan<char>.Empty);
         }
     }
 
     public void Dispose()
     {
-        _queryResults.Dispose();
         _currentEnumerator.Dispose();
         if (_outputBuffer != null)
         {
             ArrayPool<char>.Shared.Return(_outputBuffer);
-            _outputBuffer = null!;
+            _outputBuffer = null;
         }
     }
 }

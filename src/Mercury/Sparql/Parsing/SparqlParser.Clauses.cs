@@ -498,42 +498,28 @@ internal ref partial struct SparqlParser
         ConsumeKeyword("DESCRIBE");
         SkipWhitespace();
 
-        var describeAll = Peek() == '*';
-        if (describeAll)
+        var describe = new DescribeClause();
+        if (Peek() == '*')
         {
             Advance();
+            describe.All = true;
         }
         else
         {
-            // The targets are read and checked; they are not yet what DESCRIBE describes (ADR-055 D3)
-            int targets = 0;
-            while (true)
-            {
-                SkipWhitespace();
-                char ch = Peek();
-                if (IsAtEnd() || (!VariableName.IsSigil(ch) && ch != '<' && ch != ':' && !char.IsLetter(ch)))
-                    break; // '{' opens the WHERE
-                var ahead = PeekSpan(6);
-                if (KeywordIs(ahead, "WHERE") || KeywordIs(ahead, "FROM") || KeywordIs(ahead, "ORDER") ||
-                    KeywordIs(ahead, "GROUP") || KeywordIs(ahead, "HAVING") || KeywordIs(ahead, "LIMIT") ||
-                    KeywordIs(ahead, "OFFSET") || KeywordIs(ahead, "VALUES"))
-                    break;
-                var target = ParseTerm();
-                if (target.Length == 0 || (target.Type != TermType.Variable && target.Type != TermType.Iri))
-                    throw new SparqlParseException("DESCRIBE expects variables, IRIs or '*'");
-                targets++;
-            }
-            if (targets == 0)
+            describe.TargetsStart = _position;
+            var targets = new DescribeTargetReader(_source, _position);
+            if (!targets.MoveNext(out _))
                 throw new SparqlParseException("DESCRIBE expects variables, IRIs or '*'");
+            while (targets.MoveNext(out _)) { }
+            _position = targets.End;
         }
 
         var datasets = ParseDatasetClauses();
         var whereClause = new WhereClause { GroupStart = -1 };
 
-        // Optional WHERE clause for DESCRIBE
+        // [17] WhereClause ::= 'WHERE'? GroupGraphPattern, optional in a DESCRIBE
         SkipWhitespace();
-        var span = PeekSpan(5);
-        if (span.Length >= 5 && span[..5].Equals("WHERE", StringComparison.OrdinalIgnoreCase))
+        if (KeywordIs(PeekSpan(5), "WHERE") || Peek() == '{')
         {
             whereClause = ParseWhereClause();
         }
@@ -544,7 +530,7 @@ internal ref partial struct SparqlParser
         {
             Type = QueryType.Describe,
             Prologue = prologue,
-            DescribeAll = describeAll,
+            Describe = describe,
             Datasets = datasets,
             WhereClause = whereClause,
             SolutionModifier = modifier

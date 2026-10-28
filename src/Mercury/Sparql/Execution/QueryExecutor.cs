@@ -548,44 +548,69 @@ internal partial class QueryExecutor : IDisposable
         if (!template.HasPatterns)
             return ConstructResults.Empty();
 
-        // Build binding storage
-        var bindings = new Binding[16];
-        var stringBuffer = _stringBuffer;
-
-        // A WHERE without top-level triples is still a group with solutions ({} has one; BIND, VALUES and GRAPH
-        // bring their own), so every CONSTRUCT WHERE goes to the tree (ADR-055 D2).
-
-        // ADR-047 A2/B2/C2: the WHERE — BGP, FROM dataset, OR a sub-SELECT — evaluates through the unified tree; the
-        // materialized rows (all variables bound, no projection) ConstructResults reads via .Current. C2 routed
-        // CONSTRUCT-with-subquery here too (B1 had cut SELECT/ASK). A FROM dataset is honoured by the tree
-        // (_defaultGraphs union, B2). The old separate sub-query / slot-scan executor path is deleted.
-        return new ConstructResults(
-            QueryResults.FromMaterializedRows(ExecuteGraphViaTree(), _source, _store, bindings, stringBuffer),
-            template, _source, bindings, stringBuffer, _buffer.Prefixes);
+        // The template is instantiated over the WHERE's solutions after the solution modifiers, as a SELECT's rows
+        // are: Execute() is the one path for both, so ORDER BY, LIMIT and OFFSET apply (SPARQL 1.1 §16.2).
+        return new ConstructResults(Execute(), template, _source, _buffer.Prefixes);
     }
 
     /// <summary>
-    /// Execute a DESCRIBE query and return triples describing the matched resources.
-    /// Returns all triples where described resources appear as subject or object.
+    /// Execute a DESCRIBE query ([11] DescribeQuery, SPARQL 1.1 §16.4). It describes its IRI targets, and the IRIs and
+    /// blank nodes its variable targets take in the WHERE's solutions, after the solution modifiers; <c>DESCRIBE *</c>
+    /// takes every variable's. Without a WHERE there is one empty solution, so only the IRI targets are described.
     /// Caller must hold read lock on store and call Dispose on results.
     /// </summary>
     public DescribeResults ExecuteDescribe()
     {
-        var describeAll = _buffer.DescribeAll;
+        var describe = _buffer.Describe;
+        var resources = new List<string>();
+        var seen = new HashSet<string>();
+        var variableHashes = new List<int>();
 
-        // No WHERE group, no solutions to describe from (ADR-055 D3 evaluates DESCRIBE <iri> without one)
-        if (_buffer.WhereGroupStart < 0)
-            return DescribeResults.Empty();
+        if (!describe.All)
+        {
+            var targets = new SparqlParser.DescribeTargetReader(_source.AsSpan(), describe.TargetsStart);
+            while (targets.MoveNext(out var target))
+            {
+                var text = _source.AsSpan(target.Start, target.Length);
+                if (target.Type == TermType.Variable)
+                {
+                    variableHashes.Add(VariableName.Hash(text));
+                    continue;
+                }
+                var iri = ExpandPrefixedName(text).ToString();
+                if (seen.Add(iri)) resources.Add(iri);
+            }
+        }
 
-        // ADR-047 A2/B2: evaluate the WHERE through the unified tree to collect the resources to describe — the
-        // materialized rows (all variables bound, no projection) DescribeResults reads via .Current. A FROM dataset is
-        // honoured here too (the tree's default-context scan unions _defaultGraphs, see ExecuteGraphViaTree): the WHERE
-        // matches against the dataset's default graph, the union of the FROM graphs (SPARQL §16.4 evaluates it against
-        // the dataset). No FROM ⇒ the real unnamed default graph, as before.
-        var bindings = new Binding[16];
-        var queryResults = QueryResults.FromMaterializedRows(ExecuteGraphViaTree(), _source, _store, bindings, _stringBuffer);
+        if (_buffer.WhereGroupStart >= 0 && (describe.All || variableHashes.Count > 0))
+        {
+            var results = Execute();
+            try
+            {
+                while (results.MoveNext())
+                {
+                    var solution = results.Current;
+                    for (int i = 0; i < solution.Count; i++)
+                    {
+                        if (!describe.All && !variableHashes.Contains(solution.GetVariableHash(i)))
+                            continue;
+                        var value = solution.GetString(i);
+                        // A literal is not described
+                        if (value.Length > 1 && (value[0] == '<' || (value[0] == '_' && value[1] == ':')))
+                        {
+                            var resource = value.ToString();
+                            if (seen.Add(resource)) resources.Add(resource);
+                        }
+                    }
+                }
+            }
+            finally
+            {
+                results.Dispose();
+            }
+        }
 
-        return new DescribeResults(_store, queryResults, bindings, _stringBuffer, describeAll);
+        return new DescribeResults(_store, resources);
     }
 
     // Helper to create OrderByClause from buffer's OrderByEntry array

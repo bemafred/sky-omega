@@ -16,8 +16,6 @@ internal ref struct ConstructResults
     private QueryResults _queryResults;
     private ConstructTemplate _template;
     private ReadOnlySpan<char> _source;
-    private Binding[]? _bindings;
-    private char[]? _stringBuffer;
     private bool _isEmpty;
 
     // Prefix mappings for expanding prefixed names in template
@@ -56,14 +54,12 @@ internal ref struct ConstructResults
     }
 
     internal ConstructResults(QueryResults queryResults, ConstructTemplate template,
-        ReadOnlySpan<char> source, Binding[] bindings, char[] stringBuffer,
+        ReadOnlySpan<char> source,
         PrefixMapping[]? prefixes = null)
     {
         _queryResults = queryResults;
         _template = template;
         _source = source;
-        _bindings = bindings;
-        _stringBuffer = stringBuffer;
         _prefixes = prefixes;
         _expandedTerm = null;
         _generatedBnode = null;
@@ -158,8 +154,7 @@ internal ref struct ConstructResults
                 return writePos; // Unbound - return same position to signal empty
 
             var value = bindings.GetString(idx);
-            value.CopyTo(_outputBuffer.AsSpan(writePos));
-            return writePos + value.Length;
+            return WriteAt(writePos, value);
         }
         // Check for synthetic terms (negative offset)
         else if (SyntheticTermHelper.IsSynthetic(term.Start))
@@ -171,16 +166,14 @@ internal ref struct ConstructResults
                 // Format: _:genid{rowCounter}_{listNodeIndex}
                 int listNodeIndex = -term.Start - 400;
                 _generatedBnode = $"_:genid{_rowCounter}_{listNodeIndex}";
-                _generatedBnode.AsSpan().CopyTo(_outputBuffer.AsSpan(writePos));
-                return writePos + _generatedBnode.Length;
+                return WriteAt(writePos, _generatedBnode);
             }
 
             // Synthetic IRI (rdf:type, rdf:first, rdf:rest, rdf:nil, etc.)
             var syntheticIri = SyntheticTermHelper.GetSyntheticIri(term.Start);
             if (syntheticIri.Length > 0)
             {
-                syntheticIri.CopyTo(_outputBuffer.AsSpan(writePos));
-                return writePos + syntheticIri.Length;
+                return WriteAt(writePos, syntheticIri);
             }
 
             return writePos; // Unknown synthetic - treat as empty
@@ -190,9 +183,23 @@ internal ref struct ConstructResults
             // Constant term - expand prefixed names and copy
             var value = _source.Slice(term.Start, term.Length);
             var expanded = ExpandPrefixedName(value);
-            expanded.CopyTo(_outputBuffer.AsSpan(writePos));
-            return writePos + expanded.Length;
+            return WriteAt(writePos, expanded);
         }
+    }
+
+    /// <summary>Writes a term at <paramref name="writePos"/>, growing the buffer to fit; returns the end.</summary>
+    private int WriteAt(int writePos, ReadOnlySpan<char> value)
+    {
+        int end = writePos + value.Length;
+        if (end > _outputBuffer.Length)
+        {
+            var grown = ArrayPool<char>.Shared.Rent(end);
+            _outputBuffer.AsSpan(0, writePos).CopyTo(grown);
+            ArrayPool<char>.Shared.Return(_outputBuffer);
+            _outputBuffer = grown;
+        }
+        value.CopyTo(_outputBuffer.AsSpan(writePos));
+        return end;
     }
 
     /// <summary>

@@ -956,8 +956,8 @@ internal sealed class QueryBuffer
     public int HavingStart { get; set; }
     public int HavingLength { get; set; }
 
-    // DESCRIBE query metadata
-    public bool DescribeAll { get; set; }
+    // DESCRIBE's targets
+    public DescribeClause Describe { get; set; }
 
     // Temporal query parameters (ADR-009 Phase 2)
     public TemporalQueryMode TemporalMode { get; set; }
@@ -1318,7 +1318,7 @@ internal static class QueryBufferAdapter
         buffer.HavingLength = query.SolutionModifier.Having.ExpressionLength;
 
         // Copy DESCRIBE metadata
-        buffer.DescribeAll = query.DescribeAll;
+        buffer.Describe = query.Describe;
 
         // Copy CONSTRUCT template patterns
         if (query.ConstructTemplate.PatternCount > 0)

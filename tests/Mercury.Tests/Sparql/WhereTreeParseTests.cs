@@ -311,7 +311,7 @@ public class WhereTreeParseTests
     {
         var parsed = new SparqlParser(query.AsSpan()).ParseQuery();
 
-        Assert.True(parsed.DescribeAll);
+        Assert.True(parsed.Describe.All);
         if (hasWhere)
             Assert.Equal('{', query[parsed.WhereClause.GroupStart]);
         else
