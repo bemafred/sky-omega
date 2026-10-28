@@ -129,6 +129,7 @@ internal ref partial struct QueryResults
                     _bindingTable.Bind(aliasName, value.BooleanValue);
                     break;
                 case ValueType.String:
+                case ValueType.BlankNode:
                 case ValueType.Uri:
                     _bindingTable.Bind(aliasName, value.StringValue);
                     break;

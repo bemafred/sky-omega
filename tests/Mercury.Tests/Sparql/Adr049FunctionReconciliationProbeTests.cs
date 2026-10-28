@@ -28,6 +28,7 @@ public class Adr049FunctionReconciliationProbeTests
         ValueType.Boolean => "BOOL:" + (v.BooleanValue ? "true" : "false"),
         ValueType.String => "STR:" + v.StringValue.ToString(),
         ValueType.Uri => "URI:" + v.StringValue.ToString(),
+        ValueType.BlankNode => "BlankNode:" + v.StringValue.ToString(),
         _ => "??"
     };
 
@@ -131,7 +132,7 @@ public class Adr049FunctionReconciliationProbeTests
         Assert.EndsWith("\"", struuid);
 
         var bnode = ViaFilter("BNODE(\"x\")");
-        Assert.Matches(@"^URI:_:r\d+_x$", bnode);
+        Assert.Matches(@"^BlankNode:_:r[0-9a-f]{32}x\d+_x$", bnode); // a blank node; the label carries the process token
 
         var rand = ViaFilter("RAND()");
         Assert.StartsWith("DBL:", rand);

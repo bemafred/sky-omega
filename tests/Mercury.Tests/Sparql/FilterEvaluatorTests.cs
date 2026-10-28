@@ -2277,8 +2277,8 @@ public class FilterEvaluatorTests
     [Fact]
     public void Bnode_NoArg_ReturnsBlankNode()
     {
-        // BNODE() returns a blank node (starts with _:)
-        Assert.True(Evaluate("STRSTARTS(str(BNODE()), \"_:\")"));
+        // BNODE() returns a blank node: not an IRI and not a literal
+        Assert.True(Evaluate("isBlank(BNODE()) && !isIRI(BNODE()) && !isLiteral(BNODE())"));
     }
 
     [Fact]
@@ -2290,17 +2290,16 @@ public class FilterEvaluatorTests
     [Fact]
     public void Bnode_NoArg_GeneratesUnique()
     {
-        // Each call to BNODE() should generate a different blank node
-        // We test this indirectly by checking they both start with _:b
-        Assert.True(Evaluate("STRSTARTS(str(BNODE()), \"_:b\")"));
+        // Each call to BNODE() is a different blank node
+        Assert.True(Evaluate("!sameTerm(BNODE(), BNODE())"));
     }
 
     [Fact]
     public void Bnode_WithLabel_ReturnsLabeledBlankNode()
     {
-        // BNODE(label) is per-row seeded (SPARQL §17.4.2.2): _:r<rowSeed>_<label>.
+        // BNODE(label) is one blank node per label within a row (SPARQL §17.4.2.9)
         Assert.True(EvaluateWithStringBinding(
-            "STRSTARTS(str(BNODE(?x)), \"_:r\") && STRENDS(str(BNODE(?x)), \"_mynode\")",
+            "isBlank(BNODE(?x)) && sameTerm(BNODE(?x), BNODE(?x))",
             "?x", "mynode"));
     }
 
@@ -2315,8 +2314,9 @@ public class FilterEvaluatorTests
     [Fact]
     public void Bnode_WithLabel_PreservesLabel()
     {
+        // A label's node is not a fresh node; its label is not observable (STR of a blank node is an error)
         Assert.True(EvaluateWithStringBinding(
-            "STRENDS(str(BNODE(?x)), \"custom123\")",
+            "!sameTerm(BNODE(?x), BNODE()) && !BOUND(?undefined) && !isLiteral(BNODE(?x))",
             "?x", "custom123"));
     }
 

@@ -585,6 +585,7 @@ internal sealed class GroupedRow
                         case ValueType.Boolean:
                             valueStr = value.BooleanValue ? "true" : "false";
                             break;
+                        case ValueType.BlankNode:
                         case ValueType.Uri:
                         case ValueType.String:
                             valueStr = value.StringValue.ToString();

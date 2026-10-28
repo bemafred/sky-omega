@@ -274,10 +274,16 @@ internal ref partial struct FilterEvaluator
             BindingValueType.Double => new Value { Type = ValueType.Double, DoubleValue = binding.DoubleValue },
             BindingValueType.Boolean => new Value { Type = ValueType.Boolean, BooleanValue = binding.BooleanValue },
             BindingValueType.String => ParseTypedLiteralString(_bindingStrings.Slice(binding.StringOffset, binding.StringLength)),
-            BindingValueType.Uri => new Value { Type = ValueType.Uri, StringValue = _bindingStrings.Slice(binding.StringOffset, binding.StringLength) },
+            BindingValueType.Uri => NonLiteralTerm(_bindingStrings.Slice(binding.StringOffset, binding.StringLength)),
             _ => new Value { Type = ValueType.Unbound }
         };
     }
+
+    /// <summary>A binding stored as a non-literal: an IRI, or a blank node when it is written _:label.</summary>
+    private static Value NonLiteralTerm(ReadOnlySpan<char> term) =>
+        term.Length > 2 && term[0] == '_' && term[1] == ':'
+            ? new Value { Type = ValueType.BlankNode, StringValue = term }
+            : new Value { Type = ValueType.Uri, StringValue = term };
 
     /// <summary>
     /// Parse a string binding that may be a typed RDF literal.
@@ -697,10 +703,10 @@ internal ref partial struct FilterEvaluator
                 // BNODE() - no argument, generate fresh blank node
                 Advance();
                 var counter = System.Threading.Interlocked.Increment(ref s_bnodeCounter);
-                _bnodeResult = $"_:b{counter}";
+                _bnodeResult = $"_:b{s_processToken}x{counter}";
                 return new Value
                 {
-                    Type = ValueType.Uri,
+                    Type = ValueType.BlankNode,
                     StringValue = _bnodeResult.AsSpan()
                 };
             }
@@ -716,10 +722,10 @@ internal ref partial struct FilterEvaluator
 
             // Per-row seed: same label -> same bnode within a row, distinct across
             // rows (SPARQL §17.4.2.2). Mirrors what the (now-removed) BindExpressionEvaluator did.
-            _bnodeResult = $"_:r{s_bnodeRowSeed}_{label.ToString()}";
+            _bnodeResult = $"_:r{s_processToken}x{s_bnodeRowSeed}_{label.ToString()}";
             return new Value
             {
-                Type = ValueType.Uri,
+                Type = ValueType.BlankNode,
                 StringValue = _bnodeResult.AsSpan()
             };
         }
@@ -808,11 +814,7 @@ internal ref partial struct FilterEvaluator
 
         if (funcName.Equals("isBlank", StringComparison.OrdinalIgnoreCase))
         {
-            // Check if value is a blank node (starts with _:)
-            var isBlank = arg1.Type == ValueType.Uri &&
-                          arg1.StringValue.Length >= 2 &&
-                          arg1.StringValue[0] == '_' &&
-                          arg1.StringValue[1] == ':';
+            var isBlank = arg1.Type == ValueType.BlankNode;
             return new Value
             {
                 Type = ValueType.Boolean,
@@ -863,6 +865,10 @@ internal ref partial struct FilterEvaluator
                 _strResult = arg1.BooleanValue ? "true" : "false";
                 return new Value { Type = ValueType.String, StringValue = _strResult.AsSpan() };
             }
+
+            // STR of a blank node is an error (§17.4.2.5)
+            if (arg1.Type == ValueType.BlankNode)
+                return new Value { Type = ValueType.Unbound };
 
             // For URIs, strip angle brackets: <http://...> -> http://...
             if (arg1.Type == ValueType.Uri)
@@ -1376,6 +1382,10 @@ internal ref partial struct FilterEvaluator
 
     // Static counter for generating unique blank node identifiers across all evaluations
     private static int s_bnodeCounter = 0;
+
+    // This process's part of a minted label: the counters restart in every process, and a label may be stored, so
+    // BNODE() in a later session must not repeat one minted in an earlier one
+    private static readonly string s_processToken = Guid.NewGuid().ToString("N");
 
     // Per-row seed so BNODE(label) yields the same blank node within a row but a
     // distinct one across rows (SPARQL §17.4.2.2). Bumped per result row by the
@@ -1900,6 +1910,7 @@ internal ref partial struct FilterEvaluator
                     left.GetLexicalForm().SequenceEqual(right.GetLexicalForm()) &&
                     left.GetLangTagOrDatatype().SequenceEqual(right.GetLangTagOrDatatype()),
                 ValueType.Uri => left.StringValue.SequenceEqual(right.StringValue),
+                ValueType.BlankNode => left.StringValue.SequenceEqual(right.StringValue), // the same node
                 _ => false
             };
         }
@@ -2070,6 +2081,12 @@ internal ref struct Value
             return new Value { Type = ValueType.Uri, StringValue = str };
         }
 
+        // A blank node: _:label (a literal's binding is always quoted, so it never starts this way)
+        if (str.Length > 2 && str[0] == '_' && str[1] == ':')
+        {
+            return new Value { Type = ValueType.BlankNode, StringValue = str };
+        }
+
         // Check for typed literal format: "value"^^<datatype>
         if (str.Length > 2 && str[0] == '"')
         {
@@ -2188,6 +2205,8 @@ internal enum ValueType
 {
     Unbound,
     Uri,
+    /// <summary>A blank node, written <c>_:label</c>: neither an IRI nor a literal (SPARQL 1.1 §17.4.2).</summary>
+    BlankNode,
     String,
     Integer,
     Double,

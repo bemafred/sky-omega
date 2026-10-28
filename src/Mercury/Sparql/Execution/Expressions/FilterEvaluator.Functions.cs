@@ -532,6 +532,7 @@ internal ref partial struct FilterEvaluator
             ValueType.Boolean => arg1.BooleanValue == arg2.BooleanValue,
             ValueType.String => arg1.StringValue.SequenceEqual(arg2.StringValue),
             ValueType.Uri => arg1.StringValue.SequenceEqual(arg2.StringValue),
+            ValueType.BlankNode => arg1.StringValue.SequenceEqual(arg2.StringValue),
             _ => false
         };
 

@@ -390,6 +390,7 @@ internal sealed class TreeJoinExecutor
                 var v = evaluator.EvaluateToValue(table.GetBindings(), table.Count, table.GetStringBuffer(), _prefixes, _prefixSource.AsSpan());
                 switch (v.Type)
                 {
+                    case ExprValueType.Unbound: break; // an error leaves the variable unbound (§18.6)
                     case ExprValueType.Integer: table.Bind(varName.AsSpan(), v.IntegerValue); break;
                     case ExprValueType.Double: table.Bind(varName.AsSpan(), v.DoubleValue); break;
                     case ExprValueType.Boolean: table.Bind(varName.AsSpan(), v.BooleanValue); break;
