@@ -600,67 +600,24 @@ internal ref partial struct SparqlParser
     }
 
     /// <summary>
-    /// [60] Bind: the variable a BIND assigns must not be in scope already (SPARQL 1.1 §18.2.1; syntax-BINDscope6-8).
-    /// In scope are the variables of the group's earlier triples at any depth (so a nested group or UNION branch
-    /// binds them), earlier BINDs and GRAPH variables, and what an earlier sub-SELECT projects (with <c>SELECT *</c>,
-    /// the variables of its WHERE); MINUS and [NOT] EXISTS bodies bind nothing outside themselves.
+    /// [60] Bind: the variable a BIND assigns must not be in scope already (SPARQL 1.1 §18.2.1; syntax-BINDscope6-8):
+    /// in scope of the group's earlier patterns, <c>[groupFirstSlot, Count)</c>, read by <see cref="AddInScopeVariables(ref PatternArray, int, int, ref InScopeVariables)"/>.
     /// </summary>
-    [MethodImpl(MethodImplOptions.NoInlining)] // the sub-SELECT case reads its clauses; keep them out of the recursive parse
+    [MethodImpl(MethodImplOptions.NoInlining)] // the walk reads sub-SELECT clauses; keep them out of the recursive parse
     private void ThrowIfInScope(scoped ref PatternArray pa, int groupFirstSlot, int varStart, int varLength)
     {
-        var name = _source.Slice(varStart + 1, varLength - 1); // without the sigil: ?x and $x are one variable
-        for (int i = groupFirstSlot; i < pa.Count; i++)
+        var inScope = new InScopeVariables(_source);
+        try
         {
-            var slot = pa[i];
-            switch (slot.Kind)
-            {
-                case PatternKind.Triple:
-                    if (SameVariable(slot.SubjectType, slot.SubjectStart, slot.SubjectLength, name) ||
-                        SameVariable(slot.PredicateType, slot.PredicateStart, slot.PredicateLength, name) ||
-                        SameVariable(slot.ObjectType, slot.ObjectStart, slot.ObjectLength, name))
-                        throw new SparqlParseException($"BIND target variable {_source.Slice(varStart, varLength).ToString()} is already in scope - cannot rebind");
-                    break;
-                case PatternKind.Bind:
-                    if (SameVariable(TermType.Variable, slot.BindVarStart, slot.BindVarLength, name))
-                        throw new SparqlParseException($"BIND target variable {_source.Slice(varStart, varLength).ToString()} is already in scope - cannot rebind");
-                    break;
-                case PatternKind.GraphHeader:
-                    if (SameVariable(slot.GraphTermType, slot.GraphTermStart, slot.GraphTermLength, name))
-                        throw new SparqlParseException($"BIND target variable {_source.Slice(varStart, varLength).ToString()} is already in scope - cannot rebind");
-                    break;
-                case PatternKind.MinusHeader:
-                    i = slot.ChildStartIndex + slot.ChildCount - 1;
-                    break;
-                case PatternKind.ExistsHeader:
-                case PatternKind.NotExistsHeader:
-                    i = slot.ExistsChildStart + slot.ExistsChildCount - 1;
-                    break;
-                case PatternKind.SubSelectHeader:
-                {
-                    var select = new SparqlParser(_source).ParseSubSelectClausesAt(slot.GraphTermStart, slot.SubSelectModifiersStart).Select;
-                    if (select.SelectAll)
-                        break; // it projects its WHERE's variables: the scan goes on into its WHERE
-                    for (int v = 0; v < select.ProjectedVariableCount; v++)
-                    {
-                        var (start, length) = select.GetProjectedVariable(v);
-                        if (SameVariable(TermType.Variable, start, length, name))
-                            throw new SparqlParseException($"BIND target variable {_source.Slice(varStart, varLength).ToString()} is already in scope - cannot rebind");
-                    }
-                    for (int a = 0; a < select.AggregateCount; a++)
-                    {
-                        var alias = select.GetAggregate(a);
-                        if (SameVariable(TermType.Variable, alias.AliasStart, alias.AliasLength, name))
-                            throw new SparqlParseException($"BIND target variable {_source.Slice(varStart, varLength).ToString()} is already in scope - cannot rebind");
-                    }
-                    i = slot.ChildStartIndex + slot.ChildCount - 1; // its other variables are not in scope here
-                    break;
-                }
-            }
+            AddInScopeVariables(ref pa, groupFirstSlot, pa.Count, ref inScope);
+            if (inScope.Contains(_source.Slice(varStart, varLength)))
+                throw new SparqlParseException($"BIND target variable {_source.Slice(varStart, varLength).ToString()} is already in scope - cannot rebind");
+        }
+        finally
+        {
+            inScope.Dispose();
         }
     }
-
-    private bool SameVariable(TermType type, int start, int length, ReadOnlySpan<char> nameWithoutSigil)
-        => type == TermType.Variable && start >= 0 && length > 1 && VariableName.Same(_source.Slice(start, length), nameWithoutSigil);
 
     /// <summary>A blank-node property list or collection standing alone as a triple pattern: its triples only.</summary>
     [MethodImpl(MethodImplOptions.NoInlining)]

@@ -303,10 +303,9 @@ public static class SparqlEngine
         // Every row is named by its own bindings: a binding's variable hash maps to the variable's name as written in
         // the query. Rows differ in which variables they bind (OPTIONAL, UNION branches), so names read from one row
         // and applied to the others by position would drop or mislabel values.
-        var (nameByHash, namesInSourceOrder) = VariableNamesOf(sparql);
+        var nameByHash = VariableNamesOf(sparql);
 
         string[] projectedNames;
-        HashSet<string>? projected;
         if (!parsed.SelectClause.SelectAll)
         {
             // Explicit SELECT — expose projected variables AND aggregate aliases. The parser stores regular variables
@@ -328,17 +327,13 @@ public static class SparqlEngine
                 names.Add(VariableName.WithoutSigil(sparql.AsSpan().Slice(agg.AliasStart, agg.AliasLength)).ToString());
             }
             projectedNames = names.ToArray();
-            projected = new HashSet<string>(projectedNames);
         }
         else
         {
-            // SELECT * — every variable that some row binds, in the order the query first mentions it. (A variable in
-            // scope but bound in no row is not listed; that needs the WHERE's in-scope variables, ADR-055 D7.)
-            projectedNames = [];
-            projected = null;
+            // SELECT * — the WHERE's in-scope variables, including those no row binds (ADR-055 D7)
+            projectedNames = executor.InScopeVariableNames().ToArray();
         }
-
-        var boundNames = projected == null ? new HashSet<string>() : null;
+        var projected = new HashSet<string>(projectedNames);
         try
         {
             long maxResultRows = executor.MaxResultRows; // unbounded-result guard (StorageOptions.MaxResultRows)
@@ -350,10 +345,9 @@ public static class SparqlEngine
                 {
                     if (!nameByHash.TryGetValue(bindings.GetVariableHash(i), out var name))
                         continue; // not a query variable (e.g. a blank node's internal binding)
-                    if (projected != null && !projected.Contains(name))
+                    if (!projected.Contains(name))
                         continue;
-                    if (row.TryAdd(name, bindings.GetString(i).ToString()))
-                        boundNames?.Add(name);
+                    row.TryAdd(name, bindings.GetString(i).ToString());
                 }
                 rows.Add(row);
                 ResultLimitExceededException.ThrowIfExceeded(maxResultRows, rows.Count);
@@ -363,9 +357,6 @@ public static class SparqlEngine
         {
             results.Dispose();
         }
-
-        if (boundNames != null)
-            projectedNames = namesInSourceOrder.Where(boundNames.Contains).ToArray();
 
         return new QueryResult
         {
@@ -437,17 +428,12 @@ public static class SparqlEngine
     }
 
     /// <summary>
-    /// Build a row dictionary mapping projected variable names to their values.
-    /// Uses columnNames (hash-matched) to find the correct binding column for each projected variable.
+    /// The query's variables, by the hash the executor gives a binding (<see cref="VariableName.Hash"/>), named without
+    /// the sigil.
     /// </summary>
-    /// <summary>
-    /// The query's variables, by the hash the executor gives a binding (<see cref="VariableName.Hash"/>), and their
-    /// names without the sigil in the order the query first mentions them.
-    /// </summary>
-    private static (Dictionary<int, string> NameByHash, List<string> NamesInSourceOrder) VariableNamesOf(string source)
+    private static Dictionary<int, string> VariableNamesOf(string source)
     {
         var nameByHash = new Dictionary<int, string>();
-        var namesInSourceOrder = new List<string>();
         var span = source.AsSpan();
         for (int i = 0; i < span.Length - 1; i++)
         {
@@ -459,12 +445,10 @@ public static class SparqlEngine
             if (end == i + 1)
                 continue;
             var written = span.Slice(i, end - i);
-            var name = written.Slice(1).ToString();
-            if (nameByHash.TryAdd(VariableName.Hash(written), name) && !namesInSourceOrder.Contains(name))
-                namesInSourceOrder.Add(name);
+            nameByHash.TryAdd(VariableName.Hash(written), written.Slice(1).ToString());
             i = end - 1;
         }
-        return (nameByHash, namesInSourceOrder);
+        return nameByHash;
     }
 
 

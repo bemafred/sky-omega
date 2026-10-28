@@ -778,6 +778,11 @@ internal sealed class TreeJoinExecutor
         if (sub.Values.IsPresent)
             innerBag = JoinPostQueryValues(innerBag, sub.Values);
 
+        // Project before Distinct (§18.2.5), as the query does: see QueryExecutor.ExecuteViaTreeMaterialized
+        var outNames = OutputVarNames(ref pa, headerIndex);
+        if (sub.Select.SelectAll && (sub.Select.Distinct || sub.Select.Reduced))
+            innerBag = Project(innerBag, outNames);
+
         var selectClause = sub.Select;
         var qrBindings = new Binding[64];
         var qrStringBuffer = new char[16384];
@@ -787,7 +792,6 @@ internal sealed class TreeJoinExecutor
         var qr = QueryResults.FromMaterializedSimple(innerBag, _source.AsSpan(), _store, qrBindings, qrStringBuffer,
             sub.Modifier.LimitOffset, sub.Select.Distinct || sub.Select.Reduced, sub.Modifier.OrderBy, sub.Modifier.GroupBy, selectClause, sub.Modifier.Having, buffer: null, prefixes: _prefixes);
 
-        var outNames = OutputVarNames(sub, _source, slot.GraphTermStart, slot.SubSelectModifiersStart);
         var projected = new List<MaterializedRow>();
         var bindingArray = ArrayPool<Binding>.Shared.Rent(64);
         var charArray = ArrayPool<char>.Shared.Rent(1 << 13);
@@ -814,38 +818,55 @@ internal sealed class TreeJoinExecutor
         return Join(input, projected);
     }
 
-    private static List<string> OutputVarNames(SubSelect sub, string source, int selectStart, int modifiersStart)
+    /// <summary>§18.2 Project: each row keeps only the bindings of <paramref name="names"/> (without the sigil), with
+    /// their datatype tags.</summary>
+    internal static List<MaterializedRow> Project(List<MaterializedRow> rows, List<string> names)
+    {
+        var hashes = new HashSet<int>();
+        foreach (var name in names)
+            hashes.Add(VariableName.Hash(name));
+        var output = new List<MaterializedRow>(rows.Count);
+        var bindingArray = ArrayPool<Binding>.Shared.Rent(64);
+        var charArray = ArrayPool<char>.Shared.Rent(1 << 13);
+        try
+        {
+            var table = new BindingTable(bindingArray.AsSpan(0, 64), charArray.AsSpan(0, 1 << 13));
+            foreach (var row in rows)
+            {
+                table.TruncateTo(0);
+                for (int i = 0; i < row.BindingCount; i++)
+                {
+                    if (hashes.Contains(row.GetHash(i)))
+                        table.BindWithHash(row.GetHash(i), row.GetValue(i), row.GetValueType(i));
+                }
+                output.Add(new MaterializedRow(table));
+            }
+        }
+        finally
+        {
+            ArrayPool<Binding>.Shared.Return(bindingArray);
+            ArrayPool<char>.Shared.Return(charArray);
+        }
+        return output;
+    }
+
+    /// <summary>What the sub-SELECT at <paramref name="headerIndex"/> projects: its in-scope variables (SPARQL 1.1
+    /// §18.2.1; with <c>SELECT *</c>, its WHERE's and its VALUES'), without the sigil.</summary>
+    private List<string> OutputVarNames(ref PatternArray pa, int headerIndex)
     {
         var names = new List<string>();
-        var seen = new HashSet<string>();
-        if (sub.Select.SelectAll)
+        var projection = new InScopeVariables(_source.AsSpan());
+        try
         {
-            // SELECT * — the output variables are the body's variables, in first-seen order, scanned over the source
-            // before the modifiers ("SELECT *" itself names none). ADR-055 D7 replaces the scan with the in-scope set.
-            for (int i = selectStart; i < modifiersStart && i < source.Length; i++)
-            {
-                if (!VariableName.IsSigil(source[i])) continue;
-                int j = i + 1;
-                while (j < source.Length && (char.IsLetterOrDigit(source[j]) || source[j] == '_')) j++;
-                if (j > i + 1 && seen.Add(source.Substring(i + 1, j - i - 1))) names.Add(source.Substring(i + 1, j - i - 1));
-                i = j - 1;
-            }
-            return names;
+            var header = pa[headerIndex];
+            new SparqlParser(_source.AsSpan()).AddInScopeVariables(ref pa, headerIndex,
+                header.ChildStartIndex + header.ChildCount, ref projection);
+            for (int i = 0; i < projection.Count; i++)
+                names.Add(VariableName.WithoutSigil(projection[i]).ToString());
         }
-        for (int i = 0; i < sub.Select.ProjectedVariableCount; i++)
+        finally
         {
-            var (start, length) = sub.Select.GetProjectedVariable(i);
-            string name = VariableName.WithoutSigil(source.Substring(start, length));
-            if (seen.Add(name)) names.Add(name);
-        }
-        // Aggregate aliases: SELECT (COUNT(?x) AS ?c) projects ?c, which is not a plain projected variable —
-        // FromMaterializedSimple binds the computed aggregate to that alias, so read it back too.
-        for (int i = 0; i < sub.Select.AggregateCount; i++)
-        {
-            var agg = sub.Select.GetAggregate(i);
-            if (agg.AliasLength == 0) continue;
-            string name = VariableName.WithoutSigil(source.Substring(agg.AliasStart, agg.AliasLength));
-            if (seen.Add(name)) names.Add(name);
+            projection.Dispose();
         }
         return names;
     }

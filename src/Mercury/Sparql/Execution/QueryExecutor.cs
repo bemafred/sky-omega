@@ -244,6 +244,11 @@ internal partial class QueryExecutor : IDisposable
             return topk;
 
         var rows = ExecuteGraphViaTree();
+        // §18.2.5 applies Project before Distinct, and a SELECT * projects the in-scope variables: a pattern's blank node,
+        // bound only to join its triples, must not tell two solutions apart. Without DISTINCT the projection is the
+        // result's to make (the rows keep their other bindings until then).
+        if (_buffer.SelectDistinct && _buffer.SelectAll)
+            rows = TreeJoinExecutor.Project(rows, InScopeVariableNames());
         // No solutions is no rows, except for an aggregate without GROUP BY: it groups the empty sequence into one
         // group (COUNT 0), so the rows go to the modifier layer, which synthesizes that group (§18.5).
         if (rows.Count == 0 && !(_buffer.GetSelectClause().HasRealAggregates && !_buffer.GetGroupByClause().HasGroupBy))
@@ -566,7 +571,12 @@ internal partial class QueryExecutor : IDisposable
         var seen = new HashSet<string>();
         var variableHashes = new List<int>();
 
-        if (!describe.All)
+        if (describe.All)
+        {
+            foreach (var name in InScopeVariableNames())
+                variableHashes.Add(VariableName.Hash(name));
+        }
+        else
         {
             var targets = new SparqlParser.DescribeTargetReader(_source.AsSpan(), describe.TargetsStart);
             while (targets.MoveNext(out var target))
@@ -582,7 +592,7 @@ internal partial class QueryExecutor : IDisposable
             }
         }
 
-        if (_buffer.WhereGroupStart >= 0 && (describe.All || variableHashes.Count > 0))
+        if (_buffer.WhereGroupStart >= 0 && variableHashes.Count > 0)
         {
             var results = Execute();
             try
@@ -592,7 +602,7 @@ internal partial class QueryExecutor : IDisposable
                     var solution = results.Current;
                     for (int i = 0; i < solution.Count; i++)
                     {
-                        if (!describe.All && !variableHashes.Contains(solution.GetVariableHash(i)))
+                        if (!variableHashes.Contains(solution.GetVariableHash(i)))
                             continue;
                         var value = solution.GetString(i);
                         // A literal is not described
@@ -611,6 +621,31 @@ internal partial class QueryExecutor : IDisposable
         }
 
         return new DescribeResults(_store, resources);
+    }
+
+    /// <summary>
+    /// The variables of a <c>SELECT *</c> or <c>DESCRIBE *</c>: the WHERE's in-scope variables (SPARQL 1.1 §18.2.1),
+    /// then the trailing VALUES', each once, without the sigil, including variables no solution binds (ADR-055 D7).
+    /// </summary>
+    internal List<string> InScopeVariableNames()
+    {
+        var names = new List<string>();
+        var inScope = new InScopeVariables(_source.AsSpan());
+        try
+        {
+            var parser = new SparqlParser(_source.AsSpan());
+            if (_buffer.WhereGroupStart >= 0)
+                parser.AddInScopeVariables(_buffer.WhereGroupStart, ref inScope);
+            if (_buffer.HasPostQueryValues)
+                parser.AddDataBlockVariables(_buffer.PostQueryValues.Start, ref inScope);
+            for (int i = 0; i < inScope.Count; i++)
+                names.Add(VariableName.WithoutSigil(inScope[i]).ToString());
+        }
+        finally
+        {
+            inScope.Dispose();
+        }
+        return names;
     }
 
     // Helper to create OrderByClause from buffer's OrderByEntry array

@@ -230,6 +230,19 @@ The in-scope variables of the tree (§18.2.1, computed once from the parsed tree
 `SELECT *`, including variables bound in no row. This is what the facade's result header needs; see *Related* for the
 facade defect that header is part of.
 
+**Implemented 2026-10-28.** `SparqlParser.AddInScopeVariables` is the one reading of §18.2.1 over a parsed tree. It
+fills an `InScopeVariables` (pooled spans of the source, each variable once, in the order the query first mentions
+it). Four consumers that each had their own reading now use it:
+- The facade's `SELECT *` header (`QueryExecutor.InScopeVariableNames`: the WHERE's variables, then the trailing
+  VALUES'). It lists variables no row binds, and a query with no solutions keeps its header.
+- `DESCRIBE *`, which described every binding in the rows, including a pattern's blank node.
+- A sub-SELECT's projection (`TreeJoinExecutor.OutputVarNames`). Its `SELECT *` case scanned the source text and
+  missed the sub-SELECT's own trailing VALUES.
+- The BIND scope check (`ThrowIfInScope`), which missed VALUES and SERVICE variables.
+
+`SELECT DISTINCT *`, in a query or a sub-SELECT, now projects before DISTINCT (§18.2.5), so two solutions that differ
+only in a pattern's blank node are one row. Tests: `InScopeVariablesTests` (14). Stack probes unchanged (23–39 KB).
+
 ## Open questions (all resolved 2026-10-27)
 
 - **Q1. EXPLAIN's vocabulary. Resolved 2026-10-27.** `ExplainOperatorType` already has operators for sub-SELECT,
@@ -375,7 +388,7 @@ It reached `mercury_query`, the HTTP endpoint and the CLI, and it was silent.
 
 **Fixed first, separately (2026-10-27):** `SparqlEngine` now names each row from its own bindings
 (`ResultColumnNamingTests`). The `SELECT *` header is the variables some row binds, in the order the query first
-mentions them. D7 later adds the variables bound in no row.
+mentions them. D7 (2026-10-28) made it the in-scope variables, including those bound in no row.
 
 ## References
 
