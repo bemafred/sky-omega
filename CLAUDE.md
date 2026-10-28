@@ -329,6 +329,22 @@ dt.ToString("yyyy-MM-ddTHH:mm:ss.fffZ", CultureInfo.InvariantCulture)
 
 **Rationale:** Swedish locale uses `,` as decimal separator, but W3C RDF/SPARQL specifications require `.` for numeric literals. See [ADR-014](docs/adrs/mercury/ADR-014-culture-invariance.md) for details.
 
+## Git Conventions
+
+Include a `Host:` trailer in commit messages to track which machine the commit came from:
+
+```
+fix(tools): separate build from pack to avoid stale obj race
+
+The install-tools scripts now run `dotnet build -c Release` before
+`dotnet pack --no-build`, preventing race conditions.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
+Host: elite
+```
+
 ## Design Philosophy
 
 Sky Omega values:
