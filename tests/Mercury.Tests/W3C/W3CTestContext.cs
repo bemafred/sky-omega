@@ -72,8 +72,6 @@ public static class W3CTestContext
         ["data-r2/regex/manifest#dawg-regex-003"] = "SPARQL 1.0 triage: REGEX escapes and the q flag",
         ["data-r2/regex/manifest#regex-no-metacharacters"] = "SPARQL 1.0 triage: REGEX escapes and the q flag",
         ["data-r2/regex/manifest#regex-no-metacharacters-case-insensitive"] = "SPARQL 1.0 triage: REGEX escapes and the q flag",
-        ["data-r2/syntax-sparql3/manifest#bnode-dot"] = "SPARQL 1.0 triage: invalid syntax accepted: a blank-node property list without a property ([] alone, [,], [;])",
-        ["data-r2/syntax-sparql3/manifest#bnodes-missing-pvalues-01"] = "SPARQL 1.0 triage: invalid syntax accepted: a blank-node property list without a property ([] alone, [,], [;])",
         ["data-r2/syntax-sparql3/manifest#syn-bad-26"] = "SPARQL 1.0 triage: invalid syntax accepted: an expression the grammar does not read (a blank node in FILTER; ?x<?a&&?b>?y)",
         ["data-r2/syntax-sparql3/manifest#syn-bad-29"] = "SPARQL 1.0 triage: invalid syntax accepted: an expression the grammar does not read (a blank node in FILTER; ?x<?a&&?b>?y)",
         ["data-r2/syntax-sparql3/manifest#syn-bad-30"] = "SPARQL 1.0 triage: invalid syntax accepted: an expression the grammar does not read (a blank node in FILTER; ?x<?a&&?b>?y)",

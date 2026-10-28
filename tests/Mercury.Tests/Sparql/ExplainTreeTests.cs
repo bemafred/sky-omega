@@ -14,13 +14,35 @@ namespace SkyOmega.Mercury.Tests.Sparql;
 public class ExplainTreeTests
 {
     [Fact]
-    public void Triple_IsAScan_PathIsOnePathScan()
+    public void Triple_IsAScan_SequenceIsItsSteps()
     {
+        // A sequence path is expanded when the query is parsed, one triple per step joined by a named node: the plan
+        // draws the steps that run (since 1.8.31; until then the executor expanded it, numbering its nodes apart from
+        // the parser's, and two sequences in one pattern shared a node)
         var plan = SparqlEngine.Explain("SELECT * WHERE { ?s <http://ex/a> ?x . ?x <http://ex/b>/<http://ex/c>* ?o }");
 
-        Assert.Contains("⋈ Join 2 patterns", plan);
+        Assert.Contains("⋈ Join 3 patterns", plan);
         Assert.Contains("⊳ ?s <http://ex/a> ?x", plan);
-        Assert.Contains("⇝ ?x <http://ex/b>/<http://ex/c>* ?o", plan);
+        Assert.Contains("⊳ ?x <http://ex/b> ?#j0", plan);
+        Assert.Contains("⇝ ?#j0 <http://ex/c>* ?o", plan);
+        Assert.DoesNotContain(" ? ", plan);
+    }
+
+    [Fact]
+    public void Triple_APathOtherThanASequence_IsOnePathScan()
+    {
+        var plan = SparqlEngine.Explain("SELECT * WHERE { ?x (<http://ex/b>/<http://ex/c>)* ?o }");
+
+        Assert.Contains("⇝ ?x (<http://ex/b>/<http://ex/c>)* ?o", plan);
+    }
+
+    [Fact]
+    public void BlankNodePropertyList_ItsNodeIsNamed()
+    {
+        var plan = SparqlEngine.Explain("SELECT * WHERE { ?s <http://ex/a> [ <http://ex/b> ?o ] }");
+
+        Assert.Contains("⊳ ?#j0 <http://ex/b> ?o", plan);
+        Assert.Contains("⊳ ?s <http://ex/a> ?#j0", plan);
         Assert.DoesNotContain(" ? ", plan);
     }
 

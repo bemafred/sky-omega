@@ -57,7 +57,11 @@ internal ref partial struct SparqlParser
     private static bool IsExpressionNameChar(char ch) =>
         IsLetterOrDigit(ch) || ch is '_' or ':' or '-' or '.' or '%' || ch > 0x7F;
 
-    /// <summary>Steps over <c>( … )</c> or <c>{ … }</c> at the cursor, through its matching closer.</summary>
+    /// <summary>
+    /// Steps over <c>( … )</c>, <c>{ … }</c> or <c>[ … ]</c> at the cursor, through its matching closer, with brackets
+    /// inside literals, IRIs and comments not counted: an expression's group, a pattern's collection or blank-node
+    /// property list.
+    /// </summary>
     private void SkipBracketedGroup()
     {
         int start = _position;
@@ -70,8 +74,8 @@ internal ref partial struct SparqlParser
             if (c is '"' or '\'') { SkipStringLiteral(); continue; }
             if (c == '<' && TrySkipIriRef()) continue;
             if (c == '#') { while (!IsAtEnd() && Peek() != '\n') Advance(); continue; }
-            if (c is '(' or '{') depth++;
-            else if (c is ')' or '}') depth--;
+            if (c is '(' or '{' or '[') depth++;
+            else if (c is ')' or '}' or ']') depth--;
             Advance();
         } while (depth > 0);
     }

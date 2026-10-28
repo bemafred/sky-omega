@@ -28,11 +28,12 @@ namespace SkyOmega.Mercury.Sparql.Parsing;
 //   { … } UNION { … } …                → UnionHeader        |  OPTIONAL '{' … '}'           → OptionalHeader
 //   MINUS '{' … '}'                    → MinusHeader        |  { SELECT … }                 → SubSelectHeader over its WHERE
 //   SERVICE [SILENT] ep '{' … '}'      → ServiceHeader      |  FILTER [NOT] EXISTS { … }    → (Not)ExistsHeader
-//   TriplesBlock (';' property-list shorthand; RDF-star quoted triples and blank-node property lists expand
-//     via AddTriplePatternOrExpand; ALL property-path forms ^ / | * + ? ( ) ! carried as the full path span)
+//   TriplesBlock (one property-list reader, EmitPropertyListTree, for a subject and for a blank-node property list;
+//     ALL property-path forms ^ / | * + ? ( ) ! carried as the full path span; RDF-star quoted triples expand to
+//     their reifier)
 //   FILTER (BrackettedExpression | BuiltInCall) → Filter    |  BIND ( Expr AS Var )         → Bind
 //   VALUES DataBlock (single- and multi-variable forms) → ValuesHeader carrying the clause span
-//   RDF collections ( '(' a b c ')' ) expand to rdf:first / rdf:rest triples via AddTriplePatternOrExpand
+//   RDF collections ( '(' a b c ')' ) expand to rdf:first / rdf:rest triples (EmitNodeTree)
 //
 // Every group, GRAPH, OPTIONAL, MINUS and EXISTS body must be closed by its '}'; an unclosed one is a syntax
 // error, never a guess (this parser is the only one an Update WHERE passes through).
@@ -311,12 +312,9 @@ internal ref partial struct SparqlParser
     }
 
     /// <summary>
-    /// TriplesBlock: one subject followed by a predicate-object list, with ';' property-list shorthand
-    /// (same subject, new predicate-object). Emits one Triple leaf per predicate-object pair. Returns false at a
-    /// non-triple boundary so the body loop can stop. A property path of ANY form (^ / * + ? / | ! grouping) is
-    /// carried as its full source span on the Triple slot, for the evaluator's path algebra — no path form is
-    /// deferred (a deferral on the new path is exactly the divergence ADR-045 deletes). (RDF-star quoted triples
-    /// and blank-node property lists remain deferred.)
+    /// [75] TriplesSameSubjectPath ::= VarOrTerm PropertyListPathNotEmpty | TriplesNodePath PropertyListPath: a subject and
+    /// its property list. A blank-node property list or a collection may stand alone (its PropertyListPath empty); ANON,
+    /// <c>[]</c>, may not (W3C syn-bad-bnode-dot). Returns false at a non-triple boundary so the body loop can stop.
     /// </summary>
     private bool EmitTripleBlockTree(scoped ref PatternArray pa)
     {
@@ -324,122 +322,178 @@ internal ref partial struct SparqlParser
         if (IsAtEnd() || Peek() == '}')
             return false;
 
-        var subject = ParseTerm();
-        if (subject.Type == TermType.Variable && subject.Length == 0)
+        var written = ParseTerm();
+        if (written.Type == TermType.Variable && written.Length == 0)
             return false;
 
+        bool triplesNode = IsCollection(written) || (IsBlankNodePropertyList(written) && !IsAnon(written));
+        // A subject that is a node of its own ([ … ], a collection, a quoted triple) is one node for its whole property
+        // list: its node is the subject of every triple below
+        var subject = EmitNodeTree(ref pa, written);
         SkipWhitespace();
-        // [75] TriplesSameSubject ::= TriplesNode PropertyList: a blank-node property list or collection may stand alone
-        if ((Peek() == '.' || Peek() == '}') && (IsBlankNodePropertyList(subject) || IsCollection(subject)))
-        {
-            EmitTriplesNode(ref pa, subject);
+        if (triplesNode && (IsAtEnd() || Peek() is '.' or '}' or '{' || IsBodyKeywordAhead()))
             return true;
-        }
-        // A subject that is a node of its own ([ … ], [], a collection, a quoted triple) is one node for the whole property
-        // list: expanded once, its node is the subject of every triple below (expanded per triple, each got a node of its
-        // own, so `[] :p ?a ; :q ?b` was a cross product)
-        if (IsBlankNodePropertyList(subject) || IsCollection(subject) || subject.IsQuotedTriple)
-            subject = EmitTriplesNode(ref pa, subject);
-        int pathStart = _position;
-        var (predicate, path) = ParsePredicateOrPath();
-        int pathLength = _position - pathStart;
-        if (predicate.Length == 0 && path.Type == PathType.None)
-            throw new SparqlParseException("Incomplete triple pattern - expected predicate");
-
-        SkipWhitespace();
-        var obj = ParseTerm();
-        // A synthetic term (negative marker offset — an empty collection () is rdf:nil at -8) is valid at Length 0.
-        if (obj.Length == 0 && obj.Start >= 0)
-            throw new SparqlParseException("Incomplete triple pattern - expected object");
-
-        EmitTriple(ref pa, subject, predicate, obj, path, pathStart, pathLength);
-        EmitObjectListTail(ref pa, subject, predicate, path, pathStart, pathLength);
-
-        // PropertyListNotEmpty ::= Verb ObjectList ( ';' ( Verb ObjectList )? )*
-        SkipWhitespace();
-        while (Peek() == ';')
-        {
-            Advance(); // consume ';'
-            SkipWhitespace();
-            if (IsAtEnd() || Peek() == '}' || Peek() == '.')
-                break;
-            if (IsBodyKeywordAhead())
-                break;
-
-            int nextPathStart = _position;
-            var (nextPredicate, nextPath) = ParsePredicateOrPath();
-            int nextPathLength = _position - nextPathStart;
-            SkipWhitespace();
-            var nextObj = ParseTerm();
-            if (nextObj.Length == 0 && nextObj.Start >= 0)
-                throw new SparqlParseException("Incomplete triple pattern - expected object after ';'");
-
-            EmitTriple(ref pa, subject, nextPredicate, nextObj, nextPath, nextPathStart, nextPathLength);
-            EmitObjectListTail(ref pa, subject, nextPredicate, nextPath, nextPathStart, nextPathLength);
-            SkipWhitespace();
-        }
-
+        EmitPropertyListTree(ref pa, subject);
         return true;
     }
 
     /// <summary>
-    /// [79] ObjectList ::= Object ( ',' Object )* — after the first object, each ',' adds another triple with the same
-    /// subject and verb. Without this the body loop stopped at the ',' and the rest of the group was never parsed.
+    /// [83] PropertyListPathNotEmpty ::= ( VerbPath | VerbSimple ) ObjectListPath ( ';' ( ( VerbPath | VerbSimple )
+    /// ObjectList )? )* for <paramref name="subject"/>, up to a '.', '}', ']' or a clause. The one property-list reader
+    /// of a pattern: a subject's, and a blank-node property list's (<see cref="EmitNodeTree"/>). A property path of any
+    /// form is carried as its whole source span on the Triple slot, for the evaluator's path algebra.
     /// </summary>
-    private void EmitObjectListTail(scoped ref PatternArray pa, Term subject, Term predicate, PropertyPath path,
-        int pathStart, int pathLength)
+    private void EmitPropertyListTree(scoped ref PatternArray pa, Term subject)
     {
-        SkipWhitespace();
-        while (Peek() == ',')
+        while (true)
         {
-            Advance(); // consume ','
             SkipWhitespace();
-            var obj = ParseTerm();
-            if (obj.Length == 0 && obj.Start >= 0)
-                throw new SparqlParseException("Incomplete triple pattern - expected object after ','");
-            EmitTriple(ref pa, subject, predicate, obj, path, pathStart, pathLength);
-            SkipWhitespace();
+            int pathStart = _position;
+            var (predicate, path) = ParsePredicateOrPath();
+            int pathLength = _position - pathStart;
+            if (predicate.Length == 0 && path.Type == PathType.None)
+                throw new SparqlParseException($"Incomplete triple pattern - expected predicate at position {pathStart}");
+
+            // [86] ObjectListPath ::= ObjectPath ( ',' ObjectPath )*
+            while (true)
+            {
+                SkipWhitespace();
+                var written = ParseTerm();
+                // A synthetic term (negative offset: an empty collection () is rdf:nil at -8) is valid at Length 0
+                if (written.Length == 0 && written.Start >= 0)
+                    throw new SparqlParseException($"Incomplete triple pattern - expected object at position {_position}");
+                var obj = EmitNodeTree(ref pa, written);
+                AddPathTriple(ref pa, subject, predicate, obj, path, pathStart, pathLength);
+                SkipWhitespace();
+                if (Peek() != ',')
+                    break;
+                Advance();
+            }
+
+            if (Peek() != ';')
+                return;
+            // ';' may repeat and may end the list: "?s :p ?o ; ; ." and "?s :p ?o ;" are both valid
+            while (Peek() == ';')
+            {
+                Advance();
+                SkipWhitespace();
+            }
+            if (IsAtEnd() || Peek() is '.' or '}' or ']' || IsBodyKeywordAhead())
+                return;
         }
     }
 
     /// <summary>
-    /// ADR-045 cutover: re-parse the predicate-or-path at <paramref name="position"/> — a path span captured on a
-    /// tree slot — over THIS parser's source, so the resulting <see cref="PropertyPath"/>'s offsets index the same
-    /// source the zero-GC executor hands <c>TriplePatternScan</c>. The slot can't hold the full PropertyPath, so it
-    /// carries the span and the executor reconstructs the PropertyPath here on demand.
+    /// The node a written term stands for in the tree, with the triples that describe it:
+    /// <list type="bullet">
+    /// <item>a [77] blank-node property list is a new node, its property list read by <see cref="EmitPropertyListTree"/>;</item>
+    /// <item>ANON, <c>[]</c>, is a new node;</item>
+    /// <item>a [102] collection is the head of its list, with an rdf:first and an rdf:rest triple for each item;</item>
+    /// <item>a quoted triple is its reifier.</item>
+    /// </list>
+    /// Any other term is itself. The nodes are join variables: a pattern's blank node matches any term.
     /// </summary>
-    internal (Term predicate, PropertyPath path) ParsePredicateOrPathAt(int position)
+    private Term EmitNodeTree(scoped ref PatternArray pa, Term term)
     {
-        _position = position;
-        return ParsePredicateOrPath();
+        if (term.IsQuotedTriple)
+            return EmitTriplesNode(ref pa, term);
+        bool propertyList = IsBlankNodePropertyList(term);
+        if (!propertyList && !IsCollection(term))
+            return term;
+
+        IncrementDepth(propertyList ? "Blank node property list" : "Collection");
+        int saved = _position;
+        try
+        {
+            _position = term.Start + 1; // past '[' or '('
+            SkipWhitespace();
+            var node = NewJoinVariable();
+            if (propertyList)
+            {
+                if (Peek() != ']')
+                    EmitPropertyListTree(ref pa, node);
+                SkipWhitespace();
+                ExpectChar(']');
+            }
+            else
+            {
+                var current = node;
+                while (true)
+                {
+                    var written = ParseTerm();
+                    if (written.Length == 0 && written.Start >= 0)
+                        throw new SparqlParseException($"Expected a collection item or ')' at position {_position}");
+                    var item = EmitNodeTree(ref pa, written);
+                    SkipWhitespace();
+                    bool last = Peek() == ')';
+                    // node rdf:first item ; rdf:rest (next | rdf:nil)  (rdf:first, rdf:rest, rdf:nil = synthetic -6, -7, -8)
+                    var rest = last ? new Term { Type = TermType.Iri, Start = -8, Length = 0 } : NewJoinVariable();
+                    AddTreeTriple(ref pa, current, new Term { Type = TermType.Iri, Start = -6, Length = 0 }, item,
+                        PathType.None, 0, 0);
+                    AddTreeTriple(ref pa, current, new Term { Type = TermType.Iri, Start = -7, Length = 0 }, rest,
+                        PathType.None, 0, 0);
+                    if (last)
+                        break;
+                    current = rest;
+                }
+                ExpectChar(')');
+            }
+            if (_position != term.Start + term.Length)
+                throw new SparqlParseException($"Unexpected text before the closing bracket at position {_position}");
+            return node;
+        }
+        finally
+        {
+            _position = saved;
+            DecrementDepth();
+        }
     }
 
     /// <summary>
-    /// Emit a Triple slot. For a property path (<paramref name="path"/>.Type != None) the slot carries the FULL
-    /// path-expression source span (<paramref name="pathStart"/>..<paramref name="pathLength"/>) — not just the
-    /// base IRI — so the evaluator re-parses and evaluates the complete path algebra; for a plain predicate the
-    /// path fields are empty and PathKind is None.
+    /// A triple whose verb is <paramref name="path"/>, written at <c>[spanStart, spanStart + spanLength)</c>. A top-level
+    /// [88] PathSequence is one triple per step, the steps joined by join variables of this parse, so they are distinct
+    /// from every other node of the query. Through 1.8.30 the executor expanded a sequence when it ran, numbering its
+    /// join variables from 0 again: two sequences in one pattern, or a sequence beside a <c>[ … ]</c>, shared a node and
+    /// matched nothing. Any other path form is one triple carrying its span, for the evaluator's path algebra.
     /// </summary>
-    private void EmitTriple(scoped ref PatternArray pa, Term subject, Term predicate, Term obj, PropertyPath path,
-        int pathStart, int pathLength)
+    private void AddPathTriple(scoped ref PatternArray pa, Term subject, Term predicate, Term obj, PropertyPath path,
+        int spanStart, int spanLength)
     {
-        // RDF-star quoted triples and blank-node property lists expand (at parse time) to several plain triples
-        // carrying synthetic terms (reifier / blank-node join variables at negative offsets, the rdf:* IRIs at
-        // -1..-5). Reuse the shipping expansion (AddTriplePatternOrExpand — same parser instance, same synthetic
-        // counters) into a throwaway pattern, then copy the expanded triples into the tree; the evaluator resolves
-        // the synthetic offsets via SyntheticTerms.
-        if (subject.IsQuotedTriple || obj.IsQuotedTriple ||
-            IsBlankNodePropertyList(subject) || IsBlankNodePropertyList(obj) ||
-            IsCollection(subject) || IsCollection(obj))
+        IncrementDepth("Property path");
+        try
         {
-            EmitExpandedTriples(ref pa, subject, predicate, obj, path);
-            return;
+            while (path.Type == PathType.Sequence)
+            {
+                var middle = NewJoinVariable(); // the node between two steps
+                int leftStart = path.LeftStart, leftLength = path.LeftLength;
+                int rightStart = path.RightStart, rightLength = path.RightLength;
+                var (leftPredicate, leftPath) = ParsePathSegment(leftStart, leftLength);
+                AddPathTriple(ref pa, subject, leftPredicate, middle, leftPath, leftStart, leftLength);
+                // on along the sequence from the middle node: its right part is a step, or the rest of the sequence
+                (predicate, path) = ParsePathSegment(rightStart, rightLength);
+                subject = middle;
+                spanStart = rightStart;
+                spanLength = rightLength;
+            }
+            if (path.Type == PathType.None)
+                AddTreeTriple(ref pa, subject, predicate, obj, PathType.None, path.Iri.Start, path.Iri.Length);
+            else
+                AddTreeTriple(ref pa, subject, predicate, obj, path.Type, spanStart, spanLength);
         }
-
-        int pathIriStart = path.Type == PathType.None ? path.Iri.Start : pathStart;
-        int pathIriLength = path.Type == PathType.None ? path.Iri.Length : pathLength;
-        AddTreeTriple(ref pa, subject, predicate, obj, path.Type, pathIriStart, pathIriLength);
+        finally
+        {
+            DecrementDepth();
+        }
     }
+
+    /// <summary>
+    /// ADR-045 cutover: re-parse the path a tree slot carries, written at <c>[position, position + length)</c>, over THIS
+    /// parser's source, so the resulting <see cref="PropertyPath"/>'s offsets index the same source the zero-GC
+    /// executor hands <c>TriplePatternScan</c>. The read stops at the span's end: a sequence's step, <c>p*</c> in
+    /// <c>p*/q</c>, is that step alone.
+    /// </summary>
+    internal (Term predicate, PropertyPath path) ParsePredicateOrPathAt(int position, int length)
+        => ParsePathSegment(position, length);
 
     /// <summary>
     /// Adds a triple pattern to the tree. Every triple the tree holds is added here. A labeled blank node
@@ -683,51 +737,21 @@ internal ref partial struct SparqlParser
     }
 
     /// <summary>
-    /// A blank-node property list, collection or quoted triple: adds its triples and returns its node (a join variable, a
-    /// list head, or a reifier), for the triples that use it.
+    /// A quoted triple ([… RDF-star]): adds its reification triples and returns its reifier, for the triples that use it.
     /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private Term EmitTriplesNode(scoped ref PatternArray pa, Term node)
+    private Term EmitTriplesNode(scoped ref PatternArray pa, Term quoted)
     {
         var expanded = new TriplePatternList();
         try
         {
-            Term head;
-            if (IsBlankNodePropertyList(node))
-                head = ExpandBlankNodePropertyList(ref expanded, node);
-            else if (IsCollection(node))
-                head = ExpandCollection(ref expanded, node);
-            else
-                head = ExpandQuotedTriple(ref expanded, node);
+            var reifier = ExpandQuotedTriple(ref expanded, quoted);
             for (int i = 0; i < expanded.Count; i++)
             {
                 var tp = expanded[i];
                 AddTreeTriple(ref pa, tp.Subject, tp.Predicate, tp.Object, tp.Path.Type, tp.Path.Iri.Start, tp.Path.Iri.Length);
             }
-            return head;
-        }
-        finally
-        {
-            expanded.Dispose();
-        }
-    }
-
-    /// <summary>
-    /// Expand a quoted triple, blank-node property list or collection into plain triples (the shipping expansion,
-    /// same parser instance and synthetic counters) and add them to the tree.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.NoInlining)]
-    private void EmitExpandedTriples(scoped ref PatternArray pa, Term subject, Term predicate, Term obj, PropertyPath path)
-    {
-        var expanded = new TriplePatternList();
-        try
-        {
-            AddTriplePatternOrExpand(ref expanded, subject, predicate, obj, path);
-            for (int i = 0; i < expanded.Count; i++)
-            {
-                var tp = expanded[i];
-                AddTreeTriple(ref pa, tp.Subject, tp.Predicate, tp.Object, tp.Path.Type, tp.Path.Iri.Start, tp.Path.Iri.Length);
-            }
+            return reifier;
         }
         finally
         {

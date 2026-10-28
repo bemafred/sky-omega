@@ -743,6 +743,17 @@ internal sealed class SparqlExplainer
 
     private string GetTermString(Term term)
     {
+        // A term an expansion added: a join variable (a [ … ] or collection node, a reifier, a sequence's middle node)
+        // is drawn by its name, an rdf: IRI as itself
+        if (SyntheticTerms.IsSynthetic(term.Start))
+        {
+            var name = SyntheticTerms.GetSyntheticVarName(term.Start);
+            if (!name.IsEmpty)
+                return "?" + name.ToString();
+            var iri = SyntheticTerms.GetSyntheticIri(term.Start);
+            if (!iri.IsEmpty)
+                return iri.ToString();
+        }
         if (term.Length == 0)
             return "?";
 

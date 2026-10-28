@@ -1295,33 +1295,21 @@ internal sealed class TreeJoinExecutor
     }
 
     /// <summary>
-    /// A property-path triple. The slot carries the full path-expression SPAN (not a base IRI); re-parse it over the
-    /// SAME source (so the PropertyPath's offsets index the source given to <see cref="TriplePatternScan"/>). Then
-    /// reuse the shipping expansion: a top-level SEQUENCE expands to intermediate-variable triples (TriplePatternScan
-    /// does not evaluate a top-level sequence — the shipping flat path always expands it); every other form —
-    /// ^ * + ? | ( ) ! and grouped sequences — stays one pattern TriplePatternScan evaluates zero-GC. Subject/object
-    /// come from the slot; the synthetic intermediate variables are ones TriplePatternScan already resolves.
+    /// A property-path triple. The slot carries the path's source span, which is read again over the SAME source, so the
+    /// PropertyPath's offsets index the source given to <see cref="TriplePatternScan"/>. A top-level sequence was
+    /// expanded into its steps when the query was parsed, so every path here is one pattern TriplePatternScan evaluates
+    /// zero-GC: ^ * + ? | ( ) !, and a sequence inside a group.
     /// </summary>
     private void AddPathPatterns(PatternSlot slot, string activeGraph, List<TriplePattern> patterns, List<string> graphs)
     {
-        var pathParser = new SparqlParser(_source.AsSpan());
-        var (predicate, path) = pathParser.ParsePredicateOrPathAt(slot.PathIriStart);
-        var subject = new Term { Type = slot.SubjectType, Start = slot.SubjectStart, Length = slot.SubjectLength };
-        var obj = new Term { Type = slot.ObjectType, Start = slot.ObjectStart, Length = slot.ObjectLength };
-
-        var expanded = new TriplePatternList();
-        try
+        var (predicate, path) = new SparqlParser(_source.AsSpan()).ParsePredicateOrPathAt(slot.PathIriStart, slot.PathIriLength);
+        patterns.Add(new TriplePattern
         {
-            pathParser.AddTriplePatternOrExpand(ref expanded, subject, predicate, obj, path);
-            for (int i = 0; i < expanded.Count; i++)
-            {
-                patterns.Add(expanded[i]);
-                graphs.Add(activeGraph);
-            }
-        }
-        finally
-        {
-            expanded.Dispose();
-        }
+            Subject = new Term { Type = slot.SubjectType, Start = slot.SubjectStart, Length = slot.SubjectLength },
+            Predicate = predicate,
+            Object = new Term { Type = slot.ObjectType, Start = slot.ObjectStart, Length = slot.ObjectLength },
+            Path = path
+        });
+        graphs.Add(activeGraph);
     }
 }

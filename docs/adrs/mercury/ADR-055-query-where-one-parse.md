@@ -231,6 +231,14 @@ The node walk also fixes four defects of today's EXPLAIN that have nothing to do
 EXPLAIN ANALYZE still reports totals only, now from the one route (D2). The JSON format gains the three operator
 names, and `docs/architecture/technical/sparql-reference.md` lists all twenty-two symbols (it lists nine today).
 
+**Revised 2026-10-28 (Martin): a top-level sequence path is its steps.** The `PathScan` row above drew `?s <a>/<b>* ?o`
+as one path scan, while the executor expanded the sequence when it ran, numbering the middle nodes from 0 apart from
+the parser's join variables. Two sequences in one pattern, or a sequence beside a `[ … ]`, then shared a node and
+matched nothing. The parser now expands a top-level sequence into one Triple per step, joined by its own join
+variables, and EXPLAIN draws the steps that run: `⊳ ?s <a> ?#j0` and `⇝ ?#j0 <b>* ?o`. Every other path form, a
+sequence inside a group included (`(<a>/<b>)*`), is still one `PathScan`. EXPLAIN names a join variable (`?#j0`) and an
+rdf: IRI where it drew `?`.
+
 ### D7. SELECT * is the WHERE's in-scope variables
 
 The in-scope variables of the tree (§18.2.1, computed once from the parsed tree) are the variable list of a

@@ -561,57 +561,6 @@ internal ref partial struct SparqlParser
     }
 
     /// <summary>
-    /// Add a triple pattern, handling quoted triples, blank node property lists, and sequence paths.
-    /// </summary>
-    internal void AddTriplePatternOrExpand(ref TriplePatternList pattern, Term subject, Term predicate, Term obj, PropertyPath path)
-    {
-        // Check if subject or object is a quoted triple - if so, expand to reification patterns
-        if (subject.IsQuotedTriple || obj.IsQuotedTriple)
-        {
-            ExpandQuotedTriplePattern(ref pattern, subject, predicate, obj, path);
-            return;
-        }
-
-        // Check if subject or object is a blank node property list [ :p :o ]
-        // These need to be expanded to multiple patterns with a generated blank node
-        Term actualSubject = subject;
-        Term actualObject = obj;
-
-        if (IsBlankNodePropertyList(subject))
-        {
-            actualSubject = ExpandBlankNodePropertyList(ref pattern, subject);
-        }
-        else if (IsCollection(subject))
-        {
-            actualSubject = ExpandCollection(ref pattern, subject);
-        }
-
-        if (IsBlankNodePropertyList(obj))
-        {
-            actualObject = ExpandBlankNodePropertyList(ref pattern, obj);
-        }
-        else if (IsCollection(obj))
-        {
-            actualObject = ExpandCollection(ref pattern, obj);
-        }
-
-        // Check for sequence path - expand to multiple patterns with intermediate variables
-        if (path.Type == PathType.Sequence)
-        {
-            ExpandSequencePath(ref pattern, actualSubject, actualObject, path);
-            return;
-        }
-
-        pattern.Add(new TriplePattern
-        {
-            Subject = actualSubject,
-            Predicate = predicate,
-            Object = actualObject,
-            Path = path
-        });
-    }
-
-    /// <summary>
     /// Check if a term is a blank node property list (starts with '[').
     /// </summary>
     private bool IsBlankNodePropertyList(Term term)
@@ -623,6 +572,10 @@ internal ref partial struct SparqlParser
         return term.Start >= 0 && term.Start < _source.Length && _source[term.Start] == '[';
     }
 
+    /// <summary>[163] ANON ::= '[' WS* ']': a blank node with no property list.</summary>
+    private bool IsAnon(Term term) =>
+        IsBlankNodePropertyList(term) && _source.Slice(term.Start + 1, term.Length - 2).IsWhiteSpace();
+
     /// <summary>
     /// True if a term is an RDF collection — a <c>( … )</c> list. ParseCollection returns the parenthesised span as
     /// a blank node (with the head still to be generated); an empty <c>()</c> is rdf:nil and is NOT a collection here.
@@ -633,217 +586,10 @@ internal ref partial struct SparqlParser
     }
 
     /// <summary>
-    /// Expand an RDF collection <c>( a b c )</c> (in subject or object position) into its rdf:first / rdf:rest /
-    /// rdf:nil list structure, joined through join variables (the same mechanism as blank-node property lists),
-    /// and return the head node so the enclosing triple refers to the list head. Nested collections and blank-node
-    /// property lists inside the list are expanded recursively.
-    /// </summary>
-    private Term ExpandCollection(ref TriplePatternList pattern, Term collection)
-    {
-        var savedPosition = _position;
-        _position = collection.Start + 1; // skip '('
-        SkipWhitespace();
-
-        Term head = NewJoinVariable();
-        Term node = head;
-        while (!IsAtEnd() && Peek() != ')')
-        {
-            Term item = ParseTerm();
-            if (IsCollection(item)) item = ExpandCollection(ref pattern, item);
-            else if (IsBlankNodePropertyList(item)) item = ExpandBlankNodePropertyList(ref pattern, item);
-
-            // node rdf:first item  (rdf:first = synthetic IRI -6)
-            pattern.Add(new TriplePattern
-            {
-                Subject = node,
-                Predicate = new Term { Type = TermType.Iri, Start = -6, Length = 0 },
-                Object = item
-            });
-
-            SkipWhitespace();
-            bool last = IsAtEnd() || Peek() == ')';
-            // node rdf:rest (next | rdf:nil)  (rdf:rest = -7, rdf:nil = -8)
-            Term rest = last ? new Term { Type = TermType.Iri, Start = -8, Length = 0 } : NewJoinVariable();
-            pattern.Add(new TriplePattern
-            {
-                Subject = node,
-                Predicate = new Term { Type = TermType.Iri, Start = -7, Length = 0 },
-                Object = rest
-            });
-            node = rest;
-            SkipWhitespace();
-        }
-
-        if (Peek() == ')')
-            Advance();
-        _position = savedPosition;
-        return head;
-    }
-
-    /// <summary>
     /// A new join variable (<see cref="SyntheticTerms.JoinVariable"/>): the node an expansion's triples share, such as a
     /// collection's or a property list's node, a reifier or a path's intermediate node. Numbered per query, no limit.
     /// </summary>
     private Term NewJoinVariable() => Term.Variable(SyntheticTerms.JoinVariable(_joinVariableCounter++), 0);
-
-    /// <summary>
-    /// Expand a blank node property list into multiple patterns.
-    /// For: ?s :p [ :q :r ; :t :u ]
-    /// Generates a synthetic variable ?_bn{N} and patterns:
-    ///   ?_bn{N} :q :r .
-    ///   ?_bn{N} :t :u .
-    /// Returns the synthetic variable term to be used in the main pattern.
-    /// Uses synthetic variables (not blank nodes) so patterns join properly.
-    /// </summary>
-    private Term ExpandBlankNodePropertyList(ref TriplePatternList pattern, Term blankNodePropList)
-    {
-        var syntheticVar = NewJoinVariable(); // the list's node, which its triples share
-
-        // Parse the property list inside the brackets
-        // Save current position and temporarily move to parse the inner content
-        var savedPosition = _position;
-        _position = blankNodePropList.Start + 1; // Skip the opening '['
-        SkipWhitespace();
-
-        // Parse predicate-object pairs until we hit the closing ']'
-        while (!IsAtEnd() && Peek() != ']')
-        {
-            SkipWhitespace();
-
-            // Parse predicate
-            var (innerPredicate, innerPath) = ParsePredicateOrPath();
-            if (innerPredicate.Length == 0 && innerPath.Type == PathType.None)
-                break;
-
-            SkipWhitespace();
-
-            // Parse object
-            var innerObject = ParseTerm();
-            if (innerObject.Length == 0)
-                break;
-
-            // Check if inner object is itself a blank node property list (nested)
-            Term actualInnerObject = innerObject;
-            if (IsBlankNodePropertyList(innerObject))
-            {
-                actualInnerObject = ExpandBlankNodePropertyList(ref pattern, innerObject);
-            }
-
-            // Add the pattern: syntheticVar innerPredicate innerObject
-            if (innerPath.Type == PathType.Sequence)
-            {
-                ExpandSequencePath(ref pattern, syntheticVar, actualInnerObject, innerPath);
-            }
-            else
-            {
-                pattern.Add(new TriplePattern
-                {
-                    Subject = syntheticVar,
-                    Predicate = innerPredicate,
-                    Object = actualInnerObject,
-                    Path = innerPath
-                });
-            }
-
-            SkipWhitespace();
-
-            // Handle comma-separated objects (same predicate): [ :p :o1, :o2 ]
-            while (Peek() == ',')
-            {
-                Advance(); // Skip ','
-                SkipWhitespace();
-
-                innerObject = ParseTerm();
-                if (innerObject.Length == 0)
-                    break;
-
-                actualInnerObject = innerObject;
-                if (IsBlankNodePropertyList(innerObject))
-                {
-                    actualInnerObject = ExpandBlankNodePropertyList(ref pattern, innerObject);
-                }
-
-                if (innerPath.Type == PathType.Sequence)
-                {
-                    ExpandSequencePath(ref pattern, syntheticVar, actualInnerObject, innerPath);
-                }
-                else
-                {
-                    pattern.Add(new TriplePattern
-                    {
-                        Subject = syntheticVar,
-                        Predicate = innerPredicate,
-                        Object = actualInnerObject,
-                        Path = innerPath
-                    });
-                }
-
-                SkipWhitespace();
-            }
-
-            // Handle semicolon-separated predicate-object pairs: [ :p :o ; :q :r ]
-            if (Peek() == ';')
-            {
-                Advance(); // Skip ';'
-                SkipWhitespace();
-                // Continue to next predicate-object pair
-            }
-            else if (Peek() == '.')
-            {
-                Advance(); // Skip '.'
-                SkipWhitespace();
-            }
-            else
-            {
-                // No more pairs
-                break;
-            }
-        }
-
-        // Restore position (we've parsed the property list, caller will skip past the ']')
-        _position = savedPosition;
-
-        return syntheticVar;
-    }
-
-    /// <summary>
-    /// Expand a pattern containing quoted triples into reification patterns.
-    /// For: &lt;&lt; s p o &gt;&gt; pred obj
-    /// Generates:
-    ///   ?_qt{N} rdf:type rdf:Statement .
-    ///   ?_qt{N} rdf:subject s .
-    ///   ?_qt{N} rdf:predicate p .
-    ///   ?_qt{N} rdf:object o .
-    ///   ?_qt{N} pred obj .
-    /// </summary>
-    private bool ExpandQuotedTriplePattern(ref TriplePatternList pattern, Term subject, Term predicate, Term obj, PropertyPath path)
-    {
-        Term actualSubject = subject;
-        Term actualObject = obj;
-
-        // Expand subject if it's a quoted triple
-        if (subject.IsQuotedTriple)
-        {
-            actualSubject = ExpandQuotedTriple(ref pattern, subject);
-        }
-
-        // Expand object if it's a quoted triple
-        if (obj.IsQuotedTriple)
-        {
-            actualObject = ExpandQuotedTriple(ref pattern, obj);
-        }
-
-        // Add the main pattern with reifier(s) as subject/object
-        pattern.Add(new TriplePattern
-        {
-            Subject = actualSubject,
-            Predicate = predicate,
-            Object = actualObject,
-            Path = path
-        });
-
-        return true;
-    }
 
     /// <summary>
     /// Expand a single quoted triple into reification patterns.
@@ -904,66 +650,6 @@ internal ref partial struct SparqlParser
             });
 
             return reifierTerm;
-        }
-        finally
-        {
-            DecrementDepth();
-        }
-    }
-
-    /// <summary>
-    /// [88] PathSequence ::= PathEltOrInverse ( '/' PathEltOrInverse )*: expands <c>?s p1/p2/…/pn ?o</c> into n triple
-    /// patterns joined by n-1 join variables. The sequence is a flat list, read right along it in a loop, so its length
-    /// is not nesting; only a parenthesized sequence inside it, <c>(p1/p2)/p3</c>, recurses and counts toward the
-    /// depth limit.
-    /// </summary>
-    private bool ExpandSequencePath(ref TriplePatternList pattern, Term subject, Term obj, PropertyPath path)
-    {
-        IncrementDepth("Property path");
-        try
-        {
-            while (true)
-            {
-                var intermediateTerm = NewJoinVariable(); // the node between the two steps
-
-                // Re-parse left and right path segments from source offsets
-                var (leftPredicate, leftPath) = ParsePathSegment(path.LeftStart, path.LeftLength);
-                var (rightPredicate, rightPath) = ParsePathSegment(path.RightStart, path.RightLength);
-
-                // Left step: subject -> intermediate
-                if (leftPath.Type == PathType.Sequence)
-                {
-                    ExpandSequencePath(ref pattern, subject, intermediateTerm, leftPath);
-                }
-                else
-                {
-                    pattern.Add(new TriplePattern
-                    {
-                        Subject = subject,
-                        Predicate = leftPredicate,
-                        Object = intermediateTerm,
-                        Path = leftPath
-                    });
-                }
-
-                // The rest of the sequence: on along it from the intermediate node
-                if (rightPath.Type == PathType.Sequence)
-                {
-                    subject = intermediateTerm;
-                    path = rightPath;
-                    continue;
-                }
-
-                // Last step: intermediate -> object
-                pattern.Add(new TriplePattern
-                {
-                    Subject = intermediateTerm,
-                    Predicate = rightPredicate,
-                    Object = obj,
-                    Path = rightPath
-                });
-                return true;
-            }
         }
         finally
         {
@@ -1643,77 +1329,34 @@ internal ref partial struct SparqlParser
     }
 
     /// <summary>
-    /// Parse a blank node property list: [ predicate object ; ... ]
-    /// Returns a blank node term. The actual property list is captured for later expansion.
-    /// Supports property paths in predicates (e.g., [:p*/:q 123]).
+    /// A blank-node property list <c>[ … ]</c> or ANON <c>[]</c> at the cursor, as a blank-node term over its whole span;
+    /// its property list is read where the node is used (<see cref="EmitNodeTree"/>, or the template grammar). The
+    /// closing ']' is found with the token rule, so a bracket inside a literal or an IRI is not one.
     /// </summary>
     private Term ParseBlankNodePropertyList()
     {
         var start = _position;
-        Advance(); // Skip '['
-        SkipWhitespace();
-
-        // Handle empty blank node []
-        if (Peek() == ']')
-        {
-            Advance();
-            return Term.BlankNode(start, _position - start);
-        }
-
-        // Parse property list inside brackets
-        // We just skip to the closing ']', counting nested brackets
-        int depth = 1;
-        while (!IsAtEnd() && depth > 0)
-        {
-            var ch = Peek();
-            if (ch == '[') depth++;
-            else if (ch == ']') depth--;
-
-            if (depth > 0)
-                Advance();
-        }
-
-        if (Peek() == ']')
-            Advance();
-
+        SkipBracketedGroup();
         return Term.BlankNode(start, _position - start);
     }
 
     /// <summary>
-    /// Parse a collection (RDF list): ( item1 item2 ... )
-    /// Returns a blank node term representing the list head.
-    /// Supports blank node property lists with property paths inside.
+    /// A collection <c>( … )</c> at the cursor, as a blank-node term over its whole span, its items read where it is
+    /// used; the empty collection <c>()</c> is rdf:nil (synthetic IRI offset -8). The closing ')' is found with the
+    /// token rule.
     /// </summary>
     private Term ParseCollection()
     {
         var start = _position;
-        Advance(); // Skip '('
+        Advance(); // '('
         SkipWhitespace();
-
-        // Handle empty collection () — rdf:nil (synthetic IRI offset -8, resolved by SyntheticTerms)
         if (Peek() == ')')
         {
             Advance();
             return new Term { Type = TermType.Iri, Start = -8, Length = 0 };
         }
-
-        // Parse items, counting nested parens and brackets
-        int depth = 1;
-        while (!IsAtEnd() && depth > 0)
-        {
-            var ch = Peek();
-            if (ch == '(' || ch == '[') depth++;
-            else if (ch == ')' || ch == ']') depth--;
-
-            if (depth > 0)
-                Advance();
-        }
-
-        if (Peek() == ')')
-            Advance();
-
-        // Collections are represented as blank nodes for now
-        // Full RDF list expansion would require generating rdf:first/rdf:rest triples
+        _position = start;
+        SkipBracketedGroup();
         return Term.BlankNode(start, _position - start);
     }
 

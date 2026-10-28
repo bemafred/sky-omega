@@ -98,7 +98,7 @@ public class WhereTreeParseTests
     [InlineData("SELECT * WHERE { ?s <http://ex/knows>+ ?o }", "OneOrMore")]
     [InlineData("SELECT * WHERE { ?s <http://ex/knows>? ?o }", "ZeroOrOne")]
     [InlineData("SELECT * WHERE { ?s <http://ex/a>|<http://ex/b> ?o }", "Alternative")]
-    [InlineData("SELECT * WHERE { ?s <http://ex/a>/<http://ex/b> ?o }", "Sequence")]
+    [InlineData("SELECT * WHERE { ?s ^(<http://ex/a>/<http://ex/b>) ?o }", "InverseGroup")]
     [InlineData("SELECT * WHERE { ?s !(<http://ex/a>|<http://ex/b>) ?o }", "NegatedSet")]
     [InlineData("SELECT * WHERE { ?s !<http://ex/a> ?o }", "NegatedSet")]
     [InlineData("SELECT * WHERE { ?s !^a ?o }", "NegatedSet")]
@@ -122,6 +122,38 @@ public class WhereTreeParseTests
             Assert.True(span.Length > 1);
         }
         Assert.False(children.MoveNext());
+    }
+
+    [Fact]
+    public void SequencePath_IsOneTriplePerStep_JoinedByAJoinVariable()
+    {
+        // [88] PathSequence: ?s a/b*/c ?o is three triples, ?s a ?#j0, ?#j0 b* ?#j1 and ?#j1 c ?o; each step's slot
+        // carries its own span
+        const string query = "SELECT * WHERE { ?s <http://ex/a>/<http://ex/b>*/<http://ex/c> ?o }";
+        var parsed = new SparqlParser(query.AsSpan()).ParseQuery();
+        var tree = new PatternArray(new byte[PatternSlot.Size * 64]);
+        int root = new SparqlParser(query.AsSpan()).ParsePatternTreeAt(parsed.WhereClause.GroupStart, ref tree);
+
+        var children = tree.EnumerateDirectChildren(root);
+        Assert.True(children.MoveNext());
+        var first = children.Current;
+        Assert.True(children.MoveNext());
+        var second = children.Current;
+        Assert.True(children.MoveNext());
+        var third = children.Current;
+        Assert.False(children.MoveNext());
+
+        Assert.Equal("?s", query.Substring(first.SubjectStart, first.SubjectLength));
+        Assert.Equal("None", first.PathKind.ToString());
+        Assert.Equal("<http://ex/a>", query.Substring(first.PredicateStart, first.PredicateLength));
+        Assert.True(first.ObjectStart < 0); // a join variable
+        Assert.Equal(first.ObjectStart, second.SubjectStart);
+        Assert.Equal("ZeroOrMore", second.PathKind.ToString());
+        Assert.Equal("<http://ex/b>*", query.Substring(second.PathIriStart, second.PathIriLength));
+        Assert.True(second.ObjectStart < 0 && second.ObjectStart != first.ObjectStart);
+        Assert.Equal(second.ObjectStart, third.SubjectStart);
+        Assert.Equal("<http://ex/c>", query.Substring(third.PredicateStart, third.PredicateLength));
+        Assert.Equal("?o", query.Substring(third.ObjectStart, third.ObjectLength));
     }
 
     [Theory]
