@@ -172,7 +172,7 @@ internal ref struct BindingTable
     /// Bind a string value to a variable.
     /// Copies the string into the internal buffer.
     /// </summary>
-    public void Bind(ReadOnlySpan<char> variableName, ReadOnlySpan<char> value)
+    public void Bind(scoped ReadOnlySpan<char> variableName, scoped ReadOnlySpan<char> value)
     {
         EnsureBindingCapacity();
         if (!EnsureStringCapacity(value.Length)) return;

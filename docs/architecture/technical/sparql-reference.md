@@ -29,6 +29,7 @@ Key components:
 | Hash functions | MD5, SHA1, SHA256, SHA384, SHA512 |
 | UUID functions | UUID, STRUUID (uses time-ordered UUID v7) |
 | DateTime functions | NOW, YEAR, MONTH, DAY, HOURS, MINUTES, SECONDS, TZ, TIMEZONE |
+| Casts | xsd:integer, xsd:decimal, xsd:float, xsd:double, xsd:boolean, xsd:string, xsd:dateTime |
 | Computed values | BIND (arithmetic expressions) |
 | Aggregation | GROUP BY, HAVING, COUNT, SUM, AVG, MIN, MAX, GROUP_CONCAT, SAMPLE |
 | Modifiers | DISTINCT, REDUCED, ORDER BY (ASC/DESC), LIMIT, OFFSET |
@@ -38,6 +39,26 @@ Key components:
 | SPARQL Update | INSERT DATA, DELETE DATA, DELETE WHERE, DELETE/INSERT WHERE (WITH clause), CLEAR, DROP, CREATE, COPY, MOVE, ADD, LOAD |
 
 **Note:** Subqueries with UNION (e.g., `{ SELECT ?x WHERE { {?x ?p ?o} UNION {?s ?x ?o} } }`) are fully supported. Implementation uses `BoxedSubQueryExecutor` to materialize UNION branch results independently, achieving 100% W3C SPARQL 1.1 Update conformance (94/94 tests).
+
+### Expression values ([ADR-056](../../adrs/mercury/ADR-056-expression-value-is-the-term.md))
+
+An expression evaluates to an RDF term or an error, by the SPARQL operator mapping (§17.3):
+- **A value keeps its term.** `BIND(?o AS ?x)` binds the stored term, so `"01"^^xsd:short` stays that term, and
+  `STR`, `DATATYPE` and `sameTerm` read it. A constant is the literal it abbreviates: `01` is `"01"^^xsd:integer`,
+  `1.0` is an `xsd:decimal`, and `1e3` is an `xsd:double`. A computed value is written in its type's canonical form,
+  so `BIND(1 + 1 AS ?x)` binds `"2"^^xsd:integer` and `BIND("a" AS ?x)` binds `"a"`.
+- **Arithmetic** promotes integer → decimal → float → double. `7 / 2` is `"3.5"^^xsd:decimal`. A string is not
+  coerced to a number: `"5" + 1` is an error.
+- **`=` and `!=`** compare numbers, strings, booleans, dateTimes and dates by value.
+  - Values in two different value spaces (a number and a string) are not equal.
+  - A literal of an unknown datatype, or an ill-typed one, is equal only to the same term, and an error otherwise.
+  - Language tags compare ignoring case.
+  - A date or dateTime with a timezone and one without are ordered only when they are more than 14 hours apart.
+- **`<` `>` `<=` `>=`** are defined within those value spaces only. Comparing two IRIs is an error.
+- **Errors propagate.** `!`, `&&` and `||` follow the §17.2 truth tables, so `!?w` with `?w` unbound is an error. FILTER
+  keeps a row only when the effective boolean value is true. An error leaves a BIND variable unbound.
+- **Datatypes in constants** are expanded through the prologue (`"a"^^t:type1`). An undeclared prefix is an error,
+  `xsd:` included.
 
 ## Query Execution Model
 

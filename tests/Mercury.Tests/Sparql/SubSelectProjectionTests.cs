@@ -129,6 +129,6 @@ public class SubSelectProjectionTests : PooledStoreTestBase
         Assert.True(result.Success, result.ErrorMessage);
         var row = Assert.Single(result.Rows!);
         Assert.Equal("<http://ex/o>", row["o"]);
-        Assert.Equal("1", row["s"]);
+        Assert.Equal("\"1\"^^<http://www.w3.org/2001/XMLSchema#integer>", row["s"]);
     }
 }

@@ -116,24 +116,7 @@ internal ref partial struct QueryResults
                 _bindingTable.GetStringBuffer(),
                 _buffer?.Prefixes ?? _materializedPrefixes, _source, baseIri);
 
-            // Bind the result to the alias variable
-            switch (value.Type)
-            {
-                case ValueType.Integer:
-                    _bindingTable.Bind(aliasName, value.IntegerValue);
-                    break;
-                case ValueType.Double:
-                    _bindingTable.Bind(aliasName, value.DoubleValue);
-                    break;
-                case ValueType.Boolean:
-                    _bindingTable.Bind(aliasName, value.BooleanValue);
-                    break;
-                case ValueType.String:
-                case ValueType.BlankNode:
-                case ValueType.Uri:
-                    _bindingTable.Bind(aliasName, value.StringValue);
-                    break;
-            }
+            value.BindTo(ref _bindingTable, aliasName); // the term, or nothing for an error (ADR-056 D6)
         }
     }
 

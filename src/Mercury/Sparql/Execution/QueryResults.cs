@@ -563,43 +563,16 @@ internal sealed class GroupedRow
                         bindings.GetStringBuffer(),
                         null, ReadOnlySpan<char>.Empty);
 
-                    // Convert the evaluated value to the format expected by aggregation
-                    switch (value.Type)
+                    // An error is skipped (COUNT counts it); a value is read as its term, as a bound variable is
+                    if (value.Type == ValueType.Unbound)
                     {
-                        case ValueType.Integer:
-                            valueStr = $"\"{value.IntegerValue}\"^^<http://www.w3.org/2001/XMLSchema#integer>";
-                            numValue = value.IntegerValue;
-                            decimalValue = value.IntegerValue;
-                            hasNumValue = true;
-                            isDouble = false;
-                            break;
-                        case ValueType.Double:
-                            valueStr = $"\"{value.DoubleValue.ToString(CultureInfo.InvariantCulture)}\"^^<http://www.w3.org/2001/XMLSchema#double>";
-                            numValue = value.DoubleValue;
-                            // Store decimal approximation for decimal mode
-                            try { decimalValue = (decimal)value.DoubleValue; }
-                            catch { decimalValue = 0; }
-                            hasNumValue = true;
-                            isDouble = true;
-                            break;
-                        case ValueType.Boolean:
-                            valueStr = value.BooleanValue ? "true" : "false";
-                            break;
-                        case ValueType.BlankNode:
-                        case ValueType.Uri:
-                        case ValueType.String:
-                            valueStr = value.StringValue.ToString();
-                            // Try to parse as numeric
-                            if (valueStr != null)
-                            {
-                                hasNumValue = TryParseRdfNumeric(valueStr, out numValue, out decimalValue, out isDouble);
-                            }
-                            break;
-                        case ValueType.Unbound:
-                            // Expression evaluated to error/unbound - skip for most aggregates
-                            if (func != AggregateFunction.Count)
-                                continue;
-                            break;
+                        if (func != AggregateFunction.Count)
+                            continue;
+                    }
+                    else
+                    {
+                        valueStr = value.Term();
+                        hasNumValue = TryParseRdfNumeric(valueStr, out numValue, out decimalValue, out isDouble);
                     }
                 }
                 else

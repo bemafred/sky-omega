@@ -398,11 +398,11 @@ public partial class QueryExecutorTests
             Assert.Equal(14, rows.Count);
 
             // Count rows where z = "union2" (second branch)
-            var union2Count = rows.Count(r => r.z == "union2");
+            var union2Count = rows.Count(r => r.z == "\"union2\"");
             Assert.Equal(7, union2Count);  // 7 triples with second branch BIND
 
             // Count rows where z != "union2" (first branch - z = value of ?o)
-            var union1Count = rows.Count(r => r.z != "union2");
+            var union1Count = rows.Count(r => r.z != "\"union2\"");
             Assert.Equal(7, union1Count);  // 7 triples with first branch BIND
         }
         finally
@@ -436,7 +436,7 @@ public partial class QueryExecutorTests
 
             // All 3 people should have ?answer = 42
             Assert.Equal(3, answers.Count);
-            Assert.All(answers, a => Assert.Equal("42", a));
+            Assert.All(answers, a => Assert.Equal("\"42\"^^<http://www.w3.org/2001/XMLSchema#integer>", a)); // a BIND binds the term (ADR-056 D6)
         }
         finally
         {
@@ -587,7 +587,7 @@ public partial class QueryExecutorTests
             results.Dispose();
 
             Assert.Equal(3, messages.Count);
-            Assert.All(messages, m => Assert.Equal("greeting", m));
+            Assert.All(messages, m => Assert.Equal("\"greeting\"", m)); // a BIND binds the term (ADR-056 D6)
         }
         finally
         {

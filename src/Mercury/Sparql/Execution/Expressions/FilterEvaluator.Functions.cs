@@ -1,5 +1,4 @@
 using System;
-using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -16,70 +15,43 @@ internal ref partial struct FilterEvaluator
 #endif
 
     /// <summary>
-    /// Parse IF(condition, thenExpr, elseExpr)
+    /// IF(condition, then, else) (§17.4.1.2): the condition's effective boolean value picks a branch, in the same
+    /// context as the rest of the expression; an error in it is an error.
     /// </summary>
     private Value ParseIfFunction()
     {
-        // Parse condition - this is a full expression that needs boolean evaluation
-        var conditionStart = _position;
-
-        // Find the first comma by tracking parentheses depth
-        int depth = 0;
-        while (!IsAtEnd())
-        {
-            var ch = Peek();
-            if (ch == '(') depth++;
-            else if (ch == ')') depth--;
-            else if (ch == ',' && depth == 0) break;
-            Advance();
-        }
-
-        var conditionExpr = _expression.Slice(conditionStart, _position - conditionStart);
-
-        // Evaluate the condition
-        var condEvaluator = new FilterEvaluator(conditionExpr);
-        var conditionResult = condEvaluator.Evaluate(_bindingData, _bindingCount, _bindingStrings);
-
+        var condition = Value.EffectiveBoolean(ValueOr());
         SkipWhitespace();
         if (Peek() == ',')
             Advance();
-        SkipWhitespace();
-
-        // Parse then expression
         var thenValue = ValueOr();
-
         SkipWhitespace();
         if (Peek() == ',')
             Advance();
-        SkipWhitespace();
-
-        // Parse else expression
         var elseValue = ValueOr();
-
         SkipWhitespace();
         if (Peek() == ')')
             Advance();
-
-        // Return based on condition
-        return conditionResult ? thenValue : elseValue;
+        return condition switch
+        {
+            Truth.True => thenValue,
+            Truth.False => elseValue,
+            _ => Value.Error,
+        };
     }
 
     /// <summary>
-    /// Parse COALESCE(expr1, expr2, ...) - returns first bound value
+    /// COALESCE(expr1, expr2, …) (§17.4.1.4): the first argument that is not an error.
     /// </summary>
     private Value ParseCoalesceFunction()
     {
-        Value result = new Value { Type = ValueType.Unbound };
+        Value result = Value.Error;
 
         while (!IsAtEnd() && Peek() != ')')
         {
             var value = ValueOr();
-
-            // If we haven't found a bound value yet and this one is bound, use it
             if (result.Type == ValueType.Unbound && value.Type != ValueType.Unbound)
-            {
                 result = value;
-            }
 
             SkipWhitespace();
             if (Peek() == ',')
@@ -96,193 +68,124 @@ internal ref partial struct FilterEvaluator
     }
 
     /// <summary>
-    /// Parse REGEX(string, pattern [, flags])
+    /// The arguments of a two-argument function, read in order; false (an error) when the second is missing.
+    /// </summary>
+    private bool ParseSecondArgument()
+    {
+        SkipWhitespace();
+        if (Peek() != ',')
+        {
+            SkipToCloseParen();
+            return false;
+        }
+        Advance();
+        SkipWhitespace();
+        return true;
+    }
+
+    private void CloseArguments()
+    {
+        SkipWhitespace();
+        if (Peek() == ')')
+            Advance();
+    }
+
+    /// <summary>REGEX flags as .NET options: i, s, m and x (XPath fn:matches).</summary>
+    private static RegexOptions RegexFlags(ReadOnlySpan<char> flags)
+    {
+        var options = RegexOptions.None;
+        foreach (var flag in flags)
+        {
+            switch (flag)
+            {
+                case 'i': options |= RegexOptions.IgnoreCase; break;
+                case 's': options |= RegexOptions.Singleline; break;
+                case 'm': options |= RegexOptions.Multiline; break;
+                case 'x': options |= RegexOptions.IgnorePatternWhitespace; break;
+            }
+        }
+        return options;
+    }
+
+    /// <summary>
+    /// REGEX(text, pattern [, flags]) (§17.4.3.14); an error when an argument has no text or the pattern is invalid.
     /// </summary>
     private Value ParseRegexFunction()
     {
-        // Parse string argument
         var stringArg = ValueOr();
-        SkipWhitespace();
-
-        if (Peek() != ',')
-        {
-            // Skip to closing paren
-            while (!IsAtEnd() && Peek() != ')')
-                Advance();
-            if (Peek() == ')')
-                Advance();
-            return new Value { Type = ValueType.Boolean, BooleanValue = false };
-        }
-
-        Advance(); // Skip ','
-        SkipWhitespace();
-
-        // Parse pattern argument
+        if (!ParseSecondArgument())
+            return Value.Error;
         var patternArg = ValueOr();
         SkipWhitespace();
 
-        // Check for optional flags argument
-        ReadOnlySpan<char> flags = ReadOnlySpan<char>.Empty;
+        ReadOnlySpan<char> flags = default;
+        bool flagsValid = true;
         if (Peek() == ',')
         {
-            Advance(); // Skip ','
+            Advance();
             SkipWhitespace();
             var flagsArg = ValueOr();
-            if (flagsArg.Type == ValueType.String)
-                flags = flagsArg.StringValue;
+            flagsValid = flagsArg.HasText;
+            flags = flagsArg.StringValue;
         }
+        CloseArguments();
 
-        SkipWhitespace();
-        if (Peek() == ')')
-            Advance();
+        if (!stringArg.HasText || !patternArg.HasText || patternArg.Type == ValueType.Uri || !flagsValid)
+            return Value.Error;
 
-        // Get string value (lexical form)
-        ReadOnlySpan<char> stringValue;
-        if (stringArg.Type == ValueType.String || stringArg.Type == ValueType.Uri)
-            stringValue = stringArg.GetLexicalForm();
-        else if (stringArg.Type == ValueType.Unbound)
-            return new Value { Type = ValueType.Boolean, BooleanValue = false };
-        else
-            return new Value { Type = ValueType.Boolean, BooleanValue = false };
-
-        // Get pattern value (lexical form)
-        ReadOnlySpan<char> pattern;
-        if (patternArg.Type == ValueType.String)
-            pattern = patternArg.GetLexicalForm();
-        else
-            return new Value { Type = ValueType.Boolean, BooleanValue = false };
-
-        // Build regex options from flags
-        var options = RegexOptions.None;
-        foreach (var flag in flags)
-        {
-            switch (flag)
-            {
-                case 'i': options |= RegexOptions.IgnoreCase; break;
-                case 's': options |= RegexOptions.Singleline; break;
-                case 'm': options |= RegexOptions.Multiline; break;
-                case 'x': options |= RegexOptions.IgnorePatternWhitespace; break;
-            }
-        }
-
-        // Perform regex match
         try
         {
-            var regex = new Regex(pattern.ToString(), options, TimeSpan.FromMilliseconds(100));
-            var isMatch = regex.IsMatch(stringValue.ToString());
-            return new Value { Type = ValueType.Boolean, BooleanValue = isMatch };
+            var regex = new Regex(patternArg.StringValue.ToString(), RegexFlags(flags), TimeSpan.FromMilliseconds(100));
+            return Value.FromBoolean(regex.IsMatch(TextOf(stringArg).ToString()));
         }
-        catch
+        catch (ArgumentException)
         {
-            // Invalid regex pattern
-            return new Value { Type = ValueType.Boolean, BooleanValue = false };
+            return Value.Error;
         }
     }
 
     /// <summary>
-    /// Parse REPLACE(string, pattern, replacement [, flags])
-    /// Replaces all occurrences of regex pattern with replacement string
+    /// REPLACE(text, pattern, replacement [, flags]) (§17.4.3.15): every match replaced, the text's tag or datatype kept.
     /// </summary>
     private Value ParseReplaceFunction()
     {
-        // Parse string argument
         var stringArg = ValueOr();
-        SkipWhitespace();
-
-        if (Peek() != ',')
-        {
-            SkipToCloseParen();
-            return new Value { Type = ValueType.Unbound };
-        }
-
-        Advance(); // Skip ','
-        SkipWhitespace();
-
-        // Parse pattern argument
+        if (!ParseSecondArgument())
+            return Value.Error;
         var patternArg = ValueOr();
-        SkipWhitespace();
-
-        if (Peek() != ',')
-        {
-            SkipToCloseParen();
-            return new Value { Type = ValueType.Unbound };
-        }
-
-        Advance(); // Skip ','
-        SkipWhitespace();
-
-        // Parse replacement argument
+        if (!ParseSecondArgument())
+            return Value.Error;
         var replacementArg = ValueOr();
         SkipWhitespace();
 
-        // Check for optional flags argument
-        ReadOnlySpan<char> flags = ReadOnlySpan<char>.Empty;
+        ReadOnlySpan<char> flags = default;
+        bool flagsValid = true;
         if (Peek() == ',')
         {
-            Advance(); // Skip ','
+            Advance();
             SkipWhitespace();
             var flagsArg = ValueOr();
-            if (flagsArg.Type == ValueType.String)
-                flags = flagsArg.StringValue;
+            flagsValid = flagsArg.HasText;
+            flags = flagsArg.StringValue;
         }
+        CloseArguments();
 
-        SkipWhitespace();
-        if (Peek() == ')')
-            Advance();
+        if (!stringArg.HasText || !patternArg.HasText || !replacementArg.HasText || !flagsValid)
+            return Value.Error;
 
-        // Validate string argument
-        if (stringArg.Type != ValueType.String && stringArg.Type != ValueType.Uri)
-            return new Value { Type = ValueType.Unbound };
-
-        // Validate pattern argument
-        if (patternArg.Type != ValueType.String)
-            return new Value { Type = ValueType.Unbound };
-
-        // Validate replacement argument
-        if (replacementArg.Type != ValueType.String)
-            return new Value { Type = ValueType.Unbound };
-
-        var stringValue = stringArg.GetLexicalForm();
-        var pattern = patternArg.GetLexicalForm();
-        var replacement = replacementArg.GetLexicalForm();
-
-        // Build regex options from flags
-        var options = RegexOptions.None;
-        foreach (var flag in flags)
-        {
-            switch (flag)
-            {
-                case 'i': options |= RegexOptions.IgnoreCase; break;
-                case 's': options |= RegexOptions.Singleline; break;
-                case 'm': options |= RegexOptions.Multiline; break;
-                case 'x': options |= RegexOptions.IgnorePatternWhitespace; break;
-            }
-        }
-
-        // Perform regex replacement
         try
         {
-            var regex = new Regex(pattern.ToString(), options, TimeSpan.FromMilliseconds(100));
-            var result = regex.Replace(stringValue.ToString(), replacement.ToString());
-
-            // Preserve language tag or datatype from the first argument
-            var suffix = stringArg.GetLangTagOrDatatype();
-            _replaceResult = suffix.IsEmpty ? $"\"{result}\"" : $"\"{result}\"{suffix.ToString()}";
-            return new Value
-            {
-                Type = ValueType.String,
-                StringValue = _replaceResult.AsSpan()
-            };
+            var regex = new Regex(patternArg.StringValue.ToString(), RegexFlags(flags), TimeSpan.FromMilliseconds(100));
+            return WithText(stringArg, regex.Replace(TextOf(stringArg).ToString(), replacementArg.StringValue.ToString()));
         }
-        catch
+        catch (ArgumentException)
         {
-            // Invalid regex pattern
-            return new Value { Type = ValueType.Unbound };
+            return Value.Error;
         }
     }
 
     /// <summary>
-    /// Parse text:match(text, query) - full-text search with case-insensitive matching.
+    /// text:match(text, query) - full-text search with case-insensitive matching.
     /// Returns true if text contains query (case-insensitive).
     /// </summary>
     /// <remarks>
@@ -294,28 +197,13 @@ internal ref partial struct FilterEvaluator
     private Value ParseTextMatchFunction()
     {
         var textArg = ValueOr();
-        SkipWhitespace();
-
-        if (Peek() != ',')
-        {
-            SkipToCloseParen();
-            return new Value { Type = ValueType.Boolean, BooleanValue = false };
-        }
-
-        Advance(); // Skip ','
-        SkipWhitespace();
-
+        if (!ParseSecondArgument())
+            return Value.FromBoolean(false);
         var queryArg = ValueOr();
-        SkipWhitespace();
-        if (Peek() == ')')
-            Advance();
+        CloseArguments();
 
-        // Validate both arguments are strings
-        if ((textArg.Type != ValueType.String && textArg.Type != ValueType.Uri) ||
-            (queryArg.Type != ValueType.String && queryArg.Type != ValueType.Uri))
-        {
-            return new Value { Type = ValueType.Boolean, BooleanValue = false };
-        }
+        if (!textArg.HasText || !queryArg.HasText)
+            return Value.FromBoolean(false);
 
         // Case-insensitive contains check using OrdinalIgnoreCase for locale-independent
         // Unicode case-folding (handles Swedish å, ä, ö). Consistent with TrigramIndex
@@ -323,645 +211,242 @@ internal ref partial struct FilterEvaluator
 #if DEBUG
         Interlocked.Increment(ref _textMatchEvaluationCount);
 #endif
-        var matches = textArg.GetLexicalForm().Contains(queryArg.GetLexicalForm(), StringComparison.OrdinalIgnoreCase);
-        return new Value { Type = ValueType.Boolean, BooleanValue = matches };
+        return Value.FromBoolean(TextOf(textArg).Contains(TextOf(queryArg), StringComparison.OrdinalIgnoreCase));
     }
 
-    /// <summary>
-    /// Parse CONTAINS(string, substring) - returns true if string contains substring
-    /// </summary>
+    /// <summary>CONTAINS(text, substring) (§17.4.3.11)</summary>
     private Value ParseContainsFunction()
     {
         var arg1 = ValueOr();
-        SkipWhitespace();
-
-        if (Peek() != ',')
-        {
-            SkipToCloseParen();
-            return new Value { Type = ValueType.Boolean, BooleanValue = false };
-        }
-
-        Advance(); // Skip ','
-        SkipWhitespace();
-
+        if (!ParseSecondArgument())
+            return Value.Error;
         var arg2 = ValueOr();
-        SkipWhitespace();
-        if (Peek() == ')')
-            Advance();
-
-        if ((arg1.Type != ValueType.String && arg1.Type != ValueType.Uri) ||
-            (arg2.Type != ValueType.String && arg2.Type != ValueType.Uri))
-        {
-            return new Value { Type = ValueType.Boolean, BooleanValue = false };
-        }
-
-        var contains = arg1.GetLexicalForm().Contains(arg2.GetLexicalForm(), StringComparison.Ordinal);
-        return new Value { Type = ValueType.Boolean, BooleanValue = contains };
+        CloseArguments();
+        if (!arg1.HasText || !arg2.HasText)
+            return Value.Error;
+        return Value.FromBoolean(TextOf(arg1).Contains(TextOf(arg2), StringComparison.Ordinal));
     }
 
-    /// <summary>
-    /// Parse STRSTARTS(string, prefix) - returns true if string starts with prefix
-    /// </summary>
+    /// <summary>STRSTARTS(text, prefix) (§17.4.3.9)</summary>
     private Value ParseStrStartsFunction()
     {
         var arg1 = ValueOr();
-        SkipWhitespace();
-
-        if (Peek() != ',')
-        {
-            SkipToCloseParen();
-            return new Value { Type = ValueType.Boolean, BooleanValue = false };
-        }
-
-        Advance(); // Skip ','
-        SkipWhitespace();
-
+        if (!ParseSecondArgument())
+            return Value.Error;
         var arg2 = ValueOr();
-        SkipWhitespace();
-        if (Peek() == ')')
-            Advance();
-
-        if ((arg1.Type != ValueType.String && arg1.Type != ValueType.Uri) ||
-            (arg2.Type != ValueType.String && arg2.Type != ValueType.Uri))
-        {
-            return new Value { Type = ValueType.Boolean, BooleanValue = false };
-        }
-
-        var startsWith = arg1.GetLexicalForm().StartsWith(arg2.GetLexicalForm(), StringComparison.Ordinal);
-        return new Value { Type = ValueType.Boolean, BooleanValue = startsWith };
+        CloseArguments();
+        if (!arg1.HasText || !arg2.HasText)
+            return Value.Error;
+        return Value.FromBoolean(TextOf(arg1).StartsWith(TextOf(arg2), StringComparison.Ordinal));
     }
 
-    /// <summary>
-    /// Parse STRENDS(string, suffix) - returns true if string ends with suffix
-    /// </summary>
+    /// <summary>STRENDS(text, suffix) (§17.4.3.10)</summary>
     private Value ParseStrEndsFunction()
     {
         var arg1 = ValueOr();
-        SkipWhitespace();
-
-        if (Peek() != ',')
-        {
-            SkipToCloseParen();
-            return new Value { Type = ValueType.Boolean, BooleanValue = false };
-        }
-
-        Advance(); // Skip ','
-        SkipWhitespace();
-
+        if (!ParseSecondArgument())
+            return Value.Error;
         var arg2 = ValueOr();
-        SkipWhitespace();
-        if (Peek() == ')')
-            Advance();
-
-        if ((arg1.Type != ValueType.String && arg1.Type != ValueType.Uri) ||
-            (arg2.Type != ValueType.String && arg2.Type != ValueType.Uri))
-        {
-            return new Value { Type = ValueType.Boolean, BooleanValue = false };
-        }
-
-        var endsWith = arg1.GetLexicalForm().EndsWith(arg2.GetLexicalForm(), StringComparison.Ordinal);
-        return new Value { Type = ValueType.Boolean, BooleanValue = endsWith };
+        CloseArguments();
+        if (!arg1.HasText || !arg2.HasText)
+            return Value.Error;
+        return Value.FromBoolean(TextOf(arg1).EndsWith(TextOf(arg2), StringComparison.Ordinal));
     }
 
     /// <summary>
-    /// Parse LANGMATCHES(langTag, langRange) - returns true if language tag matches range
+    /// LANGMATCHES(tag, range) (§17.4.3.13, RFC 4647 basic filtering): "*" matches any non-empty tag; otherwise the
+    /// range matches the tag or a prefix of it ending at a '-', ignoring case. Both arguments are simple literals.
     /// </summary>
     private Value ParseLangMatchesFunction()
     {
         var langTagArg = ValueOr();
-        SkipWhitespace();
-
-        if (Peek() != ',')
-        {
-            SkipToCloseParen();
-            return new Value { Type = ValueType.Boolean, BooleanValue = false };
-        }
-
-        Advance(); // Skip ','
-        SkipWhitespace();
-
+        if (!ParseSecondArgument())
+            return Value.Error;
         var langRangeArg = ValueOr();
-        SkipWhitespace();
-        if (Peek() == ')')
-            Advance();
+        CloseArguments();
 
         if (langTagArg.Type != ValueType.String || langRangeArg.Type != ValueType.String)
-        {
-            return new Value { Type = ValueType.Boolean, BooleanValue = false };
-        }
+            return Value.Error;
 
         var langTag = langTagArg.StringValue;
         var langRange = langRangeArg.StringValue;
 
-        // "*" matches any non-empty language tag
-        if (langRange.Length == 1 && langRange[0] == '*')
-        {
-            return new Value { Type = ValueType.Boolean, BooleanValue = langTag.Length > 0 };
-        }
-
-        // Empty language tag never matches (except with *)
-        if (langTag.IsEmpty)
-        {
-            return new Value { Type = ValueType.Boolean, BooleanValue = false };
-        }
-
-        // Case-insensitive prefix match with optional hyphen boundary
-        // e.g., "en-US" matches "en", "en" matches "en", "de" doesn't match "en"
-        if (langTag.Length < langRange.Length)
-        {
-            return new Value { Type = ValueType.Boolean, BooleanValue = false };
-        }
-
-        var tagPrefix = langTag.Slice(0, langRange.Length);
-        if (!tagPrefix.Equals(langRange, StringComparison.OrdinalIgnoreCase))
-        {
-            return new Value { Type = ValueType.Boolean, BooleanValue = false };
-        }
-
-        // If exact length match, it's a match
-        if (langTag.Length == langRange.Length)
-        {
-            return new Value { Type = ValueType.Boolean, BooleanValue = true };
-        }
-
-        // Otherwise, next char must be hyphen for subtag
-        var matches = langTag[langRange.Length] == '-';
-        return new Value { Type = ValueType.Boolean, BooleanValue = matches };
+        if (langRange is "*")
+            return Value.FromBoolean(langTag.Length > 0);
+        if (langTag.IsEmpty || langTag.Length < langRange.Length
+            || !langTag[..langRange.Length].Equals(langRange, StringComparison.OrdinalIgnoreCase))
+            return Value.FromBoolean(false);
+        return Value.FromBoolean(langTag.Length == langRange.Length || langTag[langRange.Length] == '-');
     }
 
-    /// <summary>
-    /// Parse sameTerm(term1, term2) - strict RDF term equality
-    /// Unlike =, sameTerm requires exact type and value match with no coercion
-    /// </summary>
+    /// <summary>sameTerm(term1, term2) (§17.4.2.8): the same RDF term (ADR-056 D3).</summary>
     private Value ParseSameTermFunction()
     {
         var arg1 = ValueOr();
-        SkipWhitespace();
-
-        if (Peek() != ',')
-        {
-            SkipToCloseParen();
-            return new Value { Type = ValueType.Boolean, BooleanValue = false };
-        }
-
-        Advance(); // Skip ','
-        SkipWhitespace();
-
+        if (!ParseSecondArgument())
+            return Value.Error;
         var arg2 = ValueOr();
-        SkipWhitespace();
-        if (Peek() == ')')
-            Advance();
-
-        // Both must be bound
+        CloseArguments();
         if (arg1.Type == ValueType.Unbound || arg2.Type == ValueType.Unbound)
-        {
-            return new Value { Type = ValueType.Boolean, BooleanValue = false };
-        }
-
-        // Types must match exactly
-        if (arg1.Type != arg2.Type)
-        {
-            return new Value { Type = ValueType.Boolean, BooleanValue = false };
-        }
-
-        // Values must match exactly based on type
-        bool same = arg1.Type switch
-        {
-            ValueType.Integer => arg1.IntegerValue == arg2.IntegerValue,
-            ValueType.Double => arg1.DoubleValue == arg2.DoubleValue, // Exact equality, not epsilon
-            ValueType.Boolean => arg1.BooleanValue == arg2.BooleanValue,
-            ValueType.String => arg1.StringValue.SequenceEqual(arg2.StringValue),
-            ValueType.Uri => arg1.StringValue.SequenceEqual(arg2.StringValue),
-            ValueType.BlankNode => arg1.StringValue.SequenceEqual(arg2.StringValue),
-            _ => false
-        };
-
-        return new Value { Type = ValueType.Boolean, BooleanValue = same };
+            return Value.Error;
+        return Value.FromBoolean(Value.SameTerm(arg1, arg2));
     }
 
     /// <summary>
-    /// Parse STRBEFORE(string, delimiter) - returns substring before first occurrence of delimiter
-    /// Returns empty simple literal if delimiter not found.
-    /// Arguments must be compatible (same language tag or both plain/xsd:string).
-    /// Preserves language tag from first arg (but not xsd:string datatype).
+    /// The arguments of STRBEFORE / STRAFTER are compatible (§17.4.3.1.3) when the second has no language tag or the
+    /// same one as the first.
+    /// </summary>
+    private static bool ArgumentsCompatible(scoped in Value text, scoped in Value delimiter) =>
+        delimiter.Type != ValueType.LangString
+        || (text.Type == ValueType.LangString && text.Language.Equals(delimiter.Language, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// STRBEFORE(text, delimiter) (§17.4.3.7): the text before the first delimiter, with the text's tag; the empty
+    /// simple literal when the delimiter isn't found.
     /// </summary>
     private Value ParseStrBeforeFunction()
     {
         var stringArg = ValueOr();
-        SkipWhitespace();
-
-        if (Peek() != ',')
-        {
-            SkipToCloseParen();
-            return new Value { Type = ValueType.Unbound };
-        }
-
-        Advance(); // Skip ','
-        SkipWhitespace();
-
+        if (!ParseSecondArgument())
+            return Value.Error;
         var delimiterArg = ValueOr();
-        SkipWhitespace();
-        if (Peek() == ')')
-            Advance();
+        CloseArguments();
 
-        if ((stringArg.Type != ValueType.String && stringArg.Type != ValueType.Uri) ||
-            (delimiterArg.Type != ValueType.String && delimiterArg.Type != ValueType.Uri))
-        {
-            return new Value { Type = ValueType.Unbound };
-        }
+        if (!stringArg.HasText || !delimiterArg.HasText || !ArgumentsCompatible(stringArg, delimiterArg))
+            return Value.Error;
 
-        var str = stringArg.GetLexicalForm();
-        var delimiter = delimiterArg.GetLexicalForm();
-
-        // Get language tags/datatypes for compatibility check
-        var arg1Suffix = stringArg.GetLangTagOrDatatype();
-        var arg2Suffix = delimiterArg.GetLangTagOrDatatype();
-
-        // Extract just the language tag part (after @)
-        var arg1Lang = GetLangTag(arg1Suffix);
-        var arg2Lang = GetLangTag(arg2Suffix);
-
-        // Check argument compatibility: if arg2 has a language tag, arg1 must have the same tag
-        if (!arg2Lang.IsEmpty && !arg1Lang.Equals(arg2Lang, StringComparison.OrdinalIgnoreCase))
-        {
-            return new Value { Type = ValueType.Unbound };
-        }
-
-        // Empty delimiter returns empty string with preserved language tag
-        if (delimiter.IsEmpty)
-        {
-            if (!arg1Lang.IsEmpty)
-            {
-                _strbeforeResult = $"\"\"@{arg1Lang.ToString()}";
-                return new Value { Type = ValueType.String, StringValue = _strbeforeResult.AsSpan() };
-            }
-            return new Value { Type = ValueType.String, StringValue = ReadOnlySpan<char>.Empty };
-        }
-
-        var index = str.IndexOf(delimiter);
+        var text = TextOf(stringArg);
+        var index = text.IndexOf(TextOf(delimiterArg));
         if (index < 0)
-        {
-            // Delimiter not found returns empty simple literal (no language tag per SPARQL spec)
-            return new Value { Type = ValueType.String, StringValue = ReadOnlySpan<char>.Empty };
-        }
-
-        // Preserve language tag from the first argument (but not xsd:string)
-        var result = str.Slice(0, index).ToString();
-        if (!arg1Lang.IsEmpty)
-        {
-            _strbeforeResult = $"\"{result}\"@{arg1Lang.ToString()}";
-            return new Value { Type = ValueType.String, StringValue = _strbeforeResult.AsSpan() };
-        }
-        // Plain result (no suffix)
-        _strbeforeResult = result;
-        return new Value { Type = ValueType.String, StringValue = _strbeforeResult.AsSpan() };
+            return Value.FromString(default);
+        return WithText(stringArg, text[..index]);
     }
 
     /// <summary>
-    /// Extract the language tag from a suffix like @en or @en-US.
-    /// Returns empty span if suffix is a datatype (^^...) or empty.
-    /// </summary>
-    private static ReadOnlySpan<char> GetLangTag(ReadOnlySpan<char> suffix)
-    {
-        if (suffix.Length > 1 && suffix[0] == '@')
-            return suffix.Slice(1);
-        return ReadOnlySpan<char>.Empty;
-    }
-
-    /// <summary>
-    /// Parse STRAFTER(string, delimiter) - returns substring after first occurrence of delimiter
-    /// Returns empty simple literal if delimiter not found.
-    /// Arguments must be compatible (same language tag or both plain/xsd:string).
-    /// Preserves language tag from first arg (but not xsd:string datatype).
+    /// STRAFTER(text, delimiter) (§17.4.3.8): the text after the first delimiter, with the text's tag; the empty
+    /// simple literal when the delimiter isn't found.
     /// </summary>
     private Value ParseStrAfterFunction()
     {
         var stringArg = ValueOr();
-        SkipWhitespace();
-
-        if (Peek() != ',')
-        {
-            SkipToCloseParen();
-            return new Value { Type = ValueType.Unbound };
-        }
-
-        Advance(); // Skip ','
-        SkipWhitespace();
-
+        if (!ParseSecondArgument())
+            return Value.Error;
         var delimiterArg = ValueOr();
-        SkipWhitespace();
-        if (Peek() == ')')
-            Advance();
+        CloseArguments();
 
-        if ((stringArg.Type != ValueType.String && stringArg.Type != ValueType.Uri) ||
-            (delimiterArg.Type != ValueType.String && delimiterArg.Type != ValueType.Uri))
-        {
-            return new Value { Type = ValueType.Unbound };
-        }
+        if (!stringArg.HasText || !delimiterArg.HasText || !ArgumentsCompatible(stringArg, delimiterArg))
+            return Value.Error;
 
-        var str = stringArg.GetLexicalForm();
-        var delimiter = delimiterArg.GetLexicalForm();
-
-        // Get language tags for compatibility check
-        var arg1Suffix = stringArg.GetLangTagOrDatatype();
-        var arg2Suffix = delimiterArg.GetLangTagOrDatatype();
-        var arg1Lang = GetLangTag(arg1Suffix);
-        var arg2Lang = GetLangTag(arg2Suffix);
-
-        // Check argument compatibility: if arg2 has a language tag, arg1 must have the same tag
-        if (!arg2Lang.IsEmpty && !arg1Lang.Equals(arg2Lang, StringComparison.OrdinalIgnoreCase))
-        {
-            return new Value { Type = ValueType.Unbound };
-        }
-
-        // Empty delimiter returns full string with preserved language tag (per SPARQL spec)
-        if (delimiter.IsEmpty)
-        {
-            if (!arg1Lang.IsEmpty)
-            {
-                _strafterResult = $"\"{str.ToString()}\"@{arg1Lang.ToString()}";
-                return new Value { Type = ValueType.String, StringValue = _strafterResult.AsSpan() };
-            }
-            _strafterResult = str.ToString();
-            return new Value { Type = ValueType.String, StringValue = _strafterResult.AsSpan() };
-        }
-
-        var index = str.IndexOf(delimiter);
+        var text = TextOf(stringArg);
+        var delimiter = TextOf(delimiterArg);
+        var index = text.IndexOf(delimiter);
         if (index < 0)
-        {
-            // Delimiter not found returns empty simple literal (no language tag per SPARQL spec)
-            return new Value { Type = ValueType.String, StringValue = ReadOnlySpan<char>.Empty };
-        }
-
-        // Preserve language tag from the first argument (but not xsd:string)
-        var result = str.Slice(index + delimiter.Length).ToString();
-        if (!arg1Lang.IsEmpty)
-        {
-            _strafterResult = $"\"{result}\"@{arg1Lang.ToString()}";
-            return new Value { Type = ValueType.String, StringValue = _strafterResult.AsSpan() };
-        }
-        _strafterResult = result;
-        return new Value { Type = ValueType.String, StringValue = _strafterResult.AsSpan() };
+            return Value.FromString(default);
+        return WithText(stringArg, text[(index + delimiter.Length)..]);
     }
 
     /// <summary>
-    /// Parse STRDT(lexicalForm, datatypeIRI) - constructs a typed literal
-    /// Returns a literal with the specified datatype
+    /// STRDT(lexical, datatype) (§17.4.3.19): the literal with that lexical form and datatype, read by the same rule
+    /// as any literal (so <c>STRDT("1", xsd:integer)</c> is the integer 1).
     /// </summary>
     private Value ParseStrDtFunction()
     {
         var lexicalArg = ValueOr();
-        SkipWhitespace();
-
-        if (Peek() != ',')
-        {
-            SkipToCloseParen();
-            return new Value { Type = ValueType.Unbound };
-        }
-
-        Advance(); // Skip ','
-        SkipWhitespace();
-
+        if (!ParseSecondArgument())
+            return Value.Error;
         var datatypeArg = ValueOr();
-        SkipWhitespace();
-        if (Peek() == ')')
-            Advance();
+        CloseArguments();
 
-        // Lexical form must be a simple literal (string without language tag)
-        if (lexicalArg.Type != ValueType.String)
-            return new Value { Type = ValueType.Unbound };
-        var existingTag = lexicalArg.GetLangTagOrDatatype();
-        if (!existingTag.IsEmpty && existingTag[0] == '@')
-            return new Value { Type = ValueType.Unbound }; // a language-tagged literal is not a simple literal
-
-        // Datatype must be an IRI
-        if (datatypeArg.Type != ValueType.Uri && datatypeArg.Type != ValueType.String)
-            return new Value { Type = ValueType.Unbound };
-
-        var lexical = lexicalArg.GetLexicalForm();
-        var datatype = datatypeArg.GetLexicalForm();
-        if (datatype.Length >= 2 && datatype[0] == '<' && datatype[^1] == '>')
-            datatype = datatype.Slice(1, datatype.Length - 2); // bare IRI for the suffix
-
-        // RDF 1.1: an xsd:string typed literal IS a simple literal (no datatype suffix).
-        const string xsdString = "http://www.w3.org/2001/XMLSchema#string";
-        if (datatype.Equals(xsdString.AsSpan(), StringComparison.Ordinal))
-        {
-            _strdtResult = lexical.ToString();
-            return new Value { Type = ValueType.String, StringValue = _strdtResult.AsSpan() };
-        }
-
-        // Construct typed literal: "lexical"^^<datatype>
-        _strdtResult = $"\"{lexical.ToString()}\"^^<{datatype.ToString()}>";
-        return new Value
-        {
-            Type = ValueType.String,
-            StringValue = _strdtResult.AsSpan()
-        };
+        if (lexicalArg.Type != ValueType.String || datatypeArg.Type != ValueType.Uri)
+            return Value.Error;
+        var datatype = datatypeArg.StringValue;
+        return Value.Literal(lexicalArg.StringValue, default,
+            datatype.Length > 0 && datatype[0] == '<' ? datatype : string.Concat("<", datatype, ">"));
     }
 
-    /// <summary>
-    /// Parse STRLANG(lexicalForm, langTag) - constructs a language-tagged literal
-    /// Returns a literal with the specified language tag
-    /// </summary>
+    /// <summary>STRLANG(lexical, tag) (§17.4.3.20): the literal with that lexical form and language tag.</summary>
     private Value ParseStrLangFunction()
     {
         var lexicalArg = ValueOr();
-        SkipWhitespace();
-
-        if (Peek() != ',')
-        {
-            SkipToCloseParen();
-            return new Value { Type = ValueType.Unbound };
-        }
-
-        Advance(); // Skip ','
-        SkipWhitespace();
-
+        if (!ParseSecondArgument())
+            return Value.Error;
         var langArg = ValueOr();
-        SkipWhitespace();
-        if (Peek() == ')')
-            Advance();
+        CloseArguments();
 
-        // Lexical form must be a simple literal (string without language tag)
-        if (lexicalArg.Type != ValueType.String)
-            return new Value { Type = ValueType.Unbound };
-        var existingTag = lexicalArg.GetLangTagOrDatatype();
-        if (!existingTag.IsEmpty && existingTag[0] == '@')
-            return new Value { Type = ValueType.Unbound }; // a language-tagged literal is not a simple literal
-
-        // Language tag must be a string
-        if (langArg.Type != ValueType.String)
-            return new Value { Type = ValueType.Unbound };
-
-        var lexical = lexicalArg.GetLexicalForm();
-        var lang = langArg.GetLexicalForm();
-
-        // Language tag must not be empty
-        if (lang.IsEmpty)
-            return new Value { Type = ValueType.Unbound };
-
-        // Construct language-tagged literal: "lexical"@lang
-        _strlangResult = $"\"{lexical.ToString()}\"@{lang.ToString()}";
-        return new Value
-        {
-            Type = ValueType.String,
-            StringValue = _strlangResult.AsSpan()
-        };
+        if (lexicalArg.Type != ValueType.String || langArg.Type != ValueType.String || langArg.StringValue.IsEmpty)
+            return Value.Error;
+        return Value.FromLangString(lexicalArg.StringValue, langArg.StringValue);
     }
 
     /// <summary>
-    /// Parse SUBSTR(string, start [, length]) - returns substring
-    /// Note: SPARQL uses 1-based indexing in Unicode code points (not UTF-16 units).
-    /// Preserves language tag/datatype from first arg.
+    /// SUBSTR(text, start [, length]) (§17.4.3.3, XPath fn:substring): 1-based, in Unicode code points, start and
+    /// length rounded; the text's tag or datatype kept.
     /// </summary>
     private Value ParseSubstrFunction()
     {
         var stringArg = ValueOr();
-        SkipWhitespace();
-
-        if (Peek() != ',')
-        {
-            SkipToCloseParen();
-            return new Value { Type = ValueType.Unbound };
-        }
-
-        Advance(); // Skip ','
-        SkipWhitespace();
-
+        if (!ParseSecondArgument())
+            return Value.Error;
         var startArg = ValueOr();
         SkipWhitespace();
 
-        // Optional length argument
-        Value lengthArg = new Value { Type = ValueType.Unbound };
+        Value lengthArg = Value.Error;
+        bool hasLength = false;
         if (Peek() == ',')
         {
             Advance();
             SkipWhitespace();
             lengthArg = ValueOr();
-            SkipWhitespace();
+            hasLength = true;
         }
+        CloseArguments();
 
-        if (Peek() == ')')
-            Advance();
+        if (!stringArg.HasText || !startArg.IsNumeric || (hasLength && !lengthArg.IsNumeric))
+            return Value.Error;
 
-        if (stringArg.Type != ValueType.String && stringArg.Type != ValueType.Uri)
-            return new Value { Type = ValueType.Unbound };
-
-        if (startArg.Type != ValueType.Integer)
-            return new Value { Type = ValueType.Unbound };
-
-        var str = stringArg.GetLexicalForm();
-        var startCodePoint = (int)startArg.IntegerValue; // SPARQL is 1-based, keep as-is for helper
-
-        // Get code point count for bounds checking
-        var codePointCount = CodePointOps.GetCodePointCount(str);
-
-        if (startCodePoint < 1) startCodePoint = 1;
-        if (startCodePoint > codePointCount)
-            return new Value { Type = ValueType.String, StringValue = ReadOnlySpan<char>.Empty };
-
-        int lengthCodePoints;
-        if (lengthArg.Type == ValueType.Integer)
-        {
-            lengthCodePoints = (int)lengthArg.IntegerValue;
-            if (lengthCodePoints < 0) lengthCodePoints = 0;
-        }
-        else
-        {
-            lengthCodePoints = -1; // Take remainder
-        }
-
-        // Use code point-based substring
-        var result = CodePointOps.SubstringByCodePoints(str, startCodePoint, lengthCodePoints);
-
-        // Preserve language tag/datatype from the first argument
-        var suffix = stringArg.GetLangTagOrDatatype();
-        // Only add quotes if there's a suffix to preserve, otherwise return plain string
-        _substrResult = suffix.IsEmpty ? result : $"\"{result}\"{suffix.ToString()}";
-        return new Value
-        {
-            Type = ValueType.String,
-            StringValue = _substrResult.AsSpan()
-        };
+        var text = TextOf(stringArg);
+        var start = Math.Floor(startArg.AsDouble + 0.5);
+        int codePointCount = CodePointOps.GetCodePointCount(text);
+        // fn:substring: the code points at positions p with start <= p < start + length
+        double end = hasLength ? start + Math.Floor(lengthArg.AsDouble + 0.5) : double.PositiveInfinity;
+        if (double.IsNaN(start) || double.IsNaN(end))
+            return WithText(stringArg, default);
+        int first = (int)Math.Max(1, start);
+        double last = Math.Min(end, codePointCount + 1);
+        if (first > codePointCount || last <= first)
+            return WithText(stringArg, default);
+        return WithText(stringArg, CodePointOps.SubstringByCodePoints(text, first, (int)(last - first)));
     }
 
     /// <summary>
-    /// Parse CONCAT(string1, string2, ...) - concatenates strings
-    /// Only accepts string literals (not integers, URIs, etc.).
-    /// If all arguments have the same language tag, result preserves that tag.
-    /// If mixed language tags, result is a plain literal.
-    /// Note: Allocates a string (exception to zero-GC for this function)
+    /// CONCAT(text, …) (§17.4.3.12): the texts joined; tagged when every argument has the same tag. A number or
+    /// boolean contributes its lexical form (Mercury's; SPARQL takes string literals). A blank node or an IRI is an
+    /// error.
     /// </summary>
     private Value ParseConcatFunction()
     {
-        // Collect string parts and language tags - this function allocates
-        var parts = new System.Collections.Generic.List<string>();
-        string? commonLangTag = null;
-        bool firstArg = true;
-        bool mixedLangTags = false;
+        var builder = new StringBuilder();
+        string? commonLanguage = null;
+        bool first = true;
+        bool sameLanguage = true;
+        Span<char> number = stackalloc char[64];
 
         while (!IsAtEnd() && Peek() != ')')
         {
             var arg = ValueOr();
-
-            if (arg.Type == ValueType.Unbound)
+            if (!arg.IsLiteral)
             {
                 SkipToCloseParen();
-                return new Value { Type = ValueType.Unbound };
+                return Value.Error;
             }
+            builder.Append(arg.Lexical(number));
 
-            // Get string representation based on type
-            string partStr;
-            if (arg.Type == ValueType.String)
-            {
-                partStr = arg.GetLexicalForm().ToString();
-            }
-            else if (arg.Type == ValueType.Integer)
-            {
-                partStr = arg.IntegerValue.ToString(System.Globalization.CultureInfo.InvariantCulture);
-            }
-            else if (arg.Type == ValueType.Double)
-            {
-                partStr = arg.DoubleValue.ToString(System.Globalization.CultureInfo.InvariantCulture);
-            }
-            else if (arg.Type == ValueType.Boolean)
-            {
-                partStr = arg.BooleanValue ? "true" : "false";
-            }
-            else
-            {
-                // URIs, blank nodes, etc. are errors per SPARQL spec
-                SkipToCloseParen();
-                return new Value { Type = ValueType.Unbound };
-            }
-
-            parts.Add(partStr);
-
-            // Track language tags for result
-            var suffix = arg.GetLangTagOrDatatype();
-            var langTag = GetLangTag(suffix);
-            var langStr = langTag.IsEmpty ? null : langTag.ToString();
-
-            if (firstArg)
-            {
-                commonLangTag = langStr;
-                firstArg = false;
-            }
-            else if (!mixedLangTags)
-            {
-                // Check if language tags differ
-                if (commonLangTag != langStr &&
-                    !(commonLangTag == null && langStr == null))
-                {
-                    if (commonLangTag == null || langStr == null ||
-                        !commonLangTag.Equals(langStr, StringComparison.OrdinalIgnoreCase))
-                    {
-                        mixedLangTags = true;
-                        commonLangTag = null;
-                    }
-                }
-            }
+            var language = arg.Type == ValueType.LangString ? arg.Language.ToString() : null;
+            if (first)
+                commonLanguage = language;
+            else if (sameLanguage && !string.Equals(commonLanguage, language, StringComparison.OrdinalIgnoreCase))
+                sameLanguage = false;
+            first = false;
 
             SkipWhitespace();
             if (Peek() == ',')
@@ -970,24 +455,12 @@ internal ref partial struct FilterEvaluator
                 SkipWhitespace();
             }
         }
-
         if (Peek() == ')')
             Advance();
 
-        // Store concatenated result - allocates but keeps span valid
-        var concatenated = string.Concat(parts);
-        if (!mixedLangTags && commonLangTag != null)
-        {
-            _concatResult = $"\"{concatenated}\"@{commonLangTag}";
-        }
-        else
-        {
-            _concatResult = concatenated;
-        }
-        return new Value
-        {
-            Type = ValueType.String,
-            StringValue = _concatResult.AsSpan()
-        };
+        var concatenated = builder.ToString();
+        return sameLanguage && commonLanguage != null
+            ? Value.FromLangString(concatenated, commonLanguage)
+            : Value.FromString(concatenated);
     }
 }

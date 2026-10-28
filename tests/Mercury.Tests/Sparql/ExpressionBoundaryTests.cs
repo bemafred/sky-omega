@@ -42,7 +42,7 @@ public class ExpressionBoundaryTests : PooledStoreTestBase
             "SELECT ?y WHERE { ?s <http://ex/p> ?o BIND(CONCAT(?o, \")\") AS ?y) }", TestContext.Current.CancellationToken);
 
         Assert.True(result.Success, result.ErrorMessage);
-        Assert.Equal("x)", Assert.Single(result.Rows!)["y"]); // a computed string comes back bare
+        Assert.Equal("\"x)\"", Assert.Single(result.Rows!)["y"]); // a computed string is bound as its term (ADR-056 D6)
     }
 
     [Fact]
@@ -55,7 +55,7 @@ public class ExpressionBoundaryTests : PooledStoreTestBase
             TestContext.Current.CancellationToken);
 
         Assert.True(result.Success, result.ErrorMessage);
-        Assert.Equal("4", Assert.Single(result.Rows!)["x"]);
+        Assert.Equal("\"4\"^^<http://www.w3.org/2001/XMLSchema#integer>", Assert.Single(result.Rows!)["x"]);
     }
 
     [Fact]
@@ -69,8 +69,8 @@ public class ExpressionBoundaryTests : PooledStoreTestBase
 
         Assert.True(result.Success, result.ErrorMessage);
         var row = Assert.Single(result.Rows!);
-        Assert.Equal("x)", row["y"]);
-        Assert.Equal("1", row["n"]);
+        Assert.Equal("\"x)\"", row["y"]);
+        Assert.Equal("\"1\"^^<http://www.w3.org/2001/XMLSchema#integer>", row["n"]);
     }
 
     [Fact]
@@ -100,7 +100,7 @@ public class ExpressionBoundaryTests : PooledStoreTestBase
             "SELECT ?s (CONCAT(?o, \"COUNT(x)\") AS ?y) WHERE { ?s <http://ex/p> ?o }", TestContext.Current.CancellationToken);
 
         Assert.True(result.Success, result.ErrorMessage);
-        Assert.Equal("xCOUNT(x)", Assert.Single(result.Rows!)["y"]);
+        Assert.Equal("\"xCOUNT(x)\"", Assert.Single(result.Rows!)["y"]);
     }
 
     [Theory]

@@ -415,18 +415,10 @@ internal sealed class TreeJoinExecutor
                 table.TruncateTo(0);
                 row.RestoreBindings(ref table);
                 var evaluator = new FilterEvaluator(exprText.AsSpan());
-                // Bind via the typed overloads so the result carries its RDF datatype tag (Integer/Double/Boolean), which
-                // MaterializedRow now preserves. A numeric BIND result then reads back as its lexical form yet still
-                // matches a stored typed literal when it feeds a later pattern (W3C bind03).
+                // The result is bound as its term ("2"^^xsd:integer), the form a stored literal has, so it matches a
+                // stored typed literal when it feeds a later pattern (W3C bind03)
                 var v = evaluator.EvaluateToValue(table.GetBindings(), table.Count, table.GetStringBuffer(), _prefixes, _prefixSource.AsSpan());
-                switch (v.Type)
-                {
-                    case ExprValueType.Unbound: break; // an error leaves the variable unbound (§18.6)
-                    case ExprValueType.Integer: table.Bind(varName.AsSpan(), v.IntegerValue); break;
-                    case ExprValueType.Double: table.Bind(varName.AsSpan(), v.DoubleValue); break;
-                    case ExprValueType.Boolean: table.Bind(varName.AsSpan(), v.BooleanValue); break;
-                    default: table.Bind(varName.AsSpan(), v.StringValue); break;
-                }
+                v.BindTo(ref table, varName.AsSpan()); // the term, or nothing for an error (ADR-056 D6)
                 output.Add(new MaterializedRow(table));
             }
             return output;

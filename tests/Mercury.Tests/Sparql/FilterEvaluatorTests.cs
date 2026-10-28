@@ -306,10 +306,11 @@ public class FilterEvaluatorTests
     }
 
     [Fact]
-    public void TypeCoercion_IntegerAndNumericString_ReturnsTrue()
+    public void IntegerAndNumericString_AreNotEqual()
     {
-        // Comparing integer to numeric string coerces and compares
-        Assert.True(Evaluate("5 == \"5\""));
+        // A number and a string are in different value spaces, so they are never equal: no coercion (ADR-056 D3)
+        Assert.False(Evaluate("5 == \"5\""));
+        Assert.True(Evaluate("5 != \"5\""));
     }
 
     [Fact]
@@ -1070,7 +1071,7 @@ public class FilterEvaluatorTests
     [Fact]
     public void Regex_NumericPattern()
     {
-        Assert.True(EvaluateWithStringBinding("REGEX(?code, \"^[0-9]+$\")", "?code", "12345"));
+        Assert.True(EvaluateWithStringBinding("REGEX(?code, \"^[0-9]+$\")", "?code", "\"12345\""));
     }
 
     #endregion
@@ -1473,7 +1474,7 @@ public class FilterEvaluatorTests
     [Fact]
     public void IsNumeric_String_ReturnsFalse()
     {
-        Assert.False(EvaluateWithStringBinding("isNumeric(?x)", "?x", "42"));
+        Assert.False(EvaluateWithStringBinding("isNumeric(?x)", "?x", "\"42\""));
     }
 
     [Fact]
@@ -1703,7 +1704,7 @@ public class FilterEvaluatorTests
     public void SameTerm_IntegerVsString_ReturnsFalse()
     {
         Assert.False(EvaluateWithMultipleBindings("sameTerm(?x, ?y)",
-            ("?x", (object)42L), ("?y", (object)"42")));
+            ("?x", (object)42L), ("?y", (object)"\"42\"")));
     }
 
     [Fact]
@@ -2170,11 +2171,10 @@ public class FilterEvaluatorTests
     [Fact]
     public void StrDt_ConstructsTypedLiteral()
     {
-        // STRDT creates a typed literal - verify lexical form is preserved
-        // Per SPARQL spec, string functions operate on lexical form only
+        // STRDT makes the literal with that lexical form and datatype: here the integer 42 (§17.4.3.19)
         Assert.True(EvaluateWithStringBinding(
-            "CONTAINS(STRDT(?x, \"http://www.w3.org/2001/XMLSchema#integer\"), \"42\")",
-            "?x", "42"));
+            "STRDT(?x, <http://www.w3.org/2001/XMLSchema#integer>) = 42 && STR(STRDT(?x, <http://www.w3.org/2001/XMLSchema#integer>)) = \"42\"",
+            "?x", "\"42\""));
     }
 
     [Fact]
@@ -2182,8 +2182,8 @@ public class FilterEvaluatorTests
     {
         // STRDT creates typed literal, lexical form is just "hello"
         Assert.True(EvaluateWithStringBinding(
-            "CONTAINS(STRDT(?x, \"http://www.w3.org/2001/XMLSchema#string\"), \"hello\")",
-            "?x", "hello"));
+            "CONTAINS(STRDT(?x, <http://www.w3.org/2001/XMLSchema#string>), \"hello\")",
+            "?x", "\"hello\""));
     }
 
     [Fact]
@@ -2191,16 +2191,16 @@ public class FilterEvaluatorTests
     {
         // Verify lexical form is preserved with custom datatype
         Assert.True(EvaluateWithStringBinding(
-            "CONTAINS(STRDT(?x, \"http://example.org/mytype\"), \"value\")",
-            "?x", "value"));
+            "CONTAINS(STRDT(?x, <http://example.org/mytype>), \"value\")",
+            "?x", "\"value\""));
     }
 
     [Fact]
     public void StrDt_PreservesLexicalForm()
     {
         Assert.True(EvaluateWithStringBinding(
-            "CONTAINS(STRDT(?x, \"http://example.org/type\"), \"hello world\")",
-            "?x", "hello world"));
+            "CONTAINS(STRDT(?x, <http://example.org/type>), \"hello world\")",
+            "?x", "\"hello world\""));
     }
 
     [Fact]
@@ -2208,8 +2208,8 @@ public class FilterEvaluatorTests
     {
         // Verify case-insensitivity of function name and lexical form preservation
         Assert.True(EvaluateWithStringBinding(
-            "CONTAINS(strdt(?x, \"http://example.org/type\"), \"test\")",
-            "?x", "test"));
+            "CONTAINS(STRDT(?x, <http://example.org/type>), \"test\")",
+            "?x", "\"test\""));
     }
 
     #endregion

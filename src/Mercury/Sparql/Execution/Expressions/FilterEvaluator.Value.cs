@@ -43,7 +43,10 @@ internal ref partial struct FilterEvaluator
         {
             SkipWhitespace();
             if (MatchOperator("||") || MatchKeyword("OR"))
-                left = LogicalOr(left, ValueAnd());
+            {
+                var right = ValueAnd();
+                left = Value.FromTruth(Value.Or(Value.EffectiveBoolean(left), Value.EffectiveBoolean(right)));
+            }
             else
                 break;
         }
@@ -58,7 +61,10 @@ internal ref partial struct FilterEvaluator
         {
             SkipWhitespace();
             if (MatchOperator("&&") || MatchKeyword("AND"))
-                left = LogicalAnd(left, ValueRelational());
+            {
+                var right = ValueRelational();
+                left = Value.FromTruth(Value.And(Value.EffectiveBoolean(left), Value.EffectiveBoolean(right)));
+            }
             else
                 break;
         }
@@ -79,7 +85,7 @@ internal ref partial struct FilterEvaluator
         if (MatchKeyword("IN"))
         {
             SkipWhitespace();
-            return BoolValue(EvaluateInExpression(left, negated));
+            return Value.FromTruth(EvaluateInExpression(left, negated));
         }
         _position = save; // a NOT not followed by IN is not ours — rewind
 
@@ -87,9 +93,7 @@ internal ref partial struct FilterEvaluator
         if (op == ComparisonOperator.Unknown) return left;
         SkipWhitespace();
         var right = ValueAdditive();
-        if (left.Type == ValueType.Unbound || right.Type == ValueType.Unbound)
-            return new Value { Type = ValueType.Unbound };
-        return BoolValue(EvaluateComparisonOp(left, op, right));
+        return Value.FromTruth(EvaluateComparison(left, op, right));
     }
 
     // [116] AdditiveExpression ::= MultiplicativeExpression ( ( '+' | '-' ) MultiplicativeExpression )*
@@ -100,8 +104,8 @@ internal ref partial struct FilterEvaluator
         {
             SkipWhitespace();
             var ch = Peek();
-            if (ch == '+') { Advance(); left = Add(left, ValueMultiplicative()); }
-            else if (ch == '-') { Advance(); left = Subtract(left, ValueMultiplicative()); }
+            if (ch == '+') { Advance(); var right = ValueMultiplicative(); left = Value.Arithmetic('+', left, right); }
+            else if (ch == '-') { Advance(); var right = ValueMultiplicative(); left = Value.Arithmetic('-', left, right); }
             else break;
         }
         return left;
@@ -115,8 +119,8 @@ internal ref partial struct FilterEvaluator
         {
             SkipWhitespace();
             var ch = Peek();
-            if (ch == '*') { Advance(); left = Multiply(left, ValueUnary()); }
-            else if (ch == '/') { Advance(); left = Divide(left, ValueUnary()); }
+            if (ch == '*') { Advance(); var right = ValueUnary(); left = Value.Arithmetic('*', left, right); }
+            else if (ch == '/') { Advance(); var right = ValueUnary(); left = Value.Arithmetic('/', left, right); }
             else break;
         }
         return left;
@@ -130,23 +134,26 @@ internal ref partial struct FilterEvaluator
         if (ch == '!')
         {
             Advance();
-            return BoolValue(!CoerceToBool(ValueUnary())); // recurse so !!x / ! !x negate twice
+            var operand = ValueUnary(); // recurse so !!x / ! !x negate twice
+            return Value.FromTruth(Value.Not(Value.EffectiveBoolean(operand)));
         }
-        // NOT keyword — Mercury synonym for '!' (parallels the OR/AND keyword synonyms in
-        // ValueOr/ValueAnd). 'NOT IN' is postfix and handled in ValueRelational, so it never
-        // reaches here; a leading NOT is always logical negation.
+        // NOT keyword — Mercury synonym for '!' (parallels the OR/AND keyword synonyms in ValueOr/ValueAnd). 'NOT IN'
+        // is postfix and handled in ValueRelational, so it never reaches here; a leading NOT is always negation.
         if ((ch == 'N' || ch == 'n') && MatchKeyword("NOT"))
-            return BoolValue(!CoerceToBool(ValueUnary()));
-        if (ch == '-')
         {
-            // A negative numeric literal (-5) is parsed by ParseTerm; unary minus on anything else applies Negate.
-            if (!IsDigit(PeekNext())) { Advance(); return Negate(ValuePrimary()); }
-            return ValuePrimary();
+            var operand = ValueUnary();
+            return Value.FromTruth(Value.Not(Value.EffectiveBoolean(operand)));
         }
-        if (ch == '+')
+        if (ch is '-' or '+')
         {
-            Advance(); // unary plus is identity (ParseTerm's numeric does not accept a leading '+')
-            return ValuePrimary();
+            // A signed number is one literal token ([149]–[154]): -5, +1.0, -.5. A sign before anything else is the
+            // unary operator.
+            var next = PeekNext();
+            if (IsDigit(next) || next == '.')
+                return ValuePrimary();
+            Advance();
+            var operand = ValuePrimary();
+            return ch == '-' ? Value.Negate(operand) : Value.Plus(operand);
         }
         return ValuePrimary();
     }
@@ -168,104 +175,4 @@ internal ref partial struct FilterEvaluator
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private char PeekNext() => _position + 1 < _expression.Length ? _expression[_position + 1] : '\0';
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static Value BoolValue(bool b) => new() { Type = ValueType.Boolean, BooleanValue = b };
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static bool IsError(Value v) => v.Type == ValueType.Unbound;
-
-    // SPARQL §17.4.1.5 logical-or: true if either operand's EBV is true; else error if either is an error; else false.
-    private static Value LogicalOr(Value l, Value r)
-    {
-        if (CoerceToBool(l) || CoerceToBool(r)) return BoolValue(true);
-        if (IsError(l) || IsError(r)) return new Value { Type = ValueType.Unbound };
-        return BoolValue(false);
-    }
-
-    // SPARQL §17.4.1.6 logical-and: false if either operand is a genuine false; else error if either is an error; else true.
-    private static Value LogicalAnd(Value l, Value r)
-    {
-        bool lFalse = !CoerceToBool(l) && !IsError(l);
-        bool rFalse = !CoerceToBool(r) && !IsError(r);
-        if (lFalse || rFalse) return BoolValue(false);
-        if (IsError(l) || IsError(r)) return new Value { Type = ValueType.Unbound };
-        return BoolValue(true);
-    }
-
-    // ── Arithmetic over Values (SPARQL §17.4.2 operator mapping). Ported from the deleted BindExpressionEvaluator. ──
-
-    private static Value Add(Value left, Value right)
-    {
-        if (left.Type == ValueType.Integer && right.Type == ValueType.Integer)
-            return new Value { Type = ValueType.Integer, IntegerValue = left.IntegerValue + right.IntegerValue };
-        return NumericResult(CoerceToNumber(left), CoerceToNumber(right), static (a, b) => a + b);
-    }
-
-    private static Value Subtract(Value left, Value right)
-    {
-        if (left.Type == ValueType.Integer && right.Type == ValueType.Integer)
-            return new Value { Type = ValueType.Integer, IntegerValue = left.IntegerValue - right.IntegerValue };
-        return NumericResult(CoerceToNumber(left), CoerceToNumber(right), static (a, b) => a - b);
-    }
-
-    private static Value Multiply(Value left, Value right)
-    {
-        if (left.Type == ValueType.Integer && right.Type == ValueType.Integer)
-            return new Value { Type = ValueType.Integer, IntegerValue = left.IntegerValue * right.IntegerValue };
-        return NumericResult(CoerceToNumber(left), CoerceToNumber(right), static (a, b) => a * b);
-    }
-
-    private static Value Divide(Value left, Value right)
-    {
-        var l = CoerceToNumber(left);
-        var r = CoerceToNumber(right);
-        if (double.IsNaN(l) || double.IsNaN(r) || r == 0)
-            return new Value { Type = ValueType.Unbound };
-        return new Value { Type = ValueType.Double, DoubleValue = l / r };
-    }
-
-    private static Value Negate(Value val)
-    {
-        if (val.Type == ValueType.Integer)
-            return new Value { Type = ValueType.Integer, IntegerValue = -val.IntegerValue };
-        var n = CoerceToNumber(val);
-        if (double.IsNaN(n)) return new Value { Type = ValueType.Unbound };
-        if (n == Math.Floor(n) && n >= long.MinValue && n <= long.MaxValue)
-            return new Value { Type = ValueType.Integer, IntegerValue = -(long)n };
-        return new Value { Type = ValueType.Double, DoubleValue = -n };
-    }
-
-    // Promote to integer when the result is a whole number representable as long, else double (matches xsd:integer
-    // vs xsd:decimal/double result typing as the prior BIND arithmetic did).
-    private static Value NumericResult(double l, double r, Func<double, double, double> op)
-    {
-        if (double.IsNaN(l) || double.IsNaN(r)) return new Value { Type = ValueType.Unbound };
-        var result = op(l, r);
-        if (result == Math.Floor(result) && result >= long.MinValue && result <= long.MaxValue)
-            return new Value { Type = ValueType.Integer, IntegerValue = (long)result };
-        return new Value { Type = ValueType.Double, DoubleValue = result };
-    }
-
-    private static double CoerceToNumber(Value val) => val.Type switch
-    {
-        ValueType.Integer => val.IntegerValue,
-        ValueType.Double => val.DoubleValue,
-        ValueType.String => ParseNumberFromLexical(val.StringValue),
-        _ => double.NaN
-    };
-
-    private static double ParseNumberFromLexical(ReadOnlySpan<char> s)
-    {
-        if (double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out var result))
-            return result;
-        // Typed literal: "value"^^<datatype> — extract the lexical value between the quotes.
-        if (s.Length > 2 && s[0] == '"')
-        {
-            var endQuote = s.Slice(1).IndexOf('"');
-            if (endQuote > 0 && double.TryParse(s.Slice(1, endQuote), NumberStyles.Float, CultureInfo.InvariantCulture, out result))
-                return result;
-        }
-        return double.NaN;
-    }
 }

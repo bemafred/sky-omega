@@ -210,6 +210,6 @@ public class InScopeVariablesTests : PooledStoreTestBase
             TestContext.Current.CancellationToken);
 
         Assert.True(result.Success, result.ErrorMessage);
-        Assert.Equal("3", Assert.Single(result.Rows!)["m"]);
+        Assert.Equal("\"3\"^^<http://www.w3.org/2001/XMLSchema#integer>", Assert.Single(result.Rows!)["m"]);
     }
 }

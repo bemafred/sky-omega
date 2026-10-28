@@ -50,7 +50,7 @@ public class ResultColumnNamingTests : PooledStoreTestBase
         Assert.Equal("<http://ex/s>", withS["s"]);
         Assert.False(withS.ContainsKey("x"));
         var withX = Assert.Single(result.Rows!, r => r.ContainsKey("x"));
-        Assert.Equal("1", withX["x"]);
+        Assert.Equal("\"1\"^^<http://www.w3.org/2001/XMLSchema#integer>", withX["x"]);
         Assert.False(withX.ContainsKey("s"), "The BIND branch binds no ?s");
     }
 

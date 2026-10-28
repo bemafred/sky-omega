@@ -442,14 +442,14 @@ public static class SparqlResultComparer
     /// </summary>
     private static bool AreNumericValuesEqual(string expectedValue, string actualValue, string? expectedType, string? actualType)
     {
-        // Parse both values as doubles for comparison
-        if (!double.TryParse(expectedValue, System.Globalization.NumberStyles.Float,
-                System.Globalization.CultureInfo.InvariantCulture, out var expected))
-            return false;
-
-        if (!double.TryParse(actualValue, System.Globalization.NumberStyles.Float,
-                System.Globalization.CultureInfo.InvariantCulture, out var actual))
-            return false;
+        // Parse both values as doubles for comparison. An ill-typed literal ("xyz"^^xsd:integer) has no value: it is
+        // the same term only when lexical form and datatype are
+        bool expectedParses = double.TryParse(expectedValue, System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture, out var expected);
+        bool actualParses = double.TryParse(actualValue, System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture, out var actual);
+        if (!expectedParses || !actualParses)
+            return !expectedParses && !actualParses && expectedValue == actualValue && expectedType == actualType;
 
         // Handle special cases
         if (double.IsNaN(expected) && double.IsNaN(actual))

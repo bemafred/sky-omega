@@ -39,7 +39,7 @@ public class EmptyGroupTests : PooledStoreTestBase
         Assert.True(result.Success, result.ErrorMessage);
         var row = Assert.Single(result.Rows!);
         Assert.Equal(10, row.Count);
-        Assert.Equal("9", row["b9"]); // a bound integer is presented bare; an aggregate typed (ADR-053)
+        Assert.Equal("\"9\"^^<http://www.w3.org/2001/XMLSchema#integer>", row["b9"]); // a BIND binds the term (ADR-056 D6)
     }
 
     [Theory]

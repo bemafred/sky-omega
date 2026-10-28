@@ -882,10 +882,14 @@ internal sealed class GraphTreeEvaluator
             Populate(ref table, sol);
 
             var evaluator = new FilterEvaluator(exprText.AsSpan());
-            string rendered = Render(evaluator.EvaluateToValue(
-                table.GetBindings(), table.Count, table.GetStringBuffer(), null, ReadOnlySpan<char>.Empty));
+            var value = evaluator.EvaluateToValue(
+                table.GetBindings(), table.Count, table.GetStringBuffer(), null, ReadOnlySpan<char>.Empty);
 
-            output.Add(new Dictionary<string, string>(sol) { [key] = rendered });
+            // The term, as the engine binds it; an error leaves the variable unbound (ADR-056 D6)
+            var extended = new Dictionary<string, string>(sol);
+            if (value.Type != ExprValueType.Unbound)
+                extended[key] = value.Term();
+            output.Add(extended);
         }
         return output;
     }
@@ -1179,14 +1183,6 @@ internal sealed class GraphTreeEvaluator
             table.Bind(("?" + kv.Key).AsSpan(), kv.Value.AsSpan());
     }
 
-    /// <summary>Render a BIND result to the string form the result set would carry.</summary>
-    private static string Render(Value value) => value.Type switch
-    {
-        ExprValueType.Integer => value.IntegerValue.ToString(CultureInfo.InvariantCulture),
-        ExprValueType.Double => value.DoubleValue.ToString("G", CultureInfo.InvariantCulture),
-        ExprValueType.Boolean => value.BooleanValue ? "true" : "false",
-        _ => value.StringValue.ToString(),
-    };
 
     private static string VarName(string termText) => termText.TrimStart('?');
 

@@ -1,17 +1,17 @@
 using System;
-using System.Buffers;
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.RegularExpressions;
+using SkyOmega.Mercury.Rdf;
 using SkyOmega.Mercury.Sparql.Types;
 using SkyOmega.Mercury.Sparql.Patterns;
 
 namespace SkyOmega.Mercury.Sparql.Execution.Expressions;
 
 /// <summary>
-/// Zero-allocation FILTER expression evaluator using stack-based evaluation
+/// The SPARQL <c>[110] Expression</c> evaluator, for FILTER, BIND and every other expression (ADR-049). It reads the
+/// expression text directly and evaluates to a <see cref="Value"/>, an RDF term or an error (ADR-056).
 /// </summary>
 internal ref partial struct FilterEvaluator
 {
@@ -27,7 +27,6 @@ internal ref partial struct FilterEvaluator
     private ReadOnlySpan<char> _source;
     // Base IRI for resolving a relative ref in IRI()/URI() (ADR-049 step 2; empty = no base).
     private ReadOnlySpan<char> _baseIri;
-    private string? _expandedPrefixBuffer;
     private string? _literalScratch; // ADR-044: scratch owner for canonicalized filter literals
 
     // BIND scope depth filtering (for nested group scoping)
@@ -44,13 +43,13 @@ internal ref partial struct FilterEvaluator
         _prefixes = null;
         _source = ReadOnlySpan<char>.Empty;
         _baseIri = ReadOnlySpan<char>.Empty;
-        _expandedPrefixBuffer = null;
         _literalScratch = null;
         _filterScopeDepth = -1; // Disabled by default
     }
 
     /// <summary>
-    /// Evaluate FILTER expression against current bindings.
+    /// Evaluate FILTER expression against current bindings: true when its effective boolean value is true (an error
+    /// keeps no row, §17.2).
     /// </summary>
     public bool Evaluate(ReadOnlySpan<Binding> bindings, int bindingCount, ReadOnlySpan<char> stringBuffer)
     {
@@ -60,7 +59,7 @@ internal ref partial struct FilterEvaluator
         _bindingStrings = stringBuffer;
         _prefixes = null;
         _source = ReadOnlySpan<char>.Empty;
-        return CoerceToBool(ValueOr());
+        return Value.EffectiveBoolean(ValueOr()) == Truth.True;
     }
 
     /// <summary>
@@ -76,7 +75,7 @@ internal ref partial struct FilterEvaluator
         _prefixes = prefixes;
         _source = source;
         _filterScopeDepth = -1; // No scope filtering
-        return CoerceToBool(ValueOr());
+        return Value.EffectiveBoolean(ValueOr()) == Truth.True;
     }
 
     /// <summary>
@@ -94,7 +93,7 @@ internal ref partial struct FilterEvaluator
         _prefixes = prefixes;
         _source = source;
         _filterScopeDepth = filterScopeDepth;
-        return CoerceToBool(ValueOr());
+        return Value.EffectiveBoolean(ValueOr()) == Truth.True;
     }
 
     /// <summary>
@@ -106,65 +105,46 @@ internal ref partial struct FilterEvaluator
         _bindingData = ReadOnlySpan<Binding>.Empty;
         _bindingStrings = ReadOnlySpan<char>.Empty;
         _bindingCount = 0;
-        return CoerceToBool(ValueOr());
+        return Value.EffectiveBoolean(ValueOr()) == Truth.True;
     }
 
     /// <summary>
-    /// Evaluate IN or NOT IN expression: value [NOT] IN (v1, v2, ...)
+    /// <c>left [NOT] IN (e1, e2, …)</c> (§17.4.1.9): the <c>||</c> of the <c>=</c> tests, so it is an error when no
+    /// test is true and one is an error. NOT IN is its negation.
     /// </summary>
-    private bool EvaluateInExpression(scoped Value left, bool negated)
+    private Truth EvaluateInExpression(scoped Value left, bool negated)
     {
-        // Expect opening paren
         if (Peek() != '(')
-            return false;
-
-        Advance(); // Skip '('
+            return Truth.Error;
+        Advance();
         SkipWhitespace();
 
-        bool found = false;
-
-        // Parse value list
+        var result = Truth.False;
         while (!IsAtEnd() && Peek() != ')')
         {
             var startPos = _position;
-            scoped var listValue = ValueOr();
+            scoped var item = ValueOr();
             SkipWhitespace();
-
-            // Check if we made progress - if not, skip to next comma or closing paren
-            // This handles expressions like 1/0 that ParseTerm can't parse
-            if (_position == startPos || listValue.Type == ValueType.Unbound)
+            if (_position == startPos)
             {
-                // Skip to next comma or closing paren (treats unparseable as error/non-match)
+                // An item the grammar can't read: an error, and the list continues after it
                 while (!IsAtEnd() && Peek() != ',' && Peek() != ')')
                     Advance();
+                result = Value.Or(result, Truth.Error);
             }
             else
             {
-                // Check if left matches this list value
-                if (!found && CompareEqual(left, listValue))
-                {
-                    found = true;
-                    // Continue parsing to consume the rest of the list
-                }
+                result = Value.Or(result, Value.Equal(left, item));
             }
-
-            // Skip comma if present
             if (Peek() == ',')
             {
                 Advance();
                 SkipWhitespace();
             }
         }
-
-        // Skip closing paren
         if (Peek() == ')')
             Advance();
-
-        // SPARQL semantics for IN/NOT IN with errors:
-        // - IN: if any value matches, return true; if error and no match, return error (treat as false)
-        // - NOT IN: if any value matches, return false; if all non-error values don't match, return true
-        // For simplicity, we treat errors as non-matching values
-        return negated ? !found : found;
+        return negated ? Value.Not(result) : result;
     }
 
     /// <summary>
@@ -220,36 +200,24 @@ internal ref partial struct FilterEvaluator
 
         // Full URI: <...>
         if (ch == '<')
-        {
             return ParseFullUri();
-        }
 
-        // Function call or prefixed name (both start with letter)
-        // Also handle empty prefix case (:localName) which starts with colon
+        // Function call or prefixed name (both start with letter); the empty prefix starts with ':'
         if (IsLetter(ch) || ch == ':')
-        {
             return ParseFunctionOrPrefixedName();
-        }
 
-        // Variable reference
         if (VariableName.IsSigil(ch))
-        {
             return ParseVariable();
-        }
 
         // Literal value: [156]–[159], in any of the four quote forms
         if (ch == '"' || ch == '\'')
-        {
             return ParseStringLiteral();
-        }
 
-        // Numeric literal
-        if (IsDigit(ch) || ch == '-')
-        {
+        // Numeric literal: [146]–[155], a leading '.' ([147]) and a sign included
+        if (IsDigit(ch) || ((ch is '-' or '+' or '.') && (IsDigit(PeekNext()) || (PeekNext() == '.' && ch != '.'))))
             return ParseNumericLiteral();
-        }
 
-        return new Value { Type = ValueType.Unbound };
+        return Value.Error;
     }
 
     private Value ParseVariable()
@@ -262,35 +230,25 @@ internal ref partial struct FilterEvaluator
 
         var varName = _expression.Slice(start, _position - start);
 
-        // Look up variable in bindings
         var index = FindBinding(varName);
         if (index < 0)
-            return new Value { Type = ValueType.Unbound };
+            return Value.Error;
 
         ref readonly var binding = ref _bindingData[index];
         return binding.Type switch
         {
-            BindingValueType.Integer => new Value { Type = ValueType.Integer, IntegerValue = binding.IntegerValue },
-            BindingValueType.Double => new Value { Type = ValueType.Double, DoubleValue = binding.DoubleValue },
-            BindingValueType.Boolean => new Value { Type = ValueType.Boolean, BooleanValue = binding.BooleanValue },
-            BindingValueType.String => ParseTypedLiteralString(_bindingStrings.Slice(binding.StringOffset, binding.StringLength)),
+            BindingValueType.Integer => Value.FromInteger(binding.IntegerValue),
+            BindingValueType.Double => Value.FromDouble(binding.DoubleValue),
+            BindingValueType.Boolean => Value.FromBoolean(binding.BooleanValue),
+            BindingValueType.String => Value.FromTerm(_bindingStrings.Slice(binding.StringOffset, binding.StringLength)),
             BindingValueType.Uri => NonLiteralTerm(_bindingStrings.Slice(binding.StringOffset, binding.StringLength)),
-            _ => new Value { Type = ValueType.Unbound }
+            _ => Value.Error
         };
     }
 
     /// <summary>A binding stored as a non-literal: an IRI, or a blank node when it is written _:label.</summary>
     private static Value NonLiteralTerm(ReadOnlySpan<char> term) =>
-        term.Length > 2 && term[0] == '_' && term[1] == ':'
-            ? new Value { Type = ValueType.BlankNode, StringValue = term }
-            : new Value { Type = ValueType.Uri, StringValue = term };
-
-    /// <summary>
-    /// Parse a string binding that may be a typed RDF literal.
-    /// Delegates to Value.ParseFromBinding for shared implementation.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static Value ParseTypedLiteralString(ReadOnlySpan<char> str) => Value.ParseFromBinding(str);
+        term.Length > 2 && term[0] == '_' && term[1] == ':' ? Value.FromBlankNode(term) : Value.FromIri(term);
 
     private int FindBinding(ReadOnlySpan<char> variableName)
     {
@@ -299,25 +257,23 @@ internal ref partial struct FilterEvaluator
         {
             if (_bindingData[i].VariableNameHash == hash)
             {
-                // Check BIND scope depth compatibility
-                // If _filterScopeDepth is set (>= 0), exclude bindings from BINDs at shallower scopes
-                // A binding is from a BIND if BindScopeDepth >= 0, otherwise it's from a triple pattern (-1)
+                // A binding from a BIND at a shallower scope than the filter's is not visible to it
                 var bindingScopeDepth = _bindingData[i].BindScopeDepth;
                 if (_filterScopeDepth >= 0 && bindingScopeDepth >= 0 && bindingScopeDepth < _filterScopeDepth)
-                {
-                    // This binding is from a BIND at a shallower scope - skip it
                     continue;
-                }
                 return i;
             }
         }
         return -1;
     }
 
-
+    /// <summary>
+    /// [129] RDFLiteral ::= String ( LANGTAG | ( '^^' iri ) )?, the string in any of the four quote forms. The term it
+    /// evaluates to keeps its lexical form (decoded, ADR-044), its tag and its datatype; a prefixed datatype is
+    /// expanded through the query's prefixes, and an undeclared prefix is an error (ADR-056 D2).
+    /// </summary>
     private Value ParseStringLiteral()
     {
-        // STRING_LITERAL1 '…', STRING_LITERAL2 "…", STRING_LITERAL_LONG1 '''…''', STRING_LITERAL_LONG2 """…"""
         char quote = Peek();
         bool isLong = _position + 2 < _expression.Length && _expression[_position + 1] == quote && _expression[_position + 2] == quote;
         int quoteLength = isLong ? 3 : 1;
@@ -332,163 +288,95 @@ internal ref partial struct FilterEvaluator
             Advance();
         }
 
-        // ADR-044: canonicalize literal content so filter-side equality / CONTAINS /
-        // STRSTARTS / STRENDS / REGEX compare against the decoded form, matching
-        // canonical stored atoms. Fast path (no '\\') returns the verbatim span.
-        var str = LiteralForm.CanonicalizeContent(
-            _expression.Slice(start, _position - start),
-            out _literalScratch);
+        var lexical = LiteralForm.CanonicalizeContent(_expression.Slice(start, _position - start), out _literalScratch);
 
         if (!IsAtEnd())
-            _position += quoteLength; // Skip the closing quote(s)
+            _position += quoteLength; // the closing quote(s)
 
-        // Language tag: "content"@lang — preserve the full wrapped term form so that
-        // GetLexicalForm / GetLangTagOrDatatype (hence DATATYPE/LANG/UCASE/LCASE/CONCAT)
-        // see the tag. (ADR-049: FilterEvaluator previously dropped @lang entirely, which
-        // also left it unconsumed and broke function-argument parsing.)
+        // [145] LANGTAG ::= '@' [a-zA-Z]+ ('-' [a-zA-Z0-9]+)*
         if (!IsAtEnd() && Peek() == '@')
         {
-            var langStart = _position; // at '@'
             Advance();
+            var langStart = _position;
             while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '-'))
                 Advance();
-            var langTag = _expression.Slice(langStart, _position - langStart);
-            _typedLiteralResult = $"\"{str.ToString()}\"{langTag.ToString()}";
-            return new Value { Type = ValueType.String, StringValue = _typedLiteralResult.AsSpan() };
+            return Value.FromLangString(lexical, _expression.Slice(langStart, _position - langStart));
         }
 
-        // Typed literal suffix: ^^<IRI> or ^^prefix:local
         if (_position + 1 < _expression.Length && _expression[_position] == '^' && _expression[_position + 1] == '^')
         {
-            Advance(); // Skip first '^'
-            Advance(); // Skip second '^'
-
-            // The datatype IRI in angle-bracketed form, for both classification and the
-            // preserved output (a prefixed name is expanded to its full <IRI>).
-            string datatypeBracketed;
+            _position += 2;
             if (!IsAtEnd() && Peek() == '<')
             {
-                var dtStart = _position;
-                Advance(); // Skip '<'
+                var iriStart = _position;
                 while (!IsAtEnd() && Peek() != '>')
                     Advance();
                 if (!IsAtEnd())
-                    Advance(); // Skip '>'
-                datatypeBracketed = _expression.Slice(dtStart, _position - dtStart).ToString(); // <...>
-            }
-            else
-            {
-                // Prefixed name datatype: prefix:local — consume it (else it would be left
-                // unparsed and break the surrounding parse) and expand a known xsd: prefix.
-                var pfxStart = _position;
-                while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_'))
                     Advance();
-                if (!IsAtEnd() && Peek() == ':')
-                {
-                    Advance();
-                    while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_' || Peek() == '-'))
-                        Advance();
-                }
-                var prefixed = _expression.Slice(pfxStart, _position - pfxStart);
-                var expanded = ExpandXsdDatatypePrefix(prefixed);
-                datatypeBracketed = expanded.IsEmpty ? $"<{prefixed.ToString()}>" : $"<{expanded.ToString()}>";
+                return Value.Literal(lexical, default, _expression.Slice(iriStart, _position - iriStart));
             }
-
-            var datatype = datatypeBracketed.AsSpan();
-
-            // Numeric / boolean typed literals collapse to a typed Value (as before).
-            if (datatype.Contains("integer", StringComparison.OrdinalIgnoreCase) ||
-                datatype.Contains("int", StringComparison.OrdinalIgnoreCase) ||
-                datatype.Contains("short", StringComparison.OrdinalIgnoreCase) ||
-                datatype.Contains("byte", StringComparison.OrdinalIgnoreCase) ||
-                datatype.Contains("long", StringComparison.OrdinalIgnoreCase))
-            {
-                if (long.TryParse(str, NumberStyles.Integer, CultureInfo.InvariantCulture, out var intVal))
-                    return new Value { Type = ValueType.Integer, IntegerValue = intVal };
-            }
-
-            if (datatype.Contains("decimal", StringComparison.OrdinalIgnoreCase) ||
-                datatype.Contains("double", StringComparison.OrdinalIgnoreCase) ||
-                datatype.Contains("float", StringComparison.OrdinalIgnoreCase))
-            {
-                if (double.TryParse(str, NumberStyles.Float, CultureInfo.InvariantCulture, out var doubleVal))
-                    return new Value { Type = ValueType.Double, DoubleValue = doubleVal };
-            }
-
-            if (datatype.Contains("boolean", StringComparison.OrdinalIgnoreCase))
-            {
-                var boolVal = str.Equals("true", StringComparison.OrdinalIgnoreCase) ||
-                              str.Equals("1", StringComparison.Ordinal);
-                return new Value { Type = ValueType.Boolean, BooleanValue = boolVal };
-            }
-
-            // Any other datatype (date, dayTimeDuration, custom, …): preserve the full
-            // wrapped term form so the datatype survives into comparison and atom storage.
-            _typedLiteralResult = $"\"{str.ToString()}\"^^{datatypeBracketed}";
-            return new Value { Type = ValueType.String, StringValue = _typedLiteralResult.AsSpan() };
+            var nameStart = _position;
+            while (!IsAtEnd() && CodePointOps.IsPrefixedNameLocalChar(_expression, _position))
+                Advance();
+            var datatype = ExpandPrefixedName(_expression.Slice(nameStart, _position - nameStart));
+            return datatype == null ? Value.Error : Value.Literal(lexical, default, datatype);
         }
 
-        return new Value
-        {
-            Type = ValueType.String,
-            StringValue = str
-        };
+        return Value.FromString(lexical);
     }
 
-    // Expand a common xsd: datatype prefix to its full IRI (no angle brackets); empty if unknown.
-    private static ReadOnlySpan<char> ExpandXsdDatatypePrefix(ReadOnlySpan<char> prefixedName)
+    /// <summary>
+    /// The IRI a prefixed name stands for, as <c>&lt;iri&gt;</c>, through the query's prefixes; null when its prefix
+    /// isn't declared.
+    /// </summary>
+    private readonly string? ExpandPrefixedName(ReadOnlySpan<char> name)
     {
-        if (!prefixedName.StartsWith("xsd:", StringComparison.OrdinalIgnoreCase))
-            return ReadOnlySpan<char>.Empty;
-        var local = prefixedName.Slice(4);
-        const string xsd = "http://www.w3.org/2001/XMLSchema#";
-        if (local.Equals("date", StringComparison.OrdinalIgnoreCase)) return (xsd + "date").AsSpan();
-        if (local.Equals("dateTime", StringComparison.OrdinalIgnoreCase)) return (xsd + "dateTime").AsSpan();
-        if (local.Equals("time", StringComparison.OrdinalIgnoreCase)) return (xsd + "time").AsSpan();
-        if (local.Equals("integer", StringComparison.OrdinalIgnoreCase)) return (xsd + "integer").AsSpan();
-        if (local.Equals("decimal", StringComparison.OrdinalIgnoreCase)) return (xsd + "decimal").AsSpan();
-        if (local.Equals("double", StringComparison.OrdinalIgnoreCase)) return (xsd + "double").AsSpan();
-        if (local.Equals("float", StringComparison.OrdinalIgnoreCase)) return (xsd + "float").AsSpan();
-        if (local.Equals("boolean", StringComparison.OrdinalIgnoreCase)) return (xsd + "boolean").AsSpan();
-        if (local.Equals("string", StringComparison.OrdinalIgnoreCase)) return (xsd + "string").AsSpan();
-        if (local.Equals("gYear", StringComparison.OrdinalIgnoreCase)) return (xsd + "gYear").AsSpan();
-        if (local.Equals("gYearMonth", StringComparison.OrdinalIgnoreCase)) return (xsd + "gYearMonth").AsSpan();
-        if (local.Equals("dayTimeDuration", StringComparison.OrdinalIgnoreCase)) return (xsd + "dayTimeDuration").AsSpan();
-        return ReadOnlySpan<char>.Empty;
+        var colon = name.IndexOf(':');
+        if (colon < 0 || _prefixes == null || _source.IsEmpty)
+            return null;
+        var prefix = name[..(colon + 1)]; // stored with its colon: "ex:"
+        foreach (var mapping in _prefixes)
+        {
+            if (!_source.Slice(mapping.PrefixStart, mapping.PrefixLength).SequenceEqual(prefix))
+                continue;
+            var namespaceIri = Value.IriText(_source.Slice(mapping.IriStart, mapping.IriLength));
+            return string.Concat("<", namespaceIri, name[(colon + 1)..], ">");
+        }
+        return null;
     }
 
+    /// <summary>
+    /// [130] NumericLiteral, with its sign ([149]–[154]) and a leading '.' ([147]): the term it abbreviates, its
+    /// lexical form exactly as written. A '.' belongs to the number only when a digit follows it, and an exponent only
+    /// when digits follow it.
+    /// </summary>
     private Value ParseNumericLiteral()
     {
         var start = _position;
-        
-        if (Peek() == '-')
+        if (Peek() is '-' or '+')
             Advance();
-        
         while (!IsAtEnd() && IsDigit(Peek()))
             Advance();
-        
-        if (!IsAtEnd() && Peek() == '.')
+        if (Peek() == '.' && IsDigit(PeekNext()))
         {
             Advance();
             while (!IsAtEnd() && IsDigit(Peek()))
                 Advance();
-            
-            var str = _expression.Slice(start, _position - start);
-            if (double.TryParse(str, NumberStyles.Float, CultureInfo.InvariantCulture, out var d))
-            {
-                return new Value { Type = ValueType.Double, DoubleValue = d };
-            }
         }
-        else
+        if (Peek() is 'e' or 'E')
         {
-            var str = _expression.Slice(start, _position - start);
-            if (long.TryParse(str, NumberStyles.Integer, CultureInfo.InvariantCulture, out var i))
+            int at = _position + 1;
+            if (at < _expression.Length && _expression[at] is '+' or '-')
+                at++;
+            if (at < _expression.Length && IsDigit(_expression[at]))
             {
-                return new Value { Type = ValueType.Integer, IntegerValue = i };
+                _position = at;
+                while (!IsAtEnd() && IsDigit(Peek()))
+                    Advance();
             }
         }
-        
-        return new Value { Type = ValueType.Unbound };
+        var token = _expression.Slice(start, _position - start);
+        return Value.IsNumericToken(token, out _, out _) ? Value.FromNumericToken(token) : Value.Error;
     }
 
     /// <summary>
@@ -505,13 +393,11 @@ internal ref partial struct FilterEvaluator
         if (!IsAtEnd())
             Advance(); // Skip '>'
 
-        var uri = _expression.Slice(start, _position - start);
-        return new Value { Type = ValueType.Uri, StringValue = uri };
+        return Value.FromIri(_expression.Slice(start, _position - start));
     }
 
     /// <summary>
-    /// Parse either a function call (followed by '(') or a prefixed name (prefix:localName).
-    /// For prefixed names, expands using the _prefixes array if available.
+    /// Either a function call (followed by '(') or a prefixed name, expanded through the query's prefixes.
     /// </summary>
     private Value ParseFunctionOrPrefixedName()
     {
@@ -527,57 +413,21 @@ internal ref partial struct FilterEvaluator
 
         SkipWhitespace();
 
-        // Check for boolean literals first
+        // [134] BooleanLiteral
         if (name.Equals("true", StringComparison.OrdinalIgnoreCase))
-        {
-            return new Value { Type = ValueType.Boolean, BooleanValue = true };
-        }
+            return Value.FromBoolean(true);
         if (name.Equals("false", StringComparison.OrdinalIgnoreCase))
-        {
-            return new Value { Type = ValueType.Boolean, BooleanValue = false };
-        }
+            return Value.FromBoolean(false);
 
-        // If followed by '(', it's a function call - use existing ParseFunctionCall logic
         if (Peek() == '(')
         {
-            // Reset position and let ParseFunctionCall handle it
             _position = start;
             return ParseFunctionCall();
         }
 
-        // Otherwise, it's a prefixed name - try to expand it
-        var colonIndex = name.IndexOf(':');
-        // colonIndex >= 0 handles empty prefix (e.g., :s1 where colon is at index 0)
-        if (colonIndex >= 0 && _prefixes != null && !_source.IsEmpty)
-        {
-            // Include the colon in the prefix to match the stored format "ex:"
-            var prefix = name.Slice(0, colonIndex + 1);
-            var localName = name.Slice(colonIndex + 1);
-
-            // Find matching prefix mapping
-            foreach (var mapping in _prefixes)
-            {
-                var mappedPrefix = _source.Slice(mapping.PrefixStart, mapping.PrefixLength);
-                if (mappedPrefix.SequenceEqual(prefix))
-                {
-                    // Found a match - construct full URI
-                    var baseIri = _source.Slice(mapping.IriStart, mapping.IriLength);
-
-                    // baseIri is like "<http://example.org/>" - strip angle brackets
-                    if (baseIri.Length >= 2 && baseIri[0] == '<' && baseIri[^1] == '>')
-                    {
-                        baseIri = baseIri.Slice(1, baseIri.Length - 2);
-                    }
-
-                    // Build expanded URI: <baseIri + localName>
-                    _expandedPrefixBuffer = $"<{baseIri}{localName}>";
-                    return new Value { Type = ValueType.Uri, StringValue = _expandedPrefixBuffer.AsSpan() };
-                }
-            }
-        }
-
-        // No prefix match or not a prefixed name - return as-is (URI without brackets)
-        return new Value { Type = ValueType.Uri, StringValue = name };
+        var expanded = ExpandPrefixedName(name);
+        // An undeclared prefix: the name as written (an IRI that matches nothing)
+        return Value.FromIri(expanded != null ? expanded.AsSpan() : name);
     }
 
     private Value ParseFunctionCall()
@@ -592,107 +442,44 @@ internal ref partial struct FilterEvaluator
 
         SkipWhitespace();
         if (Peek() != '(')
-            return new Value { Type = ValueType.Unbound };
+            return Value.Error;
 
         Advance(); // Skip '('
         SkipWhitespace();
 
-        // Handle IF separately - needs special parsing for condition
         if (funcName.Equals("if", StringComparison.OrdinalIgnoreCase))
-        {
             return ParseIfFunction();
-        }
-
-        // Handle COALESCE - variable number of arguments
         if (funcName.Equals("coalesce", StringComparison.OrdinalIgnoreCase))
-        {
             return ParseCoalesceFunction();
-        }
-
-        // Handle REGEX - needs special parsing for 2-3 arguments
         if (funcName.Equals("regex", StringComparison.OrdinalIgnoreCase))
-        {
             return ParseRegexFunction();
-        }
-
-        // Handle REPLACE - regex-based string replacement
         if (funcName.Equals("replace", StringComparison.OrdinalIgnoreCase))
-        {
             return ParseReplaceFunction();
-        }
-
-        // Handle CONTAINS - two string arguments
         if (funcName.Equals("contains", StringComparison.OrdinalIgnoreCase))
-        {
             return ParseContainsFunction();
-        }
-
-        // Handle text:match - full-text search (case-insensitive contains)
         if (funcName.Equals("text:match", StringComparison.OrdinalIgnoreCase) ||
             funcName.Equals("match", StringComparison.OrdinalIgnoreCase))
-        {
             return ParseTextMatchFunction();
-        }
-
-        // Handle STRSTARTS - two string arguments
         if (funcName.Equals("strstarts", StringComparison.OrdinalIgnoreCase))
-        {
             return ParseStrStartsFunction();
-        }
-
-        // Handle STRENDS - two string arguments
         if (funcName.Equals("strends", StringComparison.OrdinalIgnoreCase))
-        {
             return ParseStrEndsFunction();
-        }
-
-        // Handle SUBSTR - 2-3 arguments
         if (funcName.Equals("substr", StringComparison.OrdinalIgnoreCase))
-        {
             return ParseSubstrFunction();
-        }
-
-        // Handle CONCAT - variable arguments
         if (funcName.Equals("concat", StringComparison.OrdinalIgnoreCase))
-        {
             return ParseConcatFunction();
-        }
-
-        // Handle LANGMATCHES - two string arguments
         if (funcName.Equals("langmatches", StringComparison.OrdinalIgnoreCase))
-        {
             return ParseLangMatchesFunction();
-        }
-
-        // Handle sameTerm - strict RDF term equality
         if (funcName.Equals("sameterm", StringComparison.OrdinalIgnoreCase))
-        {
             return ParseSameTermFunction();
-        }
-
-        // Handle STRBEFORE - substring before delimiter
         if (funcName.Equals("strbefore", StringComparison.OrdinalIgnoreCase))
-        {
             return ParseStrBeforeFunction();
-        }
-
-        // Handle STRAFTER - substring after delimiter
         if (funcName.Equals("strafter", StringComparison.OrdinalIgnoreCase))
-        {
             return ParseStrAfterFunction();
-        }
-
-        // Handle STRDT - construct typed literal
         if (funcName.Equals("strdt", StringComparison.OrdinalIgnoreCase))
-        {
             return ParseStrDtFunction();
-        }
-
-        // Handle STRLANG - construct language-tagged literal
         if (funcName.Equals("strlang", StringComparison.OrdinalIgnoreCase))
-        {
             return ParseStrLangFunction();
-        }
 
         // BNODE - construct blank node (0 or 1 argument)
         if (funcName.Equals("bnode", StringComparison.OrdinalIgnoreCase))
@@ -700,94 +487,60 @@ internal ref partial struct FilterEvaluator
             SkipWhitespace();
             if (Peek() == ')')
             {
-                // BNODE() - no argument, generate fresh blank node
                 Advance();
                 var counter = System.Threading.Interlocked.Increment(ref s_bnodeCounter);
-                _bnodeResult = Rdf.BlankNodeScope.Process.Label($"b{counter}");
-                return new Value
-                {
-                    Type = ValueType.BlankNode,
-                    StringValue = _bnodeResult.AsSpan()
-                };
+                return Value.FromBlankNode(Rdf.BlankNodeScope.Process.Label($"b{counter}"));
             }
-            // BNODE(label) - with string argument
             var labelArg = ValueOr();
             SkipWhitespace();
             if (Peek() == ')')
                 Advance();
+            if (!labelArg.HasText)
+                return Value.Error;
 
-            var label = labelArg.GetLexicalForm();
-            if (label.IsEmpty)
-                return new Value { Type = ValueType.Unbound };
-
-            // Per-row seed: same label -> same bnode within a row, distinct across
-            // rows (SPARQL §17.4.2.2). Mirrors what the (now-removed) BindExpressionEvaluator did.
+            // Per-row seed: same label -> same bnode within a row, distinct across rows (SPARQL §17.4.2.9).
             // The string's 64-bit FNV-1a hash names the node: any string is a valid label this way
             ulong hash = 14695981039346656037UL;
-            foreach (var ch in label)
+            foreach (var ch in labelArg.StringValue)
                 hash = (hash ^ ch) * 1099511628211UL;
-            _bnodeResult = Rdf.BlankNodeScope.Process.Label(
-                $"r{s_bnodeRowSeed}h{hash.ToString("x16", System.Globalization.CultureInfo.InvariantCulture)}");
-            return new Value
-            {
-                Type = ValueType.BlankNode,
-                StringValue = _bnodeResult.AsSpan()
-            };
+            return Value.FromBlankNode(Rdf.BlankNodeScope.Process.Label(
+                $"r{s_bnodeRowSeed}h{hash.ToString("x16", CultureInfo.InvariantCulture)}"));
         }
 
-        // UUID - generate a fresh IRI with UUID v7
+        // UUID - a fresh IRI with a UUID v7
         if (funcName.Equals("uuid", StringComparison.OrdinalIgnoreCase))
         {
             SkipWhitespace();
             if (Peek() == ')')
                 Advance();
-            _uuidResult = $"<urn:uuid:{Guid.CreateVersion7():D}>";
-            return new Value
-            {
-                Type = ValueType.Uri,
-                StringValue = _uuidResult.AsSpan()
-            };
+            return Value.FromIri($"<urn:uuid:{Guid.CreateVersion7():D}>");
         }
 
-        // STRUUID - generate a fresh UUID v7 string
+        // STRUUID - a fresh UUID v7, as a simple literal
         if (funcName.Equals("struuid", StringComparison.OrdinalIgnoreCase))
         {
             SkipWhitespace();
             if (Peek() == ')')
                 Advance();
-            _uuidResult = $"\"{Guid.CreateVersion7():D}\"";
-            return new Value
-            {
-                Type = ValueType.String,
-                StringValue = _uuidResult.AsSpan()
-            };
+            return Value.FromString(Guid.CreateVersion7().ToString("D"));
         }
 
-        // NOW - return current datetime as xsd:dateTime
+        // NOW - the current dateTime
         if (funcName.Equals("now", StringComparison.OrdinalIgnoreCase))
         {
             SkipWhitespace();
             if (Peek() == ')')
                 Advance();
-            _datetimeResult = $"\"{DateTime.UtcNow:O}\"^^<http://www.w3.org/2001/XMLSchema#dateTime>";
-            return new Value
-            {
-                Type = ValueType.String,
-                StringValue = _datetimeResult.AsSpan()
-            };
+            return Value.FromTyped(DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture), XsdDatatype.DateTime);
         }
 
-        // RAND - return random double between 0.0 (inclusive) and 1.0 (exclusive)
+        // RAND - a double in [0, 1)
         if (funcName.Equals("rand", StringComparison.OrdinalIgnoreCase))
         {
             SkipWhitespace();
             if (Peek() == ')')
                 Advance();
-            return new Value
-            {
-                Type = ValueType.Double,
-                DoubleValue = Random.Shared.NextDouble()
-            };
+            return Value.FromDouble(Random.Shared.NextDouble());
         }
 
         // Parse first argument for single-arg functions
@@ -797,593 +550,199 @@ internal ref partial struct FilterEvaluator
         if (Peek() == ')')
             Advance();
 
-        // Evaluate built-in functions
         if (funcName.Equals("bound", StringComparison.OrdinalIgnoreCase))
-        {
-            return new Value
-            {
-                Type = ValueType.Boolean,
-                BooleanValue = arg1.Type != ValueType.Unbound
-            };
-        }
+            return Value.FromBoolean(arg1.Type != ValueType.Unbound);
 
         if (funcName.Equals("isIRI", StringComparison.OrdinalIgnoreCase) ||
             funcName.Equals("isURI", StringComparison.OrdinalIgnoreCase))
-        {
-            return new Value
-            {
-                Type = ValueType.Boolean,
-                BooleanValue = arg1.Type == ValueType.Uri
-            };
-        }
+            return arg1.Type == ValueType.Unbound ? Value.Error : Value.FromBoolean(arg1.Type == ValueType.Uri);
 
         if (funcName.Equals("isBlank", StringComparison.OrdinalIgnoreCase))
-        {
-            var isBlank = arg1.Type == ValueType.BlankNode;
-            return new Value
-            {
-                Type = ValueType.Boolean,
-                BooleanValue = isBlank
-            };
-        }
+            return arg1.Type == ValueType.Unbound ? Value.Error : Value.FromBoolean(arg1.Type == ValueType.BlankNode);
 
         if (funcName.Equals("isLiteral", StringComparison.OrdinalIgnoreCase))
-        {
-            // Literals are strings, integers, doubles, booleans
-            var isLiteral = arg1.Type == ValueType.String ||
-                            arg1.Type == ValueType.Integer ||
-                            arg1.Type == ValueType.Double ||
-                            arg1.Type == ValueType.Boolean;
-            return new Value
-            {
-                Type = ValueType.Boolean,
-                BooleanValue = isLiteral
-            };
-        }
+            return arg1.Type == ValueType.Unbound ? Value.Error : Value.FromBoolean(arg1.IsLiteral);
 
         if (funcName.Equals("isNumeric", StringComparison.OrdinalIgnoreCase))
-        {
-            var isNumeric = arg1.Type == ValueType.Integer ||
-                            arg1.Type == ValueType.Double;
-            return new Value
-            {
-                Type = ValueType.Boolean,
-                BooleanValue = isNumeric
-            };
-        }
+            return arg1.Type == ValueType.Unbound ? Value.Error : Value.FromBoolean(arg1.IsNumeric);
 
+        // STR (§17.4.2.5): a literal's lexical form, an IRI's text; a blank node is an error
         if (funcName.Equals("str", StringComparison.OrdinalIgnoreCase))
         {
-            // Handle numeric types by converting to string representation
-            if (arg1.Type == ValueType.Integer)
-            {
-                _strResult = arg1.IntegerValue.ToString(CultureInfo.InvariantCulture);
-                return new Value { Type = ValueType.String, StringValue = _strResult.AsSpan() };
-            }
-            if (arg1.Type == ValueType.Double)
-            {
-                _strResult = arg1.DoubleValue.ToString("G", CultureInfo.InvariantCulture);
-                return new Value { Type = ValueType.String, StringValue = _strResult.AsSpan() };
-            }
-            if (arg1.Type == ValueType.Boolean)
-            {
-                _strResult = arg1.BooleanValue ? "true" : "false";
-                return new Value { Type = ValueType.String, StringValue = _strResult.AsSpan() };
-            }
-
-            // STR of a blank node is an error (§17.4.2.5)
-            if (arg1.Type == ValueType.BlankNode)
-                return new Value { Type = ValueType.Unbound };
-
-            // For URIs, strip angle brackets: <http://...> -> http://...
             if (arg1.Type == ValueType.Uri)
-            {
-                var strVal = arg1.StringValue;
-                if (strVal.Length >= 2 && strVal[0] == '<' && strVal[^1] == '>')
-                {
-                    strVal = strVal.Slice(1, strVal.Length - 2);
-                }
-                return new Value { Type = ValueType.String, StringValue = strVal };
-            }
-
-            // For strings, extract lexical form (strip quotes and language tag/datatype)
-            // "foo"@en -> foo, "bar"^^<xsd:string> -> bar
-            return new Value { Type = ValueType.String, StringValue = arg1.GetLexicalForm() };
+                return Value.FromString(Value.IriText(arg1.StringValue));
+            if (!arg1.IsLiteral)
+                return Value.Error;
+            if (!arg1.StringValue.IsEmpty || arg1.Type is ValueType.String or ValueType.LangString or ValueType.Typed)
+                return Value.FromString(arg1.StringValue);
+            Span<char> number = stackalloc char[64];
+            return Value.FromString(arg1.Lexical(number).ToString());
         }
 
-        // IRI/URI - construct IRI from string
+        // IRI/URI - an IRI from a string or an IRI; a relative reference resolves against the base
         if (funcName.Equals("iri", StringComparison.OrdinalIgnoreCase) ||
             funcName.Equals("uri", StringComparison.OrdinalIgnoreCase))
         {
-            // Canonical IRI term form is angle-bracketed (consistent with how a literal
-            // <iri> is stored by ParseFullUri). A relative ref (no scheme) resolves against
-            // _baseIri when one is in scope. Mirrors what the (now-removed) BindExpressionEvaluator did.
-            var baseStr = _baseIri;
-            if (baseStr.Length >= 2 && baseStr[0] == '<' && baseStr[^1] == '>')
-                baseStr = baseStr.Slice(1, baseStr.Length - 2);
-
-            ReadOnlySpan<char> rel;
-            if (arg1.Type == ValueType.Uri)
-            {
-                rel = arg1.StringValue;
-                if (rel.Length >= 2 && rel[0] == '<' && rel[^1] == '>')
-                    rel = rel.Slice(1, rel.Length - 2);
-            }
-            else if (arg1.Type == ValueType.String)
-            {
-                rel = arg1.GetLexicalForm();
-            }
-            else
-            {
-                return new Value { Type = ValueType.Unbound };
-            }
-
+            if (!arg1.HasText)
+                return Value.Error;
+            var rel = arg1.Type == ValueType.Uri ? Value.IriText(arg1.StringValue) : arg1.StringValue;
+            var baseStr = Value.IriText(_baseIri);
             var absolute = rel.Contains("://".AsSpan(), StringComparison.Ordinal);
-            _iriResult = absolute || baseStr.IsEmpty
-                ? $"<{rel.ToString()}>"
-                : $"<{baseStr.ToString()}{rel.ToString()}>";
-            return new Value { Type = ValueType.Uri, StringValue = _iriResult.AsSpan() };
+            return Value.FromIri(absolute || baseStr.IsEmpty
+                ? string.Concat("<", rel, ">")
+                : string.Concat("<", baseStr, rel, ">"));
         }
 
-        // LANG - returns language tag of a literal
+        // LANG (§17.4.2.6): a literal's tag, "" when it has none; an error for anything but a literal
         if (funcName.Equals("lang", StringComparison.OrdinalIgnoreCase))
-        {
-            if (arg1.Type == ValueType.String)
-            {
-                // Look for language tag pattern: "value"@lang
-                var str = arg1.StringValue;
-                var atIndex = str.LastIndexOf('@');
-                if (atIndex > 0 && atIndex < str.Length - 1)
-                {
-                    // Check if it's a quoted string followed by @lang
-                    // e.g., "hello"@en -> lang is "en"
-                    var beforeAt = str.Slice(0, atIndex);
-                    if (beforeAt.Length >= 2 && beforeAt[^1] == '"')
-                    {
-                        return new Value
-                        {
-                            Type = ValueType.String,
-                            StringValue = str.Slice(atIndex + 1)
-                        };
-                    }
-                }
-                // No language tag - return empty string
-                return new Value { Type = ValueType.String, StringValue = ReadOnlySpan<char>.Empty };
-            }
-            // Non-literals return empty string
-            return new Value { Type = ValueType.String, StringValue = ReadOnlySpan<char>.Empty };
-        }
+            return arg1.IsLiteral ? Value.FromString(arg1.Language) : Value.Error;
 
-        // DATATYPE - returns datatype IRI of a literal
+        // DATATYPE (§17.4.2.7): a literal's datatype IRI; an error for anything but a literal
         if (funcName.Equals("datatype", StringComparison.OrdinalIgnoreCase))
         {
-            // IRIs and blank nodes have no datatype.
-            if (arg1.Type == ValueType.Uri)
-                return new Value { Type = ValueType.Unbound };
-
-            // A numeric/boolean Value parsed from a typed literal preserves the original
-            // StringValue (e.g. "1.5"^^xsd:decimal -> Double keeps its lexical form). Recover the
-            // datatype from that suffix FIRST so decimal vs double vs integer stay distinct — the
-            // Type alone collapses them. Matches what the (now-removed) BindExpressionEvaluator did.
-            if (!arg1.StringValue.IsEmpty)
-            {
-                var s = arg1.StringValue;
-                var caretIdx = s.LastIndexOf("^^".AsSpan());
-                if (caretIdx > 0)
-                {
-                    var dtPart = s.Slice(caretIdx + 2);
-                    if (dtPart.Length >= 2 && dtPart[0] == '<' && dtPart[^1] == '>')
-                        return new Value { Type = ValueType.Uri, StringValue = dtPart };
-                }
-                var atIdx = s.LastIndexOf('@');
-                if (atIdx > 0 && s[atIdx - 1] == '"')
-                    return new Value { Type = ValueType.Uri, StringValue = RdfLangStringBracketed.AsSpan() };
-            }
-
-            // Fall back to the XSD datatype implied by the value type.
-            ReadOnlySpan<char> datatypeIri = arg1.Type switch
-            {
-                ValueType.Integer => "<http://www.w3.org/2001/XMLSchema#integer>".AsSpan(),
-                ValueType.Double => "<http://www.w3.org/2001/XMLSchema#double>".AsSpan(),
-                ValueType.Boolean => "<http://www.w3.org/2001/XMLSchema#boolean>".AsSpan(),
-                ValueType.String => GetStringDatatypeWithBrackets(arg1.StringValue),
-                _ => ReadOnlySpan<char>.Empty
-            };
-            if (datatypeIri.IsEmpty)
-                return new Value { Type = ValueType.Unbound };
-            return new Value { Type = ValueType.Uri, StringValue = datatypeIri };
+            if (!arg1.IsLiteral || arg1.DatatypeIri.IsEmpty)
+                return Value.Error;
+            return Value.FromIri(arg1.DatatypeIri);
         }
 
-        // STRLEN - returns string length in Unicode code points (not UTF-16 code units)
-        // Characters outside BMP (like emoji) count as 1, not 2
+        // STRLEN - length in Unicode code points
         if (funcName.Equals("strlen", StringComparison.OrdinalIgnoreCase))
-        {
-            if (arg1.Type == ValueType.String || arg1.Type == ValueType.Uri)
-            {
-                return new Value
-                {
-                    Type = ValueType.Integer,
-                    IntegerValue = CodePointOps.GetCodePointCount(arg1.GetLexicalForm())
-                };
-            }
-            return new Value { Type = ValueType.Unbound };
-        }
+            return arg1.HasText
+                ? Value.FromInteger(CodePointOps.GetCodePointCount(TextOf(arg1)))
+                : Value.Error;
 
-        // UCASE - convert string to uppercase (of lexical form), preserving language tag/datatype
+        // UCASE / LCASE - the lexical form in upper / lower case, the tag and datatype kept
         if (funcName.Equals("ucase", StringComparison.OrdinalIgnoreCase))
-        {
-            if (arg1.Type == ValueType.String || arg1.Type == ValueType.Uri)
-            {
-                var lexical = arg1.GetLexicalForm().ToString().ToUpperInvariant();
-                var suffix = arg1.GetLangTagOrDatatype();
-                // Only add quotes if there's a suffix to preserve, otherwise return plain string
-                _caseResult = suffix.IsEmpty ? lexical : $"\"{lexical}\"{suffix.ToString()}";
-                return new Value
-                {
-                    Type = ValueType.String,
-                    StringValue = _caseResult.AsSpan()
-                };
-            }
-            return new Value { Type = ValueType.Unbound };
-        }
-
-        // LCASE - convert string to lowercase (of lexical form), preserving language tag/datatype
+            return arg1.HasText ? WithText(arg1, TextOf(arg1).ToString().ToUpperInvariant()) : Value.Error;
         if (funcName.Equals("lcase", StringComparison.OrdinalIgnoreCase))
-        {
-            if (arg1.Type == ValueType.String || arg1.Type == ValueType.Uri)
-            {
-                var lexical = arg1.GetLexicalForm().ToString().ToLowerInvariant();
-                var suffix = arg1.GetLangTagOrDatatype();
-                // Only add quotes if there's a suffix to preserve, otherwise return plain string
-                _caseResult = suffix.IsEmpty ? lexical : $"\"{lexical}\"{suffix.ToString()}";
-                return new Value
-                {
-                    Type = ValueType.String,
-                    StringValue = _caseResult.AsSpan()
-                };
-            }
-            return new Value { Type = ValueType.Unbound };
-        }
+            return arg1.HasText ? WithText(arg1, TextOf(arg1).ToString().ToLowerInvariant()) : Value.Error;
 
-        // ENCODE_FOR_URI - percent-encode string for use in URI (of lexical form)
         if (funcName.Equals("encode_for_uri", StringComparison.OrdinalIgnoreCase))
-        {
-            if (arg1.Type == ValueType.String || arg1.Type == ValueType.Uri)
-            {
-                _encodeResult = Uri.EscapeDataString(arg1.GetLexicalForm().ToString());
-                return new Value
-                {
-                    Type = ValueType.String,
-                    StringValue = _encodeResult.AsSpan()
-                };
-            }
-            return new Value { Type = ValueType.Unbound };
-        }
+            return arg1.HasText ? Value.FromString(Uri.EscapeDataString(TextOf(arg1).ToString())) : Value.Error;
 
-        // MD5 - compute MD5 hash of lexical form
+        // MD5 / SHA1 / SHA256 / SHA384 / SHA512 of the lexical form, as lower-case hex
         if (funcName.Equals("md5", StringComparison.OrdinalIgnoreCase))
-        {
-            if (arg1.Type == ValueType.String || arg1.Type == ValueType.Uri)
-            {
-                var bytes = Encoding.UTF8.GetBytes(arg1.GetLexicalForm().ToString());
-                var hash = MD5.HashData(bytes);
-                _hashResult = Convert.ToHexString(hash).ToLowerInvariant();
-                return new Value
-                {
-                    Type = ValueType.String,
-                    StringValue = _hashResult.AsSpan()
-                };
-            }
-            return new Value { Type = ValueType.Unbound };
-        }
-
-        // SHA1 - compute SHA-1 hash of lexical form
+            return arg1.HasText ? Value.FromString(Hex(MD5.HashData(Encoding.UTF8.GetBytes(TextOf(arg1).ToString())))) : Value.Error;
         if (funcName.Equals("sha1", StringComparison.OrdinalIgnoreCase))
-        {
-            if (arg1.Type == ValueType.String || arg1.Type == ValueType.Uri)
-            {
-                var bytes = Encoding.UTF8.GetBytes(arg1.GetLexicalForm().ToString());
-                var hash = SHA1.HashData(bytes);
-                _hashResult = Convert.ToHexString(hash).ToLowerInvariant();
-                return new Value
-                {
-                    Type = ValueType.String,
-                    StringValue = _hashResult.AsSpan()
-                };
-            }
-            return new Value { Type = ValueType.Unbound };
-        }
-
-        // SHA256 - compute SHA-256 hash of lexical form
+            return arg1.HasText ? Value.FromString(Hex(SHA1.HashData(Encoding.UTF8.GetBytes(TextOf(arg1).ToString())))) : Value.Error;
         if (funcName.Equals("sha256", StringComparison.OrdinalIgnoreCase))
-        {
-            if (arg1.Type == ValueType.String || arg1.Type == ValueType.Uri)
-            {
-                var bytes = Encoding.UTF8.GetBytes(arg1.GetLexicalForm().ToString());
-                var hash = SHA256.HashData(bytes);
-                _hashResult = Convert.ToHexString(hash).ToLowerInvariant();
-                return new Value
-                {
-                    Type = ValueType.String,
-                    StringValue = _hashResult.AsSpan()
-                };
-            }
-            return new Value { Type = ValueType.Unbound };
-        }
-
-        // SHA384 - compute SHA-384 hash of lexical form
+            return arg1.HasText ? Value.FromString(Hex(SHA256.HashData(Encoding.UTF8.GetBytes(TextOf(arg1).ToString())))) : Value.Error;
         if (funcName.Equals("sha384", StringComparison.OrdinalIgnoreCase))
-        {
-            if (arg1.Type == ValueType.String || arg1.Type == ValueType.Uri)
-            {
-                var bytes = Encoding.UTF8.GetBytes(arg1.GetLexicalForm().ToString());
-                var hash = SHA384.HashData(bytes);
-                _hashResult = Convert.ToHexString(hash).ToLowerInvariant();
-                return new Value
-                {
-                    Type = ValueType.String,
-                    StringValue = _hashResult.AsSpan()
-                };
-            }
-            return new Value { Type = ValueType.Unbound };
-        }
-
-        // SHA512 - compute SHA-512 hash of lexical form
+            return arg1.HasText ? Value.FromString(Hex(SHA384.HashData(Encoding.UTF8.GetBytes(TextOf(arg1).ToString())))) : Value.Error;
         if (funcName.Equals("sha512", StringComparison.OrdinalIgnoreCase))
-        {
-            if (arg1.Type == ValueType.String || arg1.Type == ValueType.Uri)
-            {
-                var bytes = Encoding.UTF8.GetBytes(arg1.GetLexicalForm().ToString());
-                var hash = SHA512.HashData(bytes);
-                _hashResult = Convert.ToHexString(hash).ToLowerInvariant();
-                return new Value
-                {
-                    Type = ValueType.String,
-                    StringValue = _hashResult.AsSpan()
-                };
-            }
-            return new Value { Type = ValueType.Unbound };
-        }
+            return arg1.HasText ? Value.FromString(Hex(SHA512.HashData(Encoding.UTF8.GetBytes(TextOf(arg1).ToString())))) : Value.Error;
 
-        // YEAR/MONTH/DAY/HOURS/MINUTES/SECONDS — extract components DIRECTLY from the lexical
-        // form per SPARQL §17.4.5 (no timezone conversion; a DateTime parse would convert an
-        // offset like -08:00 to machine-local time, giving a wrong, non-deterministic component).
-        // Matches what the (now-removed) BindExpressionEvaluator did.
+        // YEAR/MONTH/DAY/HOURS/MINUTES/SECONDS — the components of the lexical form as written (§17.4.5: no timezone
+        // conversion, which a DateTime parse would apply)
         if (funcName.Equals("year", StringComparison.OrdinalIgnoreCase))
-        {
-            if (arg1.Type == ValueType.String &&
-                TryParseDateTime(arg1.GetLexicalForm(), out var year, out _, out _, out _, out _, out _))
-                return new Value { Type = ValueType.Integer, IntegerValue = year };
-            return new Value { Type = ValueType.Unbound };
-        }
-
+            return arg1.HasText && TryParseDateTime(arg1.StringValue, out var year, out _, out _, out _, out _, out _)
+                ? Value.FromInteger(year) : Value.Error;
         if (funcName.Equals("month", StringComparison.OrdinalIgnoreCase))
-        {
-            if (arg1.Type == ValueType.String &&
-                TryParseDateTime(arg1.GetLexicalForm(), out _, out var month, out _, out _, out _, out _))
-                return new Value { Type = ValueType.Integer, IntegerValue = month };
-            return new Value { Type = ValueType.Unbound };
-        }
-
+            return arg1.HasText && TryParseDateTime(arg1.StringValue, out _, out var month, out _, out _, out _, out _)
+                ? Value.FromInteger(month) : Value.Error;
         if (funcName.Equals("day", StringComparison.OrdinalIgnoreCase))
-        {
-            if (arg1.Type == ValueType.String &&
-                TryParseDateTime(arg1.GetLexicalForm(), out _, out _, out var day, out _, out _, out _))
-                return new Value { Type = ValueType.Integer, IntegerValue = day };
-            return new Value { Type = ValueType.Unbound };
-        }
-
+            return arg1.HasText && TryParseDateTime(arg1.StringValue, out _, out _, out var day, out _, out _, out _)
+                ? Value.FromInteger(day) : Value.Error;
         if (funcName.Equals("hours", StringComparison.OrdinalIgnoreCase))
-        {
-            if (arg1.Type == ValueType.String &&
-                TryParseDateTime(arg1.GetLexicalForm(), out _, out _, out _, out var hour, out _, out _))
-                return new Value { Type = ValueType.Integer, IntegerValue = hour };
-            return new Value { Type = ValueType.Unbound };
-        }
-
+            return arg1.HasText && TryParseDateTime(arg1.StringValue, out _, out _, out _, out var hour, out _, out _)
+                ? Value.FromInteger(hour) : Value.Error;
         if (funcName.Equals("minutes", StringComparison.OrdinalIgnoreCase))
-        {
-            if (arg1.Type == ValueType.String &&
-                TryParseDateTime(arg1.GetLexicalForm(), out _, out _, out _, out _, out var minute, out _))
-                return new Value { Type = ValueType.Integer, IntegerValue = minute };
-            return new Value { Type = ValueType.Unbound };
-        }
-
+            return arg1.HasText && TryParseDateTime(arg1.StringValue, out _, out _, out _, out _, out var minute, out _)
+                ? Value.FromInteger(minute) : Value.Error;
+        // SECONDS is an xsd:decimal (§17.4.5.7)
         if (funcName.Equals("seconds", StringComparison.OrdinalIgnoreCase))
-        {
-            if (arg1.Type == ValueType.String &&
-                TryParseDateTime(arg1.GetLexicalForm(), out _, out _, out _, out _, out _, out var second))
-                return new Value { Type = ValueType.Double, DoubleValue = second };
-            return new Value { Type = ValueType.Unbound };
-        }
+            return arg1.HasText && TryParseDateTime(arg1.StringValue, out _, out _, out _, out _, out _, out var second)
+                ? Value.FromDecimal(second) : Value.Error;
 
-        // TZ - extract timezone string from xsd:dateTime
+        // TZ - the timezone as written, a simple literal
         if (funcName.Equals("tz", StringComparison.OrdinalIgnoreCase))
-        {
-            if (arg1.Type == ValueType.String)
-            {
-                var tzStr = ExtractTimezone(arg1.GetLexicalForm());
-                _datetimeResult = $"\"{tzStr}\""; // TZ returns a simple (quoted) literal
-                return new Value { Type = ValueType.String, StringValue = _datetimeResult.AsSpan() };
-            }
-            return new Value { Type = ValueType.Unbound };
-        }
+            return arg1.HasText ? Value.FromString(ExtractTimezone(arg1.StringValue)) : Value.Error;
 
-        // TIMEZONE - extract timezone as xsd:dayTimeDuration
+        // TIMEZONE - the timezone as an xsd:dayTimeDuration; an error when there is none
         if (funcName.Equals("timezone", StringComparison.OrdinalIgnoreCase))
         {
-            if (arg1.Type == ValueType.String)
-            {
-                var tzStr = ExtractTimezone(arg1.GetLexicalForm());
-                if (string.IsNullOrEmpty(tzStr))
-                {
-                    // No timezone specified - return unbound per SPARQL spec
-                    return new Value { Type = ValueType.Unbound };
-                }
-                _timezoneResult = $"\"{ConvertToXsdDuration(tzStr)}\"^^<http://www.w3.org/2001/XMLSchema#dayTimeDuration>";
-                return new Value { Type = ValueType.String, StringValue = _timezoneResult.AsSpan() };
-            }
-            return new Value { Type = ValueType.Unbound };
+            if (!arg1.HasText)
+                return Value.Error;
+            var tzStr = ExtractTimezone(arg1.StringValue);
+            return string.IsNullOrEmpty(tzStr)
+                ? Value.Error
+                : Value.FromTyped(ConvertToXsdDuration(tzStr), XsdDatatype.DayTimeDuration);
         }
 
-        // ABS - absolute value
+        // ABS / ROUND / CEIL / FLOOR, in the operand's type (XPath fn:abs, fn:round, fn:ceiling, fn:floor)
         if (funcName.Equals("abs", StringComparison.OrdinalIgnoreCase))
-        {
-            if (arg1.Type == ValueType.Integer)
+            return arg1.Type switch
             {
-                return new Value
-                {
-                    Type = ValueType.Integer,
-                    IntegerValue = Math.Abs(arg1.IntegerValue)
-                };
-            }
-            if (arg1.Type == ValueType.Double)
-            {
-                return new Value
-                {
-                    Type = ValueType.Double,
-                    DoubleValue = Math.Abs(arg1.DoubleValue)
-                };
-            }
-            return new Value { Type = ValueType.Unbound };
-        }
-
-        // ROUND - round to nearest integer
+                ValueType.Integer when arg1.IntegerValue != long.MinValue => Value.FromInteger(Math.Abs(arg1.IntegerValue)),
+                ValueType.Integer => Value.FromDecimal(-(decimal)arg1.IntegerValue),
+                ValueType.Decimal => Value.FromDecimal(Math.Abs(arg1.DecimalValue)),
+                ValueType.Float => Value.FromFloat(Math.Abs(arg1.DoubleValue)),
+                ValueType.Double => Value.FromDouble(Math.Abs(arg1.DoubleValue)),
+                _ => Value.Error,
+            };
+        // fn:round rounds a half towards positive infinity
         if (funcName.Equals("round", StringComparison.OrdinalIgnoreCase))
-        {
-            if (arg1.Type == ValueType.Integer)
+            return arg1.Type switch
             {
-                return arg1; // Already an integer
-            }
-            if (arg1.Type == ValueType.Double)
-            {
-                return new Value
-                {
-                    Type = ValueType.Double,
-                    DoubleValue = Math.Round(arg1.DoubleValue, MidpointRounding.AwayFromZero)
-                };
-            }
-            return new Value { Type = ValueType.Unbound };
-        }
-
-        // CEIL - round up to nearest integer
+                ValueType.Integer => Value.FromInteger(arg1.IntegerValue),
+                ValueType.Decimal => Value.FromDecimal(Math.Floor(arg1.DecimalValue + 0.5m)),
+                ValueType.Float => Value.FromFloat(Math.Floor(arg1.DoubleValue + 0.5)),
+                ValueType.Double => Value.FromDouble(Math.Floor(arg1.DoubleValue + 0.5)),
+                _ => Value.Error,
+            };
         if (funcName.Equals("ceil", StringComparison.OrdinalIgnoreCase))
-        {
-            if (arg1.Type == ValueType.Integer)
+            return arg1.Type switch
             {
-                return arg1; // Already an integer
-            }
-            if (arg1.Type == ValueType.Double)
-            {
-                return new Value
-                {
-                    Type = ValueType.Double,
-                    DoubleValue = Math.Ceiling(arg1.DoubleValue)
-                };
-            }
-            return new Value { Type = ValueType.Unbound };
-        }
-
-        // FLOOR - round down to nearest integer
+                ValueType.Integer => Value.FromInteger(arg1.IntegerValue),
+                ValueType.Decimal => Value.FromDecimal(Math.Ceiling(arg1.DecimalValue)),
+                ValueType.Float => Value.FromFloat(Math.Ceiling(arg1.DoubleValue)),
+                ValueType.Double => Value.FromDouble(Math.Ceiling(arg1.DoubleValue)),
+                _ => Value.Error,
+            };
         if (funcName.Equals("floor", StringComparison.OrdinalIgnoreCase))
-        {
-            if (arg1.Type == ValueType.Integer)
+            return arg1.Type switch
             {
-                return arg1; // Already an integer
-            }
-            if (arg1.Type == ValueType.Double)
-            {
-                return new Value
-                {
-                    Type = ValueType.Double,
-                    DoubleValue = Math.Floor(arg1.DoubleValue)
-                };
-            }
-            return new Value { Type = ValueType.Unbound };
-        }
+                ValueType.Integer => Value.FromInteger(arg1.IntegerValue),
+                ValueType.Decimal => Value.FromDecimal(Math.Floor(arg1.DecimalValue)),
+                ValueType.Float => Value.FromFloat(Math.Floor(arg1.DoubleValue)),
+                ValueType.Double => Value.FromDouble(Math.Floor(arg1.DoubleValue)),
+                _ => Value.Error,
+            };
 
-        // XSD type cast functions
-        // xsd:integer - cast to integer
+        // XSD casts (§17.5)
         if (funcName.Equals("xsd:integer", StringComparison.OrdinalIgnoreCase))
-        {
             return CastToInteger(arg1);
-        }
-
-        // xsd:decimal - cast to decimal (represented as double internally)
         if (funcName.Equals("xsd:decimal", StringComparison.OrdinalIgnoreCase))
-        {
             return CastToDecimal(arg1);
-        }
-
-        // xsd:double - cast to double
         if (funcName.Equals("xsd:double", StringComparison.OrdinalIgnoreCase))
-        {
-            return CastToDouble(arg1);
-        }
-
-        // xsd:float - cast to float (same as double in SPARQL)
+            return CastToDouble(arg1, isFloat: false);
         if (funcName.Equals("xsd:float", StringComparison.OrdinalIgnoreCase))
-        {
-            return CastToFloat(arg1);
-        }
-
-        // xsd:boolean - cast to boolean
+            return CastToDouble(arg1, isFloat: true);
         if (funcName.Equals("xsd:boolean", StringComparison.OrdinalIgnoreCase))
-        {
             return CastToBoolean(arg1);
-        }
-
-        // xsd:string - cast to string
         if (funcName.Equals("xsd:string", StringComparison.OrdinalIgnoreCase))
-        {
             return CastToString(arg1);
-        }
+        if (funcName.Equals("xsd:dateTime", StringComparison.OrdinalIgnoreCase))
+            return CastToDateTime(arg1);
 
-        return new Value { Type = ValueType.Unbound };
+        return Value.Error;
     }
 
+    /// <summary>The text a string function reads: a literal's lexical form, an IRI's text.</summary>
+    private static ReadOnlySpan<char> TextOf(scoped in Value v) =>
+        v.Type == ValueType.Uri ? Value.IriText(v.StringValue) : v.StringValue;
 
-    // Storage for CONCAT result to keep span valid
-    private string _concatResult = string.Empty;
+    /// <summary>A string function's result: <paramref name="text"/>, with the argument's tag or datatype (an IRI's
+    /// text gives a simple literal).</summary>
+    private static Value WithText(scoped in Value arg, ReadOnlySpan<char> text) => arg.Type switch
+    {
+        ValueType.LangString => Value.FromLangString(text, arg.Language),
+        ValueType.Typed => Value.FromTyped(text, arg.Datatype),
+        ValueType.String => new Value { Type = ValueType.String, StringValue = text, Datatype = arg.Datatype },
+        _ => Value.FromString(text),
+    };
 
-    // Storage for UCASE/LCASE result to keep span valid
-    private string _caseResult = string.Empty;
-
-    // Storage for REPLACE result to keep span valid
-    private string _replaceResult = string.Empty;
-
-    // Storage for ENCODE_FOR_URI result to keep span valid
-    private string _encodeResult = string.Empty;
-
-    // Storage for STR() numeric conversion result to keep span valid
-    private string _strResult = string.Empty;
-
-    // Storage for hash function results to keep span valid
-    private string _hashResult = string.Empty;
-
-    // Storage for UUID/STRUUID results to keep span valid
-    private string _uuidResult = string.Empty;
-
-    // Storage for IRI/URI result to keep span valid
-    private string _iriResult = string.Empty;
-
-    // Storage for datetime results to keep span valid
-    private string _datetimeResult = string.Empty;
-
-    // Storage for STRDT result to keep span valid
-    private string _strdtResult = string.Empty;
-
-    // Storage for a lang-tagged / non-numeric-typed literal's full wrapped form ("v"@en, "v"^^<dt>)
-    private string _typedLiteralResult = string.Empty;
-
-    // Storage for STRLANG result to keep span valid
-    private string _strlangResult = string.Empty;
-    private string _strbeforeResult = string.Empty;
-    private string _strafterResult = string.Empty;
-    private string _substrResult = string.Empty;
-
-    // Storage for BNODE result to keep span valid
-    private string _bnodeResult = string.Empty;
+    private static string Hex(byte[] hash) => Convert.ToHexString(hash).ToLowerInvariant();
 
     // Static counter for generating unique blank node identifiers across all evaluations
     private static int s_bnodeCounter = 0;
@@ -1392,73 +751,21 @@ internal ref partial struct FilterEvaluator
     // process, and its token does not, so a stored label is never minted again
 
     // Per-row seed so BNODE(label) yields the same blank node within a row but a
-    // distinct one across rows (SPARQL §17.4.2.2). Bumped per result row by the
-    // BIND consumer via IncrementBnodeRowSeed(); mirrors the (now-removed) BindExpressionEvaluator.
+    // distinct one across rows (SPARQL §17.4.2.9). Bumped per result row by the
+    // BIND consumer via IncrementBnodeRowSeed().
     private static int s_bnodeRowSeed = 0;
 
     /// <summary>Advance the per-row BNODE seed (called once per result row by the BIND pipeline).</summary>
     public static void IncrementBnodeRowSeed() => System.Threading.Interlocked.Increment(ref s_bnodeRowSeed);
 
-    // Storage for TIMEZONE result to keep span valid
-    private string _timezoneResult = string.Empty;
-
-    // XSD namespace for datatype URIs (with angle brackets for DATATYPE function)
-    private const string XsdStringBracketed = "<http://www.w3.org/2001/XMLSchema#string>";
-    private const string RdfLangStringBracketed = "<http://www.w3.org/1999/02/22-rdf-syntax-ns#langString>";
-
     /// <summary>
-    /// Get the datatype IRI for a string literal with angle brackets.
-    /// Used by DATATYPE function to match prefix-expanded URIs.
+    /// The components of an xsd:dateTime lexical form, read directly (no timezone conversion) per SPARQL §17.4.5.
     /// </summary>
-    private static ReadOnlySpan<char> GetStringDatatypeWithBrackets(ReadOnlySpan<char> str)
-    {
-        // Check for explicit datatype: "value"^^<datatype>
-        // LastIndexOf finds position of "^^" pattern
-        var caretIndex = str.LastIndexOf("^^".AsSpan());
-        if (caretIndex > 0 && caretIndex < str.Length - 3)
-        {
-            var datatypePart = str.Slice(caretIndex + 2);
-            // If already has angle brackets, return as-is
-            if (datatypePart.Length >= 2 && datatypePart[0] == '<' && datatypePart[^1] == '>')
-                return datatypePart;
-            // Otherwise return as-is (shouldn't normally happen)
-            return datatypePart;
-        }
-
-        // Check for language tag: "value"@lang -> rdf:langString
-        var atIndex = str.LastIndexOf('@');
-        if (atIndex > 0 && atIndex < str.Length - 1)
-        {
-            var beforeAt = str.Slice(0, atIndex);
-            if (beforeAt.Length >= 2 && beforeAt[^1] == '"')
-                return RdfLangStringBracketed.AsSpan();
-        }
-
-        // Plain literal defaults to xsd:string
-        return XsdStringBracketed.AsSpan();
-    }
-
-    /// <summary>
-    /// Parse an xsd:dateTime lexical form and extract its components directly (no timezone
-    /// conversion) per SPARQL §17.4.5. Accepts a bare lexical form or an RDF typed literal
-    /// ("…"^^…). Ported from the (now-removed) BindExpressionEvaluator — the W3C-conformant implementation.
-    /// </summary>
-    private static bool TryParseDateTime(ReadOnlySpan<char> str, out int year, out int month, out int day,
-        out int hour, out int minute, out double second)
+    private static bool TryParseDateTime(ReadOnlySpan<char> parseSpan, out int year, out int month, out int day,
+        out int hour, out int minute, out decimal second)
     {
         year = month = day = hour = minute = 0;
-        second = 0.0;
-        if (str.IsEmpty)
-            return false;
-
-        // Strip a leading quote (an RDF typed literal); GetLexicalForm callers already pass bare.
-        var parseSpan = str;
-        if (str.Length > 2 && str[0] == '"')
-        {
-            var endQuote = str.Slice(1).IndexOf('"');
-            if (endQuote > 0)
-                parseSpan = str.Slice(1, endQuote);
-        }
+        second = 0;
 
         // Format: yyyy-MM-ddTHH:mm:ss[.fff][Z|+HH:MM|-HH:MM] — minimum 19 chars.
         if (parseSpan.Length < 19)
@@ -1481,331 +788,196 @@ internal ref partial struct FilterEvaluator
             if (c == '.' || IsDigit(c)) secondsEnd = i + 1;
             else break;
         }
-        return double.TryParse(parseSpan.Slice(17, secondsEnd - 17),
-            NumberStyles.Float, CultureInfo.InvariantCulture, out second);
+        return decimal.TryParse(parseSpan.Slice(17, secondsEnd - 17),
+            NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out second);
     }
 
     /// <summary>
-    /// Extract timezone string from xsd:dateTime
-    /// Returns "Z" for UTC, "+HH:MM" or "-HH:MM" for offsets, "" for no timezone
+    /// The timezone of an xsd:dateTime as written: "Z", "+HH:MM" or "-HH:MM"; "" when there is none.
     /// </summary>
     private static string ExtractTimezone(ReadOnlySpan<char> str)
     {
         if (str.IsEmpty)
             return "";
-
-        // Check for Z (UTC)
         if (str[^1] == 'Z')
             return "Z";
-
-        // Look for +/- timezone offset at end
-        // Format: +HH:MM or -HH:MM (6 chars)
         if (str.Length >= 6)
         {
             var potentialTz = str.Slice(str.Length - 6);
             if ((potentialTz[0] == '+' || potentialTz[0] == '-') && potentialTz[3] == ':')
-            {
                 return potentialTz.ToString();
-            }
         }
-
-        // No timezone specified
         return "";
     }
 
     /// <summary>
-    /// Convert timezone string to xsd:dayTimeDuration format
-    /// "Z" → "PT0S", "+05:30" → "PT5H30M", "-08:00" → "-PT8H"
+    /// A timezone as an xsd:dayTimeDuration: "Z" → "PT0S", "+05:30" → "PT5H30M", "-08:00" → "-PT8H".
     /// </summary>
     private static string ConvertToXsdDuration(string tz)
     {
-        if (tz == "Z")
+        if (tz == "Z" || tz.Length != 6)
             return "PT0S";
-
-        if (tz.Length != 6)
-            return "PT0S";
-
         var sign = tz[0];
         if (sign != '+' && sign != '-')
             return "PT0S";
-
-        // Parse hours and minutes from +HH:MM or -HH:MM
-        if (!int.TryParse(tz.AsSpan(1, 2), out var hours))
+        if (!int.TryParse(tz.AsSpan(1, 2), out var hours) || !int.TryParse(tz.AsSpan(4, 2), out var minutes))
             return "PT0S";
-        if (!int.TryParse(tz.AsSpan(4, 2), out var minutes))
+        if (hours == 0 && minutes == 0)
             return "PT0S";
 
-        // Build duration string
         var result = new StringBuilder();
         if (sign == '-')
             result.Append('-');
         result.Append("PT");
-
         if (hours > 0)
-            result.Append($"{hours}H");
+            result.Append(hours.ToString(CultureInfo.InvariantCulture)).Append('H');
         if (minutes > 0)
-            result.Append($"{minutes}M");
-
-        // If both are zero, return PT0S
-        if (hours == 0 && minutes == 0)
-            return "PT0S";
-
+            result.Append(minutes.ToString(CultureInfo.InvariantCulture)).Append('M');
         return result.ToString();
     }
 
-    // Storage for XSD cast results to keep span valid
-    private string _castResult = string.Empty;
+    // ── XSD casts (SPARQL 1.1 §17.5, XPath casting). A string casts by the target type's lexical rule; a cast with no
+    //    result is an error. ──
 
-    /// <summary>
-    /// Cast a value to xsd:integer.
-    /// Supports: booleans, typed numerics (integer/decimal/double/float), and strings that are valid integer literals.
-    /// Plain strings can only cast if they match integer lexical form (digits with optional sign).
-    /// </summary>
-    private static Value CastToInteger(Value arg)
-    {
-        // Boolean to integer: true=1, false=0
-        if (arg.Type == ValueType.Boolean)
-        {
-            return new Value { Type = ValueType.Integer, IntegerValue = arg.BooleanValue ? 1 : 0 };
-        }
-
-        // Already integer
-        if (arg.Type == ValueType.Integer)
-        {
-            return arg;
-        }
-
-        // Double to integer (truncate) - this handles typed decimals/doubles/floats
-        if (arg.Type == ValueType.Double)
-        {
-            if (double.IsNaN(arg.DoubleValue) || double.IsInfinity(arg.DoubleValue))
-                return new Value { Type = ValueType.Unbound };
-            return new Value { Type = ValueType.Integer, IntegerValue = (long)arg.DoubleValue };
-        }
-
-        // String to integer - ONLY valid integer lexical representations (no decimal point or scientific notation)
-        if (arg.Type == ValueType.String)
-        {
-            var str = ExtractLiteralValue(arg.StringValue);
-
-            // For plain strings, only accept valid integer lexical form (digits with optional leading +/-)
-            // Must NOT contain decimal point (.), 'E', 'e' (scientific notation)
-            if (str.IndexOfAny(['.', 'E', 'e']) >= 0)
-            {
-                // Contains decimal point or scientific notation - not a valid integer string
-                return new Value { Type = ValueType.Unbound };
-            }
-
-            if (long.TryParse(str, System.Globalization.NumberStyles.Integer | System.Globalization.NumberStyles.AllowLeadingSign,
-                System.Globalization.CultureInfo.InvariantCulture, out var intVal))
-            {
-                return new Value { Type = ValueType.Integer, IntegerValue = intVal };
-            }
-        }
-
-        return new Value { Type = ValueType.Unbound };
-    }
-
-    /// <summary>
-    /// Cast a value to xsd:decimal.
-    /// </summary>
-    private Value CastToDecimal(Value arg)
-    {
-        // Boolean to decimal: true=1.0, false=0.0
-        if (arg.Type == ValueType.Boolean)
-        {
-            return new Value { Type = ValueType.Double, DoubleValue = arg.BooleanValue ? 1.0 : 0.0 };
-        }
-
-        // Integer to decimal
-        if (arg.Type == ValueType.Integer)
-        {
-            return new Value { Type = ValueType.Double, DoubleValue = arg.IntegerValue };
-        }
-
-        // Already double (treat as decimal)
-        if (arg.Type == ValueType.Double)
-        {
-            if (double.IsNaN(arg.DoubleValue) || double.IsInfinity(arg.DoubleValue))
-                return new Value { Type = ValueType.Unbound };
-            return arg;
-        }
-
-        // String to decimal
-        if (arg.Type == ValueType.String)
-        {
-            var str = ExtractLiteralValue(arg.StringValue);
-            if (double.TryParse(str, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var dblVal))
-            {
-                if (!double.IsNaN(dblVal) && !double.IsInfinity(dblVal))
-                    return new Value { Type = ValueType.Double, DoubleValue = dblVal };
-            }
-        }
-
-        return new Value { Type = ValueType.Unbound };
-    }
-
-    /// <summary>
-    /// Cast a value to xsd:double.
-    /// </summary>
-    private Value CastToDouble(Value arg)
-    {
-        // Boolean to double: true=1.0E0, false=0.0E0
-        if (arg.Type == ValueType.Boolean)
-        {
-            return new Value { Type = ValueType.Double, DoubleValue = arg.BooleanValue ? 1.0 : 0.0 };
-        }
-
-        // Integer to double
-        if (arg.Type == ValueType.Integer)
-        {
-            return new Value { Type = ValueType.Double, DoubleValue = arg.IntegerValue };
-        }
-
-        // Already double
-        if (arg.Type == ValueType.Double)
-        {
-            return arg;
-        }
-
-        // String to double
-        if (arg.Type == ValueType.String)
-        {
-            var str = ExtractLiteralValue(arg.StringValue);
-            // Handle special values
-            if (str.Equals("INF", StringComparison.OrdinalIgnoreCase))
-                return new Value { Type = ValueType.Double, DoubleValue = double.PositiveInfinity };
-            if (str.Equals("-INF", StringComparison.OrdinalIgnoreCase))
-                return new Value { Type = ValueType.Double, DoubleValue = double.NegativeInfinity };
-            if (str.Equals("NaN", StringComparison.OrdinalIgnoreCase))
-                return new Value { Type = ValueType.Double, DoubleValue = double.NaN };
-
-            if (double.TryParse(str, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var dblVal))
-            {
-                return new Value { Type = ValueType.Double, DoubleValue = dblVal };
-            }
-        }
-
-        return new Value { Type = ValueType.Unbound };
-    }
-
-    /// <summary>
-    /// Cast a value to xsd:float.
-    /// </summary>
-    private Value CastToFloat(Value arg)
-    {
-        // Float is same as double in SPARQL (both use ValueType.Double)
-        // Internal representation is identical; difference only matters for serialization
-        return CastToDouble(arg);
-    }
-
-    /// <summary>
-    /// Cast a value to xsd:boolean.
-    /// </summary>
-    private Value CastToBoolean(Value arg)
-    {
-        // Already boolean
-        if (arg.Type == ValueType.Boolean)
-        {
-            return arg;
-        }
-
-        // Integer to boolean: 0=false, non-zero=true
-        if (arg.Type == ValueType.Integer)
-        {
-            return new Value { Type = ValueType.Boolean, BooleanValue = arg.IntegerValue != 0 };
-        }
-
-        // Double to boolean: 0.0=false, NaN=false, non-zero=true
-        if (arg.Type == ValueType.Double)
-        {
-            return new Value { Type = ValueType.Boolean, BooleanValue = arg.DoubleValue != 0.0 && !double.IsNaN(arg.DoubleValue) };
-        }
-
-        // String to boolean: "true"/"1" = true, "false"/"0" = false
-        if (arg.Type == ValueType.String)
-        {
-            var str = ExtractLiteralValue(arg.StringValue);
-            if (str.Equals("true", StringComparison.OrdinalIgnoreCase) || str.Equals("1", StringComparison.Ordinal))
-                return new Value { Type = ValueType.Boolean, BooleanValue = true };
-            if (str.Equals("false", StringComparison.OrdinalIgnoreCase) || str.Equals("0", StringComparison.Ordinal))
-                return new Value { Type = ValueType.Boolean, BooleanValue = false };
-        }
-
-        return new Value { Type = ValueType.Unbound };
-    }
-
-    /// <summary>
-    /// Cast a value to xsd:string.
-    /// </summary>
-    private Value CastToString(Value arg)
+    private static Value CastToInteger(scoped in Value arg)
     {
         switch (arg.Type)
         {
             case ValueType.Boolean:
-                return new Value { Type = ValueType.String, StringValue = (arg.BooleanValue ? "true" : "false").AsSpan() };
-
+                return Value.FromInteger(arg.BooleanValue ? 1 : 0);
             case ValueType.Integer:
-                _castResult = arg.IntegerValue.ToString(System.Globalization.CultureInfo.InvariantCulture);
-                return new Value { Type = ValueType.String, StringValue = _castResult.AsSpan() };
-
+                return Value.FromInteger(arg.IntegerValue);
+            case ValueType.Decimal:
+                var truncated = decimal.Truncate(arg.DecimalValue);
+                return truncated >= long.MinValue && truncated <= long.MaxValue
+                    ? Value.FromInteger((long)truncated) : Value.Error;
+            case ValueType.Float:
             case ValueType.Double:
-                if (double.IsNaN(arg.DoubleValue))
-                    return new Value { Type = ValueType.String, StringValue = "NaN".AsSpan() };
-                if (double.IsPositiveInfinity(arg.DoubleValue))
-                    return new Value { Type = ValueType.String, StringValue = "INF".AsSpan() };
-                if (double.IsNegativeInfinity(arg.DoubleValue))
-                    return new Value { Type = ValueType.String, StringValue = "-INF".AsSpan() };
-                _castResult = arg.DoubleValue.ToString("G", System.Globalization.CultureInfo.InvariantCulture);
-                return new Value { Type = ValueType.String, StringValue = _castResult.AsSpan() };
-
+                var d = Math.Truncate(arg.DoubleValue);
+                return double.IsFinite(d) && d >= long.MinValue && d <= long.MaxValue
+                    ? Value.FromInteger((long)d) : Value.Error;
             case ValueType.String:
-                // Extract just the value part (strip datatype/language tag)
-                var val = ExtractLiteralValue(arg.StringValue);
-                _castResult = val.ToString();
-                return new Value { Type = ValueType.String, StringValue = _castResult.AsSpan() };
-
-            case ValueType.Uri:
-                // Strip angle brackets if present to get just the URI string
-                var uriStr = arg.StringValue;
-                if (uriStr.Length >= 2 && uriStr[0] == '<' && uriStr[^1] == '>')
-                    uriStr = uriStr[1..^1];
-                _castResult = uriStr.ToString();
-                return new Value { Type = ValueType.String, StringValue = _castResult.AsSpan() };
-
+                var parsed = Value.Literal(arg.StringValue.Trim(), default, XsdDatatype.Integer);
+                return parsed.Type == ValueType.Integer ? Value.FromInteger(parsed.IntegerValue) : Value.Error;
             default:
-                return new Value { Type = ValueType.Unbound };
+                return Value.Error;
+        }
+    }
+
+    private static Value CastToDecimal(scoped in Value arg)
+    {
+        switch (arg.Type)
+        {
+            case ValueType.Boolean:
+                return Value.FromDecimal(arg.BooleanValue ? 1 : 0);
+            case ValueType.Integer:
+            case ValueType.Decimal:
+                return Value.FromDecimal(arg.AsDecimal);
+            case ValueType.Float:
+            case ValueType.Double:
+                if (!double.IsFinite(arg.DoubleValue))
+                    return Value.Error;
+                try { return Value.FromDecimal((decimal)arg.DoubleValue); }
+                catch (OverflowException) { return Value.Error; }
+            case ValueType.String:
+                var parsed = Value.Literal(arg.StringValue.Trim(), default, XsdDatatype.Decimal);
+                return parsed.Type == ValueType.Decimal ? Value.FromDecimal(parsed.DecimalValue) : Value.Error;
+            default:
+                return Value.Error;
+        }
+    }
+
+    private static Value CastToDouble(scoped in Value arg, bool isFloat)
+    {
+        double result;
+        switch (arg.Type)
+        {
+            case ValueType.Boolean:
+                result = arg.BooleanValue ? 1 : 0;
+                break;
+            case ValueType.Integer:
+            case ValueType.Decimal:
+            case ValueType.Float:
+            case ValueType.Double:
+                result = arg.AsDouble;
+                break;
+            case ValueType.String:
+                var parsed = Value.Literal(arg.StringValue.Trim(), default, XsdDatatype.Double);
+                if (parsed.Type != ValueType.Double)
+                    return Value.Error;
+                result = parsed.DoubleValue;
+                break;
+            default:
+                return Value.Error;
+        }
+        return isFloat ? Value.FromFloat(result) : Value.FromDouble(result);
+    }
+
+    private static Value CastToBoolean(scoped in Value arg)
+    {
+        switch (arg.Type)
+        {
+            case ValueType.Boolean:
+                return Value.FromBoolean(arg.BooleanValue);
+            case ValueType.Integer:
+            case ValueType.Decimal:
+            case ValueType.Float:
+            case ValueType.Double:
+                return Value.FromBoolean(Value.EffectiveBoolean(arg) == Truth.True);
+            case ValueType.String:
+                var parsed = Value.Literal(arg.StringValue.Trim(), default, XsdDatatype.Boolean);
+                return parsed.Type == ValueType.Boolean ? Value.FromBoolean(parsed.BooleanValue) : Value.Error;
+            default:
+                return Value.Error;
         }
     }
 
     /// <summary>
-    /// Extract the value part from an RDF literal string.
-    /// Handles formats: "value", "value"^^type, "value"@lang
+    /// xsd:string(x): an IRI's text, or a literal's value as XPath casts it to a string (XPath F&amp;O §19.1.2): a number
+    /// or boolean is written in its canonical form, so <c>"1.0"^^xsd:decimal</c> gives "1" and <c>"0"^^xsd:boolean</c>
+    /// gives "false"; a double between 1E-6 and 1E6 is written as a decimal; any other literal gives its lexical form.
     /// </summary>
-    private static ReadOnlySpan<char> ExtractLiteralValue(ReadOnlySpan<char> str)
+    private static Value CastToString(scoped in Value arg)
     {
-        if (str.IsEmpty)
-            return str;
-
-        // Check if it's a quoted literal
-        if (str[0] == '"')
+        if (arg.Type == ValueType.Uri)
+            return Value.FromString(Value.IriText(arg.StringValue));
+        if (!arg.IsLiteral)
+            return Value.Error;
+        const string decimalDigits = "0.############################";
+        switch (arg.Type)
         {
-            // Find the closing quote (might have datatype or language tag after)
-            for (int i = 1; i < str.Length; i++)
-            {
-                if (str[i] == '"')
+            case ValueType.Boolean:
+                return Value.FromString(arg.BooleanValue ? "true" : "false");
+            case ValueType.Integer:
+                return Value.FromString(arg.IntegerValue.ToString(CultureInfo.InvariantCulture));
+            case ValueType.Decimal:
+                return Value.FromString(arg.DecimalValue.ToString(decimalDigits, CultureInfo.InvariantCulture));
+            case ValueType.Float:
+            case ValueType.Double:
+                double d = arg.DoubleValue;
+                if (double.IsNaN(d)) return Value.FromString("NaN");
+                if (double.IsPositiveInfinity(d)) return Value.FromString("INF");
+                if (double.IsNegativeInfinity(d)) return Value.FromString("-INF");
+                if (d == 0) return Value.FromString(double.IsNegative(d) ? "-0" : "0");
+                double magnitude = Math.Abs(d);
+                if (magnitude >= 1e-6 && magnitude < 1e6)
                 {
-                    // Check if escaped
-                    if (i > 0 && str[i - 1] == '\\')
-                        continue;
-                    // Return content between quotes
-                    return str.Slice(1, i - 1);
+                    decimal exact = arg.Type == ValueType.Float ? (decimal)(float)d : (decimal)d;
+                    return Value.FromString(exact.ToString(decimalDigits, CultureInfo.InvariantCulture));
                 }
-            }
+                return Value.FromString(d.ToString("0.0################E0", CultureInfo.InvariantCulture));
+            default:
+                return Value.FromString(arg.StringValue);
         }
+    }
 
-        // Not a quoted literal, return as-is
-        return str;
+    private static Value CastToDateTime(scoped in Value arg)
+    {
+        bool isDateTime = arg.Type == ValueType.Typed && XsdDatatype.KindOf(arg.Datatype) == XsdKind.DateTime;
+        if ((isDateTime || arg.Type == ValueType.String)
+            && XsdDateTime.TryParse(arg.StringValue.Trim(), isDate: false, out _))
+            return Value.FromTyped(arg.StringValue.Trim(), XsdDatatype.DateTime);
+        return Value.Error;
     }
 
     /// <summary>
@@ -1827,216 +999,39 @@ internal ref partial struct FilterEvaluator
     private ComparisonOperator ParseComparisonOperator()
     {
         var span = _expression.Slice(_position, Math.Min(2, _expression.Length - _position));
-        
+
         if (span.Length >= 2)
         {
-            if (span[0] == '=' && span[1] == '=')
-            {
-                _position += 2;
-                return ComparisonOperator.Equal;
-            }
-            if (span[0] == '!' && span[1] == '=')
-            {
-                _position += 2;
-                return ComparisonOperator.NotEqual;
-            }
-            if (span[0] == '<' && span[1] == '=')
-            {
-                _position += 2;
-                return ComparisonOperator.LessOrEqual;
-            }
-            if (span[0] == '>' && span[1] == '=')
-            {
-                _position += 2;
-                return ComparisonOperator.GreaterOrEqual;
-            }
+            if (span[0] == '=' && span[1] == '=') { _position += 2; return ComparisonOperator.Equal; }
+            if (span[0] == '!' && span[1] == '=') { _position += 2; return ComparisonOperator.NotEqual; }
+            if (span[0] == '<' && span[1] == '=') { _position += 2; return ComparisonOperator.LessOrEqual; }
+            if (span[0] == '>' && span[1] == '=') { _position += 2; return ComparisonOperator.GreaterOrEqual; }
         }
-        
+
         if (span.Length >= 1)
         {
-            if (span[0] == '<')
-            {
-                _position++;
-                return ComparisonOperator.Less;
-            }
-            if (span[0] == '>')
-            {
-                _position++;
-                return ComparisonOperator.Greater;
-            }
-            if (span[0] == '=')
-            {
-                _position++;
-                return ComparisonOperator.Equal;
-            }
+            if (span[0] == '<') { _position++; return ComparisonOperator.Less; }
+            if (span[0] == '>') { _position++; return ComparisonOperator.Greater; }
+            if (span[0] == '=') { _position++; return ComparisonOperator.Equal; }
         }
-        
+
         return ComparisonOperator.Unknown;
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private bool EvaluateComparisonOp(scoped Value left, ComparisonOperator op, scoped Value right)
+    /// <summary>A comparison by the operator mapping (ADR-056 D3): true, false or an error.</summary>
+    private static Truth EvaluateComparison(scoped in Value left, ComparisonOperator op, scoped in Value right) => op switch
     {
-        // Type coercion for comparisons
-        if (left.Type == ValueType.Unbound || right.Type == ValueType.Unbound)
-            return false;
-        
-        return op switch
-        {
-            ComparisonOperator.Equal => CompareEqual(left, right),
-            ComparisonOperator.NotEqual => !CompareEqual(left, right),
-            ComparisonOperator.Less => CompareLess(left, right),
-            ComparisonOperator.Greater => CompareLess(right, left),
-            ComparisonOperator.LessOrEqual => CompareEqual(left, right) || CompareLess(left, right),
-            ComparisonOperator.GreaterOrEqual => CompareEqual(left, right) || CompareLess(right, left),
-            _ => false
-        };
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static bool CompareEqual(in Value left, in Value right)
-    {
-        // Same type - direct comparison
-        if (left.Type == right.Type)
-        {
-            return left.Type switch
-            {
-                ValueType.Integer => left.IntegerValue == right.IntegerValue,
-                ValueType.Double => Math.Abs(left.DoubleValue - right.DoubleValue) < 1e-10,
-                ValueType.Boolean => left.BooleanValue == right.BooleanValue,
-                // ADR-044 Part 4: SPARQL literal equality is defined on (lexical form,
-                // datatype, language tag), not on the raw stored bytes. Comparing
-                // GetLexicalForm normalizes the wrap-vs-unwrap asymmetry between bound
-                // values (wrapped, from store) and filter-side parsed literals
-                // (unwrapped content). Comparing GetLangTagOrDatatype keeps `@en` ≠
-                // `@de` and `xsd:integer` ≠ `xsd:double` distinguishable.
-                ValueType.String =>
-                    left.GetLexicalForm().SequenceEqual(right.GetLexicalForm()) &&
-                    left.GetLangTagOrDatatype().SequenceEqual(right.GetLangTagOrDatatype()),
-                ValueType.Uri => left.StringValue.SequenceEqual(right.StringValue),
-                ValueType.BlankNode => left.StringValue.SequenceEqual(right.StringValue), // the same node
-                _ => false
-            };
-        }
-
-        // URI and String are comparable
-        if ((left.Type == ValueType.Uri && right.Type == ValueType.String) ||
-            (left.Type == ValueType.String && right.Type == ValueType.Uri))
-        {
-            return left.StringValue.SequenceEqual(right.StringValue);
-        }
-
-        // Type coercion for numeric comparisons
-        // Try to coerce string to number for comparison with numeric types
-        if ((left.Type == ValueType.String && (right.Type == ValueType.Integer || right.Type == ValueType.Double)) ||
-            (right.Type == ValueType.String && (left.Type == ValueType.Integer || left.Type == ValueType.Double)))
-        {
-            var (leftNum, rightNum) = CoerceToNumbers(left, right);
-            if (double.IsNaN(leftNum) || double.IsNaN(rightNum))
-                return false;
-            return Math.Abs(leftNum - rightNum) < 1e-10;
-        }
-
-        // Integer vs Double coercion
-        if (left.Type == ValueType.Integer && right.Type == ValueType.Double)
-            return Math.Abs(left.IntegerValue - right.DoubleValue) < 1e-10;
-        if (left.Type == ValueType.Double && right.Type == ValueType.Integer)
-            return Math.Abs(left.DoubleValue - right.IntegerValue) < 1e-10;
-
-        return false;
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static bool CompareLess(in Value left, in Value right)
-    {
-        // Same type - direct comparison
-        if (left.Type == right.Type)
-        {
-            return left.Type switch
-            {
-                ValueType.Integer => left.IntegerValue < right.IntegerValue,
-                ValueType.Double => left.DoubleValue < right.DoubleValue,
-                ValueType.String => left.StringValue.SequenceCompareTo(right.StringValue) < 0,
-                ValueType.Uri => left.StringValue.SequenceCompareTo(right.StringValue) < 0,
-                _ => false
-            };
-        }
-
-        // Type coercion for numeric comparisons
-        // Try to coerce string to number for comparison with numeric types
-        if ((left.Type == ValueType.String && (right.Type == ValueType.Integer || right.Type == ValueType.Double)) ||
-            (right.Type == ValueType.String && (left.Type == ValueType.Integer || left.Type == ValueType.Double)))
-        {
-            var (leftNum, rightNum) = CoerceToNumbers(left, right);
-            if (double.IsNaN(leftNum) || double.IsNaN(rightNum))
-                return false;
-            return leftNum < rightNum;
-        }
-
-        // Integer vs Double coercion
-        if (left.Type == ValueType.Integer && right.Type == ValueType.Double)
-            return left.IntegerValue < right.DoubleValue;
-        if (left.Type == ValueType.Double && right.Type == ValueType.Integer)
-            return left.DoubleValue < right.IntegerValue;
-
-        return false;
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static (double Left, double Right) CoerceToNumbers(in Value left, in Value right)
-    {
-        double leftNum = left.Type switch
-        {
-            ValueType.Integer => left.IntegerValue,
-            ValueType.Double => left.DoubleValue,
-            ValueType.String => TryParseStringAsNumber(left.StringValue),
-            _ => double.NaN
-        };
-
-        double rightNum = right.Type switch
-        {
-            ValueType.Integer => right.IntegerValue,
-            ValueType.Double => right.DoubleValue,
-            ValueType.String => TryParseStringAsNumber(right.StringValue),
-            _ => double.NaN
-        };
-
-        return (leftNum, rightNum);
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static double TryParseStringAsNumber(ReadOnlySpan<char> str)
-    {
-        // Handle RDF string literals with quotes: "30" -> 30
-        if (str.Length >= 2 && str[0] == '"' && str[^1] == '"')
-        {
-            str = str[1..^1];
-        }
-
-        if (double.TryParse(str, NumberStyles.Float, CultureInfo.InvariantCulture, out var result))
-            return result;
-
-        return double.NaN;
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static bool CoerceToBool(in Value value)
-    {
-        return value.Type switch
-        {
-            ValueType.Boolean => value.BooleanValue,
-            ValueType.Integer => value.IntegerValue != 0,
-            ValueType.Double => Math.Abs(value.DoubleValue) > 1e-10,
-            ValueType.String => value.StringValue.Length > 0,
-            _ => false
-        };
-    }
+        ComparisonOperator.Equal => Value.Equal(left, right),
+        ComparisonOperator.NotEqual => Value.Not(Value.Equal(left, right)),
+        ComparisonOperator.Unknown => Truth.Error,
+        _ => Value.Order(left, op, right),
+    };
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void SkipWhitespace()
     {
         while (!IsAtEnd() && IsWhitespace(Peek()))
-            Advance();
+            _position++;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -2059,162 +1054,6 @@ internal ref partial struct FilterEvaluator
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static bool IsLetterOrDigit(char ch) => IsLetter(ch) || IsDigit(ch);
-}
-
-/// <summary>
-/// Stack-allocated value for FILTER evaluation
-/// </summary>
-internal ref struct Value
-{
-    public ValueType Type;
-    public long IntegerValue;
-    public double DoubleValue;
-    public bool BooleanValue;
-    public ReadOnlySpan<char> StringValue;
-
-    /// <summary>
-    /// Parse a string binding that may be a URI, typed RDF literal, or plain string.
-    /// Detects URIs (&lt;...&gt;), typed literals ("value"^^&lt;datatype&gt;), and extracts
-    /// numeric values for integer/decimal/double/float/boolean datatypes.
-    /// </summary>
-    public static Value ParseFromBinding(ReadOnlySpan<char> str)
-    {
-        // Check for URI format: <uri>
-        if (str.Length >= 2 && str[0] == '<' && str[^1] == '>')
-        {
-            return new Value { Type = ValueType.Uri, StringValue = str };
-        }
-
-        // A blank node: _:label (a literal's binding is always quoted, so it never starts this way)
-        if (str.Length > 2 && str[0] == '_' && str[1] == ':')
-        {
-            return new Value { Type = ValueType.BlankNode, StringValue = str };
-        }
-
-        // Check for typed literal format: "value"^^<datatype>
-        if (str.Length > 2 && str[0] == '"')
-        {
-            var closeQuote = str.Slice(1).IndexOf('"');
-            if (closeQuote > 0)
-            {
-                var value = str.Slice(1, closeQuote);
-                var suffix = str.Slice(closeQuote + 2);
-
-                // Check for datatype annotation
-                if (suffix.StartsWith("^^"))
-                {
-                    var datatype = suffix.Slice(2);
-
-                    // Check if it's a numeric datatype
-                    // Also preserve the original string in StringValue for DATATYPE function
-                    if (datatype.Contains("integer", StringComparison.OrdinalIgnoreCase) ||
-                        datatype.Contains("int", StringComparison.OrdinalIgnoreCase) ||
-                        datatype.Contains("short", StringComparison.OrdinalIgnoreCase) ||
-                        datatype.Contains("byte", StringComparison.OrdinalIgnoreCase) ||
-                        datatype.Contains("long", StringComparison.OrdinalIgnoreCase))
-                    {
-                        if (long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var intVal))
-                        {
-                            return new Value { Type = ValueType.Integer, IntegerValue = intVal, StringValue = str };
-                        }
-                    }
-
-                    if (datatype.Contains("decimal", StringComparison.OrdinalIgnoreCase) ||
-                        datatype.Contains("double", StringComparison.OrdinalIgnoreCase) ||
-                        datatype.Contains("float", StringComparison.OrdinalIgnoreCase))
-                    {
-                        if (double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var doubleVal))
-                        {
-                            return new Value { Type = ValueType.Double, DoubleValue = doubleVal, StringValue = str };
-                        }
-                    }
-
-                    if (datatype.Contains("boolean", StringComparison.OrdinalIgnoreCase))
-                    {
-                        var boolVal = value.Equals("true", StringComparison.OrdinalIgnoreCase) ||
-                                      value.Equals("1", StringComparison.Ordinal);
-                        return new Value { Type = ValueType.Boolean, BooleanValue = boolVal, StringValue = str };
-                    }
-
-                    // For other typed literals (like xsd:dateTime, xsd:string), keep full form
-                    // so DATATYPE function can extract the datatype annotation
-                    return new Value { Type = ValueType.String, StringValue = str };
-                }
-
-                // Plain literal with quotes but no datatype - keep full form for LANG/DATATYPE functions
-                // Hash functions will extract lexical form themselves
-                return new Value { Type = ValueType.String, StringValue = str };
-            }
-        }
-
-        // Not a typed literal - return as-is
-        return new Value { Type = ValueType.String, StringValue = str };
-    }
-
-    /// <summary>
-    /// Get the lexical form of a string literal (without enclosing quotes and without language tag).
-    /// For URIs or non-literals, returns the StringValue as-is.
-    /// For quoted literals like "hello" or "hello"@en, returns just hello.
-    /// </summary>
-    public readonly ReadOnlySpan<char> GetLexicalForm()
-    {
-        if (Type != ValueType.String || StringValue.Length < 2)
-            return StringValue;
-
-        // Check for quoted literal: "value" or "value"@lang or "value"^^<type>
-        if (StringValue[0] == '"')
-        {
-            // Use LastIndexOf to skip escaped quotes (\") inside the literal — the
-            // legitimate closing quote is always the last unescaped " before any
-            // language tag (@en) or datatype suffix (^^<type>). Bug fixed 2026-05-17:
-            // IndexOf('"') would stop at the first escaped quote and truncate the
-            // lexical form, breaking CONTAINS/STRSTARTS/UCASE/LCASE for any literal
-            // containing \" — including the recall-discipline rule's rdfs:comment.
-            var closeQuote = StringValue.LastIndexOf('"');
-            if (closeQuote > 0)
-                return StringValue.Slice(1, closeQuote - 1);
-        }
-
-        return StringValue;
-    }
-
-    /// <summary>
-    /// Get the language tag or datatype suffix from a string literal.
-    /// For "hello"@en returns @en, for "hello"^^&lt;type&gt; returns ^^&lt;type&gt;.
-    /// Returns empty span if no suffix.
-    /// </summary>
-    public readonly ReadOnlySpan<char> GetLangTagOrDatatype()
-    {
-        if (Type != ValueType.String || StringValue.Length < 2)
-            return ReadOnlySpan<char>.Empty;
-
-        // Check for quoted literal: "value" or "value"@lang or "value"^^<type>
-        if (StringValue[0] == '"')
-        {
-            // Use LastIndexOf to skip escaped quotes — see GetLexicalForm above for rationale.
-            var closeQuote = StringValue.LastIndexOf('"');
-            if (closeQuote > 0)
-            {
-                var afterQuote = closeQuote + 1; // position after closing quote
-                if (afterQuote < StringValue.Length)
-                    return StringValue.Slice(afterQuote);
-            }
-        }
-
-        return ReadOnlySpan<char>.Empty;
-    }
-}
-
-internal enum ValueType
-{
-    Unbound,
-    Uri,
-    /// <summary>A blank node, written <c>_:label</c>: neither an IRI nor a literal (SPARQL 1.1 §17.4.2).</summary>
-    BlankNode,
-    String,
-    Integer,
-    Double,
-    Boolean
 }
 
 internal enum ComparisonOperator

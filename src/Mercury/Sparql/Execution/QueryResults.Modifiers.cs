@@ -486,36 +486,7 @@ internal ref partial struct QueryResults
                 _bindingTable.GetStringBuffer(),
                 _buffer?.Prefixes ?? _materializedPrefixes, _source, baseIri);
 
-            // Bind the result to the alias variable
-            // Prefer StringValue if available (preserves original datatype annotation)
-            switch (value.Type)
-            {
-                case ValueType.Integer:
-                    // Use original string if available (preserves datatype), otherwise format as xsd:integer
-                    if (!value.StringValue.IsEmpty)
-                        _bindingTable.Bind(aliasVar, value.StringValue);
-                    else
-                        _bindingTable.Bind(aliasVar, $"\"{value.IntegerValue}\"^^<http://www.w3.org/2001/XMLSchema#integer>".AsSpan());
-                    break;
-                case ValueType.Double:
-                    // Use original string if available (preserves decimal vs double distinction)
-                    if (!value.StringValue.IsEmpty)
-                        _bindingTable.Bind(aliasVar, value.StringValue);
-                    else
-                        _bindingTable.Bind(aliasVar, $"\"{value.DoubleValue.ToString(System.Globalization.CultureInfo.InvariantCulture)}\"^^<http://www.w3.org/2001/XMLSchema#double>".AsSpan());
-                    break;
-                case ValueType.Boolean:
-                    if (!value.StringValue.IsEmpty)
-                        _bindingTable.Bind(aliasVar, value.StringValue);
-                    else
-                        _bindingTable.Bind(aliasVar, value.BooleanValue);
-                    break;
-                case ValueType.String:
-                case ValueType.BlankNode:
-                case ValueType.Uri:
-                    _bindingTable.Bind(aliasVar, value.StringValue);
-                    break;
-            }
+            value.BindTo(ref _bindingTable, aliasVar); // the term, or nothing for an error (ADR-056 D6)
         }
     }
 
@@ -562,25 +533,7 @@ internal ref partial struct QueryResults
                 _bindingTable.GetStringBuffer(),
                 _buffer?.Prefixes ?? _materializedPrefixes, _source);
 
-            // Bind the result if valid
-            switch (value.Type)
-            {
-                case ValueType.Integer:
-                    _bindingTable.Bind(aliasName, value.IntegerValue);
-                    break;
-                case ValueType.Double:
-                    _bindingTable.Bind(aliasName, value.DoubleValue);
-                    break;
-                case ValueType.Boolean:
-                    _bindingTable.Bind(aliasName, value.BooleanValue);
-                    break;
-                case ValueType.String:
-                case ValueType.BlankNode:
-                case ValueType.Uri:
-                    _bindingTable.Bind(aliasName, value.StringValue);
-                    break;
-                // Unbound values are not bound (leave the variable unset)
-            }
+            value.BindTo(ref _bindingTable, aliasName); // the term, or nothing for an error (ADR-056 D6)
         }
     }
 
@@ -800,47 +753,51 @@ internal sealed class MaterializedRowComparer : IComparer<MaterializedRow>
         var evaluator = new FilterEvaluator(expression);
         var value = evaluator.EvaluateToValue(bindings.GetBindings(), bindings.Count, bindings.GetStringBuffer(),
             _prefixes, _source.AsSpan());
-        return value.Type switch
-        {
-            ValueType.Unbound => ReadOnlySpan<char>.Empty,
-            ValueType.Integer => value.IntegerValue.ToString(CultureInfo.InvariantCulture),
-            ValueType.Double => value.DoubleValue.ToString("G", CultureInfo.InvariantCulture),
-            ValueType.Boolean => value.BooleanValue ? "true" : "false",
-            _ => value.StringValue.ToString(),
-        };
+        return value.Type == ValueType.Unbound ? ReadOnlySpan<char>.Empty : value.Term();
     }
 
+    /// <summary>
+    /// The ORDER BY order of two terms (§15.1): unbound, then blank nodes, then IRIs, then literals. Literals are
+    /// grouped by kind (numbers, booleans, strings, tagged strings, then other datatypes by datatype IRI), so the order
+    /// is total; within a group they are ordered by the evaluator's <c>&lt;</c> (the operator mapping, ADR-056), and
+    /// two that it doesn't order (equal values such as 1 and 01) by lexical form.
+    /// </summary>
     private static int CompareValues(ReadOnlySpan<char> a, ReadOnlySpan<char> b)
     {
-        // SPARQL ORDER BY term type ordering: Unbound < Blank nodes < IRIs < Literals
         var aType = GetTermType(a);
         var bType = GetTermType(b);
-
         if (aType != bType)
-        {
             return aType.CompareTo(bType);
-        }
+        if (aType != TermSortType.Literal)
+            return a.SequenceCompareTo(b);
 
-        // Same type - compare by value
-        // For numeric literals, compare numerically
-        if (aType == TermSortType.Literal)
+        var x = Value.FromTerm(a);
+        var y = Value.FromTerm(b);
+        int group = LiteralGroup(x).CompareTo(LiteralGroup(y));
+        if (group != 0)
+            return group;
+        if (x.Type == ValueType.Typed)
         {
-            var aLex = GetLexicalForm(a);
-            var bLex = GetLexicalForm(b);
-
-            if (double.TryParse(aLex, NumberStyles.Float, CultureInfo.InvariantCulture, out var aNum) &&
-                double.TryParse(bLex, NumberStyles.Float, CultureInfo.InvariantCulture, out var bNum))
-            {
-                return aNum.CompareTo(bNum);
-            }
-
-            // Non-numeric literals - compare lexical forms
-            return aLex.SequenceCompareTo(bLex);
+            int datatype = x.Datatype.SequenceCompareTo(y.Datatype);
+            if (datatype != 0)
+                return datatype;
         }
-
-        // For IRIs and blank nodes, compare the full representation
-        return a.SequenceCompareTo(b);
+        if (Value.Order(x, ComparisonOperator.Less, y) == Truth.True)
+            return -1;
+        if (Value.Order(x, ComparisonOperator.Greater, y) == Truth.True)
+            return 1;
+        return x.StringValue.SequenceCompareTo(y.StringValue);
     }
+
+    /// <summary>The group a literal sorts in: numbers, booleans, strings, tagged strings, other datatypes.</summary>
+    private static int LiteralGroup(scoped in Value v) => v.Type switch
+    {
+        ValueType.Integer or ValueType.Decimal or ValueType.Float or ValueType.Double => 0,
+        ValueType.Boolean => 1,
+        ValueType.String => 2,
+        ValueType.LangString => 3,
+        _ => 4,
+    };
 
     private enum TermSortType { Unbound = 0, BlankNode = 1, Iri = 2, Literal = 3 }
 
@@ -850,20 +807,5 @@ internal sealed class MaterializedRowComparer : IComparer<MaterializedRow>
         if (term.Length > 0 && term[0] == '<') return TermSortType.Iri;
         if (term.Length > 1 && term[0] == '_' && term[1] == ':') return TermSortType.BlankNode;
         return TermSortType.Literal; // Includes quoted strings and plain literals
-    }
-
-    private static ReadOnlySpan<char> GetLexicalForm(ReadOnlySpan<char> literal)
-    {
-        // Extract lexical form from quoted literal: "value"@lang or "value"^^<type>
-        if (literal.Length >= 2 && literal[0] == '"')
-        {
-            // Find closing quote
-            var closeQuote = literal.LastIndexOf('"');
-            if (closeQuote > 0)
-            {
-                return literal.Slice(1, closeQuote - 1);
-            }
-        }
-        return literal;
     }
 }

@@ -191,6 +191,47 @@ Today they compare as text.
 6. **Dogfood:** a memory recall that filters on a stored `^^xsd:date` value and on a number, through the MCP after a
    reconnect.
 
+## Implementation (2026-10-28)
+
+D1–D7 are implemented. Validation steps 1–5 pass; step 6 (dogfood through the MCP) waits for a release and a
+reconnect.
+
+- **One carrier, one reader.** `Value` (`Sparql/Execution/Expressions/Value.cs`) holds the term and owns the operator
+  mapping: `Equal`, `Order`, `SameTerm`, `EffectiveBoolean`, `Arithmetic`, `Negate` and `Plus`.
+  - `Value.Literal` is the one classification rule for a stored term (`FromTerm`) and a constant.
+  - `XsdDatatype` (`Rdf/`) matches datatypes by their whole IRI and reads the stored `xsd:T` form (D7).
+  - `XsdDateTime` holds date and dateTime values in XSD's partial order. W3C date-1 showed that a date with a
+    timezone and one without are incomparable when they are within 14 hours.
+- **One way to a binding.** `Value.BindTo` and `Value.Term()` serve all five sites (D6). The ORDER BY comparer orders
+  literals by `Value.Order` within groups by kind, so the order is total. It used to parse any literal that looked
+  like a number, so `ORDER BY STR(?o)` sorted numerically (W3C dawg-sort-builtin).
+- **The evaluator's partial copies are gone:**
+  - `CompareEqual` and `CompareLess`, with their string-to-number coercion;
+  - `CoerceToBool`, which had no error outcome;
+  - the substring datatype tests (`Contains("int")`) in `ParseFromBinding` and `ParseStringLiteral`;
+  - nineteen fields that held function results as strings.
+  - Also deleted: the reference walker's `Render` in `GraphTreeEvaluatorTests`, another copy of value-to-binding.
+- **The W3C harness:**
+  - `rs:boolean` in an RDF result set is read: the type-promotion ASK tests compared a boolean with a row count
+    (`dd4d6a8`).
+  - The comparer compares an ill-typed literal as a term: it parsed `"xyz"^^xsd:integer` as a number and failed.
+- **Results.**
+  - SPARQL 1.0: 427 of 483 pass, was 375. 48 tests left the triage, and 56 known failures remain, each with its cause.
+  - Of this ADR's group, four remain. All are ADR-053's:
+    - open-eq-02, a prefixed datatype in a pattern constant (D1);
+    - dawg-lang-3, a pattern constant matched by tag case;
+    - distinct-2 and distinct-9, where `"abc"` and `"abc"^^xsd:string` are stored as two atoms (D1.5).
+  - Mercury.Tests: 5,592 pass, 0 fail. 72 of them are new, in `ExpressionTermTests`. Solid: 25 of 25.
+  - The stack probes are unchanged at 23–39 KB.
+- **Tests changed to the spec.** BIND and SELECT expressions now return terms (`"2"^^xsd:integer`, `"x)"`).
+  - `5 = "5"` is false.
+  - STRDT takes an IRI datatype, and the evaluator unit tests bind terms (`"42"`), not bare text, which D7 reads
+    as a number.
+  - The ADR-049 function-form probe pins the typed results: `7 / 2` is `"3.5"^^xsd:decimal`, `CEIL(1.5)` is
+    `"2.0"^^xsd:decimal`, `SECONDS` is a decimal.
+- **Not in scope, and still a copy:** the aggregate path reads a numeric argument with its own
+  `QueryResults.TryParseRdfNumeric`, not `Value`. SUM and AVG still carry decimals as doubles.
+
 ## References
 
 - [ADR-053](ADR-053-one-rdf-term-one-atom.md): the write side and the migration. D7 here is deleted by its D5.

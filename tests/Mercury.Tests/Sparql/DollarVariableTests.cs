@@ -65,7 +65,7 @@ public class DollarVariableTests : PooledStoreTestBase
             TestContext.Current.CancellationToken);
 
         Assert.True(result.Success, result.ErrorMessage);
-        Assert.Equal("2", Assert.Single(result.Rows!)["y"]);
+        Assert.Equal("\"2\"^^<http://www.w3.org/2001/XMLSchema#integer>", Assert.Single(result.Rows!)["y"]);
     }
 
     [Fact]
