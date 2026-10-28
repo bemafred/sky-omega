@@ -149,19 +149,15 @@ public static class W3CTestContext
         ["data-r2/syntax-sparql4/manifest#syn-bad-GRAPH-breaks-BGP"] = "SPARQL 1.0 triage: invalid syntax accepted: a blank-node label reused in another group",
         ["data-r2/syntax-sparql4/manifest#syn-bad-OPT-breaks-BGP"] = "SPARQL 1.0 triage: invalid syntax accepted: a blank-node label reused in another group",
         ["data-r2/syntax-sparql4/manifest#syn-bad-UNION-breaks-BGP"] = "SPARQL 1.0 triage: invalid syntax accepted: a blank-node label reused in another group",
-        ["data-r2/type-promotion/manifest#type-promotion-07"] = "SPARQL 1.0 triage: numeric type promotion of derived xsd integer types",
-        ["data-r2/type-promotion/manifest#type-promotion-08"] = "SPARQL 1.0 triage: numeric type promotion of derived xsd integer types",
-        ["data-r2/type-promotion/manifest#type-promotion-09"] = "SPARQL 1.0 triage: numeric type promotion of derived xsd integer types",
-        ["data-r2/type-promotion/manifest#type-promotion-10"] = "SPARQL 1.0 triage: numeric type promotion of derived xsd integer types",
-        ["data-r2/type-promotion/manifest#type-promotion-11"] = "SPARQL 1.0 triage: numeric type promotion of derived xsd integer types",
-        ["data-r2/type-promotion/manifest#type-promotion-12"] = "SPARQL 1.0 triage: numeric type promotion of derived xsd integer types",
-        ["data-r2/type-promotion/manifest#type-promotion-13"] = "SPARQL 1.0 triage: numeric type promotion of derived xsd integer types",
-        ["data-r2/type-promotion/manifest#type-promotion-14"] = "SPARQL 1.0 triage: numeric type promotion of derived xsd integer types",
-        ["data-r2/type-promotion/manifest#type-promotion-15"] = "SPARQL 1.0 triage: numeric type promotion of derived xsd integer types",
-        ["data-r2/type-promotion/manifest#type-promotion-16"] = "SPARQL 1.0 triage: numeric type promotion of derived xsd integer types",
-        ["data-r2/type-promotion/manifest#type-promotion-17"] = "SPARQL 1.0 triage: numeric type promotion of derived xsd integer types",
-        ["data-r2/type-promotion/manifest#type-promotion-18"] = "SPARQL 1.0 triage: numeric type promotion of derived xsd integer types",
-        ["data-r2/type-promotion/manifest#type-promotion-19"] = "SPARQL 1.0 triage: numeric type promotion of derived xsd integer types",
+        ["data-r2/type-promotion/manifest#type-promotion-01"] = "SPARQL 1.0 triage: decimal and float are carried as double, so arithmetic on them is typed xsd:double",
+        ["data-r2/type-promotion/manifest#type-promotion-02"] = "SPARQL 1.0 triage: decimal and float are carried as double, so arithmetic on them is typed xsd:double",
+        ["data-r2/type-promotion/manifest#type-promotion-03"] = "SPARQL 1.0 triage: decimal and float are carried as double, so arithmetic on them is typed xsd:double",
+        ["data-r2/type-promotion/manifest#type-promotion-04"] = "SPARQL 1.0 triage: decimal and float are carried as double, so arithmetic on them is typed xsd:double",
+        ["data-r2/type-promotion/manifest#type-promotion-05"] = "SPARQL 1.0 triage: decimal and float are carried as double, so arithmetic on them is typed xsd:double",
+        ["data-r2/type-promotion/manifest#type-promotion-06"] = "SPARQL 1.0 triage: decimal and float are carried as double, so arithmetic on them is typed xsd:double",
+        ["data-r2/type-promotion/manifest#type-promotion-20"] = "SPARQL 1.0 triage: decimal and float are carried as double, so arithmetic on them is typed xsd:double",
+        ["data-r2/type-promotion/manifest#type-promotion-21"] = "SPARQL 1.0 triage: decimal and float are carried as double, so arithmetic on them is typed xsd:double",
+        ["data-r2/type-promotion/manifest#type-promotion-22"] = "SPARQL 1.0 triage: decimal and float are carried as double, so arithmetic on them is typed xsd:double",
     };
 
     /// <summary>
@@ -206,6 +202,12 @@ public static class W3CTestContext
     public static string? IncludeOnly { get; } = Environment.GetEnvironmentVariable("W3C_INCLUDE_ONLY");
 
     /// <summary>
+    /// True when the known failures (the SPARQL 1.0 triage) run as ordinary tests rather than skipped ones, to see what
+    /// each one does while fixing its cause. Set with the W3C_RUN_KNOWN_FAILURES=1 environment variable.
+    /// </summary>
+    public static bool RunKnownFailures { get; } = Environment.GetEnvironmentVariable("W3C_RUN_KNOWN_FAILURES") == "1";
+
+    /// <summary>
     /// True when a test is out of scope (<see cref="SkipList"/>): a feature Mercury does not provide. Such tests are
     /// left out of a run. A known failure (the SPARQL 1.0 triage) is not: it runs as a skipped test, counted and with its
     /// cause, so the gap stays visible.
@@ -246,9 +248,11 @@ public static class W3CTestContext
         if (SkipList.TryGetValue(testId, out reason))
             return true;
 
-        // A SPARQL 1.0 test that is a known failure, by cause
+        // A SPARQL 1.0 test that is a known failure, by cause (run anyway with W3C_RUN_KNOWN_FAILURES=1)
         foreach (var (failure, cause) in Sparql10Triage)
         {
+            if (RunKnownFailures)
+                break;
             if (testId.Contains(failure, StringComparison.Ordinal))
             {
                 reason = cause;

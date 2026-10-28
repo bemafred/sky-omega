@@ -251,7 +251,7 @@ public class SparqlConformanceTests
                 var expectedRdf = await SparqlResultParser.ParseRdfResultSetAsync(test.ResultPath!);
                 _output.WriteLine($"Expected {expectedRdf.Count} results (from RDF result set)");
 
-                var actualRdf = await RunSelectQueryAsync(store, query, parsed, expectedRdf);
+                var actualRdf = await RunResultSetQueryAsync(store, query, parsed, expectedRdf);
                 _output.WriteLine($"Got {actualRdf.Count} results");
 
                 // An ORDER BY result set gives each solution an rs:index; it is compared in that order
@@ -784,7 +784,7 @@ public class SparqlConformanceTests
     /// <summary>
     /// Runs a SELECT query and returns the results as a SparqlResultSet.
     /// </summary>
-    private async Task<SparqlResultSet> RunSelectQueryAsync(QuadStore store, string query, Query parsed, SparqlResultSet expectedForVariables)
+    private async Task<SparqlResultSet> RunResultSetQueryAsync(QuadStore store, string query, Query parsed, SparqlResultSet expectedForVariables)
     {
         return await Task.Run(() => RunOnLargeStack(() =>
         {
@@ -798,6 +798,11 @@ public class SparqlConformanceTests
             try
             {
                 using var executor = new QueryExecutor(store, query.AsSpan(), parsed);
+
+                // An ASK query's result is its boolean (rs:boolean in the expected set)
+                if (parsed.Type == QueryType.Ask)
+                    return SparqlResultSet.Boolean(executor.ExecuteAsk());
+
                 var results = executor.Execute();
 
                 try

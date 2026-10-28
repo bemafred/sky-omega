@@ -4,6 +4,11 @@
 
 **Status:** Proposed — 2026-10-27
 
+**Split 2026-10-28:** the evaluator part of D3 (a value keeps its term, decimal is its own type, comparison follows the
+operator mapping) is [ADR-056](ADR-056-expression-value-is-the-term.md), which changes no stored data and goes first.
+This ADR keeps the write paths, the stored form and the migration (D1, D2, D3's `StoredTerm.FromValue`, D4, D5), with
+Q2 and Q3 open.
+
 Found while ruling out confounds for [ADR-052](ADR-052-update-where-one-pattern-path.md) ("Related defect"): `INSERT
 DATA { <a> <k> 1 }` stores the bare atom `1`, which no constant pattern then finds. A probe on 1.8.22 showed that this is
 one case of a wider defect: the same RDF term reaches the store as different atoms depending on which path wrote it, and
@@ -165,6 +170,9 @@ resolution in `TriplePatternScan`, and the VALUES expansion. `LiteralForm.Canoni
 
 ### D3. A binding → its stored form
 
+The evaluator side of this decision (a value keeps its term, decimal is its own tag, `1e3` is a double, one way from
+a value to a binding) is [ADR-056](ADR-056-expression-value-is-the-term.md). What stays here is the stored form.
+
 `StoredTerm.FromValue(value)` turns an evaluated value into its stored form and replaces both `TermForBinding` and
 `CanonicalBoundValue`. For that, a value has to keep its term:
 
@@ -201,6 +209,8 @@ second canonicalization rule kept forever, which is the divergence this ADR remo
 - **What it can't decide, it lists and leaves:** a datatype that is a prefixed name other than `xsd:`, and an empty
   datatype (the 33 atoms above). Each is printed with its graph, subject, predicate and valid-from.
 - It reports counts before and after, in the census's categories, and `--dry-run` reports without writing.
+- Once every store is migrated, the evaluator's read rule for the old forms ([ADR-056](ADR-056-expression-value-is-the-term.md)
+  D7: a stored `^^xsd:T` datatype and a bare numeric) is deleted.
 - The MCP memory store is migrated with `mercury-mcp` stopped. A Reference store (read-only, sealed) isn't migrated in
   place; see Q2.
 

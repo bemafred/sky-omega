@@ -82,19 +82,18 @@ public static class SparqlResultParser
             }
         }
 
-        if (resultSetSubject == null)
+        // An ASK result: rs:boolean, on the ResultSet or on its own
+        foreach (var (s, p, o) in triples)
         {
-            // No ResultSet found - might be an ASK result or empty
-            foreach (var (s, p, o) in triples)
+            if (p == rsBoolean && (resultSetSubject == null || s == resultSetSubject))
             {
-                if (p == rsBoolean)
-                {
-                    var boolValue = o.Trim('"') == "true" || o.Trim('"') == "1";
-                    return SparqlResultSet.Boolean(boolValue);
-                }
+                var lexical = o.Length > 0 && o[0] == '"' ? o[1..o.IndexOf('"', 1)] : o;
+                return SparqlResultSet.Boolean(lexical is "true" or "1");
             }
-            return resultSet;
         }
+
+        if (resultSetSubject == null)
+            return resultSet;
 
         // Get variable names
         foreach (var (s, p, o) in triples)
