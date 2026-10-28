@@ -19,7 +19,7 @@ internal struct UpdateOperation
 
     // ADR-052: source offset of the WHERE group's opening '{' (for DELETE WHERE, its QuadPattern's '{').
     // The WHERE is a GroupGraphPattern, parsed into the pattern tree from here and evaluated by TreeJoinExecutor,
-    // exactly as a query's WHERE is. No legacy GraphPattern is built for it.
+    // exactly as a query's WHERE is.
     public int WhereGroupStart;
 
     // For USING clause in DELETE/INSERT

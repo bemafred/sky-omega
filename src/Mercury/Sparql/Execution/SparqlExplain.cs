@@ -559,9 +559,8 @@ internal sealed class SparqlExplainer
                 return new ExplainNode { OperatorType = ExplainOperatorType.Values, Description = $"Inline data: {Clip(slot.ValuesVarStart, slot.ValuesVarLength, 50)}" };
             case PatternKind.ServiceHeader:
             {
-                var span = _source.AsSpan(slot.GraphTermStart, slot.GraphTermLength);
-                int brace = span.IndexOf('{');
-                return new ExplainNode { OperatorType = ExplainOperatorType.Service, Description = (brace > 0 ? span[..brace] : span).Trim().ToString() };
+                var head = _source.AsSpan(slot.GraphTermStart, slot.ServiceGroupStart - slot.GraphTermStart); // SERVICE [SILENT] ep
+                return new ExplainNode { OperatorType = ExplainOperatorType.Service, Description = head.Trim().ToString() };
             }
             case PatternKind.SubSelectHeader:
                 return SubSelectNode(ref tree, index);

@@ -112,9 +112,11 @@ internal sealed class TreeJoinExecutor
     /// forward pattern only — the candidate filter is an object-position pre-filter), or null.</summary>
     private HashSet<long>? ObjectCandidatesFor(in TriplePattern p)
     {
-        if (_trigramCandidatesByVar == null || p.Path.Type != PathType.None || !p.Object.IsVariable)
+        // A join variable (negative offset) or a pattern's blank node (_:b) is never a text:match variable
+        if (_trigramCandidatesByVar == null || p.Path.Type != PathType.None || !p.Object.IsVariable
+            || p.Object.Start < 0 || !VariableName.IsSigil(_source[p.Object.Start]))
             return null;
-        var varName = _source.AsSpan(p.Object.Start + 1, p.Object.Length - 1); // skip '?'
+        var varName = VariableName.WithoutSigil(_source.AsSpan(p.Object.Start, p.Object.Length));
         return _trigramCandidatesByVar.TryGetValue(varName.ToString(), out var c) ? c : null;
     }
 
@@ -288,13 +290,7 @@ internal sealed class TreeJoinExecutor
     {
         _planner ??= new QueryPlanner(_store.Statistics, _store.Atoms);
 
-        var gp = new GraphPattern();
-        foreach (var tp in patternArr)
-            gp.AddPattern(tp);
-
-        int[] order = _planner.OptimizePatternOrder(gp, _source.AsSpan());
-        if (order.Length != patternArr.Length)
-            return; // shape mismatch (e.g. an optional crept in) — leave source order untouched
+        int[] order = _planner.OptimizePatternOrder(patternArr, _source.AsSpan());
 
         var reorderedPatterns = new TriplePattern[patternArr.Length];
         var reorderedGraphs = new string[graphArr.Length];
@@ -701,13 +697,24 @@ internal sealed class TreeJoinExecutor
         if (_serviceExecutor is null)
             throw new InvalidOperationException("SERVICE requires an ISparqlServiceExecutor (the cutover injects HttpSparqlServiceExecutor).");
 
+        // The head is read with the parser's own reader; the group is the header's child, from its '{' to the end
         var slot = pa[serviceIndex];
-        string serviceSrc = _source.Substring(slot.GraphTermStart, slot.GraphTermLength);
-        var (endpointIsVariable, endpointText, silent, innerWhere) = ParseServiceParts(serviceSrc);
-        string query = "SELECT * WHERE " + innerWhere;
+        var (silent, endpoint) = new SparqlParser(_source.AsSpan()).ParseServiceHeadAt(slot.GraphTermStart);
+        string endpointText = _source.Substring(endpoint.Start, endpoint.Length);
+        int groupEnd = slot.GraphTermStart + slot.GraphTermLength;
 
-        if (!endpointIsVariable)
-            return Join(input, ServiceCall(StripIri(endpointText), query, silent));
+        // The endpoint parses the query on its own, so it gets the prologue's prefixes along with the group
+        var text = new System.Text.StringBuilder();
+        foreach (var mapping in _prefixes ?? [])
+        {
+            text.Append("PREFIX ").Append(_prefixSource, mapping.PrefixStart, mapping.PrefixLength)
+                .Append(' ').Append(_prefixSource, mapping.IriStart, mapping.IriLength).Append(' ');
+        }
+        text.Append("SELECT * WHERE ").Append(_source, slot.ServiceGroupStart, groupEnd - slot.ServiceGroupStart);
+        string query = text.ToString();
+
+        if (endpoint.Type != TermType.Variable)
+            return Join(input, ServiceCall(StripIri(ExpandPname(endpointText)), query, silent));
 
         // SERVICE ?ep — the endpoint is taken from each outer row's binding.
         var output = new List<MaterializedRow>();
@@ -941,26 +948,6 @@ internal sealed class TreeJoinExecutor
         throw new ArgumentException("Unbalanced braces");
     }
 
-    private static (bool endpointIsVariable, string endpointText, bool silent, string innerWhere) ParseServiceParts(string s)
-    {
-        int i = SkipWs(s, "SERVICE".Length);
-        bool silent = false;
-        if (Matches(s, i, "SILENT")) { i = SkipWs(s, i + "SILENT".Length); silent = true; }
-
-        int epStart = i;
-        bool isVar;
-        if (i < s.Length && s[i] == '<') { while (i < s.Length && s[i] != '>') i++; if (i < s.Length) i++; isVar = false; }
-        else { while (i < s.Length && !char.IsWhiteSpace(s[i]) && s[i] != '{') i++; isVar = true; }
-        string endpointText = s.Substring(epStart, i - epStart);
-
-        int open = s.IndexOf('{', i);
-        int close = MatchBrace(s, open);
-        return (isVar, endpointText, silent, s.Substring(open, close - open + 1));
-    }
-
-    private static int SkipWs(string s, int i) { while (i < s.Length && char.IsWhiteSpace(s[i])) i++; return i; }
-    private static bool Matches(string s, int i, string w) =>
-        i + w.Length <= s.Length && string.Compare(s, i, w, 0, w.Length, StringComparison.OrdinalIgnoreCase) == 0;
     private static string StripIri(string t) => t.Length >= 2 && t[0] == '<' && t[^1] == '>' ? t[1..^1] : t;
 
     /// <summary>
@@ -1287,12 +1274,19 @@ internal sealed class TreeJoinExecutor
         var subject = new Term { Type = slot.SubjectType, Start = slot.SubjectStart, Length = slot.SubjectLength };
         var obj = new Term { Type = slot.ObjectType, Start = slot.ObjectStart, Length = slot.ObjectLength };
 
-        var expanded = new GraphPattern();
-        pathParser.AddTriplePatternOrExpand(ref expanded, subject, predicate, obj, path);
-        for (int i = 0; i < expanded.PatternCount; i++)
+        var expanded = new TriplePatternList();
+        try
         {
-            patterns.Add(expanded.GetPattern(i));
-            graphs.Add(activeGraph);
+            pathParser.AddTriplePatternOrExpand(ref expanded, subject, predicate, obj, path);
+            for (int i = 0; i < expanded.Count; i++)
+            {
+                patterns.Add(expanded[i]);
+                graphs.Add(activeGraph);
+            }
+        }
+        finally
+        {
+            expanded.Dispose();
         }
     }
 }

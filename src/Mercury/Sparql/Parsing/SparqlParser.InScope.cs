@@ -10,9 +10,9 @@ internal ref partial struct SparqlParser
 {
     /// <summary>
     /// SPARQL 1.1 §18.2.1: adds the in-scope variables of the slots <c>[first, end)</c> of a tree parsed over this
-    /// parser's source. A triple pattern's variables, a GRAPH variable, a BIND variable, a VALUES block's variables and
-    /// a SERVICE pattern's variables are in scope, and every group, OPTIONAL and UNION passes its children's out. A
-    /// sub-SELECT passes out what it projects (with <c>SELECT *</c>, its WHERE's variables and its VALUES'). MINUS and
+    /// parser's source. A triple pattern's variables, a GRAPH variable, a BIND variable and a VALUES block's variables
+    /// are in scope, and every group, OPTIONAL, UNION and SERVICE passes its children's out (a SERVICE's endpoint
+    /// variable is the caller's to bind). A sub-SELECT passes out what it projects (with <c>SELECT *</c>, its WHERE's variables and its VALUES'). MINUS and
     /// [NOT] EXISTS bodies, and FILTER expressions, bind nothing outside themselves. A blank node is not a variable.
     /// This is the one reading of the rule: <c>SELECT *</c>, <c>DESCRIBE *</c>, a sub-SELECT * and the BIND scope
     /// check all use it. The cursor is not moved.
@@ -49,9 +49,6 @@ internal ref partial struct SparqlParser
                     if (!AddSubSelectProjection(slot.GraphTermStart, slot.SubSelectModifiersStart, ref into))
                         i = slot.ChildStartIndex + slot.ChildCount - 1; // it projects by name: its WHERE stays inside
                     break; // with SELECT *, the walk goes on into its WHERE
-                case PatternKind.ServiceHeader:
-                    AddServiceVariables(slot.GraphTermStart, ref into);
-                    break;
             }
         }
     }
@@ -116,26 +113,5 @@ internal ref partial struct SparqlParser
             AddIfVariable(TermType.Variable, aggregate.AliasStart, aggregate.AliasLength, ref into);
         }
         return false;
-    }
-
-    /// <summary>
-    /// [59] ServiceGraphPattern ::= 'SERVICE' 'SILENT'? VarOrIri GroupGraphPattern: adds the in-scope variables of the
-    /// group of the SERVICE at <paramref name="serviceStart"/>. The endpoint variable is the caller's to bind.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.NoInlining)]
-    private readonly void AddServiceVariables(int serviceStart, scoped ref InScopeVariables into)
-    {
-        var head = new SparqlParser(_source);
-        head._position = serviceStart;
-        head.ConsumeKeyword("SERVICE");
-        head.SkipWhitespace();
-        if (KeywordIs(head.PeekSpan(6), "SILENT"))
-        {
-            head.ConsumeKeyword("SILENT");
-            head.SkipWhitespace();
-        }
-        head.ParseTerm();
-        head.SkipWhitespace();
-        AddInScopeVariables(head._position, ref into);
     }
 }

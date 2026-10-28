@@ -157,20 +157,20 @@ internal ref struct ConstructResults
             return WriteAt(writePos, value);
         }
         // Check for synthetic terms (negative offset)
-        else if (SyntheticTermHelper.IsSynthetic(term.Start))
+        else if (SyntheticTerms.IsSynthetic(term.Start))
         {
-            // Check for synthetic list node blank node (-400 to -431)
-            if (SyntheticTermHelper.IsListNodeOffset(term.Start))
+            // A template collection's node: a new blank node per solution
+            if (SyntheticTerms.IsListNodeOffset(term.Start))
             {
                 // Generate unique blank node ID for this row + list node index
                 // Format: _:genid{rowCounter}_{listNodeIndex}
-                int listNodeIndex = -term.Start - 400;
+                int listNodeIndex = SyntheticTerms.ListNodeIndex(term.Start);
                 _generatedBnode = $"_:genid{_rowCounter}_{listNodeIndex}";
                 return WriteAt(writePos, _generatedBnode);
             }
 
             // Synthetic IRI (rdf:type, rdf:first, rdf:rest, rdf:nil, etc.)
-            var syntheticIri = SyntheticTermHelper.GetSyntheticIri(term.Start);
+            var syntheticIri = SyntheticTerms.GetSyntheticIri(term.Start);
             if (syntheticIri.Length > 0)
             {
                 return WriteAt(writePos, syntheticIri);

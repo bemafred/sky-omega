@@ -15,7 +15,7 @@ namespace SkyOmega.Mercury.Sparql.Execution;
 
 internal ref partial struct QueryResults
 {
-    // Pattern data stored on heap via QueryBuffer (eliminates ~4KB GraphPattern from stack)
+    // The query's clauses, on the heap (QueryBuffer), so they stay off the stack
     private Patterns.QueryBuffer? _buffer;
     // ADR-047 C2: prefix mappings for evaluating computed SELECT projections ((expr AS ?var)) on materialized rows when
     // there is no _buffer — the sub-SELECT path (SubSelectStep), which has prefixes but no outer QueryBuffer to lend.
@@ -82,8 +82,7 @@ internal ref partial struct QueryResults
         return result;
     }
     /// <summary>
-    /// Create QueryResults from pre-materialized rows without requiring the full GraphPattern.
-    /// This overload avoids stack overflow by not passing the large GraphPattern struct.
+    /// Create QueryResults from pre-materialized rows.
     /// NoInlining prevents stack frame merging with caller (ADR-003).
     /// </summary>
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]

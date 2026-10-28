@@ -137,9 +137,8 @@ internal ref partial struct SparqlParser
         bool hasDelete = false;
         bool hasInsert = false;
 
-        // Parse DELETE/INSERT directly into op fields to avoid intermediate
-        // GraphPattern locals (~5-11 KB each). JIT allocates all locals in the
-        // prologue, so 3 extra GraphPatterns would add ~15-33 KB to this frame.
+        // Parse DELETE/INSERT directly into op fields: the JIT allocates every local in the prologue, so
+        // intermediate template locals would all sit in this frame.
         if (TryConsumeKeyword("DELETE"))
         {
             hasDelete = true;

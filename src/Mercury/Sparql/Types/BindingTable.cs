@@ -5,8 +5,8 @@ namespace SkyOmega.Mercury.Sparql.Types;
 
 /// <summary>
 /// Binding table for variable bindings during query execution.
-/// Zero-allocation design over pooled buffers; the string buffer GROWS on demand (ADR-050) so a
-/// binding is never silently dropped — bounded only by the store's MaxAtomSize.
+/// Zero-allocation design over pooled buffers; the string buffer and the binding storage both GROW on
+/// demand (ADR-050), so a binding is never silently dropped, whatever a row's size or variable count.
 /// </summary>
 internal ref struct BindingTable
 {
@@ -15,6 +15,7 @@ internal ref struct BindingTable
     private Span<char> _stringBuffer;
     private int _stringOffset;
     private char[]? _grownArray;   // ADR-050: a pooled char[] this table rented while growing the string buffer; returned by ReturnGrownBuffer()
+    private Binding[]? _grownBindings; // a pooled Binding[] this table rented while growing past its storage; returned by ReturnGrownBuffer()
 
     public BindingTable(Span<Binding> storage)
     {
@@ -23,6 +24,7 @@ internal ref struct BindingTable
         _stringBuffer = Span<char>.Empty;
         _stringOffset = 0;
         _grownArray = null;
+        _grownBindings = null;
     }
 
     public BindingTable(Span<Binding> storage, Span<char> stringBuffer)
@@ -32,6 +34,22 @@ internal ref struct BindingTable
         _stringBuffer = stringBuffer;
         _stringOffset = 0;
         _grownArray = null;
+        _grownBindings = null;
+    }
+
+    /// <summary>Ensure room for one more binding, growing the storage when it is full rather than dropping the
+    /// binding: a row may bind more variables than the caller sized it for (each expansion adds join variables).
+    /// Growth rents a larger array from the shared pool and copies the live bindings; the caller-owned storage is
+    /// never returned here, only arrays this table rents (released by <see cref="ReturnGrownBuffer"/>).</summary>
+    private void EnsureBindingCapacity()
+    {
+        if (_count < _bindings.Length) return;
+
+        var grown = ArrayPool<Binding>.Shared.Rent(System.Math.Max(16, _bindings.Length * 2));
+        _bindings.Slice(0, _count).CopyTo(grown);
+        if (_grownBindings is not null) ArrayPool<Binding>.Shared.Return(_grownBindings);
+        _grownBindings = grown;
+        _bindings = grown;
     }
 
     /// <summary>Ensure room for <paramref name="additional"/> more chars, GROWING the string buffer on
@@ -53,7 +71,7 @@ internal ref struct BindingTable
         return true;
     }
 
-    /// <summary>Return the pooled buffer this table rented while growing (ADR-050) — a no-op when it
+    /// <summary>Return the pooled buffers this table rented while growing (ADR-050) — a no-op when it
     /// never grew. Call once the bindings are no longer read (a result row's strings are copied out by
     /// QueryResults' MaterializedRow before this point). Idempotent; if omitted, the rare grown array
     /// is GC'd rather than pooled — correctness holds either way.</summary>
@@ -65,6 +83,13 @@ internal ref struct BindingTable
             _grownArray = null;
             _stringBuffer = Span<char>.Empty;
         }
+        if (_grownBindings is not null)
+        {
+            ArrayPool<Binding>.Shared.Return(_grownBindings);
+            _grownBindings = null;
+            _bindings = Span<Binding>.Empty;
+            _count = 0;
+        }
     }
 
     /// <summary>
@@ -72,7 +97,7 @@ internal ref struct BindingTable
     /// </summary>
     public void Bind(ReadOnlySpan<char> variableName, long value)
     {
-        if (_count >= _bindings.Length) return;
+        EnsureBindingCapacity();
 
         // Format the value as string and store in buffer (must use InvariantCulture for RDF compliance)
         Span<char> temp = stackalloc char[24];
@@ -98,7 +123,7 @@ internal ref struct BindingTable
     /// </summary>
     public void Bind(ReadOnlySpan<char> variableName, double value)
     {
-        if (_count >= _bindings.Length) return;
+        EnsureBindingCapacity();
 
         // Format the value as string and store in buffer (must use InvariantCulture for RDF compliance)
         Span<char> temp = stackalloc char[32];
@@ -124,7 +149,7 @@ internal ref struct BindingTable
     /// </summary>
     public void Bind(ReadOnlySpan<char> variableName, bool value)
     {
-        if (_count >= _bindings.Length) return;
+        EnsureBindingCapacity();
 
         // Store string representation
         var str = value ? "true" : "false";
@@ -149,7 +174,7 @@ internal ref struct BindingTable
     /// </summary>
     public void Bind(ReadOnlySpan<char> variableName, ReadOnlySpan<char> value)
     {
-        if (_count >= _bindings.Length) return;
+        EnsureBindingCapacity();
         if (!EnsureStringCapacity(value.Length)) return;
 
         // Copy string to buffer
@@ -171,7 +196,7 @@ internal ref struct BindingTable
     /// </summary>
     public void BindUri(ReadOnlySpan<char> variableName, ReadOnlySpan<char> value)
     {
-        if (_count >= _bindings.Length) return;
+        EnsureBindingCapacity();
         if (!EnsureStringCapacity(value.Length)) return;
 
         // Copy string to buffer
@@ -193,7 +218,7 @@ internal ref struct BindingTable
     /// </summary>
     public void BindWithHash(int variableNameHash, ReadOnlySpan<char> value)
     {
-        if (_count >= _bindings.Length) return;
+        EnsureBindingCapacity();
         if (!EnsureStringCapacity(value.Length)) return;
 
         // Copy string to buffer
@@ -216,7 +241,7 @@ internal ref struct BindingTable
     /// </summary>
     public void BindWithHash(int variableNameHash, ReadOnlySpan<char> value, BindingValueType type)
     {
-        if (_count >= _bindings.Length) return;
+        EnsureBindingCapacity();
         if (!EnsureStringCapacity(value.Length)) return;
 
         value.CopyTo(_stringBuffer.Slice(_stringOffset));

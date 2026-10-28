@@ -135,7 +135,7 @@ public class GraphTreeEvaluatorTests : IDisposable
     [InlineData("subselect-aggregate", "SELECT ?c WHERE { { SELECT (COUNT(*) AS ?c) WHERE { ?s <urn:p> ?o } } }")]
     [InlineData("subselect-order-limit", "SELECT ?o WHERE { { SELECT ?o WHERE { ?s <urn:p> ?o } ORDER BY ?o LIMIT 2 } }")]
     // RDF-star quoted triple (expands to reification) and blank-node property list (expands to a synthetic-variable
-    // subject) — both produce synthetic terms (negative offsets) resolved via SyntheticTermHelper.
+    // subject) — both produce synthetic terms (negative offsets) resolved via SyntheticTerms.
     [InlineData("rdf-star", "SELECT ?c WHERE { << <urn:a> <urn:p> <urn:v1> >> <urn:certainty> ?c }")]
     [InlineData("blank-node-proplist", "SELECT ?s WHERE { ?s <urn:knows> [ <urn:name> \"x\" ] }")]
     // Multi-variable VALUES (one path with single-var via the shipping DataBlockReader), joined with a triple.
@@ -1192,7 +1192,7 @@ internal sealed class GraphTreeEvaluator
 
     /// <summary>
     /// Resolve a term's text. A synthetic term (negative offset, from RDF-star or blank-node-property-list
-    /// expansion) is resolved via <see cref="SyntheticTermHelper"/> — the rdf:* IRIs (-1..-5) and the reifier /
+    /// expansion) is resolved via <see cref="SyntheticTerms"/> — the rdf:* IRIs (-1..-5) and the reifier /
     /// blank-node join variables (<c>?_qt…</c> / <c>?_bn…</c>) — so the expanded triples are evaluable; a normal
     /// term is read from the source.
     /// </summary>
@@ -1200,8 +1200,8 @@ internal sealed class GraphTreeEvaluator
     {
         if (start < 0)
             return (type == TermType.Iri
-                ? SyntheticTermHelper.GetSyntheticIri(start)
-                : SyntheticTermHelper.GetSyntheticVarName(start)).ToString();
+                ? SyntheticTerms.GetSyntheticIri(start)
+                : SyntheticTerms.GetSyntheticVarName(start)).ToString();
         return _source.Substring(start, length);
     }
 }

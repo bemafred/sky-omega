@@ -250,6 +250,33 @@ it). Four consumers that each had their own reading now use it:
 `SELECT DISTINCT *`, in a query or a sub-SELECT, now projects before DISTINCT (§18.2.5), so two solutions that differ
 only in a pattern's blank node are one row. Tests: `InScopeVariablesTests` (14). Stack probes unchanged (23–39 KB).
 
+### The GraphPattern sweep (2026-10-28)
+
+D1 kept `GraphPattern` as scratch storage. With the flat WHERE gone it was a 15.5 KB fixed-size list that kept at most
+32 triples and **dropped the rest without an error**. Every expansion went through it, so a 20-item collection, a
+40-pair property list or a 40-step sequence path matched on its first part only. The sweep:
+- **SERVICE is parsed by the tree.** Its group is the ServiceHeader's child, read by the same group grammar as every
+  other, and the header records where the group starts. The evaluator reads the endpoint with the parser's
+  `ParseServiceHead` instead of splitting strings with `MatchBrace`. It now sends the prologue's prefixes along with
+  the group, which it had not done before. The flat SERVICE / FILTER / EXISTS parser chain the tree borrowed is
+  deleted.
+- **`TriplePatternList`** (pooled, growable) replaces `GraphPattern` in the expansions and the path executor. The
+  planner takes a span of triple patterns. `GraphPattern`, `ServiceClause`, `ExistsFilter`, `CompoundExistsRef`,
+  `GraphClause`, `FilterExpr` and `BindExpr` are deleted, along with the planner's unreachable SERVICE strategy.
+- **Join variables are unbounded and cannot collide** (`SyntheticTerms`, renamed from `SyntheticTermHelper`):
+  - Reifiers, path intermediates and collection or property-list nodes share one counter per query.
+  - Each kind used to have 32 names, after which its joins silently broke.
+  - Their names have no sigil, so a query's own `?_bn0` no longer joins a hidden node.
+  - CONSTRUCT template list nodes have their own unbounded range.
+- **A sequence path is a flat list.** `p1/…/pn` is read in a loop, so its length no longer counts as nesting depth.
+- **`BindingTable` grows its bindings as ADR-050 grew its strings.** It had silently dropped a row's bindings past its
+  storage, usually 64.
+- **`ConstructTemplate` grows.** It was fixed at 16 triples.
+- The `text:match` hint and candidate lookups no longer slice the source at a join variable's negative offset.
+
+Tests: `LongExpansionTests` (7) and a SERVICE query-text test. `Query` is 944 B (2,232 B after D1), and five nested
+groups complete on 23 KB (39 KB).
+
 ## Open questions (all resolved 2026-10-27)
 
 - **Q1. EXPLAIN's vocabulary. Resolved 2026-10-27.** `ExplainOperatorType` already has operators for sub-SELECT,

@@ -21,6 +21,32 @@ public partial class QueryExecutorTests
     #region SERVICE clause tests
 
     [Fact]
+    public void Execute_ServiceClause_SendsTheGroupWithThePrefixesItUses()
+    {
+        // The endpoint parses the text it is sent on its own: a prefixed name in the group needs its PREFIX there
+        var query = "PREFIX ex: <http://example.org/> SELECT * WHERE { SERVICE ex:sparql { ?s ex:name \"{x}\" } }";
+        var parsedQuery = new SparqlParser(query.AsSpan()).ParseQuery();
+        var mockExecutor = new MockSparqlServiceExecutor();
+
+        Store.AcquireReadLock();
+        try
+        {
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery, mockExecutor);
+            var results = executor.Execute();
+            while (results.MoveNext()) { }
+            results.Dispose();
+        }
+        finally
+        {
+            Store.ReleaseReadLock();
+        }
+
+        var (endpoint, sent) = Assert.Single(mockExecutor.Calls);
+        Assert.Equal("http://example.org/sparql", endpoint);
+        Assert.Equal("PREFIX ex: <http://example.org/> SELECT * WHERE { ?s ex:name \"{x}\" }", sent);
+    }
+
+    [Fact]
     public void Execute_ServiceClause_WithMockExecutor()
     {
         var query = "SELECT * WHERE { SERVICE <http://remote.example.org/sparql> { ?s ?p ?o } }";
@@ -1060,6 +1086,9 @@ internal class MockSparqlServiceExecutor : ISparqlServiceExecutor
     private readonly Dictionary<string, List<Dictionary<string, (string value, ServiceBindingType type)>>> _results = new();
     private readonly Dictionary<string, Exception> _errors = new();
 
+    /// <summary>Every SELECT sent, in order: the endpoint and the query text.</summary>
+    public List<(string Endpoint, string Query)> Calls { get; } = new();
+
     public void AddResult(string endpoint, IEnumerable<Dictionary<string, (string value, ServiceBindingType type)>> rows)
     {
         _results[endpoint] = rows.ToList();
@@ -1072,6 +1101,7 @@ internal class MockSparqlServiceExecutor : ISparqlServiceExecutor
 
     public ValueTask<List<ServiceResultRow>> ExecuteSelectAsync(string endpointUri, string query, System.Threading.CancellationToken ct = default)
     {
+        Calls.Add((endpointUri, query));
         if (_errors.TryGetValue(endpointUri, out var error))
         {
             throw error;

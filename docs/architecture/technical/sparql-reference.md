@@ -59,7 +59,7 @@ One file per type in `Sparql/Execution/Operators/`:
 - `SubQueryGroupedRow` - GROUP BY / aggregate computation for subqueries
 - `SubQueryJoinScan` - Joins subquery results with outer patterns via nested loop
 - `QueryCancellation` - Thread-static cancellation token for query operators
-- `SyntheticTermHelper` - Resolves synthetic terms from SPARQL-star expansion
+- `SyntheticTerms` - The terms an expansion adds: rdf: IRIs, unbounded join variables (names without a sigil), CONSTRUCT template list nodes
 - `SlotTriplePatternScan` - Slot-based variant reading from 64-byte PatternSlot
 - `SlotMultiPatternScan` - Slot-based multi-pattern join reading from byte[] buffer
 - `ServiceScan` - Executes SERVICE clause against remote SPARQL endpoint via ISparqlServiceExecutor

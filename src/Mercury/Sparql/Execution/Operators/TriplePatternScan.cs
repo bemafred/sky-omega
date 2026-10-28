@@ -1634,17 +1634,17 @@ internal ref struct TriplePatternScan
     private ReadOnlySpan<char> ResolveTermWithStorage(Term term, TermPosition position)
     {
         // Handle synthetic terms (negative offsets from SPARQL-star expansion)
-        if (SyntheticTermHelper.IsSynthetic(term.Start))
+        if (SyntheticTerms.IsSynthetic(term.Start))
         {
             if (term.IsVariable)
             {
-                var varName = SyntheticTermHelper.GetSyntheticVarName(term.Start);
+                var varName = SyntheticTerms.GetSyntheticVarName(term.Start);
                 var idx = _initialBindings.FindBinding(varName);
                 if (idx >= 0)
                     return _initialBindings.GetString(idx);
                 return ReadOnlySpan<char>.Empty;
             }
-            return SyntheticTermHelper.GetSyntheticIri(term.Start);
+            return SyntheticTerms.GetSyntheticIri(term.Start);
         }
 
         if (term.IsVariable)
@@ -1701,17 +1701,17 @@ internal ref struct TriplePatternScan
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private ReadOnlySpan<char> ResolveTermForQuery(Term term)
     {
-        if (SyntheticTermHelper.IsSynthetic(term.Start))
+        if (SyntheticTerms.IsSynthetic(term.Start))
         {
             if (term.IsVariable)
             {
-                var varName = SyntheticTermHelper.GetSyntheticVarName(term.Start);
+                var varName = SyntheticTerms.GetSyntheticVarName(term.Start);
                 var idx = _initialBindings.FindBinding(varName);
                 if (idx >= 0)
                     return _initialBindings.GetString(idx);
                 return ReadOnlySpan<char>.Empty;
             }
-            return SyntheticTermHelper.GetSyntheticIri(term.Start);
+            return SyntheticTerms.GetSyntheticIri(term.Start);
         }
 
         if (term.IsVariable)
@@ -1895,7 +1895,7 @@ internal ref struct TriplePatternScan
 
             // Handle 'a' shorthand for rdf:type
             if (current.Length == 1 && current[0] == 'a')
-                expandedCurrent = SyntheticTermHelper.RdfType.AsSpan();
+                expandedCurrent = SyntheticTerms.RdfType.AsSpan();
 
             if (expandedCurrent.SequenceEqual(predicate))
                 return true;
@@ -1939,7 +1939,7 @@ internal ref struct TriplePatternScan
             // Handle ^a shorthand for inverse rdf:type
             ReadOnlySpan<char> expandedInner;
             if (innerPred.Length == 1 && innerPred[0] == 'a')
-                expandedInner = SyntheticTermHelper.RdfType.AsSpan();
+                expandedInner = SyntheticTerms.RdfType.AsSpan();
             else
                 expandedInner = ExpandPrefixedName(innerPred);
 
@@ -2036,8 +2036,8 @@ internal ref struct TriplePatternScan
 
         // Handle synthetic variables (from SPARQL-star expansion)
         ReadOnlySpan<char> varName;
-        if (SyntheticTermHelper.IsSynthetic(term.Start))
-            varName = SyntheticTermHelper.GetSyntheticVarName(term.Start);
+        if (SyntheticTerms.IsSynthetic(term.Start))
+            varName = SyntheticTerms.GetSyntheticVarName(term.Start);
         else
             varName = _source.Slice(term.Start, term.Length);
 

@@ -147,6 +147,9 @@ internal ref struct PatternSlot
 
     /// <summary>SubSelectHeader only: source offset of the sub-SELECT's SolutionModifier, just past its WHERE group.</summary>
     public ref int SubSelectModifiersStart => ref MemoryMarshal.AsRef<int>(_span.Slice(24, 4));
+
+    /// <summary>ServiceHeader only: source offset of the SERVICE's group, its opening '{'.</summary>
+    public ref int ServiceGroupStart => ref MemoryMarshal.AsRef<int>(_span.Slice(24, 4));
     
     // ───────────────────────────────────────────────────────────────────────
     // Variant: ExistsHeader / NotExistsHeader
@@ -194,13 +197,15 @@ internal ref struct PatternSlot
 
     /// <summary>
     /// True for headers that carry a child-range at the GraphHeader layout
-    /// (ChildStartIndex@16 / ChildCount@20): GraphHeader, the ADR-045 nestable group headers and SubSelectHeader.
+    /// (ChildStartIndex@16 / ChildCount@20): GraphHeader, the ADR-045 nestable group headers, SubSelectHeader and
+    /// ServiceHeader.
     /// (ExistsHeader uses a different offset and is excluded.) The one list every subtree walk reads.
     /// </summary>
     public readonly bool IsNestableGroup =>
         Kind == PatternKind.GraphHeader || Kind == PatternKind.GroupHeader ||
         Kind == PatternKind.UnionHeader || Kind == PatternKind.OptionalHeader ||
-        Kind == PatternKind.MinusHeader || Kind == PatternKind.SubSelectHeader;
+        Kind == PatternKind.MinusHeader || Kind == PatternKind.SubSelectHeader ||
+        Kind == PatternKind.ServiceHeader;
 
     /// <summary>
     /// Clear slot for reuse
@@ -373,18 +378,28 @@ internal ref struct PatternArray
     }
 
     /// <summary>
-    /// Add a SERVICE leaf (ADR-045): <c>SERVICE [SILENT] ep { … }</c>. The full SERVICE source span is carried on
-    /// the slot (re-parsed on evaluation for the endpoint / SILENT / inner pattern, which is sent to the remote
-    /// endpoint); it has no in-tree children. Returns the slot index.
+    /// Begin a SERVICE: <c>SERVICE [SILENT] ep { … }</c> starting at <paramref name="sourceStart"/>. Its group follows
+    /// as its one child, parsed like every other group; it is sent to the endpoint, not evaluated here. Returns the
+    /// header index.
     /// </summary>
-    public int AddServiceHeader(int sourceStart, int sourceLength)
+    public int BeginService(int sourceStart)
     {
         int headerIndex = _count;
         var slot = AllocateSlot();
         slot.Kind = PatternKind.ServiceHeader;
         slot.GraphTermStart = sourceStart;
-        slot.GraphTermLength = sourceLength;
+        slot.ChildStartIndex = _count; // the group follows
+        slot.ChildCount = 0;
         return headerIndex;
+    }
+
+    /// <summary>End a SERVICE: records its group subtree, where the group starts, and its source end (exclusive).</summary>
+    public void EndService(int headerIndex, int groupStart, int sourceEnd)
+    {
+        var header = this[headerIndex];
+        header.ChildCount = _count - header.ChildStartIndex;
+        header.ServiceGroupStart = groupStart;
+        header.GraphTermLength = sourceEnd - header.GraphTermStart;
     }
 
     /// <summary>

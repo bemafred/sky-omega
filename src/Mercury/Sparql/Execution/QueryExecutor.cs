@@ -114,8 +114,6 @@ internal partial class QueryExecutor : IDisposable
         // This avoids stack overflow when accessing patterns in nested calls
         // The Query struct is NOT stored - only the buffer is kept
         _buffer = QueryBufferAdapter.FromQuery(in query, source);
-        // Cache the original GraphPattern (has all complex structures like subqueries, service clauses)
-        // Building from buffer would lose this info, so we copy directly
         // Store prologue for prefix expansion
         _prologue = query.Prologue;
 
@@ -741,30 +739,6 @@ internal partial class QueryExecutor : IDisposable
         {
             PooledBufferManager.Shared.Return(stringBuffer);
         }
-    }
-
-    /// <summary>
-    /// Evaluates all filter expressions for the given pattern against the current bindings.
-    /// Returns true if all filters pass, false if any filter fails.
-    /// </summary>
-    private bool PassesFilters(in GraphPattern pattern, ref BindingTable bindingTable)
-    {
-        if (pattern.FilterCount == 0)
-            return true;
-
-        for (int i = 0; i < pattern.FilterCount; i++)
-        {
-            var filter = pattern.GetFilter(i);
-            var filterExpr = _source.AsSpan(filter.Start, filter.Length);
-            var evaluator = new FilterEvaluator(filterExpr);
-            // Pass prefixes for prefix expansion in filter expressions (e.g., ?a = :s1)
-            if (!evaluator.Evaluate(bindingTable.GetBindings(), bindingTable.Count, bindingTable.GetStringBuffer(),
-                _buffer.Prefixes, _source.AsSpan()))
-            {
-                return false;
-            }
-        }
-        return true;
     }
 
     /// <summary>

@@ -166,12 +166,7 @@ internal ref partial struct SparqlParser
 
             if (KeywordIs(span, "SERVICE"))
             {
-                // SERVICE is federation — its inner pattern is sent to a remote endpoint, not the local active
-                // graph. Reuse the shipping ParseService (into a throwaway pattern) to advance past the clause and
-                // carry its source span; the evaluator re-parses it and delegates to an ISparqlServiceExecutor.
-                int serviceStart = _position;
-                SkipServiceClause();
-                pa.AddServiceHeader(serviceStart, _position - serviceStart);
+                ParseServiceTree(ref pa, depth);
                 continue;
             }
 
@@ -403,7 +398,7 @@ internal ref partial struct SparqlParser
         // carrying synthetic terms (reifier / blank-node join variables at negative offsets, the rdf:* IRIs at
         // -1..-5). Reuse the shipping expansion (AddTriplePatternOrExpand — same parser instance, same synthetic
         // counters) into a throwaway pattern, then copy the expanded triples into the tree; the evaluator resolves
-        // the synthetic offsets via SyntheticTermHelper.
+        // the synthetic offsets via SyntheticTerms.
         if (subject.IsQuotedTriple || obj.IsQuotedTriple ||
             IsBlankNodePropertyList(subject) || IsBlankNodePropertyList(obj) ||
             IsCollection(subject) || IsCollection(obj))
@@ -605,15 +600,46 @@ internal ref partial struct SparqlParser
         pa.AddValuesBlock(clause.Start, clause.Length);
     }
 
-    // The scratch GraphPatterns below (15.5 KB each) live in their own frames, entered only when the construct
-    // occurs. Inlined into the recursive ParseGroupBodyTree they cost every nesting level ~32 KB (ADR-055 Q3).
+    // The expansions below live in their own frames, entered only when the construct occurs (ADR-055 Q3).
 
-    /// <summary>Step over a SERVICE clause with the shipping parser; the evaluator re-parses its span.</summary>
-    [MethodImpl(MethodImplOptions.NoInlining)]
-    private void SkipServiceClause()
+    /// <summary>
+    /// [59] ServiceGraphPattern ::= 'SERVICE' 'SILENT'? VarOrIri GroupGraphPattern. The group is the ServiceHeader's
+    /// child, parsed by the same group grammar as every other; the evaluator sends its text to the endpoint.
+    /// </summary>
+    private void ParseServiceTree(scoped ref PatternArray pa, int depth)
     {
-        var serviceClause = new GraphPattern();
-        ParseService(ref serviceClause);
+        int header = pa.BeginService(_position);
+        ParseServiceHead();
+        int groupStart = _position;
+        ParseGroupTree(ref pa, depth + 1);
+        pa.EndService(header, groupStart, _position);
+    }
+
+    /// <summary>A SERVICE's <c>'SERVICE' 'SILENT'? VarOrIri</c> at <paramref name="serviceStart"/>; the evaluator reads
+    /// its endpoint with the reader the parser checked it with.</summary>
+    internal (bool Silent, Term Endpoint) ParseServiceHeadAt(int serviceStart)
+    {
+        _position = serviceStart;
+        return ParseServiceHead();
+    }
+
+    /// <summary>Reads <c>'SERVICE' 'SILENT'? VarOrIri</c>, leaving the cursor at the group's '{'.</summary>
+    private (bool Silent, Term Endpoint) ParseServiceHead()
+    {
+        ConsumeKeyword("SERVICE");
+        SkipWhitespace();
+        bool silent = false;
+        if (KeywordIs(PeekSpan(6), "SILENT"))
+        {
+            ConsumeKeyword("SILENT");
+            SkipWhitespace();
+            silent = true;
+        }
+        var endpoint = ParseTerm();
+        if (endpoint.Length == 0 || (endpoint.Type != TermType.Variable && endpoint.Type != TermType.Iri))
+            throw new SparqlParseException("SERVICE expects a variable or an IRI");
+        SkipWhitespace();
+        return (silent, endpoint);
     }
 
     /// <summary>
@@ -640,15 +666,22 @@ internal ref partial struct SparqlParser
     [MethodImpl(MethodImplOptions.NoInlining)]
     private void EmitStandaloneTriplesNode(scoped ref PatternArray pa, Term node)
     {
-        var expanded = new GraphPattern();
-        if (IsBlankNodePropertyList(node))
-            ExpandBlankNodePropertyList(ref expanded, node);
-        else
-            ExpandCollection(ref expanded, node);
-        for (int i = 0; i < expanded.PatternCount; i++)
+        var expanded = new TriplePatternList();
+        try
         {
-            var tp = expanded.GetPattern(i);
-            AddTreeTriple(ref pa, tp.Subject, tp.Predicate, tp.Object, tp.Path.Type, tp.Path.Iri.Start, tp.Path.Iri.Length);
+            if (IsBlankNodePropertyList(node))
+                ExpandBlankNodePropertyList(ref expanded, node);
+            else
+                ExpandCollection(ref expanded, node);
+            for (int i = 0; i < expanded.Count; i++)
+            {
+                var tp = expanded[i];
+                AddTreeTriple(ref pa, tp.Subject, tp.Predicate, tp.Object, tp.Path.Type, tp.Path.Iri.Start, tp.Path.Iri.Length);
+            }
+        }
+        finally
+        {
+            expanded.Dispose();
         }
     }
 
@@ -659,12 +692,19 @@ internal ref partial struct SparqlParser
     [MethodImpl(MethodImplOptions.NoInlining)]
     private void EmitExpandedTriples(scoped ref PatternArray pa, Term subject, Term predicate, Term obj, PropertyPath path)
     {
-        var expanded = new GraphPattern();
-        AddTriplePatternOrExpand(ref expanded, subject, predicate, obj, path);
-        for (int i = 0; i < expanded.PatternCount; i++)
+        var expanded = new TriplePatternList();
+        try
         {
-            var tp = expanded.GetPattern(i);
-            AddTreeTriple(ref pa, tp.Subject, tp.Predicate, tp.Object, tp.Path.Type, tp.Path.Iri.Start, tp.Path.Iri.Length);
+            AddTriplePatternOrExpand(ref expanded, subject, predicate, obj, path);
+            for (int i = 0; i < expanded.Count; i++)
+            {
+                var tp = expanded[i];
+                AddTreeTriple(ref pa, tp.Subject, tp.Predicate, tp.Object, tp.Path.Type, tp.Path.Iri.Start, tp.Path.Iri.Length);
+            }
+        }
+        finally
+        {
+            expanded.Dispose();
         }
     }
 

@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using SkyOmega.Mercury.Sparql.Types;
+using SkyOmega.Mercury.Sparql.Execution.Operators;
 
 namespace SkyOmega.Mercury.Sparql.Parsing;
 
@@ -22,9 +23,7 @@ internal ref partial struct SparqlParser
 {
     private ReadOnlySpan<char> _source;
     private int _position;
-    private int _quotedTripleCounter; // Counter for generating synthetic reifier variables
-    private int _seqVarCounter; // Counter for generating synthetic sequence intermediate variables
-    private int _blankNodePropListCounter; // Counter for generating synthetic blank nodes for [ ] property lists
+    private int _joinVariableCounter; // The next SyntheticTerms.JoinVariable an expansion takes
     private int _constructListNodeCounter; // Counter for synthetic list node blank nodes within CONSTRUCT template
     private int _currentDepth; // Current recursion depth for subqueries, paths, quoted triples
     private readonly int _maxDepth; // Maximum allowed recursion depth
@@ -52,9 +51,7 @@ internal ref partial struct SparqlParser
 
         _source = source;
         _position = 0;
-        _quotedTripleCounter = 0;
-        _seqVarCounter = 0;
-        _blankNodePropListCounter = 0;
+        _joinVariableCounter = 0;
         _currentDepth = 0;
         _maxDepth = maxDepth;
     }
@@ -542,7 +539,7 @@ internal ref partial struct SparqlParser
     /// <summary>
     /// Add a triple pattern, handling quoted triples, blank node property lists, and sequence paths.
     /// </summary>
-    internal void AddTriplePatternOrExpand(ref GraphPattern pattern, Term subject, Term predicate, Term obj, PropertyPath path)
+    internal void AddTriplePatternOrExpand(ref TriplePatternList pattern, Term subject, Term predicate, Term obj, PropertyPath path)
     {
         // Check if subject or object is a quoted triple - if so, expand to reification patterns
         if (subject.IsQuotedTriple || obj.IsQuotedTriple)
@@ -581,7 +578,7 @@ internal ref partial struct SparqlParser
             return;
         }
 
-        pattern.AddPattern(new TriplePattern
+        pattern.Add(new TriplePattern
         {
             Subject = actualSubject,
             Predicate = predicate,
@@ -613,18 +610,17 @@ internal ref partial struct SparqlParser
 
     /// <summary>
     /// Expand an RDF collection <c>( a b c )</c> (in subject or object position) into its rdf:first / rdf:rest /
-    /// rdf:nil list structure, joined through synthetic variables (a blank node in a pattern is a wildcard, so the
-    /// co-referring list nodes use the -300 join-variable range — the same mechanism as blank-node property lists),
+    /// rdf:nil list structure, joined through join variables (the same mechanism as blank-node property lists),
     /// and return the head node so the enclosing triple refers to the list head. Nested collections and blank-node
     /// property lists inside the list are expanded recursively.
     /// </summary>
-    private Term ExpandCollection(ref GraphPattern pattern, Term collection)
+    private Term ExpandCollection(ref TriplePatternList pattern, Term collection)
     {
         var savedPosition = _position;
         _position = collection.Start + 1; // skip '('
         SkipWhitespace();
 
-        Term head = NewListJoinVariable();
+        Term head = NewJoinVariable();
         Term node = head;
         while (!IsAtEnd() && Peek() != ')')
         {
@@ -633,7 +629,7 @@ internal ref partial struct SparqlParser
             else if (IsBlankNodePropertyList(item)) item = ExpandBlankNodePropertyList(ref pattern, item);
 
             // node rdf:first item  (rdf:first = synthetic IRI -6)
-            pattern.AddPattern(new TriplePattern
+            pattern.Add(new TriplePattern
             {
                 Subject = node,
                 Predicate = new Term { Type = TermType.Iri, Start = -6, Length = 0 },
@@ -643,8 +639,8 @@ internal ref partial struct SparqlParser
             SkipWhitespace();
             bool last = IsAtEnd() || Peek() == ')';
             // node rdf:rest (next | rdf:nil)  (rdf:rest = -7, rdf:nil = -8)
-            Term rest = last ? new Term { Type = TermType.Iri, Start = -8, Length = 0 } : NewListJoinVariable();
-            pattern.AddPattern(new TriplePattern
+            Term rest = last ? new Term { Type = TermType.Iri, Start = -8, Length = 0 } : NewJoinVariable();
+            pattern.Add(new TriplePattern
             {
                 Subject = node,
                 Predicate = new Term { Type = TermType.Iri, Start = -7, Length = 0 },
@@ -661,15 +657,10 @@ internal ref partial struct SparqlParser
     }
 
     /// <summary>
-    /// A fresh synthetic join variable in the -300..-331 range (resolved by SyntheticTermHelper), shared with
-    /// blank-node property lists so co-referring nodes get distinct, joinable variables. Bounded at 32 per query.
+    /// A new join variable (<see cref="SyntheticTerms.JoinVariable"/>): the node an expansion's triples share, such as a
+    /// collection's or a property list's node, a reifier or a path's intermediate node. Numbered per query, no limit.
     /// </summary>
-    private Term NewListJoinVariable()
-    {
-        if (_blankNodePropListCounter >= 32)
-            throw new SparqlParseException("RDF collection / blank-node property list exceeds the synthetic join-variable limit (32 per query)");
-        return Term.Variable(-(_blankNodePropListCounter++ + 300), 0);
-    }
+    private Term NewJoinVariable() => Term.Variable(SyntheticTerms.JoinVariable(_joinVariableCounter++), 0);
 
     /// <summary>
     /// Expand a blank node property list into multiple patterns.
@@ -680,13 +671,9 @@ internal ref partial struct SparqlParser
     /// Returns the synthetic variable term to be used in the main pattern.
     /// Uses synthetic variables (not blank nodes) so patterns join properly.
     /// </summary>
-    private Term ExpandBlankNodePropertyList(ref GraphPattern pattern, Term blankNodePropList)
+    private Term ExpandBlankNodePropertyList(ref TriplePatternList pattern, Term blankNodePropList)
     {
-        // Generate a synthetic variable for joining (not a blank node, which would be a wildcard)
-        // We use negative offsets with a specific range to indicate synthetic blank node property list vars
-        var blankNodeIndex = _blankNodePropListCounter++;
-        // Use negative start in range -300 to -331 to indicate synthetic blank node property list variable
-        var syntheticVar = Term.Variable(-(blankNodeIndex + 300), 0);
+        var syntheticVar = NewJoinVariable(); // the list's node, which its triples share
 
         // Parse the property list inside the brackets
         // Save current position and temporarily move to parse the inner content
@@ -725,7 +712,7 @@ internal ref partial struct SparqlParser
             }
             else
             {
-                pattern.AddPattern(new TriplePattern
+                pattern.Add(new TriplePattern
                 {
                     Subject = syntheticVar,
                     Predicate = innerPredicate,
@@ -758,7 +745,7 @@ internal ref partial struct SparqlParser
                 }
                 else
                 {
-                    pattern.AddPattern(new TriplePattern
+                    pattern.Add(new TriplePattern
                     {
                         Subject = syntheticVar,
                         Predicate = innerPredicate,
@@ -805,7 +792,7 @@ internal ref partial struct SparqlParser
     ///   ?_qt{N} rdf:object o .
     ///   ?_qt{N} pred obj .
     /// </summary>
-    private bool ExpandQuotedTriplePattern(ref GraphPattern pattern, Term subject, Term predicate, Term obj, PropertyPath path)
+    private bool ExpandQuotedTriplePattern(ref TriplePatternList pattern, Term subject, Term predicate, Term obj, PropertyPath path)
     {
         Term actualSubject = subject;
         Term actualObject = obj;
@@ -823,7 +810,7 @@ internal ref partial struct SparqlParser
         }
 
         // Add the main pattern with reifier(s) as subject/object
-        pattern.AddPattern(new TriplePattern
+        pattern.Add(new TriplePattern
         {
             Subject = actualSubject,
             Predicate = predicate,
@@ -838,15 +825,12 @@ internal ref partial struct SparqlParser
     /// Expand a single quoted triple into reification patterns.
     /// Returns a synthetic variable Term representing the reifier.
     /// </summary>
-    private Term ExpandQuotedTriple(ref GraphPattern pattern, Term quotedTriple)
+    private Term ExpandQuotedTriple(ref TriplePatternList pattern, Term quotedTriple)
     {
         IncrementDepth("Quoted triple");
         try
         {
-            // Generate synthetic reifier variable: ?_qt{N}
-            // We use negative offsets to indicate synthetic terms
-            var reifierIndex = _quotedTripleCounter++;
-            var reifierTerm = Term.Variable(-(reifierIndex + 100), 0); // Synthetic variable marker
+            var reifierTerm = NewJoinVariable(); // the reification's statement node
 
             // Re-parse the quoted triple content to extract nested terms
             var (innerSubject, innerPredicate, innerObject) =
@@ -864,7 +848,7 @@ internal ref partial struct SparqlParser
 
             // Add reification patterns:
             // ?_qt{N} rdf:type rdf:Statement
-            pattern.AddPattern(new TriplePattern
+            pattern.Add(new TriplePattern
             {
                 Subject = reifierTerm,
                 Predicate = Term.Iri(RdfTypeOffset, 0),
@@ -872,7 +856,7 @@ internal ref partial struct SparqlParser
             });
 
             // ?_qt{N} rdf:subject innerSubject
-            pattern.AddPattern(new TriplePattern
+            pattern.Add(new TriplePattern
             {
                 Subject = reifierTerm,
                 Predicate = Term.Iri(RdfSubjectOffset, 0),
@@ -880,7 +864,7 @@ internal ref partial struct SparqlParser
             });
 
             // ?_qt{N} rdf:predicate innerPredicate
-            pattern.AddPattern(new TriplePattern
+            pattern.Add(new TriplePattern
             {
                 Subject = reifierTerm,
                 Predicate = Term.Iri(RdfPredicateOffset, 0),
@@ -888,7 +872,7 @@ internal ref partial struct SparqlParser
             });
 
             // ?_qt{N} rdf:object innerObject
-            pattern.AddPattern(new TriplePattern
+            pattern.Add(new TriplePattern
             {
                 Subject = reifierTerm,
                 Predicate = Term.Iri(RdfObjectOffset, 0),
@@ -904,61 +888,58 @@ internal ref partial struct SparqlParser
     }
 
     /// <summary>
-    /// Expand a sequence path (p1/p2) into multiple triple patterns with synthetic intermediate variables.
-    /// For: ?s &lt;p1&gt;/&lt;p2&gt; ?o
-    /// Generates:
-    ///   ?s &lt;p1&gt; ?_seq0 .
-    ///   ?_seq0 &lt;p2&gt; ?o .
-    /// Handles nested sequences recursively: ?s &lt;p1&gt;/&lt;p2&gt;/&lt;p3&gt; ?o becomes 3 patterns.
+    /// [88] PathSequence ::= PathEltOrInverse ( '/' PathEltOrInverse )*: expands <c>?s p1/p2/…/pn ?o</c> into n triple
+    /// patterns joined by n-1 join variables. The sequence is a flat list, read right along it in a loop, so its length
+    /// is not nesting; only a parenthesized sequence inside it, <c>(p1/p2)/p3</c>, recurses and counts toward the
+    /// depth limit.
     /// </summary>
-    private bool ExpandSequencePath(ref GraphPattern pattern, Term subject, Term obj, PropertyPath path)
+    private bool ExpandSequencePath(ref TriplePatternList pattern, Term subject, Term obj, PropertyPath path)
     {
         IncrementDepth("Property path");
         try
         {
-            // Generate synthetic intermediate variable: ?_seq{N}
-            var seqIndex = _seqVarCounter++;
-            var intermediateTerm = Term.Variable(-(seqIndex + 200), 0); // Synthetic sequence variable marker
-
-            // Re-parse left and right path segments from source offsets
-            var (leftPredicate, leftPath) = ParsePathSegment(path.LeftStart, path.LeftLength);
-            var (rightPredicate, rightPath) = ParsePathSegment(path.RightStart, path.RightLength);
-
-            // Add left pattern: subject -> intermediate
-            if (leftPath.Type == PathType.Sequence)
+            while (true)
             {
-                // Recursively expand nested sequence on left side
-                ExpandSequencePath(ref pattern, subject, intermediateTerm, leftPath);
-            }
-            else
-            {
-                pattern.AddPattern(new TriplePattern
+                var intermediateTerm = NewJoinVariable(); // the node between the two steps
+
+                // Re-parse left and right path segments from source offsets
+                var (leftPredicate, leftPath) = ParsePathSegment(path.LeftStart, path.LeftLength);
+                var (rightPredicate, rightPath) = ParsePathSegment(path.RightStart, path.RightLength);
+
+                // Left step: subject -> intermediate
+                if (leftPath.Type == PathType.Sequence)
                 {
-                    Subject = subject,
-                    Predicate = leftPredicate,
-                    Object = intermediateTerm,
-                    Path = leftPath
-                });
-            }
+                    ExpandSequencePath(ref pattern, subject, intermediateTerm, leftPath);
+                }
+                else
+                {
+                    pattern.Add(new TriplePattern
+                    {
+                        Subject = subject,
+                        Predicate = leftPredicate,
+                        Object = intermediateTerm,
+                        Path = leftPath
+                    });
+                }
 
-            // Add right pattern: intermediate -> object
-            if (rightPath.Type == PathType.Sequence)
-            {
-                // Recursively expand nested sequence on right side
-                ExpandSequencePath(ref pattern, intermediateTerm, obj, rightPath);
-            }
-            else
-            {
-                pattern.AddPattern(new TriplePattern
+                // The rest of the sequence: on along it from the intermediate node
+                if (rightPath.Type == PathType.Sequence)
+                {
+                    subject = intermediateTerm;
+                    path = rightPath;
+                    continue;
+                }
+
+                // Last step: intermediate -> object
+                pattern.Add(new TriplePattern
                 {
                     Subject = intermediateTerm,
                     Predicate = rightPredicate,
                     Object = obj,
                     Path = rightPath
                 });
+                return true;
             }
-
-            return true;
         }
         finally
         {
@@ -1688,7 +1669,7 @@ internal ref partial struct SparqlParser
         Advance(); // Skip '('
         SkipWhitespace();
 
-        // Handle empty collection () — rdf:nil (synthetic IRI offset -8, resolved by SyntheticTermHelper)
+        // Handle empty collection () — rdf:nil (synthetic IRI offset -8, resolved by SyntheticTerms)
         if (Peek() == ')')
         {
             Advance();

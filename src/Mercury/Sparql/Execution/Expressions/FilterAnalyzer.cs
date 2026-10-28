@@ -79,10 +79,11 @@ internal static class FilterAnalyzer
             while (triples.MoveNext())
             {
                 var triple = triples.Current;
-                if (triple.Kind != PatternKind.Triple || triple.ObjectType != TermType.Variable)
+                // A join variable (negative offset) or a pattern's blank node (_:b) is not the text:match variable
+                if (triple.Kind != PatternKind.Triple || triple.ObjectType != TermType.Variable
+                    || triple.ObjectStart < 0 || !VariableName.IsSigil(source[triple.ObjectStart]))
                     continue;
-                var objVar = source.Slice(triple.ObjectStart + 1, triple.ObjectLength - 1); // skip '?'
-                if (objVar.SequenceEqual(varName))
+                if (VariableName.Same(source.Slice(triple.ObjectStart, triple.ObjectLength), varName))
                 {
                     boundAsObject = true;
                     break;

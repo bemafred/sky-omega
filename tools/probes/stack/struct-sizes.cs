@@ -7,9 +7,9 @@
 using System.Runtime.CompilerServices;
 var asm = typeof(SkyOmega.Mercury.SparqlEngine).Assembly;
 var sizeOf = typeof(Unsafe).GetMethod("SizeOf", Type.EmptyTypes)!;
-foreach (var n in new[] { "Types.Query", "Types.WhereClause", "Types.GraphPattern", "Types.SubSelect", "Types.SelectClause",
-    "Types.SolutionModifier", "Types.Prologue", "Types.GraphClause", "Types.ServiceClause", "Types.ExistsFilter",
-    "Types.TriplePattern", "Types.FilterExpr", "Types.BindExpr", "Types.AggregateExpression", "Types.ConstructTemplate",
+foreach (var n in new[] { "Types.Query", "Types.WhereClause", "Types.SubSelect", "Types.SelectClause",
+    "Types.SolutionModifier", "Types.Prologue", "Types.TriplePattern", "Types.TriplePatternList",
+    "Types.AggregateExpression", "Types.ConstructTemplate",
     "Types.ValuesClause", "Types.UpdateOperation", "Types.LimitOffsetClause", "Types.OrderByClause", "Types.GroupByClause",
     "Types.Term", "Types.PropertyPath", "Execution.QueryResults", "Patterns.PatternSlot" }) {
   var t = asm.GetType("SkyOmega.Mercury.Sparql." + n);

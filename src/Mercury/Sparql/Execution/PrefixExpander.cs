@@ -33,7 +33,7 @@ internal static class PrefixExpander
 
         // 'a' keyword — shorthand for rdf:type.
         if (term.Length == 1 && term[0] == 'a')
-            return SyntheticTermHelper.RdfType;
+            return SyntheticTerms.RdfType;
 
         int colonIdx = term.IndexOf(':');
         if (colonIdx < 0)
