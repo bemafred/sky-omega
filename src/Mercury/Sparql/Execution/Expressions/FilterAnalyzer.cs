@@ -121,8 +121,8 @@ internal static class FilterAnalyzer
 
         var args = inner.Slice(funcStart);
 
-        // First arg must be ?variable
-        if (args.Length < 2 || args[0] != '?')
+        // First arg must be a variable
+        if (args.Length < 2 || !VariableName.IsSigil(args[0]))
             return false;
         int varEnd = 1;
         while (varEnd < args.Length && IsVarChar(args[varEnd]))

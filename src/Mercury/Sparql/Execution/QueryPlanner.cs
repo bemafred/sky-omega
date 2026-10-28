@@ -370,7 +370,7 @@ internal sealed class QueryPlanner
         // parser applies per kind.
         if (term.Start < 0)
             return term.Start;
-        return Fnv1a.Hash(source.Slice(term.Start, term.Length));
+        return VariableName.Hash(source.Slice(term.Start, term.Length));
     }
 
     // Default cardinality estimate for SERVICE clauses (remote endpoints)

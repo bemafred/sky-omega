@@ -8,6 +8,7 @@ using System.Text;
 using System.Threading;
 using SkyOmega.Mercury.Abstractions;
 using SkyOmega.Mercury.Runtime;
+using SkyOmega.Mercury.Sparql;
 using SkyOmega.Mercury.Diagnostics;
 using SkyOmega.Mercury.Runtime.Buffers;
 
@@ -2846,13 +2847,13 @@ public sealed class QuadStore : IDisposable
 
     /// <summary>
     /// Resolve a SPARQL term (IRI, literal, or variable) to an atom ID for Reference-profile
-    /// queries. Empty spans and ?-prefixed variables become -1 (wildcard); IRIs/literals are
+    /// queries. Empty spans and variables become -1 (wildcard); IRIs/literals are
     /// looked up in the IAtomStore (returning 0 if not present, which matches nothing).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private long ResolveQueryTerm(ReadOnlySpan<char> term)
     {
-        if (term.IsEmpty || term[0] == '?')
+        if (term.IsEmpty || VariableName.IsSigil(term[0]))
             return -1;
         return _atoms.GetAtomId(term);
     }
@@ -2864,7 +2865,7 @@ public sealed class QuadStore : IDisposable
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private long ResolveQueryGraph(ReadOnlySpan<char> graph)
     {
-        if (graph.IsEmpty || graph[0] == '?')
+        if (graph.IsEmpty || VariableName.IsSigil(graph[0]))
             return graph.IsEmpty ? 0 : -1;
         var id = _atoms.GetAtomId(graph);
         return id == 0 ? -2 : id;
@@ -2882,8 +2883,8 @@ public sealed class QuadStore : IDisposable
         ReadOnlySpan<char> @object)
     {
         _ = @object; // reserved for future cost-based selection
-        var subjectBound = !subject.IsEmpty && subject[0] != '?';
-        var predicateBound = !predicate.IsEmpty && predicate[0] != '?';
+        var subjectBound = !subject.IsEmpty && !VariableName.IsSigil(subject[0]);
+        var predicateBound = !predicate.IsEmpty && !VariableName.IsSigil(predicate[0]);
 
         if (predicateBound && !subjectBound)
             return (_gposReference!, TemporalIndexType.GPOS);
@@ -2903,7 +2904,7 @@ public sealed class QuadStore : IDisposable
         ReadOnlySpan<char> graph,
         HashSet<long>? candidateObjectAtomIds = null)
     {
-        if (!graph.IsEmpty && graph[0] != '?')
+        if (!graph.IsEmpty && !VariableName.IsSigil(graph[0]))
             throw new ProfileCapabilityException(
                 "Minimal profile does not support named-graph queries (hasGraph=false per ADR-029). " +
                 "Drop the graph parameter or use Cognitive / Graph / Reference for multi-graph workloads.");
@@ -2926,9 +2927,9 @@ public sealed class QuadStore : IDisposable
         ReadOnlySpan<char> predicate,
         ReadOnlySpan<char> @object)
     {
-        var subjectBound = !subject.IsEmpty && subject[0] != '?';
-        var predicateBound = !predicate.IsEmpty && predicate[0] != '?';
-        var objectBound = !@object.IsEmpty && @object[0] != '?';
+        var subjectBound = !subject.IsEmpty && !VariableName.IsSigil(subject[0]);
+        var predicateBound = !predicate.IsEmpty && !VariableName.IsSigil(predicate[0]);
+        var objectBound = !@object.IsEmpty && !VariableName.IsSigil(@object[0]);
 
         // When secondary indexes aren't built yet, fall back to GSPO scan.
         if (_indexState != StoreIndexState.Ready)
@@ -3037,9 +3038,9 @@ public sealed class QuadStore : IDisposable
         ReadOnlySpan<char> @object,
         TemporalQueryType queryType)
     {
-        var subjectBound = !subject.IsEmpty && subject[0] != '?';
-        var predicateBound = !predicate.IsEmpty && predicate[0] != '?';
-        var objectBound = !@object.IsEmpty && @object[0] != '?';
+        var subjectBound = !subject.IsEmpty && !VariableName.IsSigil(subject[0]);
+        var predicateBound = !predicate.IsEmpty && !VariableName.IsSigil(predicate[0]);
+        var objectBound = !@object.IsEmpty && !VariableName.IsSigil(@object[0]);
 
         // When secondary indexes are not available, fall back to GSPO for everything.
         // Queries still work — just slower (full GSPO scan instead of targeted index).

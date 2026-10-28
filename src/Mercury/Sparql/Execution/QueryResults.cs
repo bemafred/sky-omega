@@ -378,7 +378,7 @@ internal sealed class MaterializedRow
 
     public ReadOnlySpan<char> GetValueByName(ReadOnlySpan<char> name)
     {
-        var hash = ComputeHash(name);
+        var hash = VariableName.Hash(name);
         for (int i = 0; i < _count; i++)
         {
             if (_hashes[i] == hash)
@@ -401,7 +401,6 @@ internal sealed class MaterializedRow
         }
     }
 
-    private static int ComputeHash(ReadOnlySpan<char> s) => Fnv1a.Hash(s);
 }
 
 /// <summary>
@@ -458,7 +457,7 @@ internal sealed class GroupedRow
         {
             var (start, len) = groupBy.GetVariable(i);
             var varName = source.AsSpan(start, len);
-            _keyHashes[i] = ComputeHash(varName);
+            _keyHashes[i] = VariableName.Hash(varName);
             var idx = bindings.FindBinding(varName);
             _keyValues[i] = idx >= 0 ? bindings.GetString(idx).ToString() : "";
         }
@@ -493,11 +492,11 @@ internal sealed class GroupedRow
 
             // Hash of alias (result variable name)
             var aliasName = source.AsSpan(agg.AliasStart, agg.AliasLength);
-            _aggHashes[i] = ComputeHash(aliasName);
+            _aggHashes[i] = VariableName.Hash(aliasName);
 
             // Hash of source variable/expression
             var varName = source.AsSpan(agg.VariableStart, agg.VariableLength);
-            _aggVarHashes[i] = ComputeHash(varName);
+            _aggVarHashes[i] = VariableName.Hash(varName);
 
             // Check if this is a complex expression (not a simple variable)
             // Simple variables start with ? or $, or are just *
@@ -549,7 +548,7 @@ internal sealed class GroupedRow
             bool isDouble = false;
 
             // For COUNT(*), we don't need a specific variable
-            if (varHash != ComputeHash("*".AsSpan()))
+            if (varHash != VariableName.Hash("*".AsSpan()))
             {
                 // Check if we have a complex expression that needs evaluation
                 var expr = _aggExpressions[i];
@@ -626,7 +625,7 @@ internal sealed class GroupedRow
             if (_distinctSets[i] != null)
             {
                 string val;
-                if (varHash == ComputeHash("*".AsSpan()))
+                if (varHash == VariableName.Hash("*".AsSpan()))
                 {
                     // COUNT(DISTINCT *) - build key from all bound variables in the row
                     var keyBuilder = new System.Text.StringBuilder();
@@ -813,7 +812,6 @@ internal sealed class GroupedRow
     public int GetAggregateHash(int index) => _aggHashes[index];
     public ReadOnlySpan<char> GetAggregateValue(int index) => _aggValues[index];
 
-    private static int ComputeHash(ReadOnlySpan<char> s) => Fnv1a.Hash(s);
 
     /// <summary>
     /// Try to parse a numeric value from an RDF literal string.

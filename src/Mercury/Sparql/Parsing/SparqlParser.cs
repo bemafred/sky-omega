@@ -1567,7 +1567,7 @@ internal ref partial struct SparqlParser
         var ch = Peek();
 
         // Variable: ?name or $name
-        if (ch == '?' || ch == '$')
+        if (VariableName.IsSigil(ch))
         {
             return ParseVariable();
         }
@@ -2272,7 +2272,7 @@ internal ref partial struct SparqlParser
 
             // Count variables
             int varCount = 0;
-            while (!IsAtEnd() && Peek() == '?')
+            while (!IsAtEnd() && VariableName.IsSigil(Peek()))
             {
                 Advance(); // Skip '?'
                 while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_'))
@@ -2518,7 +2518,7 @@ internal ref partial struct SparqlParser
 
                 // Now parse the alias variable
                 SkipWhitespace();
-                if (Peek() != '?')
+                if (!VariableName.IsSigil(Peek()))
                 {
                     throw new SparqlParseException("Expected variable after AS in GROUP BY expression");
                 }
@@ -2543,7 +2543,7 @@ internal ref partial struct SparqlParser
                 clause.AddExpression(aliasStart, aliasLength, innerExprStart, innerExprLength);
             }
             // Check for simple variable
-            else if (Peek() == '?')
+            else if (VariableName.IsSigil(Peek()))
             {
                 var start = _position;
                 Advance(); // Skip '?'
@@ -2608,7 +2608,7 @@ internal ref partial struct SparqlParser
             }
 
             // Parse variable
-            if (Peek() == '?')
+            if (VariableName.IsSigil(Peek()))
             {
                 var varStart = _position;
                 Advance(); // Skip '?'
@@ -2646,7 +2646,7 @@ internal ref partial struct SparqlParser
                 continue;
             if (span.Length >= 4 && span[..4].Equals("DESC", StringComparison.OrdinalIgnoreCase))
                 continue;
-            if (Peek() == '?')
+            if (VariableName.IsSigil(Peek()))
                 continue;
 
             break;

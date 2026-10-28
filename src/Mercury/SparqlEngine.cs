@@ -319,13 +319,13 @@ public static class SparqlEngine
             for (int i = 0; i < varCount; i++)
             {
                 var (start, length) = parsed.SelectClause.GetProjectedVariable(i);
-                names.Add(WithoutSigil(sparql.AsSpan().Slice(start, length)));
+                names.Add(VariableName.WithoutSigil(sparql.AsSpan().Slice(start, length)).ToString());
             }
             for (int i = 0; i < aggCount; i++)
             {
                 var agg = parsed.SelectClause.GetAggregate(i);
                 if (agg.AliasLength == 0) continue;
-                names.Add(WithoutSigil(sparql.AsSpan().Slice(agg.AliasStart, agg.AliasLength)));
+                names.Add(VariableName.WithoutSigil(sparql.AsSpan().Slice(agg.AliasStart, agg.AliasLength)).ToString());
             }
             projectedNames = names.ToArray();
             projected = new HashSet<string>(projectedNames);
@@ -442,9 +442,8 @@ public static class SparqlEngine
     /// Uses columnNames (hash-matched) to find the correct binding column for each projected variable.
     /// </summary>
     /// <summary>
-    /// The query's variables, by the FNV-1a hash the executor gives a binding (of the variable as written, sigil
-    /// included), and their names without the sigil in the order the query first mentions them. Both <c>?x</c> and
-    /// <c>$x</c> are variables; they name the same variable, so they share one name.
+    /// The query's variables, by the hash the executor gives a binding (<see cref="VariableName.Hash"/>), and their
+    /// names without the sigil in the order the query first mentions them.
     /// </summary>
     private static (Dictionary<int, string> NameByHash, List<string> NamesInSourceOrder) VariableNamesOf(string source)
     {
@@ -453,7 +452,7 @@ public static class SparqlEngine
         var span = source.AsSpan();
         for (int i = 0; i < span.Length - 1; i++)
         {
-            if (span[i] != '?' && span[i] != '$')
+            if (!VariableName.IsSigil(span[i]))
                 continue;
             int end = i + 1;
             while (end < span.Length && (char.IsLetterOrDigit(span[end]) || span[end] == '_'))
@@ -462,15 +461,13 @@ public static class SparqlEngine
                 continue;
             var written = span.Slice(i, end - i);
             var name = written.Slice(1).ToString();
-            if (nameByHash.TryAdd(Fnv1a.Hash(written), name) && !namesInSourceOrder.Contains(name))
+            if (nameByHash.TryAdd(VariableName.Hash(written), name) && !namesInSourceOrder.Contains(name))
                 namesInSourceOrder.Add(name);
             i = end - 1;
         }
         return (nameByHash, namesInSourceOrder);
     }
 
-    private static string WithoutSigil(ReadOnlySpan<char> variable) =>
-        (variable.Length > 0 && (variable[0] == '?' || variable[0] == '$') ? variable.Slice(1) : variable).ToString();
 
     #endregion
 }

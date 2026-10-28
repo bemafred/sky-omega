@@ -112,17 +112,14 @@ internal sealed class SparqlJsonResultWriter : IDisposable, IAsyncDisposable
         bool first = true;
         foreach (var varName in _variables)
         {
-            var varWithQ = varName.StartsWith("?") ? varName : "?" + varName;
-            var idx = bindings.FindBinding(varWithQ.AsSpan());
+            var idx = bindings.FindBinding(varName.AsSpan());
             if (idx < 0) continue; // Unbound variable
 
             if (!first) WriteChar(',');
             first = false;
 
             WriteString("\n        \"");
-            // Write variable name without leading ?
-            var nameToWrite = varName.StartsWith("?") ? varName.Substring(1) : varName;
-            WriteJsonEscaped(nameToWrite.AsSpan());
+            WriteJsonEscaped(VariableName.WithoutSigil(varName.AsSpan()));
             WriteString("\": ");
 
             WriteBindingValue(ref bindings, idx);

@@ -329,8 +329,7 @@ internal class UpdateExecutor
 
         if (term.Type == TermType.Variable)
         {
-            // MaterializedRow keys bindings by the hash of the variable name as written, '?' included.
-            int hash = Fnv1a.Hash(termSpan);
+            int hash = VariableName.Hash(termSpan);
             for (int i = 0; i < row.BindingCount; i++)
             {
                 if (row.GetHash(i) == hash)

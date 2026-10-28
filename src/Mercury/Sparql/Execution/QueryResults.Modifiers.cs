@@ -521,10 +521,13 @@ internal ref partial struct QueryResults
 
     private static string NormalizeAggregateExpr(string expr)
     {
+        // Case, whitespace and the variable sigil do not matter: COUNT(?s) is count( $s )
         var sb = new System.Text.StringBuilder(expr.Length);
         foreach (var c in expr)
         {
-            if (!char.IsWhiteSpace(c))
+            if (VariableName.IsSigil(c))
+                sb.Append('?');
+            else if (!char.IsWhiteSpace(c))
                 sb.Append(char.ToUpperInvariant(c));
         }
         return sb.ToString();

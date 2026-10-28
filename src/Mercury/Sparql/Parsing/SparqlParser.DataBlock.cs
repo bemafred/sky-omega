@@ -58,7 +58,7 @@ internal ref partial struct SparqlParser
                 _parser.Advance();
                 _full = true;
             }
-            else if (ch != '?' && ch != '$')
+            else if (!VariableName.IsSigil(ch))
             {
                 throw new SparqlParseException("Expected a variable or '(' after VALUES");
             }
@@ -78,7 +78,7 @@ internal ref partial struct SparqlParser
             if (_full ? _parser.Peek() != ')' : _variableCount == 0)
             {
                 char ch = _parser.Peek();
-                if (ch != '?' && ch != '$')
+                if (!VariableName.IsSigil(ch))
                     throw new SparqlParseException(_full ? "Expected a variable or ')' in VALUES" : "Expected a variable after VALUES");
                 var variable = _parser.ParseVariable();
                 start = variable.Start;

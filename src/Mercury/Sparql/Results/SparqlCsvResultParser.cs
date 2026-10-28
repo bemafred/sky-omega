@@ -169,10 +169,8 @@ internal sealed class SparqlCsvResultParser : IDisposable, IAsyncDisposable
         for (int i = 0; i < fields.Count; i++)
         {
             var field = fields[i];
-            // TSV has ?variable prefix, CSV does not
-            if (field.StartsWith('?'))
-                field = field.Substring(1);
-            vars[i] = field;
+            // TSV has a ?variable prefix, CSV does not
+            vars[i] = VariableName.WithoutSigil(field);
         }
 
         return vars;

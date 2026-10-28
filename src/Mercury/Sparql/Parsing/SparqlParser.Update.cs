@@ -633,7 +633,7 @@ internal ref partial struct SparqlParser
             return (start, _position - start, TermType.BlankNode);
         }
 
-        if (Peek() == '?')
+        if (VariableName.IsSigil(Peek()))
         {
             // Variable
             Advance();

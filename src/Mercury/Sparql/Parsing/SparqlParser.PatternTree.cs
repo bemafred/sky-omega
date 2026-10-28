@@ -560,7 +560,7 @@ internal ref partial struct SparqlParser
         SkipWhitespace();
 
         int varStart = _position;
-        if (Peek() == '?')
+        if (VariableName.IsSigil(Peek()))
         {
             Advance(); // consume '?'
             while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_'))
@@ -660,7 +660,7 @@ internal ref partial struct SparqlParser
     }
 
     private bool SameVariable(TermType type, int start, int length, ReadOnlySpan<char> nameWithoutSigil)
-        => type == TermType.Variable && start >= 0 && length > 1 && _source.Slice(start + 1, length - 1).SequenceEqual(nameWithoutSigil);
+        => type == TermType.Variable && start >= 0 && length > 1 && VariableName.Same(_source.Slice(start, length), nameWithoutSigil);
 
     /// <summary>A blank-node property list or collection standing alone as a triple pattern: its triples only.</summary>
     [MethodImpl(MethodImplOptions.NoInlining)]

@@ -85,16 +85,14 @@ internal sealed class SparqlCsvResultWriter : IDisposable, IAsyncDisposable
             var name = variables[i];
             if (_useTsv)
             {
-                // TSV uses ?var format
-                if (!name.StartsWith("?"))
-                    WriteChar('?');
-                WriteSpan(name.AsSpan());
+                // TSV writes ?var
+                WriteChar('?');
+                WriteSpan(VariableName.WithoutSigil(name.AsSpan()));
             }
             else
             {
-                // CSV strips the ?
-                var nameToWrite = name.StartsWith("?") ? name.Substring(1) : name;
-                WriteCsvField(nameToWrite.AsSpan());
+                // CSV writes the bare name
+                WriteCsvField(VariableName.WithoutSigil(name.AsSpan()));
             }
         }
 
@@ -126,8 +124,7 @@ internal sealed class SparqlCsvResultWriter : IDisposable, IAsyncDisposable
             if (i > 0) WriteChar(_separator);
 
             var varName = _variables[i];
-            var varWithQ = varName.StartsWith("?") ? varName : "?" + varName;
-            var idx = bindings.FindBinding(varWithQ.AsSpan());
+            var idx = bindings.FindBinding(varName.AsSpan());
 
             if (idx >= 0)
             {

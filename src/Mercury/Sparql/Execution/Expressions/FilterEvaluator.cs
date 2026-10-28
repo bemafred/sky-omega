@@ -232,7 +232,7 @@ internal ref partial struct FilterEvaluator
         }
 
         // Variable reference
-        if (ch == '?')
+        if (VariableName.IsSigil(ch))
         {
             return ParseVariable();
         }
@@ -255,7 +255,7 @@ internal ref partial struct FilterEvaluator
     private Value ParseVariable()
     {
         var start = _position;
-        Advance(); // Skip '?'
+        Advance(); // the sigil
 
         while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_'))
             Advance();
@@ -288,7 +288,7 @@ internal ref partial struct FilterEvaluator
 
     private int FindBinding(ReadOnlySpan<char> variableName)
     {
-        var hash = ComputeVariableHash(variableName);
+        var hash = VariableName.Hash(variableName);
         for (int i = 0; i < _bindingCount; i++)
         {
             if (_bindingData[i].VariableNameHash == hash)
@@ -308,7 +308,6 @@ internal ref partial struct FilterEvaluator
         return -1;
     }
 
-    private static int ComputeVariableHash(ReadOnlySpan<char> value) => Fnv1a.Hash(value);
 
     private Value ParseStringLiteral()
     {

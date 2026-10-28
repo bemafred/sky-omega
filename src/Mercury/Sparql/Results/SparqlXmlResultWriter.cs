@@ -82,8 +82,7 @@ internal sealed class SparqlXmlResultWriter : IDisposable, IAsyncDisposable
         foreach (var v in variables)
         {
             WriteString("    <variable name=\"");
-            var name = v.StartsWith("?") ? v.Substring(1) : v;
-            WriteXmlEscaped(name.AsSpan());
+            WriteXmlEscaped(VariableName.WithoutSigil(v.AsSpan()));
             WriteString("\"/>\n");
         }
 
@@ -120,13 +119,11 @@ internal sealed class SparqlXmlResultWriter : IDisposable, IAsyncDisposable
 
         foreach (var varName in _variables)
         {
-            var varWithQ = varName.StartsWith("?") ? varName : "?" + varName;
-            var idx = bindings.FindBinding(varWithQ.AsSpan());
+            var idx = bindings.FindBinding(varName.AsSpan());
             if (idx < 0) continue; // Unbound variable
 
             WriteString("      <binding name=\"");
-            var nameToWrite = varName.StartsWith("?") ? varName.Substring(1) : varName;
-            WriteXmlEscaped(nameToWrite.AsSpan());
+            WriteXmlEscaped(VariableName.WithoutSigil(varName.AsSpan()));
             WriteString("\">\n");
 
             WriteBindingValue(ref bindings, idx);

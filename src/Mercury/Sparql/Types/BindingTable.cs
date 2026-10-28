@@ -84,7 +84,7 @@ internal ref struct BindingTable
         temp.Slice(0, written).CopyTo(_stringBuffer.Slice(_stringOffset));
 
         ref var binding = ref _bindings[_count++];
-        binding.VariableNameHash = ComputeHash(variableName);
+        binding.VariableNameHash = VariableName.Hash(variableName);
         binding.Type = BindingValueType.Integer;
         binding.IntegerValue = value;
         binding.StringOffset = _stringOffset;
@@ -110,7 +110,7 @@ internal ref struct BindingTable
         temp.Slice(0, written).CopyTo(_stringBuffer.Slice(_stringOffset));
 
         ref var binding = ref _bindings[_count++];
-        binding.VariableNameHash = ComputeHash(variableName);
+        binding.VariableNameHash = VariableName.Hash(variableName);
         binding.Type = BindingValueType.Double;
         binding.DoubleValue = value;
         binding.StringOffset = _stringOffset;
@@ -134,7 +134,7 @@ internal ref struct BindingTable
         str.AsSpan().CopyTo(_stringBuffer.Slice(_stringOffset));
 
         ref var binding = ref _bindings[_count++];
-        binding.VariableNameHash = ComputeHash(variableName);
+        binding.VariableNameHash = VariableName.Hash(variableName);
         binding.Type = BindingValueType.Boolean;
         binding.BooleanValue = value;
         binding.StringOffset = _stringOffset;
@@ -156,7 +156,7 @@ internal ref struct BindingTable
         value.CopyTo(_stringBuffer.Slice(_stringOffset));
 
         ref var binding = ref _bindings[_count++];
-        binding.VariableNameHash = ComputeHash(variableName);
+        binding.VariableNameHash = VariableName.Hash(variableName);
         binding.Type = BindingValueType.String;
         binding.StringOffset = _stringOffset;
         binding.StringLength = value.Length;
@@ -178,7 +178,7 @@ internal ref struct BindingTable
         value.CopyTo(_stringBuffer.Slice(_stringOffset));
 
         ref var binding = ref _bindings[_count++];
-        binding.VariableNameHash = ComputeHash(variableName);
+        binding.VariableNameHash = VariableName.Hash(variableName);
         binding.Type = BindingValueType.Uri;
         binding.StringOffset = _stringOffset;
         binding.StringLength = value.Length;
@@ -262,7 +262,7 @@ internal ref struct BindingTable
     /// </summary>
     public readonly int FindBinding(ReadOnlySpan<char> variableName)
     {
-        var hash = ComputeHash(variableName);
+        var hash = VariableName.Hash(variableName);
         for (int i = 0; i < _count; i++)
         {
             if (_bindings[i].VariableNameHash == hash)
@@ -385,5 +385,4 @@ internal ref struct BindingTable
         _stringBuffer.Slice(0, _stringOffset).CopyTo(destination);
     }
 
-    private static int ComputeHash(ReadOnlySpan<char> value) => Fnv1a.Hash(value);
 }

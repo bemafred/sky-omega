@@ -49,7 +49,7 @@ internal ref partial struct SparqlParser
             var agg = selectClause.GetAggregate(i);
             if (agg.AliasLength > 0)
             {
-                var hash = ComputeSpanHash(_source.Slice(agg.AliasStart, agg.AliasLength));
+                var hash = VariableName.Hash(_source.Slice(agg.AliasStart, agg.AliasLength));
                 if (selectAliasCount < 32) selectAliasHashes[selectAliasCount++] = hash;
             }
         }
@@ -92,7 +92,7 @@ internal ref partial struct SparqlParser
                 ? subquery.Select.GetProjectedVariable(j)
                 : (subquery.Select.GetAggregate(j - projected).AliasStart, subquery.Select.GetAggregate(j - projected).AliasLength);
             if (len == 0) continue;
-            var hash = ComputeSpanHash(_source.Slice(start, len));
+            var hash = VariableName.Hash(_source.Slice(start, len));
             foreach (var aliasHash in aliasHashes)
             {
                 if (aliasHash == hash)
@@ -226,7 +226,7 @@ internal ref partial struct SparqlParser
                     if (gbLen > 0)
                     {
                         var gbName = _source.Slice(gbStart, gbLen);
-                        if (varName.SequenceEqual(gbName))
+                        if (VariableName.Same(varName, gbName))
                         {
                             found = true;
                             break;
@@ -511,7 +511,7 @@ internal ref partial struct SparqlParser
             {
                 SkipWhitespace();
                 char ch = Peek();
-                if (IsAtEnd() || (ch != '?' && ch != '$' && ch != '<' && ch != ':' && !char.IsLetter(ch)))
+                if (IsAtEnd() || (!VariableName.IsSigil(ch) && ch != '<' && ch != ':' && !char.IsLetter(ch)))
                     break; // '{' opens the WHERE
                 var ahead = PeekSpan(6);
                 if (KeywordIs(ahead, "WHERE") || KeywordIs(ahead, "FROM") || KeywordIs(ahead, "ORDER") ||
@@ -623,7 +623,7 @@ internal ref partial struct SparqlParser
 
                         // Check for duplicate alias
                         var aliasSpan = _source.Slice(agg.AliasStart, agg.AliasLength);
-                        var aliasHash = ComputeSpanHash(aliasSpan);
+                        var aliasHash = VariableName.Hash(aliasSpan);
                         for (int i = 0; i < aliasCount; i++)
                         {
                             if (aliasHashes[i] == aliasHash)
@@ -643,7 +643,7 @@ internal ref partial struct SparqlParser
                         if (agg.AliasLength > 0)
                         {
                             var aliasSpan = _source.Slice(agg.AliasStart, agg.AliasLength);
-                            var aliasHash = ComputeSpanHash(aliasSpan);
+                            var aliasHash = VariableName.Hash(aliasSpan);
                             for (int i = 0; i < aliasCount; i++)
                             {
                                 if (aliasHashes[i] == aliasHash)
@@ -663,7 +663,7 @@ internal ref partial struct SparqlParser
                     }
                 }
                 // Check for variable
-                else if (Peek() == '?')
+                else if (VariableName.IsSigil(Peek()))
                 {
                     // Store variable position for validation
                     var varStart = _position;
@@ -673,7 +673,7 @@ internal ref partial struct SparqlParser
 
                     // Check for duplicate variable name
                     var varSpan = _source.Slice(varStart, _position - varStart);
-                    var varHash = ComputeSpanHash(varSpan);
+                    var varHash = VariableName.Hash(varSpan);
                     for (int i = 0; i < aliasCount; i++)
                     {
                         if (aliasHashes[i] == varHash)
@@ -712,7 +712,6 @@ internal ref partial struct SparqlParser
         return clause;
     }
 
-    private static int ComputeSpanHash(ReadOnlySpan<char> span) => Fnv1a.Hash(span);
 
     private AggregateExpression ParseAggregateExpression()
     {
@@ -810,7 +809,7 @@ internal ref partial struct SparqlParser
                             SkipWhitespace();
 
                             // Parse the alias variable
-                            if (Peek() == '?')
+                            if (VariableName.IsSigil(Peek()))
                             {
                                 agg.AliasStart = _position;
                                 Advance();
@@ -877,7 +876,7 @@ internal ref partial struct SparqlParser
             Advance();
             agg.VariableLength = 1;
         }
-        else if (Peek() == '?')
+        else if (VariableName.IsSigil(Peek()))
         {
             Advance();
             while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_'))
@@ -969,7 +968,7 @@ internal ref partial struct SparqlParser
             ConsumeKeyword("AS");
             SkipWhitespace();
 
-            if (Peek() == '?')
+            if (VariableName.IsSigil(Peek()))
             {
                 agg.AliasStart = _position;
                 Advance();

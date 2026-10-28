@@ -664,7 +664,7 @@ internal sealed class TreeJoinExecutor
         var reader = new SparqlParser.DataBlockReader(_source.AsSpan(), vc.Start);
         var varNames = new List<string>();
         while (reader.MoveNextVariable(out int vs, out int vl))
-            varNames.Add("?" + _source.Substring(vs + 1, vl - 1)); // ?x and $x are one variable
+            varNames.Add(_source.Substring(vs, vl));
 
         var valueRows = new List<MaterializedRow>();
         var bindingArray = ArrayPool<Binding>.Shared.Rent(64);
@@ -735,7 +735,7 @@ internal sealed class TreeJoinExecutor
                 {
                     table.TruncateTo(0);
                     foreach (var v in row.Variables)
-                        if (row.TryGetBinding(v, out var b)) table.Bind(("?" + v.TrimStart('?')).AsSpan(), b.ToRdfTerm().AsSpan());
+                        if (row.TryGetBinding(v, out var b)) table.Bind(v.AsSpan(), b.ToRdfTerm().AsSpan());
                     result.Add(new MaterializedRow(table));
                 }
             }
@@ -800,8 +800,8 @@ internal sealed class TreeJoinExecutor
                 table.TruncateTo(0);
                 foreach (var name in outNames)
                 {
-                    int idx = bt.FindBinding(("?" + name).AsSpan());
-                    if (idx >= 0) table.Bind(("?" + name).AsSpan(), bt.GetString(idx));
+                    int idx = bt.FindBinding(name);
+                    if (idx >= 0) table.Bind(name, bt.GetString(idx));
                 }
                 projected.Add(new MaterializedRow(table));
             }
@@ -824,7 +824,7 @@ internal sealed class TreeJoinExecutor
             // before the modifiers ("SELECT *" itself names none). ADR-055 D7 replaces the scan with the in-scope set.
             for (int i = selectStart; i < modifiersStart && i < source.Length; i++)
             {
-                if (source[i] != '?') continue;
+                if (!VariableName.IsSigil(source[i])) continue;
                 int j = i + 1;
                 while (j < source.Length && (char.IsLetterOrDigit(source[j]) || source[j] == '_')) j++;
                 if (j > i + 1 && seen.Add(source.Substring(i + 1, j - i - 1))) names.Add(source.Substring(i + 1, j - i - 1));
@@ -835,7 +835,7 @@ internal sealed class TreeJoinExecutor
         for (int i = 0; i < sub.Select.ProjectedVariableCount; i++)
         {
             var (start, length) = sub.Select.GetProjectedVariable(i);
-            string name = source.Substring(start, length).TrimStart('?');
+            string name = VariableName.WithoutSigil(source.Substring(start, length));
             if (seen.Add(name)) names.Add(name);
         }
         // Aggregate aliases: SELECT (COUNT(?x) AS ?c) projects ?c, which is not a plain projected variable —
@@ -844,7 +844,7 @@ internal sealed class TreeJoinExecutor
         {
             var agg = sub.Select.GetAggregate(i);
             if (agg.AliasLength == 0) continue;
-            string name = source.Substring(agg.AliasStart, agg.AliasLength).TrimStart('?');
+            string name = VariableName.WithoutSigil(source.Substring(agg.AliasStart, agg.AliasLength));
             if (seen.Add(name)) names.Add(name);
         }
         return names;

@@ -729,7 +729,7 @@ internal sealed class SparqlExplainer
     private void AddVariableHash(Term term)
     {
         var name = _source.AsSpan().Slice(term.Start, term.Length);
-        var hash = Fnv1a.Hash(name);
+        var hash = VariableName.Hash(name);
         if (!_boundVariables.Contains(hash))
             _boundVariables.Add(hash);
     }
@@ -762,7 +762,7 @@ internal sealed class SparqlExplainer
     {
         if (term.Length == 0) return false;
         var first = _source[term.Start];
-        return first == '?' || first == '$';
+        return VariableName.IsSigil(first);
     }
 
     private string GetSliceDescription()

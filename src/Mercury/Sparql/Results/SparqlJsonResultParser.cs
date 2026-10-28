@@ -127,11 +127,7 @@ internal sealed class SparqlResultRow
     /// <returns>True if the variable is bound.</returns>
     public bool TryGetValue(string variable, out SparqlResultValue value)
     {
-        // Strip leading ? if present
-        if (variable.StartsWith('?'))
-            variable = variable.Substring(1);
-
-        return _bindings.TryGetValue(variable, out value);
+        return _bindings.TryGetValue(VariableName.WithoutSigil(variable), out value);
     }
 
     /// <summary>
@@ -149,9 +145,7 @@ internal sealed class SparqlResultRow
     /// </summary>
     public bool IsBound(string variable)
     {
-        if (variable.StartsWith('?'))
-            variable = variable.Substring(1);
-        return _bindings.ContainsKey(variable);
+        return _bindings.ContainsKey(VariableName.WithoutSigil(variable));
     }
 
     /// <summary>
