@@ -29,8 +29,18 @@ public sealed record W3CTestCase(
     string ManifestPath,
     (string Path, string GraphIri)[]? ActionGraphData = null,
     string? ExpectedDefaultGraphPath = null,
-    (string Path, string GraphIri)[]? ExpectedNamedGraphs = null)
+    (string Path, string GraphIri)[]? ExpectedNamedGraphs = null,
+    string? Approval = null)
 {
+    /// <summary>
+    /// False when the working group rejected the test (dawgt:approval NotApproved or Withdrawn): it is not normative.
+    /// Approved and Proposed tests, and tests with no approval property, are run; much of the SPARQL 1.1 suite is
+    /// Proposed (reviewed in the suite's later years without a status change).
+    /// </summary>
+    public bool IsApproved => Approval is null ||
+        !(Approval.EndsWith("#NotApproved>", System.StringComparison.Ordinal) ||
+          Approval.EndsWith("#Withdrawn>", System.StringComparison.Ordinal));
+
     /// <summary>
     /// Gets a display name suitable for xUnit test output.
     /// </summary>

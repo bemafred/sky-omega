@@ -49,6 +49,138 @@ public static class W3CTestContext
     };
 
     /// <summary>
+    /// The SPARQL 1.0 (DAWG) tests that failed when the suite was first run, 2026-10-28, by cause. Each entry is a
+    /// known failure to fix and remove, not an exclusion: see the Mercury finding mercury-w3c-sparql10-not-run.
+    /// </summary>
+    private static readonly Dictionary<string, string> Sparql10Triage = new()
+    {
+        ["data-r2/algebra/manifest#nested-opt-1"] = "SPARQL 1.0 triage: nested and complex OPTIONAL",
+        ["data-r2/basic/manifest#base-prefix-1"] = "SPARQL 1.0 triage: relative IRIs are not resolved against BASE",
+        ["data-r2/basic/manifest#base-prefix-2"] = "SPARQL 1.0 triage: relative IRIs are not resolved against BASE",
+        ["data-r2/basic/manifest#base-prefix-4"] = "SPARQL 1.0 triage: relative IRIs are not resolved against BASE",
+        ["data-r2/basic/manifest#base-prefix-5"] = "SPARQL 1.0 triage: relative IRIs are not resolved against BASE",
+        ["data-r2/basic/manifest#quotes-1"] = "SPARQL 1.0 triage: long string literals in a pattern",
+        ["data-r2/basic/manifest#quotes-2"] = "SPARQL 1.0 triage: long string literals in a pattern",
+        ["data-r2/basic/manifest#quotes-3"] = "SPARQL 1.0 triage: long string literals in a pattern",
+        ["data-r2/basic/manifest#quotes-4"] = "SPARQL 1.0 triage: long string literals in a pattern",
+        ["data-r2/basic/manifest#term-6"] = "SPARQL 1.0 triage: numeric literal forms in a pattern (\"456.\"^^xsd:decimal, +5)",
+        ["data-r2/basic/manifest#term-7"] = "SPARQL 1.0 triage: numeric literal forms in a pattern (\"456.\"^^xsd:decimal, +5)",
+        ["data-r2/basic/manifest#term-8"] = "SPARQL 1.0 triage: numeric literal forms in a pattern (\"456.\"^^xsd:decimal, +5)",
+        ["data-r2/boolean-effective-value/manifest#dawg-bev-1"] = "SPARQL 1.0 triage: effective boolean value",
+        ["data-r2/boolean-effective-value/manifest#dawg-bev-2"] = "SPARQL 1.0 triage: effective boolean value",
+        ["data-r2/boolean-effective-value/manifest#dawg-bev-3"] = "SPARQL 1.0 triage: effective boolean value",
+        ["data-r2/boolean-effective-value/manifest#dawg-bev-4"] = "SPARQL 1.0 triage: effective boolean value",
+        ["data-r2/boolean-effective-value/manifest#dawg-bev-5"] = "SPARQL 1.0 triage: effective boolean value",
+        ["data-r2/boolean-effective-value/manifest#dawg-bev-6"] = "SPARQL 1.0 triage: effective boolean value",
+        ["data-r2/cast/manifest#cast-dT"] = "SPARQL 1.0 triage: casts to xsd:float, xsd:decimal, xsd:dateTime",
+        ["data-r2/cast/manifest#cast-dec"] = "SPARQL 1.0 triage: casts to xsd:float, xsd:decimal, xsd:dateTime",
+        ["data-r2/cast/manifest#cast-flt"] = "SPARQL 1.0 triage: casts to xsd:float, xsd:decimal, xsd:dateTime",
+        ["data-r2/dataset/manifest#dawg-dataset-01"] = "SPARQL 1.0 triage: harness: the files FROM / FROM NAMED name are not loaded, and FROM NAMED is injected",
+        ["data-r2/dataset/manifest#dawg-dataset-03"] = "SPARQL 1.0 triage: harness: the files FROM / FROM NAMED name are not loaded, and FROM NAMED is injected",
+        ["data-r2/dataset/manifest#dawg-dataset-05"] = "SPARQL 1.0 triage: harness: the files FROM / FROM NAMED name are not loaded, and FROM NAMED is injected",
+        ["data-r2/dataset/manifest#dawg-dataset-06"] = "SPARQL 1.0 triage: harness: the files FROM / FROM NAMED name are not loaded, and FROM NAMED is injected",
+        ["data-r2/dataset/manifest#dawg-dataset-07"] = "SPARQL 1.0 triage: harness: the files FROM / FROM NAMED name are not loaded, and FROM NAMED is injected",
+        ["data-r2/dataset/manifest#dawg-dataset-08"] = "SPARQL 1.0 triage: harness: the files FROM / FROM NAMED name are not loaded, and FROM NAMED is injected",
+        ["data-r2/dataset/manifest#dawg-dataset-11"] = "SPARQL 1.0 triage: harness: the files FROM / FROM NAMED name are not loaded, and FROM NAMED is injected",
+        ["data-r2/dataset/manifest#dawg-dataset-12b"] = "SPARQL 1.0 triage: harness: the files FROM / FROM NAMED name are not loaded, and FROM NAMED is injected",
+        ["data-r2/distinct/manifest#distinct-2"] = "SPARQL 1.0 triage: value equality and term identity of literals (unknown datatypes, lexical forms, language-tag case)",
+        ["data-r2/distinct/manifest#distinct-9"] = "SPARQL 1.0 triage: value equality and term identity of literals (unknown datatypes, lexical forms, language-tag case)",
+        ["data-r2/expr-builtin/manifest#dawg-lang-1"] = "SPARQL 1.0 triage: str, lang and langMatches",
+        ["data-r2/expr-builtin/manifest#dawg-lang-2"] = "SPARQL 1.0 triage: str, lang and langMatches",
+        ["data-r2/expr-builtin/manifest#dawg-lang-3"] = "SPARQL 1.0 triage: value equality and term identity of literals (unknown datatypes, lexical forms, language-tag case)",
+        ["data-r2/expr-builtin/manifest#dawg-langMatches-4"] = "SPARQL 1.0 triage: str, lang and langMatches",
+        ["data-r2/expr-builtin/manifest#dawg-str-1"] = "SPARQL 1.0 triage: str, lang and langMatches",
+        ["data-r2/expr-builtin/manifest#dawg-str-2"] = "SPARQL 1.0 triage: str, lang and langMatches",
+        ["data-r2/expr-builtin/manifest#lang-case-insensitive-eq"] = "SPARQL 1.0 triage: value equality and term identity of literals (unknown datatypes, lexical forms, language-tag case)",
+        ["data-r2/expr-builtin/manifest#lang-case-insensitive-ne"] = "SPARQL 1.0 triage: value equality and term identity of literals (unknown datatypes, lexical forms, language-tag case)",
+        ["data-r2/expr-builtin/manifest#sameTerm-eq"] = "SPARQL 1.0 triage: value equality and term identity of literals (unknown datatypes, lexical forms, language-tag case)",
+        ["data-r2/expr-builtin/manifest#sameTerm-not-eq"] = "SPARQL 1.0 triage: value equality and term identity of literals (unknown datatypes, lexical forms, language-tag case)",
+        ["data-r2/expr-builtin/manifest#sameTerm-simple"] = "SPARQL 1.0 triage: value equality and term identity of literals (unknown datatypes, lexical forms, language-tag case)",
+        ["data-r2/expr-equals/manifest#eq-1"] = "SPARQL 1.0 triage: value equality and term identity of literals (unknown datatypes, lexical forms, language-tag case)",
+        ["data-r2/expr-equals/manifest#eq-2"] = "SPARQL 1.0 triage: value equality and term identity of literals (unknown datatypes, lexical forms, language-tag case)",
+        ["data-r2/expr-equals/manifest#eq-2-1"] = "SPARQL 1.0 triage: value equality and term identity of literals (unknown datatypes, lexical forms, language-tag case)",
+        ["data-r2/expr-equals/manifest#eq-2-2"] = "SPARQL 1.0 triage: value equality and term identity of literals (unknown datatypes, lexical forms, language-tag case)",
+        ["data-r2/expr-equals/manifest#eq-3"] = "SPARQL 1.0 triage: value equality and term identity of literals (unknown datatypes, lexical forms, language-tag case)",
+        ["data-r2/expr-equals/manifest#eq-dateTime"] = "SPARQL 1.0 triage: value equality and term identity of literals (unknown datatypes, lexical forms, language-tag case)",
+        ["data-r2/expr-equals/manifest#eq-float"] = "SPARQL 1.0 triage: value equality and term identity of literals (unknown datatypes, lexical forms, language-tag case)",
+        ["data-r2/graph/manifest#dawg-graph-09"] = "SPARQL 1.0 triage: harness: the files FROM / FROM NAMED name are not loaded, and FROM NAMED is injected",
+        ["data-r2/graph/manifest#dawg-graph-10b"] = "SPARQL 1.0 triage: harness: the files FROM / FROM NAMED name are not loaded, and FROM NAMED is injected",
+        ["data-r2/graph/manifest#dawg-graph-11"] = "SPARQL 1.0 triage: harness: the files FROM / FROM NAMED name are not loaded, and FROM NAMED is injected",
+        ["data-r2/i18n/manifest#kanji-1"] = "SPARQL 1.0 triage: non-ASCII prefixed names and NFC normalization",
+        ["data-r2/i18n/manifest#kanji-2"] = "SPARQL 1.0 triage: non-ASCII prefixed names and NFC normalization",
+        ["data-r2/i18n/manifest#normalization-1"] = "SPARQL 1.0 triage: non-ASCII prefixed names and NFC normalization",
+        ["data-r2/open-world/manifest#date-2"] = "SPARQL 1.0 triage: value equality and term identity of literals (unknown datatypes, lexical forms, language-tag case)",
+        ["data-r2/open-world/manifest#date-3"] = "SPARQL 1.0 triage: value equality and term identity of literals (unknown datatypes, lexical forms, language-tag case)",
+        ["data-r2/open-world/manifest#open-cmp-01"] = "SPARQL 1.0 triage: value equality and term identity of literals (unknown datatypes, lexical forms, language-tag case)",
+        ["data-r2/open-world/manifest#open-cmp-02"] = "SPARQL 1.0 triage: value equality and term identity of literals (unknown datatypes, lexical forms, language-tag case)",
+        ["data-r2/open-world/manifest#open-eq-02"] = "SPARQL 1.0 triage: value equality and term identity of literals (unknown datatypes, lexical forms, language-tag case)",
+        ["data-r2/open-world/manifest#open-eq-04"] = "SPARQL 1.0 triage: value equality and term identity of literals (unknown datatypes, lexical forms, language-tag case)",
+        ["data-r2/open-world/manifest#open-eq-05"] = "SPARQL 1.0 triage: value equality and term identity of literals (unknown datatypes, lexical forms, language-tag case)",
+        ["data-r2/open-world/manifest#open-eq-06"] = "SPARQL 1.0 triage: value equality and term identity of literals (unknown datatypes, lexical forms, language-tag case)",
+        ["data-r2/open-world/manifest#open-eq-07"] = "SPARQL 1.0 triage: value equality and term identity of literals (unknown datatypes, lexical forms, language-tag case)",
+        ["data-r2/open-world/manifest#open-eq-08"] = "SPARQL 1.0 triage: value equality and term identity of literals (unknown datatypes, lexical forms, language-tag case)",
+        ["data-r2/open-world/manifest#open-eq-10"] = "SPARQL 1.0 triage: value equality and term identity of literals (unknown datatypes, lexical forms, language-tag case)",
+        ["data-r2/open-world/manifest#open-eq-11"] = "SPARQL 1.0 triage: value equality and term identity of literals (unknown datatypes, lexical forms, language-tag case)",
+        ["data-r2/open-world/manifest#open-eq-12"] = "SPARQL 1.0 triage: value equality and term identity of literals (unknown datatypes, lexical forms, language-tag case)",
+        ["data-r2/optional/manifest#dawg-optional-complex-2"] = "SPARQL 1.0 triage: nested and complex OPTIONAL",
+        ["data-r2/optional/manifest#dawg-optional-complex-3"] = "SPARQL 1.0 triage: nested and complex OPTIONAL",
+        ["data-r2/reduced/manifest#reduced-1"] = "SPARQL 1.0 triage: harness: REDUCED results are compared exactly; the spec allows any multiplicity from DISTINCT to all",
+        ["data-r2/reduced/manifest#reduced-2"] = "SPARQL 1.0 triage: harness: REDUCED results are compared exactly; the spec allows any multiplicity from DISTINCT to all",
+        ["data-r2/regex/manifest#dawg-regex-003"] = "SPARQL 1.0 triage: REGEX escapes and the q flag",
+        ["data-r2/regex/manifest#regex-no-metacharacters"] = "SPARQL 1.0 triage: REGEX escapes and the q flag",
+        ["data-r2/regex/manifest#regex-no-metacharacters-case-insensitive"] = "SPARQL 1.0 triage: REGEX escapes and the q flag",
+        ["data-r2/sort/manifest#dawg-sort-builtin"] = "SPARQL 1.0 triage: ORDER BY str(?o) ordering",
+        ["data-r2/syntax-sparql1/manifest#syntax-expr-05"] = "SPARQL 1.0 triage: valid syntax rejected: dots in prefixed names, FILTER :fn(...)",
+        ["data-r2/syntax-sparql1/manifest#syntax-lit-13"] = "SPARQL 1.0 triage: long string literals in a pattern",
+        ["data-r2/syntax-sparql1/manifest#syntax-lit-14"] = "SPARQL 1.0 triage: long string literals in a pattern",
+        ["data-r2/syntax-sparql1/manifest#syntax-qname-08"] = "SPARQL 1.0 triage: valid syntax rejected: dots in prefixed names, FILTER :fn(...)",
+        ["data-r2/syntax-sparql3/manifest#blabel-cross-graph-bad"] = "SPARQL 1.0 triage: invalid syntax accepted: a blank-node label reused in another group",
+        ["data-r2/syntax-sparql3/manifest#blabel-cross-optional-bad"] = "SPARQL 1.0 triage: invalid syntax accepted: a blank-node label reused in another group",
+        ["data-r2/syntax-sparql3/manifest#blabel-cross-union-bad"] = "SPARQL 1.0 triage: invalid syntax accepted: a blank-node label reused in another group",
+        ["data-r2/syntax-sparql3/manifest#bnode-dot"] = "SPARQL 1.0 triage: invalid syntax accepted: a missing or stray DOT between triples",
+        ["data-r2/syntax-sparql3/manifest#bnodes-missing-pvalues-01"] = "SPARQL 1.0 triage: invalid syntax accepted: a missing or stray DOT between triples",
+        ["data-r2/syntax-sparql3/manifest#syn-bad-02"] = "SPARQL 1.0 triage: invalid syntax accepted: a missing or stray DOT between triples",
+        ["data-r2/syntax-sparql3/manifest#syn-bad-03"] = "SPARQL 1.0 triage: invalid syntax accepted: a missing or stray DOT between triples",
+        ["data-r2/syntax-sparql3/manifest#syn-bad-05"] = "SPARQL 1.0 triage: invalid syntax accepted: a missing or stray DOT between triples",
+        ["data-r2/syntax-sparql3/manifest#syn-bad-06"] = "SPARQL 1.0 triage: invalid syntax accepted: a missing or stray DOT between triples",
+        ["data-r2/syntax-sparql3/manifest#syn-bad-07"] = "SPARQL 1.0 triage: invalid syntax accepted: a missing or stray DOT between triples",
+        ["data-r2/syntax-sparql3/manifest#syn-bad-08"] = "SPARQL 1.0 triage: invalid syntax accepted: a missing or stray DOT between triples",
+        ["data-r2/syntax-sparql3/manifest#syn-bad-09"] = "SPARQL 1.0 triage: invalid syntax accepted: a missing or stray DOT between triples",
+        ["data-r2/syntax-sparql3/manifest#syn-bad-10"] = "SPARQL 1.0 triage: invalid syntax accepted: a missing or stray DOT between triples",
+        ["data-r2/syntax-sparql3/manifest#syn-bad-11"] = "SPARQL 1.0 triage: invalid syntax accepted: a missing or stray DOT between triples",
+        ["data-r2/syntax-sparql3/manifest#syn-bad-12"] = "SPARQL 1.0 triage: invalid syntax accepted: a missing or stray DOT between triples",
+        ["data-r2/syntax-sparql3/manifest#syn-bad-13"] = "SPARQL 1.0 triage: invalid syntax accepted: a missing or stray DOT between triples",
+        ["data-r2/syntax-sparql3/manifest#syn-bad-14"] = "SPARQL 1.0 triage: invalid syntax accepted: a missing or stray DOT between triples",
+        ["data-r2/syntax-sparql3/manifest#syn-bad-26"] = "SPARQL 1.0 triage: invalid syntax accepted: blank node as predicate, in FILTER or GRAPH; tokenizing ?x<?a&&?b>?y",
+        ["data-r2/syntax-sparql3/manifest#syn-bad-27"] = "SPARQL 1.0 triage: invalid syntax accepted: blank node as predicate, in FILTER or GRAPH; tokenizing ?x<?a&&?b>?y",
+        ["data-r2/syntax-sparql3/manifest#syn-bad-28"] = "SPARQL 1.0 triage: invalid syntax accepted: blank node as predicate, in FILTER or GRAPH; tokenizing ?x<?a&&?b>?y",
+        ["data-r2/syntax-sparql3/manifest#syn-bad-29"] = "SPARQL 1.0 triage: invalid syntax accepted: blank node as predicate, in FILTER or GRAPH; tokenizing ?x<?a&&?b>?y",
+        ["data-r2/syntax-sparql3/manifest#syn-bad-30"] = "SPARQL 1.0 triage: invalid syntax accepted: blank node as predicate, in FILTER or GRAPH; tokenizing ?x<?a&&?b>?y",
+        ["data-r2/syntax-sparql3/manifest#syn-bad-31"] = "SPARQL 1.0 triage: invalid syntax accepted: blank node as predicate, in FILTER or GRAPH; tokenizing ?x<?a&&?b>?y",
+        ["data-r2/syntax-sparql4/manifest#syn-bad-34"] = "SPARQL 1.0 triage: invalid syntax accepted: a blank-node label reused in another group",
+        ["data-r2/syntax-sparql4/manifest#syn-bad-35"] = "SPARQL 1.0 triage: invalid syntax accepted: a blank-node label reused in another group",
+        ["data-r2/syntax-sparql4/manifest#syn-bad-36"] = "SPARQL 1.0 triage: invalid syntax accepted: a blank-node label reused in another group",
+        ["data-r2/syntax-sparql4/manifest#syn-bad-37"] = "SPARQL 1.0 triage: invalid syntax accepted: a blank-node label reused in another group",
+        ["data-r2/syntax-sparql4/manifest#syn-bad-38"] = "SPARQL 1.0 triage: invalid syntax accepted: a blank-node label reused in another group",
+        ["data-r2/syntax-sparql4/manifest#syn-bad-GRAPH-breaks-BGP"] = "SPARQL 1.0 triage: invalid syntax accepted: a blank-node label reused in another group",
+        ["data-r2/syntax-sparql4/manifest#syn-bad-OPT-breaks-BGP"] = "SPARQL 1.0 triage: invalid syntax accepted: a blank-node label reused in another group",
+        ["data-r2/syntax-sparql4/manifest#syn-bad-UNION-breaks-BGP"] = "SPARQL 1.0 triage: invalid syntax accepted: a blank-node label reused in another group",
+        ["data-r2/type-promotion/manifest#type-promotion-07"] = "SPARQL 1.0 triage: numeric type promotion of derived xsd integer types",
+        ["data-r2/type-promotion/manifest#type-promotion-08"] = "SPARQL 1.0 triage: numeric type promotion of derived xsd integer types",
+        ["data-r2/type-promotion/manifest#type-promotion-09"] = "SPARQL 1.0 triage: numeric type promotion of derived xsd integer types",
+        ["data-r2/type-promotion/manifest#type-promotion-10"] = "SPARQL 1.0 triage: numeric type promotion of derived xsd integer types",
+        ["data-r2/type-promotion/manifest#type-promotion-11"] = "SPARQL 1.0 triage: numeric type promotion of derived xsd integer types",
+        ["data-r2/type-promotion/manifest#type-promotion-12"] = "SPARQL 1.0 triage: numeric type promotion of derived xsd integer types",
+        ["data-r2/type-promotion/manifest#type-promotion-13"] = "SPARQL 1.0 triage: numeric type promotion of derived xsd integer types",
+        ["data-r2/type-promotion/manifest#type-promotion-14"] = "SPARQL 1.0 triage: numeric type promotion of derived xsd integer types",
+        ["data-r2/type-promotion/manifest#type-promotion-15"] = "SPARQL 1.0 triage: numeric type promotion of derived xsd integer types",
+        ["data-r2/type-promotion/manifest#type-promotion-16"] = "SPARQL 1.0 triage: numeric type promotion of derived xsd integer types",
+        ["data-r2/type-promotion/manifest#type-promotion-17"] = "SPARQL 1.0 triage: numeric type promotion of derived xsd integer types",
+        ["data-r2/type-promotion/manifest#type-promotion-18"] = "SPARQL 1.0 triage: numeric type promotion of derived xsd integer types",
+        ["data-r2/type-promotion/manifest#type-promotion-19"] = "SPARQL 1.0 triage: numeric type promotion of derived xsd integer types",
+    };
+
+    /// <summary>
     /// Known slow tests that may exceed standard timeout.
     /// Tests listed here are known to take >10 seconds due to complexity.
     /// </summary>
@@ -90,6 +222,23 @@ public static class W3CTestContext
     public static string? IncludeOnly { get; } = Environment.GetEnvironmentVariable("W3C_INCLUDE_ONLY");
 
     /// <summary>
+    /// True when a test is out of scope (<see cref="SkipList"/>): a feature Mercury does not provide. Such tests are
+    /// left out of a run. A known failure (the SPARQL 1.0 triage) is not: it runs as a skipped test, counted and with its
+    /// cause, so the gap stays visible.
+    /// </summary>
+    public static bool IsOutOfScope(string testId)
+    {
+        if (SkipList.ContainsKey(testId))
+            return true;
+        foreach (var pattern in SkipList.Keys)
+        {
+            if (testId.Contains(pattern, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
+    }
+
+    /// <summary>
     /// Checks if a test should be skipped.
     /// </summary>
     /// <param name="testId">The test identifier or path.</param>
@@ -112,6 +261,16 @@ public static class W3CTestContext
         // Check for exact match
         if (SkipList.TryGetValue(testId, out reason))
             return true;
+
+        // A SPARQL 1.0 test that is a known failure, by cause
+        foreach (var (failure, cause) in Sparql10Triage)
+        {
+            if (testId.Contains(failure, StringComparison.Ordinal))
+            {
+                reason = cause;
+                return true;
+            }
+        }
 
         // Check for partial match (e.g., skip entire category)
         foreach (var (pattern, skipReason) in SkipList)
@@ -140,6 +299,7 @@ public static class W3CTestContext
         W3CTestSuite.TriG11 => Path.Combine(TestsRoot, "rdf", "rdf11", "rdf-trig", "manifest.ttl"),
         W3CTestSuite.TriG12 => Path.Combine(TestsRoot, "rdf", "rdf12", "rdf-trig", "manifest.ttl"),
         W3CTestSuite.RdfXml11 => Path.Combine(TestsRoot, "rdf", "rdf11", "rdf-xml", "manifest.ttl"),
+        W3CTestSuite.Sparql10Query => Path.Combine(TestsRoot, "sparql", "sparql10", "manifest.ttl"),
         W3CTestSuite.Sparql11Query => Path.Combine(TestsRoot, "sparql", "sparql11", "manifest-sparql11-query.ttl"),
         W3CTestSuite.Sparql11Update => Path.Combine(TestsRoot, "sparql", "sparql11", "manifest-sparql11-update.ttl"),
         _ => throw new ArgumentException($"Unknown test suite: {suite}", nameof(suite))
@@ -155,7 +315,7 @@ public static class W3CTestContext
         W3CTestSuite.Turtle11 or W3CTestSuite.Turtle12 => W3CTestFormat.Turtle,
         W3CTestSuite.TriG11 or W3CTestSuite.TriG12 => W3CTestFormat.TriG,
         W3CTestSuite.RdfXml11 => W3CTestFormat.RdfXml,
-        W3CTestSuite.Sparql11Query => W3CTestFormat.SparqlQuery,
+        W3CTestSuite.Sparql10Query or W3CTestSuite.Sparql11Query => W3CTestFormat.SparqlQuery,
         W3CTestSuite.Sparql11Update => W3CTestFormat.SparqlUpdate,
         _ => W3CTestFormat.Unknown
     };
@@ -249,6 +409,9 @@ public enum W3CTestSuite
     NQuads12,
     Turtle12,
     TriG12,
+
+    // SPARQL 1.0 Tests (the DAWG suite: core features the 1.1 suite does not test again)
+    Sparql10Query,
 
     // SPARQL 1.1 Tests
     Sparql11Query,

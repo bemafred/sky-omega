@@ -1,3 +1,4 @@
+using System.Linq;
 // Licensed under the MIT License.
 
 using SkyOmega.Mercury.Sparql.Types;
@@ -35,6 +36,7 @@ public class SparqlConformanceTests
 
         if (W3CTestContext.ShouldSkip(test.Id, out var reason))
             Assert.SkipWhen(true, reason);
+        Assert.SkipUnless(test.IsApproved, $"Rejected by the working group ({test.Approval})");
 
         _output.WriteLine($"Test: {test.Name}");
         _output.WriteLine($"File: {test.ActionPath}");
@@ -59,6 +61,7 @@ public class SparqlConformanceTests
 
         if (W3CTestContext.ShouldSkip(test.Id, out var reason))
             Assert.SkipWhen(true, reason);
+        Assert.SkipUnless(test.IsApproved, $"Rejected by the working group ({test.Approval})");
 
         _output.WriteLine($"Test: {test.Name}");
         _output.WriteLine($"File: {test.ActionPath}");
@@ -86,6 +89,7 @@ public class SparqlConformanceTests
 
         if (W3CTestContext.ShouldSkip(test.Id, out var reason))
             Assert.SkipWhen(true, reason);
+        Assert.SkipUnless(test.IsApproved, $"Rejected by the working group ({test.Approval})");
 
         var update = File.ReadAllText(test.ActionPath);
         _output.WriteLine($"Update:\n{update}");
@@ -104,6 +108,7 @@ public class SparqlConformanceTests
 
         if (W3CTestContext.ShouldSkip(test.Id, out var reason))
             Assert.SkipWhen(true, reason);
+        Assert.SkipUnless(test.IsApproved, $"Rejected by the working group ({test.Approval})");
 
         var update = File.ReadAllText(test.ActionPath);
         _output.WriteLine($"Update:\n{update}");
@@ -121,6 +126,7 @@ public class SparqlConformanceTests
 
         if (W3CTestContext.ShouldSkip(test.Id, out var reason))
             Assert.SkipWhen(true, reason);
+        Assert.SkipUnless(test.IsApproved, $"Rejected by the working group ({test.Approval})");
 
         // Skip tests that require features we haven't implemented yet
         if (test.Id.Contains("entailment", StringComparison.OrdinalIgnoreCase))
@@ -223,7 +229,7 @@ public class SparqlConformanceTests
         {
             // Check if this is a RDF-encoded SPARQL result set (rs:ResultSet)
             // This is used by some W3C tests to encode SELECT results as RDF
-            if (resultExt == ".ttl" && await IsRdfResultSetAsync(test.ResultPath!))
+            if (resultExt is ".ttl" or ".rdf" && await IsRdfResultSetAsync(test.ResultPath!))
             {
                 // SELECT query with RDF-encoded result set - parse and compare as result set
                 var expectedRdf = await SparqlResultParser.ParseRdfResultSetAsync(test.ResultPath!);
@@ -232,7 +238,10 @@ public class SparqlConformanceTests
                 var actualRdf = await RunSelectQueryAsync(store, query, parsed, expectedRdf);
                 _output.WriteLine($"Got {actualRdf.Count} results");
 
-                var rdfError = SparqlResultComparer.Compare(expectedRdf, actualRdf);
+                // An ORDER BY result set gives each solution an rs:index; it is compared in that order
+                var rdfError = SparqlResultComparer.Compare(expectedRdf, actualRdf,
+                    ordered: query.Contains("ORDER BY", StringComparison.OrdinalIgnoreCase)
+                             && (await File.ReadAllTextAsync(test.ResultPath!, TestContext.Current.CancellationToken)).Contains("index", StringComparison.Ordinal));
                 if (rdfError != null)
                 {
                     _output.WriteLine($"Result comparison failed:");
@@ -751,9 +760,9 @@ public class SparqlConformanceTests
     private static async Task<bool> IsRdfResultSetAsync(string path)
     {
         var content = await File.ReadAllTextAsync(path);
-        // Quick check for rs:ResultSet pattern
+        // Quick check for rs:ResultSet, in Turtle or RDF/XML
         return content.Contains("rs:ResultSet") ||
-               content.Contains("<http://www.w3.org/2001/sw/DataAccess/tests/result-set#ResultSet>");
+               content.Contains("http://www.w3.org/2001/sw/DataAccess/tests/result-set#ResultSet");
     }
 
     /// <summary>
@@ -895,9 +904,9 @@ public class SparqlConformanceTests
                 $"Directory exists: {Directory.Exists(W3CTestContext.TestsRoot)}. " +
                 "Run ./tools/update-submodules.sh (or .\\tools\\update-submodules.ps1) to initialize.");
 
-        var tests = W3CTestContext.LoadTestCasesAsync(
-            W3CTestSuite.Sparql11Query,
-            W3CTestType.PositiveSyntax).GetAwaiter().GetResult();
+        // The SPARQL 1.0 suite and the 1.1 suite: 1.1 tests what 1.1 added, so core features are tested only in 1.0
+        var tests = W3CTestContext.LoadTestCasesAsync(W3CTestSuite.Sparql10Query, W3CTestType.PositiveSyntax).GetAwaiter().GetResult()
+            .Concat(W3CTestContext.LoadTestCasesAsync(W3CTestSuite.Sparql11Query, W3CTestType.PositiveSyntax).GetAwaiter().GetResult());
 
         foreach (var test in tests)
         {
@@ -913,9 +922,9 @@ public class SparqlConformanceTests
                 $"Directory exists: {Directory.Exists(W3CTestContext.TestsRoot)}. " +
                 "Run ./tools/update-submodules.sh (or .\\tools\\update-submodules.ps1) to initialize.");
 
-        var tests = W3CTestContext.LoadTestCasesAsync(
-            W3CTestSuite.Sparql11Query,
-            W3CTestType.NegativeSyntax).GetAwaiter().GetResult();
+        // The SPARQL 1.0 suite and the 1.1 suite: 1.1 tests what 1.1 added, so core features are tested only in 1.0
+        var tests = W3CTestContext.LoadTestCasesAsync(W3CTestSuite.Sparql10Query, W3CTestType.NegativeSyntax).GetAwaiter().GetResult()
+            .Concat(W3CTestContext.LoadTestCasesAsync(W3CTestSuite.Sparql11Query, W3CTestType.NegativeSyntax).GetAwaiter().GetResult());
 
         foreach (var test in tests)
         {
@@ -946,14 +955,15 @@ public class SparqlConformanceTests
                 $"Directory exists: {Directory.Exists(W3CTestContext.TestsRoot)}. " +
                 "Run ./tools/update-submodules.sh (or .\\tools\\update-submodules.ps1) to initialize.");
 
-        var tests = W3CTestContext.LoadTestCasesAsync(
-            W3CTestSuite.Sparql11Query,
-            W3CTestType.QueryEval).GetAwaiter().GetResult();
+        // The SPARQL 1.0 suite and the 1.1 suite: 1.1 tests what 1.1 added, so core features are tested only in 1.0
+        var tests = W3CTestContext.LoadTestCasesAsync(W3CTestSuite.Sparql10Query, W3CTestType.QueryEval).GetAwaiter().GetResult()
+            .Concat(W3CTestContext.LoadTestCasesAsync(W3CTestSuite.Sparql11Query, W3CTestType.QueryEval).GetAwaiter().GetResult());
 
         foreach (var test in tests)
         {
-            // Skip tests at data generation level to prevent stack overflow during test execution
-            if (W3CTestContext.ShouldSkip(test.Id, out _))
+            // Out-of-scope tests are left out at data generation (some would overflow the stack); known failures run
+            // as skipped tests
+            if (W3CTestContext.IsOutOfScope(test.Id))
                 continue;
 
             yield return new object[] { test.DisplayName, test };
@@ -968,6 +978,7 @@ public class SparqlConformanceTests
 
         if (W3CTestContext.ShouldSkip(test.Id, out var reason))
             Assert.SkipWhen(true, reason);
+        Assert.SkipUnless(test.IsApproved, $"Rejected by the working group ({test.Approval})");
 
         _output.WriteLine($"Test: {test.Name}");
         _output.WriteLine($"Update: {test.ActionPath}");

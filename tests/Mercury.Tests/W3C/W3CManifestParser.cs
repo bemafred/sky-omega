@@ -28,6 +28,7 @@ public sealed class W3CManifestParser
     private static readonly string MfName = $"<{MF}name>";
     private static readonly string MfAction = $"<{MF}action>";
     private static readonly string MfResult = $"<{MF}result>";
+    private static readonly string DawgtApproval = "<http://www.w3.org/2001/sw/DataAccess/tests/test-dawg#approval>";
     private static readonly string RdfsComment = $"<{RDFS}comment>";
     private static readonly string RdfsLabel = $"<{RDFS}label>";
     private static readonly string QtQuery = $"<{QT}query>";
@@ -374,7 +375,8 @@ public sealed class W3CManifestParser
             ManifestPath: manifestPath,
             ActionGraphData: actionGraphData,
             ExpectedDefaultGraphPath: expectedDefaultGraphPath,
-            ExpectedNamedGraphs: expectedNamedGraphs);
+            ExpectedNamedGraphs: expectedNamedGraphs,
+            Approval: props.TryGetValue(DawgtApproval, out var approval) && approval.Count > 0 ? approval[0] : null);
     }
 
     /// <summary>

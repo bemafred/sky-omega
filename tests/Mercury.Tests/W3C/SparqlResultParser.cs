@@ -1,3 +1,4 @@
+using System.Linq;
 // Licensed under the MIT License.
 
 using System.Text.Json;
@@ -47,16 +48,19 @@ public static class SparqlResultParser
         // since URN scheme doesn't support standard relative resolution
         var triples = new List<(string s, string p, string o)>();
         await using var stream = File.OpenRead(path);
-        using var parser = new Mercury.Rdf.Turtle.TurtleStreamParser(stream, baseUri: new Uri(path).AbsoluteUri);
-
-        await parser.ParseAsync((s, p, o) =>
+        // Convert file:// URIs to urn:w3c: scheme to match W3C test framework
+        void Add(ReadOnlySpan<char> s, ReadOnlySpan<char> p, ReadOnlySpan<char> o) =>
+            triples.Add((ConvertToW3cUrn(s.ToString()), ConvertToW3cUrn(p.ToString()), ConvertToW3cUrn(o.ToString())));
+        if (Path.GetExtension(path).Equals(".rdf", StringComparison.OrdinalIgnoreCase))
         {
-            // Convert file:// URIs to urn:w3c: scheme to match W3C test framework
-            var sStr = ConvertToW3cUrn(s.ToString());
-            var pStr = ConvertToW3cUrn(p.ToString());
-            var oStr = ConvertToW3cUrn(o.ToString());
-            triples.Add((sStr, pStr, oStr));
-        });
+            using var parser = new Mercury.RdfXml.RdfXmlStreamParser(stream, baseUri: new Uri(path).AbsoluteUri);
+            await parser.ParseAsync((s, p, o) => Add(s, p, o));
+        }
+        else
+        {
+            using var parser = new Mercury.Rdf.Turtle.TurtleStreamParser(stream, baseUri: new Uri(path).AbsoluteUri);
+            await parser.ParseAsync((s, p, o) => Add(s, p, o));
+        }
 
         // Constants for rs: namespace
         const string rsResultVariable = "<http://www.w3.org/2001/sw/DataAccess/tests/result-set#resultVariable>";
@@ -102,7 +106,8 @@ public static class SparqlResultParser
             }
         }
 
-        // Find all solutions
+        // Find all solutions, in rs:index order when the result set has one (an ORDER BY result)
+        const string rsIndex = "<http://www.w3.org/2001/sw/DataAccess/tests/result-set#index>";
         var solutionSubjects = new List<string>();
         foreach (var (s, p, o) in triples)
         {
@@ -111,6 +116,20 @@ public static class SparqlResultParser
                 solutionSubjects.Add(o);
             }
         }
+        int IndexOf(string solution)
+        {
+            foreach (var (s, p, o) in triples)
+            {
+                if (s == solution && p == rsIndex)
+                {
+                    var lexical = o.StartsWith('"') ? o[1..o.IndexOf('"', 1)] : o;
+                    if (int.TryParse(lexical, out var index))
+                        return index;
+                }
+            }
+            return int.MaxValue;
+        }
+        solutionSubjects = solutionSubjects.OrderBy(IndexOf).ToList();
 
         // Parse each solution
         foreach (var solutionSubject in solutionSubjects)
