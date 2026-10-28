@@ -193,8 +193,12 @@ public class SparqlConformanceTests
         }
 
         // Inject FROM NAMED clauses for declared named graphs
-        // This ensures GRAPH ?g iteration includes empty graphs (W3C semantics)
-        if (namedGraphIris.Count > 0)
+        // This ensures GRAPH ?g iteration includes empty graphs (W3C semantics). A query that describes its own dataset
+        // (FROM / FROM NAMED) uses it in place of the test's (§13.2): the SPARQL 1.0 dataset tests give both since the
+        // 2026-10 suite, and injecting there added graphs the query doesn't name
+        bool queryHasDataset = System.Text.RegularExpressions.Regex.IsMatch(query, @"\bFROM\s+(NAMED\s+)?<",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (namedGraphIris.Count > 0 && !queryHasDataset)
         {
             query = InjectFromNamedClauses(query, namedGraphIris);
             _output.WriteLine($"Injected FROM NAMED for: {string.Join(", ", namedGraphIris)}");

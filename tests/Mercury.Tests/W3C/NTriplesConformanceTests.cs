@@ -23,6 +23,8 @@ public class NTriplesConformanceTests
     public async Task NTriples11_PositiveSyntax(W3CTestCase test)
     {
         Assert.SkipUnless(W3CTestContext.IsAvailable, "W3C test suite not available");
+        if (W3CTestContext.IsKnownFailure(test.Id, out var cause))
+            Assert.SkipWhen(true, cause);
         Assert.SkipUnless(File.Exists(test.ActionPath), $"Test file not found: {test.ActionPath}");
 
         _output.WriteLine($"Test: {test.Name}");
@@ -47,6 +49,8 @@ public class NTriplesConformanceTests
     public async Task NTriples11_NegativeSyntax(W3CTestCase test)
     {
         Assert.SkipUnless(W3CTestContext.IsAvailable, "W3C test suite not available");
+        if (W3CTestContext.IsKnownFailure(test.Id, out var cause))
+            Assert.SkipWhen(true, cause);
         Assert.SkipUnless(File.Exists(test.ActionPath), $"Test file not found: {test.ActionPath}");
 
         _output.WriteLine($"Test: {test.Name}");

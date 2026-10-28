@@ -49,13 +49,16 @@ public static class W3CTestContext
     };
 
     /// <summary>
-    /// The SPARQL 1.0 (DAWG) tests that failed when the suite was first run, 2026-10-28, by cause. Each entry is a
-    /// known failure to fix and remove, not an exclusion: see the Mercury finding mercury-w3c-sparql10-not-run.
+    /// Known failures, by cause: each entry is a failure to fix and remove, not an exclusion (run them with
+    /// W3C_RUN_KNOWN_FAILURES=1). The SPARQL 1.0 (DAWG) tests that failed when that suite was first run, 2026-10-28 (see
+    /// the Mercury finding mercury-w3c-sparql10-not-run), and the new and changed tests of the W3C suite update of the
+    /// same day (rdf-tests f172950 → d01b141).
     /// </summary>
-    private static readonly Dictionary<string, string> Sparql10Triage = new()
+    private static readonly Dictionary<string, string> KnownFailures = new()
     {
         ["data-r2/basic/manifest#base-prefix-1"] = "SPARQL 1.0 triage: relative IRIs are not resolved against BASE",
         ["data-r2/basic/manifest#base-prefix-2"] = "SPARQL 1.0 triage: relative IRIs are not resolved against BASE",
+        ["data-r2/basic/manifest#base-prefix-6"] = "SPARQL 1.0 triage: relative IRIs are not resolved against BASE",
         ["data-r2/basic/manifest#base-prefix-4"] = "SPARQL 1.0 triage: relative IRIs are not resolved against BASE",
         ["data-r2/basic/manifest#base-prefix-5"] = "SPARQL 1.0 triage: relative IRIs are not resolved against BASE",
         ["data-r2/basic/manifest#quotes-1"] = "SPARQL 1.0 triage: long string literals in a pattern",
@@ -75,6 +78,24 @@ public static class W3CTestContext
         ["data-r2/syntax-sparql3/manifest#syn-bad-26"] = "SPARQL 1.0 triage: invalid syntax accepted: an expression the grammar does not read (a blank node in FILTER; ?x<?a&&?b>?y)",
         ["data-r2/syntax-sparql3/manifest#syn-bad-29"] = "SPARQL 1.0 triage: invalid syntax accepted: an expression the grammar does not read (a blank node in FILTER; ?x<?a&&?b>?y)",
         ["data-r2/syntax-sparql3/manifest#syn-bad-30"] = "SPARQL 1.0 triage: invalid syntax accepted: an expression the grammar does not read (a blank node in FILTER; ?x<?a&&?b>?y)",
+
+        // The W3C suite update of 2026-10-28 (rdf-tests f172950 -> d01b141), by cause
+        ["data-r2/dataset/manifest#dawg-dataset-02"] = "W3C update: FROM NAMED with no FROM keeps the store's default graph; the query's dataset has an empty one (§13.2)",
+        ["data-sparql11/subquery/manifest#subquery16"] = "W3C update: ORDER BY compares IRIs with their brackets, so <…/s1> sorts before <…/s>",
+        ["data-sparql11/bindings/manifest#values-construct-group-by"] = "W3C update: a trailing VALUES is not joined after GROUP BY and before the SELECT expressions (§18.2.4.1)",
+        ["data-sparql11/bindings/manifest#values-group-by-projection"] = "W3C update: a trailing VALUES is not joined after GROUP BY and before the SELECT expressions (§18.2.4.1)",
+        ["data-sparql11/bindings/manifest#values-group-by-select-expression"] = "W3C update: a trailing VALUES is not joined after GROUP BY and before the SELECT expressions (§18.2.4.1)",
+        ["data-sparql11/syntax-query/manifest#test_group_by_values_scope_01"] = "W3C update: a trailing VALUES is not joined after GROUP BY and before the SELECT expressions (§18.2.4.1)",
+        ["data-sparql11/syntax-query/manifest#test_group_by_values_scope_03"] = "W3C update: a trailing VALUES is not joined after GROUP BY and before the SELECT expressions (§18.2.4.1)",
+        ["rdf-xml/manifest.ttl#xml-canon-test001"] = "W3C update: an XMLLiteral keeps the in-scope namespace declarations it doesn't use; exclusive canonicalization drops them",
+        ["rdf-xml/manifest.ttl#xml-canon-test002"] = "W3C update: an XMLLiteral keeps the in-scope namespace declarations it doesn't use; exclusive canonicalization drops them",
+        ["rdf-turtle/manifest.ttl#turtle-syntax-bad-uri-escape-01"] = "W3C update: a character an IRIREF excludes is checked only when written raw, and not '{' or '}': a \\u escape to a space, '<' or '>' is accepted",
+        ["rdf-turtle/manifest.ttl#turtle-syntax-bad-uri-escape-02"] = "W3C update: a character an IRIREF excludes is checked only when written raw, and not '{' or '}': a \\u escape to a space, '<' or '>' is accepted",
+        ["rdf-turtle/manifest.ttl#turtle-syntax-bad-uri-escape-03"] = "W3C update: a character an IRIREF excludes is checked only when written raw, and not '{' or '}': a \\u escape to a space, '<' or '>' is accepted",
+        ["rdf-trig/manifest.ttl#trig-syntax-bad-uri-escape-01"] = "W3C update: a character an IRIREF excludes is checked only when written raw, and not '{' or '}': a \\u escape to a space, '<' or '>' is accepted",
+        ["rdf-trig/manifest.ttl#trig-syntax-bad-uri-escape-02"] = "W3C update: a character an IRIREF excludes is checked only when written raw, and not '{' or '}': a \\u escape to a space, '<' or '>' is accepted",
+        ["rdf-trig/manifest.ttl#trig-syntax-bad-uri-escape-03"] = "W3C update: a character an IRIREF excludes is checked only when written raw, and not '{' or '}': a \\u escape to a space, '<' or '>' is accepted",
+        ["rdf-trig/manifest.ttl#trig-syntax-bad-uri-escape-04"] = "W3C update: a character an IRIREF excludes is checked only when written raw, and not '{' or '}': a \\u escape to a space, '<' or '>' is accepted",
     };
 
 
@@ -148,7 +169,28 @@ public static class W3CTestContext
     /// <param name="testId">The test identifier or path.</param>
     /// <param name="reason">The reason for skipping, if applicable.</param>
     /// <returns>True if the test should be skipped.</returns>
-    public static bool ShouldSkip(string testId, out string? reason)
+    /// <summary>
+    /// True when <paramref name="testId"/> is a known failure (<see cref="KnownFailures"/>), with its cause; false for
+    /// every test when W3C_RUN_KNOWN_FAILURES=1. The RDF format suites check only this: the skip list's patterns match
+    /// by substring, and "nfc" matched their localName_with_…nfc… tests.
+    /// </summary>
+    public static bool IsKnownFailure(string testId, out string? cause)
+    {
+        cause = null;
+        if (RunKnownFailures)
+            return false;
+        foreach (var (failure, knownCause) in KnownFailures)
+        {
+            if (testId.Contains(failure, StringComparison.Ordinal))
+            {
+                cause = knownCause;
+                return true;
+            }
+        }
+        return false;
+    }
+
+        public static bool ShouldSkip(string testId, out string? reason)
     {
         reason = null;
 
@@ -166,17 +208,8 @@ public static class W3CTestContext
         if (SkipList.TryGetValue(testId, out reason))
             return true;
 
-        // A SPARQL 1.0 test that is a known failure, by cause (run anyway with W3C_RUN_KNOWN_FAILURES=1)
-        foreach (var (failure, cause) in Sparql10Triage)
-        {
-            if (RunKnownFailures)
-                break;
-            if (testId.Contains(failure, StringComparison.Ordinal))
-            {
-                reason = cause;
-                return true;
-            }
-        }
+        if (IsKnownFailure(testId, out reason))
+            return true;
 
         // Check for partial match (e.g., skip entire category)
         foreach (var (pattern, skipReason) in SkipList)

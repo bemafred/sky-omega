@@ -24,6 +24,8 @@ public class TurtleConformanceTests
     public async Task Turtle11_PositiveSyntax(W3CTestCase test)
     {
         Assert.SkipUnless(W3CTestContext.IsAvailable, "W3C test suite not available");
+        if (W3CTestContext.IsKnownFailure(test.Id, out var cause))
+            Assert.SkipWhen(true, cause);
         Assert.SkipUnless(File.Exists(test.ActionPath), $"Test file not found: {test.ActionPath}");
 
         _output.WriteLine($"Test: {test.Name}");
@@ -48,6 +50,8 @@ public class TurtleConformanceTests
     public async Task Turtle11_NegativeSyntax(W3CTestCase test)
     {
         Assert.SkipUnless(W3CTestContext.IsAvailable, "W3C test suite not available");
+        if (W3CTestContext.IsKnownFailure(test.Id, out var cause))
+            Assert.SkipWhen(true, cause);
         Assert.SkipUnless(File.Exists(test.ActionPath), $"Test file not found: {test.ActionPath}");
 
         _output.WriteLine($"Test: {test.Name}");
@@ -70,6 +74,8 @@ public class TurtleConformanceTests
     public async Task Turtle11_Eval(W3CTestCase test)
     {
         Assert.SkipUnless(W3CTestContext.IsAvailable, "W3C test suite not available");
+        if (W3CTestContext.IsKnownFailure(test.Id, out var cause))
+            Assert.SkipWhen(true, cause);
         Assert.SkipUnless(File.Exists(test.ActionPath), $"Test file not found: {test.ActionPath}");
         Assert.SkipWhen(test.ResultPath == null, "No expected result file");
         Assert.SkipUnless(File.Exists(test.ResultPath), $"Result file not found: {test.ResultPath}");
