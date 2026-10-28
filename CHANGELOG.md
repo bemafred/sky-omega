@@ -37,6 +37,7 @@ Cycle 10 r4 production validation: [docs/validations/cycle10-phase3-r4-21b-2026-
 ### Fixed
 
 - **VALUES kept at most 4 variables and 16 values** and dropped the rest without an error; it now has no size limit.
+- **Valid queries failed to parse:** a top-level 3-way UNION, and GRAPH in a nested group or a UNION branch.
 - **A VALUES after ASK, CONSTRUCT or DESCRIBE was ignored**, and so was any text after the end of a query.
 - An empty trailing VALUES was ignored; `1e3`, `'single'` and `"""long"""` were errors in VALUES; malformed VALUES could be accepted; `VALUES $x` did not join `?x`.
 - **Sub-SELECT:** a `{` in its projection was run as its WHERE; `SELECT *` lost variables after a `}` in a string; one HAVING condition only; GROUP BY rules unchecked.
