@@ -768,6 +768,10 @@ internal sealed class MaterializedRowComparer : IComparer<MaterializedRow>
         var bType = GetTermType(b);
         if (aType != bType)
             return aType.CompareTo(bType);
+        // An IRI is ordered by its text, without the brackets: with them, the '>' that ends <…/s> sorts after the '1'
+        // of <…/s1>
+        if (aType == TermSortType.Iri)
+            return a[1..^1].SequenceCompareTo(b[1..^1]);
         if (aType != TermSortType.Literal)
             return a.SequenceCompareTo(b);
 

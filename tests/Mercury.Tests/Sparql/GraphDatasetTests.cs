@@ -50,6 +50,9 @@ public class GraphDatasetTests : IDisposable
     [InlineData("FROM g1 + FROM NAMED g2 + GRAPH g2", "SELECT ?s FROM <urn:g1> FROM NAMED <urn:g2> WHERE { GRAPH <urn:g2> { ?s <urn:p> ?o } }", "s", "<urn:b>")]
     [InlineData("FROM NAMED g1 g2 + GRAPH ?g — enumerates only the named set", "SELECT ?g FROM NAMED <urn:g1> FROM NAMED <urn:g2> WHERE { GRAPH ?g { ?s <urn:p> ?o } }", "g", "<urn:g1>|<urn:g2>")]
     [InlineData("FROM NAMED g1 + GRAPH g2 — not in the set, empty", "SELECT ?s FROM NAMED <urn:g1> WHERE { GRAPH <urn:g2> { ?s <urn:p> ?o } }", "s", "")]
+    [InlineData("FROM NAMED g1, no FROM — the default graph is empty (§13.2)", "SELECT ?s FROM NAMED <urn:g1> WHERE { ?s <urn:p> ?o }", "s", "")]
+    [InlineData("FROM g1 twice — g1 once", "SELECT ?s FROM <urn:g1> FROM <urn:g1> WHERE { ?s <urn:p> ?o }", "s", "<urn:a>")]
+    [InlineData("FROM NAMED g1 twice + GRAPH ?g — g1 once", "SELECT ?g FROM NAMED <urn:g1> FROM NAMED <urn:g1> WHERE { GRAPH ?g { ?s <urn:p> ?o } }", "g", "<urn:g1>")]
     public void DatasetClauses_AreRespectedByTheUnifiedGraphPath(string name, string query, string variable, string expectedPipe)
     {
         var result = SparqlEngine.Query(_store, query, TestContext.Current.CancellationToken);

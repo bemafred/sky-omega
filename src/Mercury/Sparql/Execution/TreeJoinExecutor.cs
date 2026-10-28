@@ -1092,13 +1092,13 @@ internal sealed class TreeJoinExecutor
     }
 
     /// <summary>
-    /// The graphs a pattern with default-context graph <paramref name="graph"/> ("") scans when a FROM dataset
-    /// redefined the default graph: the FROM graphs (their RDF merge IS the default graph, SPARQL §13.2). Returns null
-    /// for the single-graph cases — a GRAPH &lt;g&gt; override, or the real unnamed default with no FROM clause — so the
-    /// caller takes the unchanged single-scan path.
+    /// The graphs a pattern with default-context graph <paramref name="graph"/> ("") scans when a dataset clause
+    /// redefined the default graph: the FROM graphs (their RDF merge IS the default graph, SPARQL §13.2), none for a
+    /// dataset with FROM NAMED only. Returns null for the single-graph cases — a GRAPH &lt;g&gt; override, or the real
+    /// unnamed default with no dataset clause — so the caller takes the unchanged single-scan path.
     /// </summary>
     private string[]? DefaultGraphUnion(string graph)
-        => graph.Length == 0 && _defaultGraphs is { Length: > 0 } ? _defaultGraphs : null;
+        => graph.Length == 0 ? _defaultGraphs : null;
 
     /// <summary>
     /// ADR-047 materialization fix — fold a FLAT pure-BGP into the aggregate accumulator as the nested-loop join

@@ -181,27 +181,41 @@ public class SparqlConformanceTests
             }
         }
 
+        // A test with named graphs gives the query its dataset as FROM and FROM NAMED clauses, so GRAPH ?g iterates the
+        // declared graphs, empty ones included (W3C semantics). A dataset clause describes the whole dataset (§13.2), so
+        // the test's default data goes into a graph of its own, named in a FROM: with FROM NAMED alone the default graph
+        // is empty. A query that describes its own dataset uses it in place of the test's: the SPARQL 1.0 dataset tests
+        // give both since the 2026-10 suite, and injecting there added graphs the query doesn't name.
+        bool queryHasDataset = System.Text.RegularExpressions.Regex.IsMatch(query, @"\bFROM\s+(NAMED\s+)?<",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        bool injectDataset = namedGraphIris.Count > 0 && !queryHasDataset;
+
         // Load default graph data
         // Use urn:w3c: scheme with filename as base URI so <> resolves correctly
         // (consistent with named graph IRIs which also use urn:w3c: scheme)
+        string? defaultGraphIri = null;
         if (test.DataPath != null && File.Exists(test.DataPath))
         {
             var dataFilename = Path.GetFileName(test.DataPath);
             var dataBaseUri = $"urn:w3c:{dataFilename}";
-            await LoadDataAsync(store, test.DataPath, baseUri: dataBaseUri);
-            _output.WriteLine($"Loaded data from {test.DataPath}");
+            if (injectDataset)
+            {
+                defaultGraphIri = dataBaseUri;
+                if (!namedGraphIris.Contains(dataBaseUri))
+                    await LoadDataToNamedGraphAsync(store, test.DataPath, $"<{dataBaseUri}>", baseUri: dataBaseUri);
+                _output.WriteLine($"Loaded data from {test.DataPath} into <{dataBaseUri}>, the query's FROM");
+            }
+            else
+            {
+                await LoadDataAsync(store, test.DataPath, baseUri: dataBaseUri);
+                _output.WriteLine($"Loaded data from {test.DataPath}");
+            }
         }
 
-        // Inject FROM NAMED clauses for declared named graphs
-        // This ensures GRAPH ?g iteration includes empty graphs (W3C semantics). A query that describes its own dataset
-        // (FROM / FROM NAMED) uses it in place of the test's (§13.2): the SPARQL 1.0 dataset tests give both since the
-        // 2026-10 suite, and injecting there added graphs the query doesn't name
-        bool queryHasDataset = System.Text.RegularExpressions.Regex.IsMatch(query, @"\bFROM\s+(NAMED\s+)?<",
-            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-        if (namedGraphIris.Count > 0 && !queryHasDataset)
+        if (injectDataset)
         {
-            query = InjectFromNamedClauses(query, namedGraphIris);
-            _output.WriteLine($"Injected FROM NAMED for: {string.Join(", ", namedGraphIris)}");
+            query = InjectDatasetClauses(query, defaultGraphIri, namedGraphIris);
+            _output.WriteLine($"Injected FROM {defaultGraphIri ?? "(none)"}, FROM NAMED for: {string.Join(", ", namedGraphIris)}");
         }
 
         // The files a query names in FROM / FROM NAMED: the SPARQL 1.0 dataset tests give their data only there. Each
@@ -694,21 +708,23 @@ public class SparqlConformanceTests
     }
 
     /// <summary>
-    /// Inject FROM NAMED clauses into a query for declared named graphs.
-    /// This ensures GRAPH ?g iteration includes all declared graphs, even empty ones.
-    /// W3C tests declare named graphs via qt:graphData entries in the manifest.
+    /// Inject a test's dataset into a query: a FROM for its default data (qt:data), when it has any, and a FROM NAMED
+    /// for each declared named graph (qt:graphData). This ensures GRAPH ?g iteration includes all declared graphs, even
+    /// empty ones.
     ///
     /// SPARQL grammar: SelectQuery ::= SelectClause DatasetClause* WhereClause
-    /// So FROM NAMED must come AFTER SELECT clause but BEFORE WHERE.
+    /// So the clauses must come AFTER SELECT clause but BEFORE WHERE.
     /// </summary>
-    private static string InjectFromNamedClauses(string query, List<string> namedGraphIris)
+    private static string InjectDatasetClauses(string query, string? defaultGraphIri, List<string> namedGraphIris)
     {
         if (namedGraphIris.Count == 0)
             return query;
 
-        // Build FROM NAMED clauses (with leading newline for formatting)
+        // Build the dataset clauses (with leading newline for formatting)
         var fromNamedClauses = new System.Text.StringBuilder();
         fromNamedClauses.AppendLine();
+        if (defaultGraphIri != null)
+            fromNamedClauses.Append("FROM <").Append(defaultGraphIri).AppendLine(">");
         foreach (var graphIri in namedGraphIris)
         {
             fromNamedClauses.Append("FROM NAMED <");

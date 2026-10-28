@@ -179,11 +179,13 @@ internal partial class QueryExecutor : IDisposable
     /// Resolve a dataset clause list — a query's FROM / FROM NAMED or an Update's USING / USING NAMED — into the
     /// tree executor's graph sets (prefixed names expanded against <paramref name="prefixes"/>):
     /// <list type="bullet">
-    /// <item><paramref name="defaultGraphs"/>: null = the store's unnamed default graph; [g…] = those graphs, whose
-    /// merge is the default graph.</item>
+    /// <item><paramref name="defaultGraphs"/>: null = no dataset clause, the store's unnamed default graph; empty = a
+    /// dataset without FROM / USING, whose default graph is empty (§13.2); [g…] = those graphs, whose merge is the
+    /// default graph.</item>
     /// <item><paramref name="namedGraphs"/>: null = no dataset clause, every named graph is accessible; empty = a
     /// dataset without FROM NAMED / USING NAMED, so no named graph is; [g…] = only those.</item>
     /// </list>
+    /// Each is a set: a graph named twice is in it once.
     /// </summary>
     internal static void ResolveDataset(DatasetClause[]? datasets, ReadOnlySpan<char> source, PrefixMapping[]? prefixes,
         out string[]? defaultGraphs, out string[]? namedGraphs)
@@ -199,14 +201,14 @@ internal partial class QueryExecutor : IDisposable
         {
             var rawIri = source.Slice(ds.GraphIri.Start, ds.GraphIri.Length);
             var iri = PrefixExpander.TryExpand(rawIri, prefixes, source) ?? rawIri.ToString();
-            if (ds.IsNamed)
-                namedList.Add(iri);
-            else
-                defaultList.Add(iri);
+            var list = ds.IsNamed ? namedList : defaultList;
+            if (!list.Contains(iri))
+                list.Add(iri);
         }
 
-        if (defaultList.Count > 0) defaultGraphs = defaultList.ToArray();
-        namedGraphs = namedList.Count > 0 ? namedList.ToArray() : Array.Empty<string>();
+        // A dataset clause describes the whole dataset: with FROM NAMED and no FROM, the default graph is empty
+        defaultGraphs = defaultList.ToArray();
+        namedGraphs = namedList.ToArray();
     }
 
     public void Dispose()

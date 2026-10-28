@@ -296,6 +296,26 @@ public class ExpressionTermTests : PooledStoreTestBase
     }
 
     [Fact]
+    public void OrderBy_Iris_OrdersByTheirText()
+    {
+        // <…/s> before <…/s1> before <…/s10> (W3C subquery16); through 1.8.30 the comparison included the brackets, and
+        // the '>' that ends <…/s> sorted after every digit
+        Store.AddCurrent("<http://ex/s10>", "<http://ex/p>", "\"c\"");
+        Store.AddCurrent("<http://ex/s>", "<http://ex/p>", "\"a\"");
+        Store.AddCurrent("<http://ex/s1>", "<http://ex/p>", "\"b\"");
+
+        var ascending = SparqlEngine.Query(Store, "SELECT ?s WHERE { ?s <http://ex/p> ?o } ORDER BY ?s",
+            TestContext.Current.CancellationToken);
+        var lowest = SparqlEngine.Query(Store, "SELECT (MIN(?s) AS ?min) WHERE { ?s <http://ex/p> ?o }",
+            TestContext.Current.CancellationToken);
+
+        Assert.True(ascending.Success, ascending.ErrorMessage);
+        Assert.Equal(new[] { "<http://ex/s>", "<http://ex/s1>", "<http://ex/s10>" }, ascending.Rows!.Select(r => r["s"]));
+        Assert.True(lowest.Success, lowest.ErrorMessage);
+        Assert.Equal("<http://ex/s>", Assert.Single(lowest.Rows!)["min"]);
+    }
+
+    [Fact]
     public void MinMax_OfDates_AreTheEarliestAndLatestDate()
     {
         // MIN and MAX order by ORDER BY's order (§18.5.1.4–5), so they take dates; through 1.8.29 they read numbers

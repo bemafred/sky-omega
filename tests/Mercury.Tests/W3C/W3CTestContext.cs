@@ -80,8 +80,6 @@ public static class W3CTestContext
         ["data-r2/syntax-sparql3/manifest#syn-bad-30"] = "SPARQL 1.0 triage: invalid syntax accepted: an expression the grammar does not read (a blank node in FILTER; ?x<?a&&?b>?y)",
 
         // The W3C suite update of 2026-10-28 (rdf-tests f172950 -> d01b141), by cause
-        ["data-r2/dataset/manifest#dawg-dataset-02"] = "W3C update: FROM NAMED with no FROM keeps the store's default graph; the query's dataset has an empty one (§13.2)",
-        ["data-sparql11/subquery/manifest#subquery16"] = "W3C update: ORDER BY compares IRIs with their brackets, so <…/s1> sorts before <…/s>",
         ["data-sparql11/bindings/manifest#values-construct-group-by"] = "W3C update: a trailing VALUES is not joined after GROUP BY and before the SELECT expressions (§18.2.4.1)",
         ["data-sparql11/bindings/manifest#values-group-by-projection"] = "W3C update: a trailing VALUES is not joined after GROUP BY and before the SELECT expressions (§18.2.4.1)",
         ["data-sparql11/bindings/manifest#values-group-by-select-expression"] = "W3C update: a trailing VALUES is not joined after GROUP BY and before the SELECT expressions (§18.2.4.1)",
