@@ -140,4 +140,29 @@ public class PropertyListTreeTests : PooledStoreTestBase
 
         Assert.True(result.Success, result.ErrorMessage);
     }
+
+    [Fact]
+    public void NestedBlankNodePropertyLists_NineDeep_Parse()
+    {
+        // ?s :p [ :p [ … [ :q ?o ] … ] ]: nine lists, each a level of the parser's depth limit (10)
+        var query = "SELECT ?o WHERE { ?s <http://ex/p> " + string.Concat(Enumerable.Repeat("[ <http://ex/p> ", 8))
+            + "[ <http://ex/q> ?o ]" + string.Concat(Enumerable.Repeat(" ]", 8)) + " }";
+
+        var result = SparqlEngine.Query(Store, query, TestContext.Current.CancellationToken);
+
+        Assert.True(result.Success, result.ErrorMessage);
+    }
+
+    [Fact]
+    public void NestedBlankNodePropertyLists_PastTheDepthLimit_AreASyntaxError()
+    {
+        // A list's expansion recurses; past the depth limit it is an error, not a stack overflow
+        var query = "SELECT ?o WHERE { ?s <http://ex/p> " + string.Concat(Enumerable.Repeat("[ <http://ex/p> ", 200))
+            + "?o" + string.Concat(Enumerable.Repeat(" ]", 200)) + " }";
+
+        var result = SparqlEngine.Query(Store, query, TestContext.Current.CancellationToken);
+
+        Assert.False(result.Success);
+        Assert.Contains("depth", result.ErrorMessage);
+    }
 }

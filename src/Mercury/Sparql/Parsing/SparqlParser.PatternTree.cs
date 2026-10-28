@@ -459,6 +459,15 @@ internal ref partial struct SparqlParser
     private void AddPathTriple(scoped ref PatternArray pa, Term subject, Term predicate, Term obj, PropertyPath path,
         int spanStart, int spanLength)
     {
+        if (path.Type != PathType.Sequence)
+        {
+            AddTreeTriple(ref pa, subject, predicate, obj, path.Type,
+                path.Type == PathType.None ? path.Iri.Start : spanStart,
+                path.Type == PathType.None ? path.Iri.Length : spanLength);
+            return;
+        }
+
+        // Only a parenthesized sequence inside a sequence, (p1/p2)/p3, recurses; it counts toward the depth limit
         IncrementDepth("Property path");
         try
         {
