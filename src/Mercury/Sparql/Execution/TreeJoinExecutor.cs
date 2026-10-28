@@ -194,6 +194,11 @@ internal sealed class TreeJoinExecutor
     /// </summary>
     private List<MaterializedRow> EvalGroup(ref PatternArray pa, int headerIndex, string activeGraph,
         List<MaterializedRow> input)
+        => ApplyGroupConstraints(ref pa, headerIndex, activeGraph, EvalGroupPatterns(ref pa, headerIndex, activeGraph, input));
+
+    /// <summary>A group's patterns joined with <paramref name="input"/>: everything but its FILTERs and EXISTS.</summary>
+    private List<MaterializedRow> EvalGroupPatterns(ref PatternArray pa, int headerIndex, string activeGraph,
+        List<MaterializedRow> input)
     {
         var children = new List<int>();
         var e = pa.EnumerateDirectChildren(headerIndex);
@@ -230,9 +235,20 @@ internal sealed class TreeJoinExecutor
             }
         }
         current = FlushBgp(pendingPatterns, pendingGraphs, current); // trailing BGP run
+        return current;
+    }
 
-        foreach (int ci in children)
+    /// <summary>
+    /// A group's FILTERs and [NOT] EXISTS, which apply to the whole group (§18.2.2.5), applied to <paramref name="rows"/>.
+    /// </summary>
+    private List<MaterializedRow> ApplyGroupConstraints(ref PatternArray pa, int headerIndex, string activeGraph,
+        List<MaterializedRow> rows)
+    {
+        var current = rows;
+        var e = pa.EnumerateDirectChildren(headerIndex);
+        while (e.MoveNext())
         {
+            int ci = e.CurrentIndex;
             var kind = pa[ci].Kind;
             if (kind == PatternKind.Filter)
                 current = ApplyFilter(ref pa, ci, activeGraph, current);
@@ -345,14 +361,22 @@ internal sealed class TreeJoinExecutor
                 // bottom-up answer only for the variables P's required part binds. A variable P binds only through a
                 // nested OPTIONAL is left out of the seed and joined afterwards: seeded, the nested OPTIONAL could not
                 // bind it, and the row would join P's other solutions (W3C nested-opt-1).
+                // The group's FILTERs and EXISTS are LeftJoin's condition, on the joined row: they apply after the join.
                 var optionalOnly = OptionalOnlyVariables(ref pa, ci);
                 var output = new List<MaterializedRow>();
                 foreach (var row in input)
                 {
-                    var single = new List<MaterializedRow> { optionalOnly.Count == 0 ? row : Without(row, optionalOnly) };
-                    var ext = EvalGroup(ref pa, ci, activeGraph, single);
-                    if (optionalOnly.Count > 0 && ext.Count > 0)
-                        ext = Join(new List<MaterializedRow> { row }, ext);
+                    List<MaterializedRow> ext;
+                    if (optionalOnly.Count == 0)
+                    {
+                        ext = EvalGroup(ref pa, ci, activeGraph, new List<MaterializedRow> { row });
+                    }
+                    else
+                    {
+                        ext = EvalGroupPatterns(ref pa, ci, activeGraph, new List<MaterializedRow> { Without(row, optionalOnly) });
+                        if (ext.Count > 0)
+                            ext = ApplyGroupConstraints(ref pa, ci, activeGraph, Join(new List<MaterializedRow> { row }, ext));
+                    }
                     if (ext.Count > 0) output.AddRange(ext);
                     else output.Add(row); // left join: preserve the row when the optional has no match
                 }

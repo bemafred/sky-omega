@@ -34,6 +34,27 @@ public class OptionalSemanticsTests : PooledStoreTestBase
         Assert.False(row.ContainsKey("w"));
     }
 
+    [Theory]
+    [InlineData("<http://ex/v1>", true)]
+    [InlineData("<http://ex/v9>", false)]
+    public void OptionalFilter_OnAVariableBoundOnlyByANestedOptional_SeesTheOuterValue(string compared, bool extends)
+    {
+        // LeftJoin's condition (the group's FILTER) is evaluated on the joined row, which has the outer ?v; the nested
+        // OPTIONAL does not match, so the group's own solution has no ?v
+        Store.AddCurrent("<http://ex/a>", "<http://ex/p>", "<http://ex/v1>");
+        Store.AddCurrent("<http://ex/a>", "<http://ex/q>", "<http://ex/w>");
+
+        var result = SparqlEngine.Query(Store,
+            "SELECT ?v ?w WHERE { ?s <http://ex/p> ?v OPTIONAL { ?s <http://ex/q> ?w OPTIONAL { ?s <http://ex/r> ?v } " +
+            $"FILTER(?v = {compared}) }} }}",
+            TestContext.Current.CancellationToken);
+
+        Assert.True(result.Success, result.ErrorMessage);
+        var row = Assert.Single(result.Rows!);
+        Assert.Equal("<http://ex/v1>", row["v"]);
+        Assert.Equal(extends, row.ContainsKey("w"));
+    }
+
     [Fact]
     public void NestedOptional_WellDesigned_ExtendsEachRow()
     {
