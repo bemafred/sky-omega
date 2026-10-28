@@ -52,7 +52,19 @@ internal static class PrefixExpander
                     ReadOnlySpan<char> iri = source.Slice(m.IriStart, m.IriLength);
                     if (iri.Length >= 2 && iri[0] == '<' && iri[^1] == '>')
                         iri = iri.Slice(1, iri.Length - 2);
-                    return string.Concat("<".AsSpan(), iri, localPart, ">".AsSpan());
+                    if (localPart.IndexOf('\\') < 0)
+                        return string.Concat("<".AsSpan(), iri, localPart, ">".AsSpan());
+                    // [173] PN_LOCAL_ESC: the IRI holds the escaped character, not the '\' (:a\-b is <…a-b>); a
+                    // [171] PERCENT stays as written
+                    var built = new System.Text.StringBuilder(iri.Length + localPart.Length + 2);
+                    built.Append('<').Append(iri);
+                    for (int i = 0; i < localPart.Length; i++)
+                    {
+                        if (localPart[i] == '\\' && i + 1 < localPart.Length)
+                            i++;
+                        built.Append(localPart[i]);
+                    }
+                    return built.Append('>').ToString();
                 }
             }
         }

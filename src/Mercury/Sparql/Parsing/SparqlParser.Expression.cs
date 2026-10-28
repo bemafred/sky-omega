@@ -78,7 +78,8 @@ internal ref partial struct SparqlParser
 
     /// <summary>
     /// [156]–[159] STRING_LITERAL1, STRING_LITERAL2, STRING_LITERAL_LONG1, STRING_LITERAL_LONG2 at the cursor, with
-    /// ECHAR escapes. A language tag or datatype after it is read as the following tokens.
+    /// ECHAR escapes. A language tag or datatype after it is read as the following tokens. The one string reader: of
+    /// expressions, and of literals in patterns, templates and data (<see cref="ParseLiteral"/>).
     /// </summary>
     private void SkipStringLiteral()
     {
@@ -92,7 +93,15 @@ internal ref partial struct SparqlParser
             if (IsAtEnd())
                 throw new SparqlParseException($"Unclosed string literal at position {start}");
             char c = Peek();
-            if (c == '\\') { Advance(); Advance(); continue; }
+            if (c == '\\')
+            {
+                // A \u or \U escape may not name a surrogate code point
+                if (PeekAt(1) == 'u') ValidateUnicodeEscape4(start);
+                else if (PeekAt(1) == 'U') ValidateUnicodeEscape8(start);
+                Advance();
+                Advance();
+                continue;
+            }
             if (c == quote && (!isLong || (_position + 2 < _source.Length && _source[_position + 1] == quote && _source[_position + 2] == quote)))
             {
                 _position += open;

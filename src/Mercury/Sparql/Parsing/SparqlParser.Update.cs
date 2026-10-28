@@ -678,11 +678,9 @@ internal ref partial struct SparqlParser
             // Full IRI: <http://...>
             ParseIriRef();
         }
-        else if (char.IsLetter(ch) || ch == ':')
+        else if (TryReadPnameNs())
         {
-            // Prefixed name: prefix:local or :local
-            while (!IsAtEnd() && (char.IsLetterOrDigit(Peek()) || Peek() == '_' || Peek() == '-' || Peek() == ':'))
-                Advance();
+            ReadPnLocal(); // [141] PNAME_LN, or a PNAME_NS alone
         }
         else
         {

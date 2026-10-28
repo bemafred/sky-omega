@@ -26,6 +26,11 @@ internal ref partial struct SparqlParser
     private int _joinVariableCounter; // The next SyntheticTerms.JoinVariable an expansion takes
     private int _constructListNodeCounter; // Counter for synthetic list node blank nodes within CONSTRUCT template
     private int _currentDepth; // Current recursion depth for subqueries, paths, quoted triples
+    // §19.6: a blank-node label belongs to one basic graph pattern of a WHERE group. Each label seen, with the number of
+    // the basic graph pattern it is in; allocated at the first label, reset for each WHERE group.
+    private List<(int Start, int Length, int Pattern)>? _blankNodeLabels;
+    private int _basicPatternCount;   // basic graph patterns opened in this WHERE group
+    private int _basicPattern;        // the one the triples being added are in
     private readonly int _maxDepth; // Maximum allowed recursion depth
 
     // Default maximum query depth (subqueries, property paths, quoted triples)
@@ -539,22 +544,10 @@ internal ref partial struct SparqlParser
         ConsumeKeyword("PREFIX");
         SkipWhitespace();
 
-        // syn-bad-pname-05: Validate prefix name starts with letter (or is empty for default prefix)
-        // SPARQL grammar: PNAME_NS ::= PN_PREFIX? ':'
-        // PN_PREFIX ::= PN_CHARS_BASE ((PN_CHARS | '.')* PN_CHARS)?
-        // PN_CHARS_BASE ::= [A-Z] | [a-z] | [#x00C0-#x00D6] | ...
-        if (!IsAtEnd() && Peek() != ':')
-        {
-            var firstChar = Peek();
-            if (!IsLetter(firstChar) && firstChar != '_')
-            {
-                throw new SparqlParseException($"PREFIX name must start with a letter, not '{firstChar}'");
-            }
-        }
-
-        // Track prefix position
+        // [140] PNAME_NS ::= PN_PREFIX? ':' (syn-bad-pname-05: a prefix starts with a PN_CHARS_BASE)
         var prefixStart = _position;
-        ParsePnameNs();
+        if (!TryReadPnameNs())
+            throw new SparqlParseException($"Expected a prefix name ending in ':' at position {_position}");
         var prefixLength = _position - prefixStart;
 
         SkipWhitespace();
@@ -1599,16 +1592,10 @@ internal ref partial struct SparqlParser
             return ParseTermIriRef();
         }
 
-        // Prefixed name: prefix:local or :local (empty prefix)
-        if (IsLetter(ch))
+        // Prefixed name ([141] PNAME_LN, [140] PNAME_NS), or a bare word such as true or false
+        if (ch == ':' || IsPnCharsBase(ch))
         {
             return ParsePrefixedNameOrKeyword();
-        }
-
-        // Empty prefix: :local (starts with colon)
-        if (ch == ':')
-        {
-            return ParseEmptyPrefixName();
         }
 
         // Literal: "string" or 'string'
@@ -1832,45 +1819,15 @@ internal ref partial struct SparqlParser
     private Term ParsePrefixedNameOrKeyword()
     {
         var start = _position;
-
-        // Read prefix part
-        while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_'))
-            Advance();
-
-        // Check for colon (prefixed name)
-        if (Peek() == ':')
+        if (TryReadPnameNs())
         {
-            Advance(); // Skip ':'
-
-            // Read local part - per SPARQL grammar PN_LOCAL can contain ':' after first char
-            // Also handle PLX escapes (backslash escapes and percent escapes)
-            while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_' || Peek() == '-' || Peek() == '.' || Peek() == ':' || Peek() == '\\' || Peek() == '%'))
-            {
-                // Don't include trailing dot
-                if (Peek() == '.' && !IsLetterOrDigit(PeekAt(1)) && PeekAt(1) != ':')
-                    break;
-
-                // syn-bad-pname-06: Validate backslash escapes in prefixed names
-                if (Peek() == '\\')
-                {
-                    var nextChar = PeekAt(1);
-                    if (!IsValidPnLocalEsc(nextChar))
-                    {
-                        throw new SparqlParseException($"Invalid escape sequence '\\{nextChar}' in prefixed name local part");
-                    }
-                    Advance(); // Skip '\'
-                    Advance(); // Skip escaped char
-                    continue;
-                }
-
-                Advance();
-            }
-
+            ReadPnLocal();
             return Term.Iri(start, _position - start);
         }
 
-        // Not a prefixed name - might be a keyword, reset
-        // Check if this looks like a keyword we should skip
+        // Not a prefixed name: a bare word
+        while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_'))
+            Advance();
         var word = _source.Slice(start, _position - start);
         if (word.Equals("FILTER", StringComparison.OrdinalIgnoreCase) ||
             word.Equals("OPTIONAL", StringComparison.OrdinalIgnoreCase) ||
@@ -1885,42 +1842,99 @@ internal ref partial struct SparqlParser
     }
 
     /// <summary>
-    /// Parse a prefixed name with empty prefix: :local
+    /// [140] PNAME_NS ::= PN_PREFIX? ':' at the cursor, with [168] PN_PREFIX ::= PN_CHARS_BASE ((PN_CHARS|'.')* PN_CHARS)?:
+    /// a prefix may hold dots but not end with one (<c>x.y:</c>). Moves past the ':' and returns true, or returns false
+    /// with the cursor unmoved. The one reader of a prefix: the prologue, every prefixed name, and Update's graph
+    /// references.
     /// </summary>
-    private Term ParseEmptyPrefixName()
+    private bool TryReadPnameNs()
     {
-        var start = _position;
-
-        // Skip ':'
-        Advance();
-
-        // Read local part - per SPARQL grammar PN_LOCAL can contain ':' after first char
-        // Also handle PLX escapes (backslash escapes and percent escapes)
-        while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_' || Peek() == '-' || Peek() == '.' || Peek() == ':' || Peek() == '\\' || Peek() == '%'))
+        int i = _position;
+        if (i < _source.Length && IsPnCharsBase(_source[i]))
         {
-            // Don't include trailing dot
-            if (Peek() == '.' && !IsLetterOrDigit(PeekAt(1)) && PeekAt(1) != ':')
-                break;
-
-            // syn-bad-pname-06: Validate backslash escapes in prefixed names
-            // PN_LOCAL_ESC ::= '\' ( '_' | '~' | '.' | '-' | '!' | '$' | '&' | "'" | '(' | ')' | '*' | '+' | ',' | ';' | '=' | '/' | '?' | '#' | '@' | '%' )
-            if (Peek() == '\\')
+            i++;
+            int end = i; // just past the last PN_CHARS
+            while (i < _source.Length && (IsPnChars(_source[i]) || _source[i] == '.'))
             {
-                var nextChar = PeekAt(1);
-                if (!IsValidPnLocalEsc(nextChar))
-                {
-                    throw new SparqlParseException($"Invalid escape sequence '\\{nextChar}' in prefixed name local part");
-                }
-                Advance(); // Skip '\'
-                Advance(); // Skip escaped char
-                continue;
+                i++;
+                if (_source[i - 1] != '.')
+                    end = i;
             }
-
-            Advance();
+            i = end;
         }
-
-        return Term.Iri(start, _position - start);
+        if (i >= _source.Length || _source[i] != ':')
+            return false;
+        _position = i + 1;
+        return true;
     }
+
+    /// <summary>
+    /// [169] PN_LOCAL ::= (PN_CHARS_U | ':' | [0-9] | PLX) ((PN_CHARS | '.' | ':' | PLX)* (PN_CHARS | ':' | PLX))? at the
+    /// cursor, possibly empty (<c>x:</c>). Dots inside a name are its own (<c>:a.b</c>); a dot that ends it is the triple's
+    /// '.'. [170] PLX: a [171] PERCENT is '%' and two hex digits; a [173] PN_LOCAL_ESC is '\' and one of its characters.
+    /// </summary>
+    private void ReadPnLocal()
+    {
+        int end = _position; // just past the last character that may end the name
+        bool first = true;
+        while (!IsAtEnd())
+        {
+            char c = Peek();
+            if (c == '\\')
+            {
+                // syn-bad-pname-06
+                var escaped = PeekAt(1);
+                if (!IsValidPnLocalEsc(escaped))
+                    throw new SparqlParseException($"Invalid escape sequence '\\{escaped}' in prefixed name local part");
+                _position += 2;
+            }
+            else if (c == '%')
+            {
+                if (!Uri.IsHexDigit(PeekAt(1)) || !Uri.IsHexDigit(PeekAt(2)))
+                    throw new SparqlParseException($"Expected two hex digits after '%' in a prefixed name at position {_position}");
+                _position += 3;
+            }
+            else if (IsPnChars(c) || c == ':')
+            {
+                // PN_CHARS that may not begin a local name: '-', #x00B7, [#x0300-#x036F], [#x203F-#x2040]
+                if (first && (c == '-' || c == '·' || c is >= '̀' and <= 'ͯ' || c is '‿' or '⁀'))
+                    break;
+                Advance();
+            }
+            else if (c == '.' && !first)
+            {
+                Advance();
+                continue; // a '.' may not end the name: end stays before it
+            }
+            else
+            {
+                break;
+            }
+            first = false;
+            end = _position;
+        }
+        _position = end;
+    }
+
+    /// <summary>
+    /// [164] PN_CHARS_BASE: an ASCII letter, or a character in the grammar's Unicode ranges. A code point past #xFFFF is a
+    /// surrogate pair; its high surrogates up to #xDB7F (planes 1 to 14) and every low surrogate are read as name characters.
+    /// </summary>
+    private static bool IsPnCharsBase(char c) =>
+        (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+        (c >= 'À' && c <= 'Ö') || (c >= 'Ø' && c <= 'ö') || (c >= 'ø' && c <= '˿') ||
+        (c >= 'Ͱ' && c <= 'ͽ') || (c >= 'Ϳ' && c <= '῿') || (c >= '‌' && c <= '‍') ||
+        (c >= '⁰' && c <= '↏') || (c >= 'Ⰰ' && c <= '⿯') || (c >= '、' && c <= '퟿') ||
+        (c >= '豈' && c <= '﷏') || (c >= 'ﷰ' && c <= '�') ||
+        (c >= '\uD800' && c <= '\uDB7F') || (c >= '\uDC00' && c <= '\uDFFF');
+
+    /// <summary>
+    /// [166] PN_CHARS ::= PN_CHARS_U | '-' | [0-9] | #x00B7 | [#x0300-#x036F] | [#x203F-#x2040], with [165] PN_CHARS_U ::=
+    /// PN_CHARS_BASE | '_'.
+    /// </summary>
+    private static bool IsPnChars(char c) =>
+        IsPnCharsBase(c) || c == '_' || c == '-' || (c >= '0' && c <= '9') || c == '·' ||
+        (c >= '̀' && c <= 'ͯ') || c == '‿' || c == '⁀';
 
     /// <summary>
     /// Checks if a character is valid after '\' in PN_LOCAL_ESC.
@@ -2023,67 +2037,26 @@ internal ref partial struct SparqlParser
     }
 
     /// <summary>
-    /// Parse a string literal
+    /// [129] RDFLiteral ::= String ( LANGTAG | ( '^^' iri ) )?. The string, in any of its four quote forms, is read with
+    /// the token rule every expression uses (<see cref="SkipStringLiteral"/>); [145] LANGTAG ::= '@' [a-zA-Z]+
+    /// ('-' [a-zA-Z0-9]+)*.
     /// </summary>
     private Term ParseLiteral()
     {
-        var quote = Peek();
         var start = _position;
+        SkipStringLiteral();
 
-        Advance(); // Skip opening quote
-
-        // Check for long string (""" or ''')
-        if (Peek() == quote && PeekAt(1) == quote)
-        {
-            Advance();
-            Advance();
-            // Long string - read until closing """
-            while (!IsAtEnd())
-            {
-                if (Peek() == quote && PeekAt(1) == quote && PeekAt(2) == quote)
-                {
-                    Advance();
-                    Advance();
-                    Advance();
-                    break;
-                }
-                Advance();
-            }
-        }
-        else
-        {
-            // Short string - read until closing quote
-            while (!IsAtEnd() && Peek() != quote)
-            {
-                if (Peek() == '\\')
-                {
-                    var escapeChar = PeekAt(1);
-
-                    // Validate Unicode escapes for invalid codepoints (surrogates)
-                    if (escapeChar == 'u')
-                    {
-                        ValidateUnicodeEscape4(start);
-                    }
-                    else if (escapeChar == 'U')
-                    {
-                        ValidateUnicodeEscape8(start);
-                    }
-
-                    Advance(); // Skip '\'
-                }
-                Advance();
-            }
-
-            if (Peek() == quote)
-                Advance(); // Skip closing quote
-        }
-
-        // Check for language tag @en or datatype ^^<type>
         if (Peek() == '@')
         {
             Advance();
-            while (!IsAtEnd() && (IsLetter(Peek()) || Peek() == '-'))
+            while (!IsAtEnd() && IsLetter(Peek()))
                 Advance();
+            while (Peek() == '-' && IsLetterOrDigit(PeekAt(1)))
+            {
+                Advance();
+                while (!IsAtEnd() && IsLetterOrDigit(Peek()))
+                    Advance();
+            }
         }
         else if (Peek() == '^' && PeekAt(1) == '^')
         {
@@ -2687,20 +2660,6 @@ internal ref partial struct SparqlParser
         Advance(); // Skip '>'
         
         return _source.Slice(start, end - start + 1);
-    }
-
-    private ReadOnlySpan<char> ParsePnameNs()
-    {
-        var start = _position;
-        
-        while (!IsAtEnd() && Peek() != ':')
-            Advance();
-        
-        if (IsAtEnd())
-            throw new SparqlParseException("Expected ':' in prefix name");
-        
-        Advance(); // Skip ':'
-        return _source.Slice(start, _position - start);
     }
 
     private void ConsumeKeyword(ReadOnlySpan<char> keyword)

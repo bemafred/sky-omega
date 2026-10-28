@@ -58,6 +58,8 @@ internal ref partial struct SparqlParser
     internal int ParsePatternTreeAt(int position, scoped ref PatternArray pa)
     {
         _position = position;
+        _blankNodeLabels = null;
+        _basicPatternCount = 0;
         return ParsePatternTree(ref pa);
     }
 
@@ -109,6 +111,10 @@ internal ref partial struct SparqlParser
         // BIND, VALUES, a group …); two triples statements need a '.' between them; a group never starts with one.
         bool dotAllowed = false;  // the element before may be followed by a '.'
         bool triplesOpen = false; // the element before is a triples statement with no '.' after it
+        // A basic graph pattern is a run of triples statements; a FILTER doesn't end it, any other clause does
+        // (§18.2.2.1 removes the FILTERs before adjacent triples are collected)
+        int basicPattern = 0;
+        bool basicPatternOpen = false;
         while (true)
         {
             SkipWhitespace();
@@ -127,6 +133,8 @@ internal ref partial struct SparqlParser
             bool needsDot = triplesOpen;
             dotAllowed = true;
             triplesOpen = false;
+            bool continuesBasicPattern = basicPatternOpen;
+            basicPatternOpen = basicPatternOpen && AtKeyword("FILTER");
 
             // Peek enough for the longest keyword (OPTIONAL = 8).
             var span = PeekSpan(8);
@@ -190,6 +198,10 @@ internal ref partial struct SparqlParser
             // Otherwise it is a triples statement. Its trailing '.' is consumed at the loop top.
             if (needsDot)
                 throw new SparqlParseException($"Expected '.' between two triple patterns at position {_position}");
+            if (!continuesBasicPattern)
+                basicPattern = ++_basicPatternCount;
+            basicPatternOpen = true;
+            _basicPattern = basicPattern;
             if (!EmitTripleBlockTree(ref pa))
                 break;
             triplesOpen = true;
@@ -438,11 +450,36 @@ internal ref partial struct SparqlParser
     private void AddTreeTriple(scoped ref PatternArray pa, Term subject, Term predicate, Term obj,
         PathType pathType, int pathStart, int pathLength)
     {
+        ThrowIfLabelInAnotherPattern(subject);
+        ThrowIfLabelInAnotherPattern(obj);
         pa.AddTriple(
             PatternTermType(subject), subject.Start, subject.Length,
             predicate.Type, predicate.Start, predicate.Length,
             PatternTermType(obj), obj.Start, obj.Length,
             pathType, pathStart, pathLength);
+    }
+
+    /// <summary>
+    /// §19.6: the same blank-node label cannot be used in two basic graph patterns of a query (W3C syntax-sparql3
+    /// blabel-cross-*, syntax-sparql4 syn-bad-34 to -38 and *-breaks-BGP). Records a labeled blank node with the
+    /// basic graph pattern it is in, and throws when the label is already in another one.
+    /// </summary>
+    private void ThrowIfLabelInAnotherPattern(Term term)
+    {
+        if (!term.IsBlankNode || term.Start < 0 || term.Length <= 2 || _source[term.Start] != '_')
+            return;
+        var label = _source.Slice(term.Start, term.Length);
+        _blankNodeLabels ??= new List<(int Start, int Length, int Pattern)>();
+        foreach (var (start, length, pattern) in _blankNodeLabels)
+        {
+            if (!_source.Slice(start, length).SequenceEqual(label))
+                continue;
+            if (pattern != _basicPattern)
+                throw new SparqlParseException(
+                    $"Blank node label {label.ToString()} is used in two basic graph patterns (position {term.Start})");
+            return;
+        }
+        _blankNodeLabels.Add((term.Start, term.Length, _basicPattern));
     }
 
     private readonly TermType PatternTermType(Term term)
@@ -512,9 +549,9 @@ internal ref partial struct SparqlParser
             SkipBracketedGroup();
             pa.AddFilter(open + 1, _position - open - 2, depth);
         }
-        else if (IsLetter(Peek()) || Peek() == '<')
+        else if (IsPnCharsBase(Peek()) || Peek() is '<' or ':')
         {
-            // BuiltInCall / FunctionCall: FILTER CONTAINS(...), FILTER ex:fn(...), FILTER <iri>(...)
+            // BuiltInCall / FunctionCall: FILTER CONTAINS(...), FILTER ex:fn(...), FILTER :fn(...), FILTER <iri>(...)
             int start = _position;
             SkipExpressionToken(); // the name or IRI
             SkipWhitespace();
