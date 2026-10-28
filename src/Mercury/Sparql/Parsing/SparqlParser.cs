@@ -469,7 +469,7 @@ internal ref partial struct SparqlParser
 
         // [28] ValuesClause follows every query form, and nothing follows it
         SkipWhitespace();
-        if (KeywordIs(PeekSpan(6), "VALUES"))
+        if (AtKeyword("VALUES"))
         {
             query.Values = ParseValuesClause();
             SkipWhitespace();
@@ -2458,9 +2458,9 @@ internal ref partial struct SparqlParser
 
                 // The expression's tokens up to its AS keyword
                 int asPosition = -1;
-                while (!IsAtEnd() && Peek() != ')' && !AtExpressionKeyword("AS"))
+                while (!IsAtEnd() && Peek() != ')' && !AtKeyword("AS"))
                     SkipExpressionToken();
-                if (AtExpressionKeyword("AS"))
+                if (AtKeyword("AS"))
                 {
                     asPosition = _position;
                     ConsumeKeyword("AS");
@@ -2546,9 +2546,9 @@ internal ref partial struct SparqlParser
         while (true)
         {
             SkipWhitespace();
-            if (AtExpressionKeyword("ASC") || AtExpressionKeyword("DESC"))
+            if (AtKeyword("ASC") || AtKeyword("DESC"))
             {
-                var direction = AtExpressionKeyword("DESC") ? OrderDirection.Descending : OrderDirection.Ascending;
+                var direction = AtKeyword("DESC") ? OrderDirection.Descending : OrderDirection.Ascending;
                 ConsumeKeyword(direction == OrderDirection.Descending ? "DESC" : "ASC");
                 SkipWhitespace();
                 if (Peek() != '(')
@@ -2604,9 +2604,9 @@ internal ref partial struct SparqlParser
         char ch = Peek();
         if (!(IsLetter(ch) || ch == '<' || ch == ':'))
             return false;
-        if (AtExpressionKeyword("LIMIT") || AtExpressionKeyword("OFFSET") || AtExpressionKeyword("VALUES") ||
-            AtExpressionKeyword("AS") || AtExpressionKeyword("DURING") || AtExpressionKeyword("ALL") ||
-            AtExpressionKeyword("BINDINGS"))
+        if (AtKeyword("LIMIT") || AtKeyword("OFFSET") || AtKeyword("VALUES") ||
+            AtKeyword("AS") || AtKeyword("DURING") || AtKeyword("ALL") ||
+            AtKeyword("BINDINGS"))
             return false;
         int saved = _position;
         SkipExpressionToken();

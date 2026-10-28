@@ -124,8 +124,11 @@ internal ref partial struct SparqlParser
         return false;
     }
 
-    /// <summary>True when the expression token at the cursor is <paramref name="keyword"/> (case-insensitive, whole word).</summary>
-    private readonly bool AtExpressionKeyword(ReadOnlySpan<char> keyword)
+    /// <summary>
+    /// True when <paramref name="keyword"/> is at the cursor as a whole word (case-insensitive): not followed by a name
+    /// character, so <c>graph:a</c> or <c>?gas</c> is not GRAPH or AS. Every keyword test in the parser uses this.
+    /// </summary>
+    private readonly bool AtKeyword(ReadOnlySpan<char> keyword)
     {
         if (_position + keyword.Length > _source.Length)
             return false;
@@ -158,7 +161,7 @@ internal ref partial struct SparqlParser
         int end = start + length;
         while (_position < end)
         {
-            if (AtExpressionKeyword("EXISTS"))
+            if (AtKeyword("EXISTS"))
             {
                 int keywordStart = _position;
                 _position += "EXISTS".Length;
@@ -193,7 +196,7 @@ internal ref partial struct SparqlParser
             int nameLength = 0;
             foreach (var (name, aggregate) in AggregateNames)
             {
-                if (AtExpressionKeyword(name))
+                if (AtKeyword(name))
                 {
                     function = aggregate;
                     nameLength = name.Length;

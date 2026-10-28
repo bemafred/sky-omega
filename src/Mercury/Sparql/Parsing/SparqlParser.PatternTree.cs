@@ -78,7 +78,7 @@ internal ref partial struct SparqlParser
         SkipWhitespace();
 
         int header;
-        if (KeywordIs(PeekSpan(6), "SELECT"))
+        if (AtKeyword("SELECT"))
         {
             // SubSelect: its WHERE is a child subtree, evaluated with the active graph threaded in
             header = pa.Count;
@@ -128,43 +128,43 @@ internal ref partial struct SparqlParser
                 continue;
             }
 
-            if (KeywordIs(span, "FILTER"))
+            if (AtKeyword("FILTER"))
             {
                 EmitFilterTree(ref pa, depth);
                 continue;
             }
 
-            if (KeywordIs(span, "OPTIONAL"))
+            if (AtKeyword("OPTIONAL"))
             {
                 ParseWrappedGroupTree(ref pa, depth, PatternKind.OptionalHeader, "OPTIONAL");
                 continue;
             }
 
-            if (KeywordIs(span, "MINUS"))
+            if (AtKeyword("MINUS"))
             {
                 ParseWrappedGroupTree(ref pa, depth, PatternKind.MinusHeader, "MINUS");
                 continue;
             }
 
-            if (KeywordIs(span, "BIND"))
+            if (AtKeyword("BIND"))
             {
                 EmitBindTree(ref pa, depth, groupFirstSlot);
                 continue;
             }
 
-            if (KeywordIs(span, "VALUES"))
+            if (AtKeyword("VALUES"))
             {
                 EmitValuesTree(ref pa, depth);
                 continue;
             }
 
-            if (KeywordIs(span, "GRAPH"))
+            if (AtKeyword("GRAPH"))
             {
                 ParseGraphTree(ref pa, depth);
                 continue;
             }
 
-            if (KeywordIs(span, "SERVICE"))
+            if (AtKeyword("SERVICE"))
             {
                 ParseServiceTree(ref pa, depth);
                 continue;
@@ -172,10 +172,10 @@ internal ref partial struct SparqlParser
 
             // A sub-SELECT is `{ SELECT … }`, caught at the group level (the '{' branch above → ParseGroupTree).
             // A bare SELECT here is an unwrapped subquery — a syntax error, not a missing feature.
-            if (KeywordIs(span, "SELECT"))
+            if (AtKeyword("SELECT"))
                 throw new SparqlParseException("SELECT (subquery) must be wrapped in braces: { SELECT ... }");
 
-            if (KeywordIs(span, "UNION"))
+            if (AtKeyword("UNION"))
                 throw new SparqlParseException("UNION requires graph patterns enclosed in braces: { pattern } UNION { pattern }");
 
             // Otherwise it is a triples block. Its trailing '.' is consumed at the loop top.
@@ -195,11 +195,11 @@ internal ref partial struct SparqlParser
         int firstBranch = ParseGroupTree(ref pa, depth + 1);
 
         SkipWhitespace();
-        if (!KeywordIs(PeekSpan(5), "UNION"))
+        if (!AtKeyword("UNION"))
             return; // a single nested group, not a union
 
         int union = pa.WrapSubtree(firstBranch, PatternKind.UnionHeader);
-        while (KeywordIs(PeekSpan(5), "UNION"))
+        while (AtKeyword("UNION"))
         {
             ConsumeKeyword("UNION");
             SkipWhitespace();
@@ -234,7 +234,7 @@ internal ref partial struct SparqlParser
 
         int header = pa.BeginGraph(graphTerm.Type, graphTerm.Start, graphTerm.Length);
         SkipWhitespace();
-        if (KeywordIs(PeekSpan(6), "SELECT"))
+        if (AtKeyword("SELECT"))
         {
             // GRAPH g { SELECT … } — the GroupGraphPattern is a SubSelect ([53] GroupGraphPattern ::= '{' SubSelect '}'),
             // e.g. W3C agg-empty-group-count-graph: GRAPH ?g { SELECT (count(*) AS ?c) WHERE { … } }. Carry the
@@ -271,7 +271,7 @@ internal ref partial struct SparqlParser
         int open = _position;
         Advance(); // consume '{'
         SkipWhitespace();
-        if (KeywordIs(PeekSpan(6), "SELECT"))
+        if (AtKeyword("SELECT"))
         {
             // [53] GroupGraphPattern ::= '{' SubSelect '}': the block is a sub-SELECT, its header's one child
             _position = open;
@@ -451,13 +451,13 @@ internal ref partial struct SparqlParser
         if (Peek() == '(') { Advance(); SkipWhitespace(); paren = true; }
 
         bool negated = false;
-        if (AtExpressionKeyword("NOT"))
+        if (AtKeyword("NOT"))
         {
             ConsumeKeyword("NOT");
             SkipWhitespace();
             negated = true;
         }
-        if (AtExpressionKeyword("EXISTS"))
+        if (AtKeyword("EXISTS"))
         {
             ConsumeKeyword("EXISTS");
             SkipWhitespace();
@@ -527,7 +527,7 @@ internal ref partial struct SparqlParser
         SkipWhitespace();
 
         int exprStart = _position;
-        while (!IsAtEnd() && Peek() != ')' && !AtExpressionKeyword("AS"))
+        while (!IsAtEnd() && Peek() != ')' && !AtKeyword("AS"))
             SkipExpressionToken();
         int exprLength = _position - exprStart;
         while (exprLength > 0 && char.IsWhiteSpace(_source[exprStart + exprLength - 1]))
@@ -595,7 +595,7 @@ internal ref partial struct SparqlParser
         ConsumeKeyword("SERVICE");
         SkipWhitespace();
         bool silent = false;
-        if (KeywordIs(PeekSpan(6), "SILENT"))
+        if (AtKeyword("SILENT"))
         {
             ConsumeKeyword("SILENT");
             SkipWhitespace();
@@ -675,15 +675,11 @@ internal ref partial struct SparqlParser
     }
 
     /// <summary>True if a body keyword (one that ends a property list) begins <paramref name="span"/>.</summary>
-    private static bool KeywordIs(ReadOnlySpan<char> span, ReadOnlySpan<char> keyword)
-        => span.Length >= keyword.Length && span[..keyword.Length].Equals(keyword, StringComparison.OrdinalIgnoreCase);
-
     /// <summary>Lookahead used inside a property list to stop before a keyword that begins a new clause.</summary>
     private bool IsBodyKeywordAhead()
     {
-        var span = PeekSpan(8);
-        return KeywordIs(span, "FILTER") || KeywordIs(span, "OPTIONAL") || KeywordIs(span, "MINUS")
-            || KeywordIs(span, "BIND") || KeywordIs(span, "VALUES") || KeywordIs(span, "SERVICE")
-            || KeywordIs(span, "GRAPH");
+        return AtKeyword("FILTER") || AtKeyword("OPTIONAL") || AtKeyword("MINUS")
+            || AtKeyword("BIND") || AtKeyword("VALUES") || AtKeyword("SERVICE")
+            || AtKeyword("GRAPH");
     }
 }

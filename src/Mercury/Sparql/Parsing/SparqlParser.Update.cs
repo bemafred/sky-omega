@@ -433,7 +433,7 @@ internal ref partial struct SparqlParser
                 return quads.ToArray();
 
             var span = PeekSpan(5);
-            if (span.Length >= 5 && span[..5].Equals("GRAPH", StringComparison.OrdinalIgnoreCase))
+            if (AtKeyword("GRAPH"))
             {
                 ConsumeKeyword("GRAPH");
                 SkipWhitespace();
@@ -474,7 +474,7 @@ internal ref partial struct SparqlParser
             if (IsAtEnd() || Peek() == '}')
                 return;
             var span = PeekSpan(5);
-            if (span.Length >= 5 && span[..5].Equals("GRAPH", StringComparison.OrdinalIgnoreCase))
+            if (AtKeyword("GRAPH"))
                 return;
 
             var written = ParseTerm();
@@ -703,15 +703,12 @@ internal ref partial struct SparqlParser
     /// <summary>
     /// Try to consume a keyword, returning true if successful.
     /// </summary>
+    /// <summary>Consumes <paramref name="keyword"/> when the whole word is at the cursor.</summary>
     private bool TryConsumeKeyword(string keyword)
     {
-        var span = PeekSpan(keyword.Length);
-        if (span.Length >= keyword.Length &&
-            span[..keyword.Length].Equals(keyword, StringComparison.OrdinalIgnoreCase))
-        {
-            _position += keyword.Length;
-            return true;
-        }
-        return false;
+        if (!AtKeyword(keyword))
+            return false;
+        _position += keyword.Length;
+        return true;
     }
 }

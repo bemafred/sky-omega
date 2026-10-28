@@ -351,7 +351,7 @@ internal ref partial struct SparqlParser
 
         // [17] WhereClause ::= 'WHERE'? GroupGraphPattern, optional in a DESCRIBE
         SkipWhitespace();
-        if (KeywordIs(PeekSpan(5), "WHERE") || Peek() == '{')
+        if (AtKeyword("WHERE") || Peek() == '{')
         {
             whereClause = ParseWhereClause();
         }
@@ -397,7 +397,7 @@ internal ref partial struct SparqlParser
         var clause = new SelectClause();
 
         var span = PeekSpan(8);
-        if (span.Length >= 8 && span[..8].Equals("DISTINCT", StringComparison.OrdinalIgnoreCase))
+        if (AtKeyword("DISTINCT"))
         {
             ConsumeKeyword("DISTINCT");
             SkipWhitespace();
@@ -543,43 +543,37 @@ internal ref partial struct SparqlParser
 
         // Parse aggregate function name
         var span = PeekSpan(12);
-        if (span.Length >= 12 && span[..12].Equals("GROUP_CONCAT", StringComparison.OrdinalIgnoreCase))
+        if (AtKeyword("GROUP_CONCAT"))
         {
             ConsumeKeyword("GROUP_CONCAT");
             agg.Function = AggregateFunction.GroupConcat;
         }
-        else if (span.Length >= 5 && span[..5].Equals("COUNT", StringComparison.OrdinalIgnoreCase) &&
-                 (span.Length == 5 || !char.IsLetterOrDigit(span[5])))
+        else if (AtKeyword("COUNT"))
         {
             ConsumeKeyword("COUNT");
             agg.Function = AggregateFunction.Count;
         }
-        else if (span.Length >= 3 && span[..3].Equals("SUM", StringComparison.OrdinalIgnoreCase) &&
-                 (span.Length == 3 || !char.IsLetterOrDigit(span[3])))
+        else if (AtKeyword("SUM"))
         {
             ConsumeKeyword("SUM");
             agg.Function = AggregateFunction.Sum;
         }
-        else if (span.Length >= 3 && span[..3].Equals("AVG", StringComparison.OrdinalIgnoreCase) &&
-                 (span.Length == 3 || !char.IsLetterOrDigit(span[3])))
+        else if (AtKeyword("AVG"))
         {
             ConsumeKeyword("AVG");
             agg.Function = AggregateFunction.Avg;
         }
-        else if (span.Length >= 3 && span[..3].Equals("MIN", StringComparison.OrdinalIgnoreCase) &&
-                 (span.Length == 3 || !char.IsLetterOrDigit(span[3])))
+        else if (AtKeyword("MIN"))
         {
             ConsumeKeyword("MIN");
             agg.Function = AggregateFunction.Min;
         }
-        else if (span.Length >= 3 && span[..3].Equals("MAX", StringComparison.OrdinalIgnoreCase) &&
-                 (span.Length == 3 || !char.IsLetterOrDigit(span[3])))
+        else if (AtKeyword("MAX"))
         {
             ConsumeKeyword("MAX");
             agg.Function = AggregateFunction.Max;
         }
-        else if (span.Length >= 6 && span[..6].Equals("SAMPLE", StringComparison.OrdinalIgnoreCase) &&
-                 (span.Length == 6 || !char.IsLetterOrDigit(span[6])))
+        else if (AtKeyword("SAMPLE"))
         {
             ConsumeKeyword("SAMPLE");
             agg.Function = AggregateFunction.Sample;
@@ -593,9 +587,9 @@ internal ref partial struct SparqlParser
 
             // The expression's tokens up to its AS keyword, then the alias
             bool foundAs = false;
-            while (!IsAtEnd() && Peek() != ')' && !AtExpressionKeyword("AS"))
+            while (!IsAtEnd() && Peek() != ')' && !AtKeyword("AS"))
                 SkipExpressionToken();
-            if (AtExpressionKeyword("AS"))
+            if (AtKeyword("AS"))
             {
                 exprEnd = _position;
                 while (exprEnd > exprStart && char.IsWhiteSpace(_source[exprEnd - 1]))
@@ -649,7 +643,7 @@ internal ref partial struct SparqlParser
 
         // Check for DISTINCT
         span = PeekSpan(8);
-        if (span.Length >= 8 && span[..8].Equals("DISTINCT", StringComparison.OrdinalIgnoreCase))
+        if (AtKeyword("DISTINCT"))
         {
             ConsumeKeyword("DISTINCT");
             SkipWhitespace();
@@ -689,7 +683,7 @@ internal ref partial struct SparqlParser
             SkipWhitespace();
 
             span = PeekSpan(9);
-            if (span.Length >= 9 && span[..9].Equals("SEPARATOR", StringComparison.OrdinalIgnoreCase))
+            if (AtKeyword("SEPARATOR"))
             {
                 ConsumeKeyword("SEPARATOR");
                 SkipWhitespace();
@@ -936,7 +930,7 @@ internal ref partial struct SparqlParser
     {
         ParseSelectClause();
         SkipWhitespace();
-        if (KeywordIs(PeekSpan(5), "WHERE"))
+        if (AtKeyword("WHERE"))
         {
             ConsumeKeyword("WHERE");
             SkipWhitespace();
@@ -975,7 +969,7 @@ internal ref partial struct SparqlParser
     {
         subSelect.Modifier = ParseSolutionModifier();
         SkipWhitespace();
-        if (KeywordIs(PeekSpan(6), "VALUES"))
+        if (AtKeyword("VALUES"))
         {
             subSelect.Values = ParseValuesClause();
             SkipWhitespace();

@@ -144,7 +144,7 @@ internal ref partial struct SparqlParser
 
             _column++;
             var ahead = _parser.PeekSpan(6);
-            if (KeywordIs(ahead, "UNDEF") && (ahead.Length == 5 || !IsLetterOrDigit(ahead[5])))
+            if (_parser.AtKeyword("UNDEF"))
             {
                 _parser.ConsumeKeyword("UNDEF");
                 length = -1;
