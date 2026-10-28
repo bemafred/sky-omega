@@ -414,12 +414,29 @@ internal ref partial struct SparqlParser
 
         int pathIriStart = path.Type == PathType.None ? path.Iri.Start : pathStart;
         int pathIriLength = path.Type == PathType.None ? path.Iri.Length : pathLength;
-        pa.AddTriple(
-            subject.Type, subject.Start, subject.Length,
-            predicate.Type, predicate.Start, predicate.Length,
-            obj.Type, obj.Start, obj.Length,
-            path.Type, pathIriStart, pathIriLength);
+        AddTreeTriple(ref pa, subject, predicate, obj, path.Type, pathIriStart, pathIriLength);
     }
+
+    /// <summary>
+    /// Adds a triple pattern to the tree. Every triple the tree holds is added here. A labeled blank node
+    /// (<c>_:b</c>) in a pattern acts as a variable (SPARQL 1.1 §4.1.4), so it is added as the variable named
+    /// <c>_:b</c>: it matches any term and joins the other patterns that use the label. Having no sigil, it is not a
+    /// query variable: it hashes apart from <c>?b</c>, is never projected and is not in scope.
+    /// </summary>
+    private void AddTreeTriple(scoped ref PatternArray pa, Term subject, Term predicate, Term obj,
+        PathType pathType, int pathStart, int pathLength)
+    {
+        pa.AddTriple(
+            PatternTermType(subject), subject.Start, subject.Length,
+            predicate.Type, predicate.Start, predicate.Length,
+            PatternTermType(obj), obj.Start, obj.Length,
+            pathType, pathStart, pathLength);
+    }
+
+    private readonly TermType PatternTermType(Term term)
+        => term.IsBlankNode && term.Start >= 0 && term.Length > 2 && _source[term.Start] == '_'
+            ? TermType.Variable
+            : term.Type;
 
     /// <summary>
     /// FILTER constraint. <c>FILTER [NOT] EXISTS { … }</c> (bare or parenthesized) becomes an
@@ -631,11 +648,7 @@ internal ref partial struct SparqlParser
         for (int i = 0; i < expanded.PatternCount; i++)
         {
             var tp = expanded.GetPattern(i);
-            pa.AddTriple(
-                tp.Subject.Type, tp.Subject.Start, tp.Subject.Length,
-                tp.Predicate.Type, tp.Predicate.Start, tp.Predicate.Length,
-                tp.Object.Type, tp.Object.Start, tp.Object.Length,
-                tp.Path.Type, tp.Path.Iri.Start, tp.Path.Iri.Length);
+            AddTreeTriple(ref pa, tp.Subject, tp.Predicate, tp.Object, tp.Path.Type, tp.Path.Iri.Start, tp.Path.Iri.Length);
         }
     }
 
@@ -651,11 +664,7 @@ internal ref partial struct SparqlParser
         for (int i = 0; i < expanded.PatternCount; i++)
         {
             var tp = expanded.GetPattern(i);
-            pa.AddTriple(
-                tp.Subject.Type, tp.Subject.Start, tp.Subject.Length,
-                tp.Predicate.Type, tp.Predicate.Start, tp.Predicate.Length,
-                tp.Object.Type, tp.Object.Start, tp.Object.Length,
-                tp.Path.Type, tp.Path.Iri.Start, tp.Path.Iri.Length);
+            AddTreeTriple(ref pa, tp.Subject, tp.Predicate, tp.Object, tp.Path.Type, tp.Path.Iri.Start, tp.Path.Iri.Length);
         }
     }
 

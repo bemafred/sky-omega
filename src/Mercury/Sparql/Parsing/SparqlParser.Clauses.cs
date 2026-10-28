@@ -143,6 +143,11 @@ internal ref partial struct SparqlParser
     /// CONSTRUCT WHERE { TriplesTemplate } ([10] ConstructQuery, second form): the WHERE group is also the template, so
     /// it may hold only triples, and no property paths. Returns those triples as the template.
     /// </summary>
+    private readonly Term TemplateTerm(Term term)
+        => term.IsVariable && term.Start >= 0 && term.Length > 0 && !VariableName.IsSigil(_source[term.Start])
+            ? Term.BlankNode(term.Start, term.Length)
+            : term;
+
     private ConstructTemplate ConstructTemplateFromWhere(int whereGroupStart)
     {
         var template = new ConstructTemplate();
@@ -160,7 +165,12 @@ internal ref partial struct SparqlParser
                 var kind = e.Current.Kind;
                 if (kind == PatternKind.Triple && e.Current.PathKind == PathType.None)
                 {
-                    template.AddPattern(e.Current.ToTriplePattern());
+                    // The tree holds a labeled blank node as a variable without a sigil (it matches as one); in the
+                    // template it is a blank node again, a new one per solution
+                    var triple = e.Current.ToTriplePattern();
+                    triple.Subject = TemplateTerm(triple.Subject);
+                    triple.Object = TemplateTerm(triple.Object);
+                    template.AddPattern(triple);
                     continue;
                 }
                 throw new SparqlParseException("CONSTRUCT WHERE shorthand does not allow " + kind switch

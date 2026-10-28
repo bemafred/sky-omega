@@ -18,7 +18,8 @@ public class WhereTreeParseTests
     [InlineData("SELECT * WHERE { ?s ?p ?o }", "Variable", "?s", "Variable", "?p", "Variable", "?o")]
     [InlineData("SELECT * WHERE { <http://ex/a> <http://ex/p> \"hello\" }", "Iri", "<http://ex/a>", "Iri", "<http://ex/p>", "Literal", "\"hello\"")]
     [InlineData("PREFIX foaf: <http://xmlns.com/foaf/0.1/> SELECT * WHERE { ?s foaf:name \"hi\"@en }", "Variable", "?s", "Iri", "foaf:name", "Literal", "\"hi\"@en")]
-    [InlineData("SELECT * WHERE { _:b1 <http://ex/p> \"42\"^^<http://www.w3.org/2001/XMLSchema#integer> }", "BlankNode", "_:b1", "Iri", "<http://ex/p>", "Literal", "\"42\"^^<http://www.w3.org/2001/XMLSchema#integer>")]
+    // A labeled blank node in a pattern acts as a variable (SPARQL 1.1 §4.1.4): the tree holds it as one, named _:b1
+    [InlineData("SELECT * WHERE { _:b1 <http://ex/p> \"42\"^^<http://www.w3.org/2001/XMLSchema#integer> }", "Variable", "_:b1", "Iri", "<http://ex/p>", "Literal", "\"42\"^^<http://www.w3.org/2001/XMLSchema#integer>")]
     [InlineData("SELECT * WHERE { ?s ?p 42 }", "Variable", "?s", "Variable", "?p", "Literal", "42")]
     [InlineData("SELECT * WHERE { $s ?p ?o }", "Variable", "$s", "Variable", "?p", "Variable", "?o")]
     public void Triple_TermsKeepTheirTypeAndSpan(string query, string st, string s, string pt, string p, string ot, string o)

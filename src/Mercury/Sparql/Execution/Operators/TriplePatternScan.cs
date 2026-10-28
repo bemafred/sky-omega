@@ -1667,7 +1667,8 @@ internal ref struct TriplePatternScan
 
         if (term.IsBlankNode)
         {
-            // Named blank nodes (_:name) should match the literal value
+            // A WHERE's labeled blank node (_:name) reaches the scan as a variable (SPARQL 1.1 §4.1.4; the pattern
+            // tree adds it as one), so a label here is from a caller without a tree and matches as written.
             // Anonymous blank nodes ([]) act as wildcards
             var bnSpan = _source.Slice(term.Start, term.Length);
             if (bnSpan.Length >= 2 && bnSpan[0] == '_' && bnSpan[1] == ':')
@@ -1733,7 +1734,8 @@ internal ref struct TriplePatternScan
 
         if (term.IsBlankNode)
         {
-            // Named blank nodes (_:name) should match the literal value
+            // A WHERE's labeled blank node (_:name) reaches the scan as a variable (SPARQL 1.1 §4.1.4; the pattern
+            // tree adds it as one), so a label here is from a caller without a tree and matches as written.
             // Anonymous blank nodes ([]) act as wildcards
             var bnSpan = _source.Slice(term.Start, term.Length);
             if (bnSpan.Length >= 2 && bnSpan[0] == '_' && bnSpan[1] == ':')

@@ -83,10 +83,11 @@ internal ref partial struct SparqlParser
             into.Add(start, length);
     }
 
-    private static void AddIfVariable(TermType type, int start, int length, scoped ref InScopeVariables into)
+    private readonly void AddIfVariable(TermType type, int start, int length, scoped ref InScopeVariables into)
     {
-        // Synthetic terms (expanded collections, quoted triples) have negative offsets and are never variables
-        if (type == TermType.Variable && start >= 0 && length > 1)
+        // Synthetic terms (expanded collections, quoted triples) have negative offsets, and a pattern's labeled blank
+        // node (_:b) has no sigil: neither is a query variable
+        if (type == TermType.Variable && start >= 0 && length > 1 && VariableName.IsSigil(_source[start]))
             into.Add(start, length);
     }
 

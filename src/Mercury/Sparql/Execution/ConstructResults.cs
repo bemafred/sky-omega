@@ -178,6 +178,15 @@ internal ref struct ConstructResults
 
             return writePos; // Unknown synthetic - treat as empty
         }
+        else if (term.IsBlankNode)
+        {
+            // §16.2: a template's blank node is a new node for each solution, the same one throughout that solution
+            var label = _source.Slice(term.Start, term.Length);
+            _generatedBnode = label.Length > 2 && label[0] == '_' && label[1] == ':'
+                ? $"_:genid{_rowCounter}_b_{label[2..].ToString()}"
+                : $"_:genid{_rowCounter}_at{term.Start}";
+            return WriteAt(writePos, _generatedBnode);
+        }
         else
         {
             // Constant term - expand prefixed names and copy
