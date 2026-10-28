@@ -320,7 +320,7 @@ public sealed class ReplSession : IDisposable
             return null;
 
         if (!options.EnableMultiLine || !NeedsMoreInput(firstLine))
-            return firstLine;
+            return WithoutTerminator(firstLine);
 
         // Multi-line mode — continuation lines use standard input
         // (the first line got editing; continuations are short additions)
@@ -349,7 +349,14 @@ public sealed class ReplSession : IDisposable
                 break;
         }
 
-        return sb.ToString().TrimEnd();
+        return WithoutTerminator(sb.ToString());
+    }
+
+    /// <summary>A ';' ending the input is the REPL's terminator, not part of the query.</summary>
+    private static string WithoutTerminator(string input)
+    {
+        var trimmed = input.TrimEnd();
+        return trimmed.EndsWith(';') ? trimmed[..^1].TrimEnd() : trimmed;
     }
 
     private static bool NeedsMoreInput(string input)

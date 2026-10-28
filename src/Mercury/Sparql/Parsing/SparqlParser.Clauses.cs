@@ -9,7 +9,6 @@ internal ref partial struct SparqlParser
 {
     /// <summary>
     /// [7] SelectQuery ::= SelectClause DatasetClause* WhereClause SolutionModifier
-    /// [2] Query ::= Prologue ( SelectQuery | ... ) ValuesClause
     /// </summary>
     private Query ParseSelectQuery(Prologue prologue)
     {
@@ -24,7 +23,7 @@ internal ref partial struct SparqlParser
         // Validate SELECT alias scope conflicts with subqueries (syntax-SELECTscope2)
         ValidateSelectSubqueryScope(selectClause, whereClause.GroupStart);
 
-        var query = new Query
+        return new Query
         {
             Type = QueryType.Select,
             Prologue = prologue,
@@ -33,16 +32,6 @@ internal ref partial struct SparqlParser
             WhereClause = whereClause,
             SolutionModifier = modifier
         };
-
-        // Parse optional trailing VALUES clause
-        SkipWhitespace();
-        var span = PeekSpan(6);
-        if (span.Length >= 6 && span[..6].Equals("VALUES", StringComparison.OrdinalIgnoreCase))
-        {
-            query.Values = ParseValuesClause();
-        }
-
-        return query;
     }
 
     /// <summary>
@@ -503,16 +492,39 @@ internal ref partial struct SparqlParser
         return headNode;
     }
 
+    /// <summary>[11] DescribeQuery ::= 'DESCRIBE' ( VarOrIri+ | '*' ) DatasetClause* WhereClause? SolutionModifier</summary>
     private Query ParseDescribeQuery(Prologue prologue)
     {
         ConsumeKeyword("DESCRIBE");
         SkipWhitespace();
 
-        // Parse resource list or *
         var describeAll = Peek() == '*';
         if (describeAll)
         {
             Advance();
+        }
+        else
+        {
+            // The targets are read and checked; they are not yet what DESCRIBE describes (ADR-055 D3)
+            int targets = 0;
+            while (true)
+            {
+                SkipWhitespace();
+                char ch = Peek();
+                if (IsAtEnd() || (ch != '?' && ch != '$' && ch != '<' && ch != ':' && !char.IsLetter(ch)))
+                    break; // '{' opens the WHERE
+                var ahead = PeekSpan(6);
+                if (KeywordIs(ahead, "WHERE") || KeywordIs(ahead, "FROM") || KeywordIs(ahead, "ORDER") ||
+                    KeywordIs(ahead, "GROUP") || KeywordIs(ahead, "HAVING") || KeywordIs(ahead, "LIMIT") ||
+                    KeywordIs(ahead, "OFFSET") || KeywordIs(ahead, "VALUES"))
+                    break;
+                var target = ParseTerm();
+                if (target.Length == 0 || (target.Type != TermType.Variable && target.Type != TermType.Iri))
+                    throw new SparqlParseException("DESCRIBE expects variables, IRIs or '*'");
+                targets++;
+            }
+            if (targets == 0)
+                throw new SparqlParseException("DESCRIBE expects variables, IRIs or '*'");
         }
 
         var datasets = ParseDatasetClauses();
@@ -539,6 +551,7 @@ internal ref partial struct SparqlParser
         };
     }
 
+    /// <summary>[12] AskQuery ::= 'ASK' DatasetClause* WhereClause SolutionModifier</summary>
     private Query ParseAskQuery(Prologue prologue)
     {
         ConsumeKeyword("ASK");
@@ -546,13 +559,15 @@ internal ref partial struct SparqlParser
 
         var datasets = ParseDatasetClauses();
         var whereClause = ParseWhereClause();
+        var modifier = ParseQuerySolutionModifier();
 
         return new Query
         {
             Type = QueryType.Ask,
             Prologue = prologue,
             Datasets = datasets,
-            WhereClause = whereClause
+            WhereClause = whereClause,
+            SolutionModifier = modifier
         };
     }
 

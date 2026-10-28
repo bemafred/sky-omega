@@ -77,6 +77,34 @@ public class DataBlockTests : PooledStoreTestBase
         Assert.Equal("<http://ex/o>", row["o"]);
     }
 
+    [Fact]
+    public void Values_AfterAnAsk_JoinsWithItsSolutions()
+    {
+        // [2] Query ::= Prologue ( SelectQuery | ConstructQuery | DescribeQuery | AskQuery ) ValuesClause
+        Store.AddCurrent("<http://ex/s>", "<http://ex/p>", "<http://ex/o>");
+
+        var result = SparqlEngine.Query(Store, "ASK { ?s <http://ex/p> ?o } VALUES ?s { <http://ex/other> }",
+            TestContext.Current.CancellationToken);
+
+        Assert.True(result.Success, result.ErrorMessage);
+        Assert.False(result.AskResult);
+    }
+
+    [Fact]
+    public void Values_AfterAConstruct_JoinsWithItsSolutions()
+    {
+        Store.AddCurrent("<http://ex/a>", "<http://ex/p>", "<http://ex/o>");
+        Store.AddCurrent("<http://ex/b>", "<http://ex/p>", "<http://ex/o>");
+
+        var result = SparqlEngine.Query(Store,
+            "CONSTRUCT { ?s <http://ex/q> ?o } WHERE { ?s <http://ex/p> ?o } VALUES ?s { <http://ex/a> }",
+            TestContext.Current.CancellationToken);
+
+        Assert.True(result.Success, result.ErrorMessage);
+        var triple = Assert.Single(result.Triples!);
+        Assert.Equal("<http://ex/a>", triple.Subject);
+    }
+
     [Theory]
     [InlineData("SELECT ?x WHERE { VALUES ?x 1 }")]                    // no '{'
     [InlineData("SELECT ?x WHERE { VALUES { 1 } }")]                   // no variable

@@ -430,7 +430,7 @@ internal ref partial struct SparqlParser
         SkipWhitespace();
         var queryType = DetermineQueryType();
         
-        return queryType switch
+        var query = queryType switch
         {
             QueryType.Select => ParseSelectQuery(prologue),
             QueryType.Construct => ParseConstructQuery(prologue),
@@ -438,6 +438,18 @@ internal ref partial struct SparqlParser
             QueryType.Ask => ParseAskQuery(prologue),
             _ => throw new SparqlParseException("Expected SELECT, CONSTRUCT, DESCRIBE, or ASK")
         };
+
+        // [28] ValuesClause follows every query form, and nothing follows it
+        SkipWhitespace();
+        if (KeywordIs(PeekSpan(6), "VALUES"))
+        {
+            query.Values = ParseValuesClause();
+            SkipWhitespace();
+        }
+        if (!IsAtEnd())
+            throw new SparqlParseException($"Unexpected text after the query at position {_position}");
+
+        return query;
     }
 
     private QueryType DetermineQueryType()
