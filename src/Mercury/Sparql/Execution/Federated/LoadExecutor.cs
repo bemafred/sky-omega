@@ -4,15 +4,14 @@
 // Uses BCL HttpClient (no external dependencies)
 
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Net;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 using SkyOmega.Mercury.Abstractions;
-using SkyOmega.Mercury.NTriples;
-using SkyOmega.Mercury.Rdf.Turtle;
-using SkyOmega.Mercury.RdfXml;
+using SkyOmega.Mercury.Rdf;
 using SkyOmega.Mercury.Storage;
 
 namespace SkyOmega.Mercury.Sparql.Execution.Federated;
@@ -208,39 +207,20 @@ internal sealed class LoadExecutor : IDisposable
             // Determine format from content type or URL extension
             var format = DetermineFormat(contentType, sourceUri);
 
-            int count = 0;
-
-            store.BeginBatch();
+            // Parsed first, then written in one batch with no await inside it (the batch's lock is thread-affine)
             try
             {
-                count = await ParseAndLoadAsync(stream, format, graphStr, store, _options.MaxTripleCount, ct)
+                var quads = await ParseDocumentAsync(stream, format, graphStr, _options.MaxTripleCount, ct)
                     .ConfigureAwait(false);
-                store.CommitBatch();
-
-                return new UpdateResult { Success = true, AffectedCount = count };
+                return WriteDocument(store, quads);
             }
             catch (TripleLimitExceededException ex)
             {
-                store.RollbackBatch();
-                return new UpdateResult
-                {
-                    Success = false,
-                    ErrorMessage = ex.Message
-                };
+                return new UpdateResult { Success = false, ErrorMessage = ex.Message };
             }
             catch (SizeLimitExceededException ex)
             {
-                store.RollbackBatch();
-                return new UpdateResult
-                {
-                    Success = false,
-                    ErrorMessage = ex.Message
-                };
-            }
-            catch
-            {
-                store.RollbackBatch();
-                throw;
+                return new UpdateResult { Success = false, ErrorMessage = ex.Message };
             }
         }
         catch (HttpRequestException ex)
@@ -301,35 +281,18 @@ internal sealed class LoadExecutor : IDisposable
         var format = DetermineFormat(null, sourceUri);
         var maxTripleCount = _options.MaxTripleCount;
 
-        // Run on a dedicated thread to maintain ReaderWriterLockSlim thread affinity.
-        // BeginBatch acquires the write lock; CommitBatch releases it.
-        // These must happen on the same thread — async continuations can switch threads.
-        var task = Task.Run(() =>
+        // Parsed first, then written in one batch with no await inside it (the batch's lock is thread-affine)
+        var task = Task.Run(async () =>
         {
-            using var stream = File.OpenRead(filePath);
-
-            store.BeginBatch();
+            await using var stream = File.OpenRead(filePath);
             try
             {
-                var count = ParseAndLoadAsync(stream, format, graphStr, store, maxTripleCount, ct)
-                    .GetAwaiter().GetResult();
-                store.CommitBatch();
-
-                return new UpdateResult { Success = true, AffectedCount = count };
+                var quads = await ParseDocumentAsync(stream, format, graphStr, maxTripleCount, ct).ConfigureAwait(false);
+                return WriteDocument(store, quads);
             }
             catch (TripleLimitExceededException ex)
             {
-                store.RollbackBatch();
-                return new UpdateResult
-                {
-                    Success = false,
-                    ErrorMessage = ex.Message
-                };
-            }
-            catch
-            {
-                store.RollbackBatch();
-                throw;
+                return new UpdateResult { Success = false, ErrorMessage = ex.Message };
             }
         }, ct);
 
@@ -337,99 +300,66 @@ internal sealed class LoadExecutor : IDisposable
     }
 
     /// <summary>
-    /// Determine RDF format from content type or URL extension.
+    /// The document's format, by the shared negotiation (<see cref="RdfFormatNegotiator.Negotiate"/>: the content type,
+    /// then the extension); Turtle when neither says.
     /// </summary>
     private static RdfFormat DetermineFormat(string? contentType, string uri)
     {
-        // First try content type
-        if (!string.IsNullOrEmpty(contentType))
-        {
-            var ct = contentType.ToLowerInvariant();
-
-            if (ct.Contains("turtle") || ct == "text/turtle" || ct == "application/x-turtle")
-                return RdfFormat.Turtle;
-
-            if (ct.Contains("n-triples") || ct == "application/n-triples")
-                return RdfFormat.NTriples;
-
-            if (ct.Contains("rdf+xml") || ct == "application/rdf+xml")
-                return RdfFormat.RdfXml;
-
-            if (ct == "text/xml" || ct == "application/xml")
-                return RdfFormat.RdfXml;
-        }
-
-        // Fall back to URL extension
-        var lowerUri = uri.ToLowerInvariant();
-
-        if (lowerUri.EndsWith(".ttl") || lowerUri.EndsWith(".turtle"))
-            return RdfFormat.Turtle;
-
-        if (lowerUri.EndsWith(".nt") || lowerUri.EndsWith(".ntriples"))
-            return RdfFormat.NTriples;
-
-        if (lowerUri.EndsWith(".rdf") || lowerUri.EndsWith(".xml") || lowerUri.EndsWith(".rdfxml"))
-            return RdfFormat.RdfXml;
-
-        // Default to Turtle as it's the most common
-        return RdfFormat.Turtle;
+        // text/plain is what servers send for any file they do not know; it says nothing about the format here
+        if (contentType != null && contentType.StartsWith("text/plain", StringComparison.OrdinalIgnoreCase))
+            contentType = null;
+        var format = RdfFormatNegotiator.Negotiate(contentType, uri);
+        return format == RdfFormat.Unknown ? RdfFormat.Turtle : format;
     }
 
     /// <summary>
-    /// Parse stream and load triples into store.
+    /// The document's quads as they go into the store: into <paramref name="graphStr"/> (LOAD … INTO GRAPH), or where the
+    /// document puts them. Read with <see cref="RdfEngine.ParseQuadsAsync"/>, the one parse of every format; the
+    /// document's blank nodes are its own (<see cref="BlankNodeScope"/>). Stops at <paramref name="maxTripleCount"/>.
     /// </summary>
-    private static async Task<int> ParseAndLoadAsync(
+    private static async Task<List<(string S, string P, string O, string G)>> ParseDocumentAsync(
         Stream stream,
         RdfFormat format,
         string? graphStr,
-        QuadStore store,
         int maxTripleCount,
         CancellationToken ct)
     {
-        int count = 0;
+        var quads = new List<(string S, string P, string O, string G)>();
+        var blankNodes = new BlankNodeScope();
 
-        void AddTriple(ReadOnlySpan<char> s, ReadOnlySpan<char> p, ReadOnlySpan<char> o)
+        await RdfEngine.ParseQuadsAsync(stream, format, (s, p, o, g) =>
         {
-            if (maxTripleCount > 0 && count >= maxTripleCount)
-            {
+            if (maxTripleCount > 0 && quads.Count >= maxTripleCount)
                 throw new TripleLimitExceededException(maxTripleCount);
-            }
 
-            if (graphStr == null)
-                store.AddCurrentBatched(s, p, o);
-            else
-                store.AddCurrentBatched(s, p, o, graphStr.AsSpan());
-            count++;
-        }
+            var graph = graphStr ?? (g.IsEmpty ? string.Empty : blankNodes.Graph(g).ToString());
+            quads.Add((blankNodes.Subject(s).ToString(), p.ToString(), blankNodes.Object(o).ToString(), graph));
+        }, ct: ct).ConfigureAwait(false);
 
-        switch (format)
+        return quads;
+    }
+
+    /// <summary>Writes a parsed document in one batch, all or nothing.</summary>
+    private static UpdateResult WriteDocument(QuadStore store, List<(string S, string P, string O, string G)> quads)
+    {
+        store.BeginBatch();
+        try
         {
-            case RdfFormat.Turtle:
-                using (var parser = new TurtleStreamParser(stream))
-                {
-                    await parser.ParseAsync((s, p, o) => AddTriple(s, p, o), ct);
-                }
-                break;
-
-            case RdfFormat.NTriples:
-                using (var parser = new NTriplesStreamParser(stream))
-                {
-                    await parser.ParseAsync((s, p, o) => AddTriple(s, p, o), ct);
-                }
-                break;
-
-            case RdfFormat.RdfXml:
-                using (var parser = new RdfXmlStreamParser(stream))
-                {
-                    await parser.ParseAsync((s, p, o) => AddTriple(s, p, o), ct);
-                }
-                break;
-
-            default:
-                throw new NotSupportedException($"Unsupported RDF format: {format}");
+            foreach (var (s, p, o, g) in quads)
+            {
+                if (g.Length == 0)
+                    store.AddCurrentBatched(s, p, o);
+                else
+                    store.AddCurrentBatched(s, p, o, g);
+            }
+            store.CommitBatch();
+            return new UpdateResult { Success = true, AffectedCount = quads.Count };
         }
-
-        return count;
+        catch
+        {
+            store.RollbackBatch();
+            throw;
+        }
     }
 
     public void Dispose()

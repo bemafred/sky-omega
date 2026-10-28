@@ -191,21 +191,9 @@ public static class RdfEngine
             prevElapsed = elapsed;
         }
 
-        // Triple formats (Turtle, NTriples, RdfXml)
-        void OnTriple(ReadOnlySpan<char> subject, ReadOnlySpan<char> predicate, ReadOnlySpan<char> obj)
-        {
-            if (limit.HasValue && totalCount >= limit.Value)
-            {
-                cts!.Cancel();
-                return;
-            }
-            buffer.Add((string.Empty, subject.ToString(), predicate.ToString(), obj.ToString()));
-            totalCount++;
-            if (buffer.Count >= chunkSize)
-                FlushBuffer();
-        }
+        // The stream is one document: its blank nodes are its own
+        var blankNodes = new BlankNodeScope();
 
-        // Quad formats (NQuads, TriG, JsonLd)
         void OnQuad(ReadOnlySpan<char> subject, ReadOnlySpan<char> predicate, ReadOnlySpan<char> obj, ReadOnlySpan<char> graph)
         {
             if (limit.HasValue && totalCount >= limit.Value)
@@ -213,7 +201,8 @@ public static class RdfEngine
                 cts!.Cancel();
                 return;
             }
-            buffer.Add((graph.IsEmpty ? string.Empty : graph.ToString(), subject.ToString(), predicate.ToString(), obj.ToString()));
+            buffer.Add((graph.IsEmpty ? string.Empty : blankNodes.Graph(graph).ToString(), blankNodes.Subject(subject).ToString(),
+                predicate.ToString(), blankNodes.Object(obj).ToString()));
             totalCount++;
             if (buffer.Count >= chunkSize)
                 FlushBuffer();
@@ -221,41 +210,7 @@ public static class RdfEngine
 
         try
         {
-            switch (format)
-            {
-                case RdfFormat.Turtle:
-                    using (var parser = new TurtleStreamParser(stream, baseUri: baseUri))
-                        await parser.ParseAsync((s, p, o) => OnTriple(s, p, o), ct).ConfigureAwait(false);
-                    break;
-
-                case RdfFormat.NTriples:
-                    using (var parser = new NTriplesStreamParser(stream))
-                        await parser.ParseAsync((s, p, o) => OnTriple(s, p, o), ct).ConfigureAwait(false);
-                    break;
-
-                case RdfFormat.RdfXml:
-                    using (var parser = new RdfXmlStreamParser(stream, baseUri: baseUri))
-                        await parser.ParseAsync((s, p, o) => OnTriple(s, p, o), ct).ConfigureAwait(false);
-                    break;
-
-                case RdfFormat.NQuads:
-                    using (var parser = new NQuadsStreamParser(stream))
-                        await parser.ParseAsync((s, p, o, g) => OnQuad(s, p, o, g), ct).ConfigureAwait(false);
-                    break;
-
-                case RdfFormat.TriG:
-                    using (var parser = new TriGStreamParser(stream, baseUri))
-                        await parser.ParseAsync((s, p, o, g) => OnQuad(s, p, o, g), ct).ConfigureAwait(false);
-                    break;
-
-                case RdfFormat.JsonLd:
-                    using (var parser = new JsonLdStreamParser(stream, baseUri))
-                        await parser.ParseAsync((s, p, o, g) => OnQuad(s, p, o, g), ct).ConfigureAwait(false);
-                    break;
-
-                default:
-                    throw new NotSupportedException($"Unsupported RDF format: {format}");
-            }
+            await ParseQuadsAsync(stream, format, OnQuad, baseUri, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (limit.HasValue && totalCount >= limit.Value)
         {
@@ -297,92 +252,24 @@ public static class RdfEngine
     /// <returns>The number of triples/quads loaded.</returns>
     public static async Task<long> LoadAsync(QuadStore store, Stream stream, RdfFormat format, string? baseUri = null)
     {
-        long count = 0;
+        // Parsed first, then written in one batch with no await inside it: the batch's write lock belongs to the thread
+        // that took it, and an await may resume on another. The stream is one document: its blank nodes are its own.
+        var blankNodes = new BlankNodeScope();
+        var quads = new List<(string Subject, string Predicate, string Object, string Graph)>();
+        await ParseQuadsAsync(stream, format, (subject, predicate, obj, graph) =>
+            quads.Add((blankNodes.Subject(subject).ToString(), predicate.ToString(), blankNodes.Object(obj).ToString(),
+                graph.IsEmpty ? string.Empty : blankNodes.Graph(graph).ToString())), baseUri).ConfigureAwait(false);
 
         store.BeginBatch();
         try
         {
-            switch (format)
+            foreach (var (s, p, o, g) in quads)
             {
-                case RdfFormat.Turtle:
-                    using (var parser = new TurtleStreamParser(stream, baseUri: baseUri))
-                    {
-                        await parser.ParseAsync((subject, predicate, obj) =>
-                        {
-                            store.AddCurrentBatched(subject, predicate, obj);
-                            count++;
-                        }).ConfigureAwait(false);
-                    }
-                    break;
-
-                case RdfFormat.NTriples:
-                    using (var parser = new NTriplesStreamParser(stream))
-                    {
-                        await parser.ParseAsync((subject, predicate, obj) =>
-                        {
-                            store.AddCurrentBatched(subject, predicate, obj);
-                            count++;
-                        }).ConfigureAwait(false);
-                    }
-                    break;
-
-                case RdfFormat.RdfXml:
-                    using (var parser = new RdfXmlStreamParser(stream, baseUri: baseUri))
-                    {
-                        await parser.ParseAsync((subject, predicate, obj) =>
-                        {
-                            store.AddCurrentBatched(subject, predicate, obj);
-                            count++;
-                        }).ConfigureAwait(false);
-                    }
-                    break;
-
-                case RdfFormat.NQuads:
-                    using (var parser = new NQuadsStreamParser(stream))
-                    {
-                        await parser.ParseAsync((subject, predicate, obj, graph) =>
-                        {
-                            if (graph.IsEmpty)
-                                store.AddCurrentBatched(subject, predicate, obj);
-                            else
-                                store.AddCurrentBatched(subject, predicate, obj, graph);
-                            count++;
-                        }).ConfigureAwait(false);
-                    }
-                    break;
-
-                case RdfFormat.TriG:
-                    using (var parser = new TriGStreamParser(stream, baseUri))
-                    {
-                        await parser.ParseAsync((subject, predicate, obj, graph) =>
-                        {
-                            if (graph.IsEmpty)
-                                store.AddCurrentBatched(subject, predicate, obj);
-                            else
-                                store.AddCurrentBatched(subject, predicate, obj, graph);
-                            count++;
-                        }).ConfigureAwait(false);
-                    }
-                    break;
-
-                case RdfFormat.JsonLd:
-                    using (var parser = new JsonLdStreamParser(stream, baseUri))
-                    {
-                        await parser.ParseAsync((subject, predicate, obj, graph) =>
-                        {
-                            if (graph.IsEmpty)
-                                store.AddCurrentBatched(subject, predicate, obj);
-                            else
-                                store.AddCurrentBatched(subject, predicate, obj, graph);
-                            count++;
-                        }).ConfigureAwait(false);
-                    }
-                    break;
-
-                default:
-                    throw new NotSupportedException($"Unsupported RDF format: {format}");
+                if (g.Length == 0)
+                    store.AddCurrentBatched(s, p, o);
+                else
+                    store.AddCurrentBatched(s, p, o, g);
             }
-
             store.CommitBatch();
         }
         catch
@@ -391,7 +278,7 @@ public static class RdfEngine
             throw;
         }
 
-        return count;
+        return quads.Count;
     }
 
     #endregion
@@ -400,53 +287,50 @@ public static class RdfEngine
 
     /// <summary>
     /// Parse RDF data from a stream and invoke a callback for each triple.
-    /// For quad formats (NQuads, TriG, JsonLd), the graph component is ignored.
+    /// For quad formats (NQuads, TriG, JsonLd), the graph component is ignored. Labels are as the document writes them;
+    /// loading into a store scopes them (<see cref="BlankNodeScope"/>).
     /// </summary>
-    public static async Task ParseAsync(Stream stream, RdfFormat format, RdfTripleHandler handler,
+    public static Task ParseAsync(Stream stream, RdfFormat format, RdfTripleHandler handler,
+        string? baseUri = null, CancellationToken ct = default)
+        => ParseQuadsAsync(stream, format, (s, p, o, _) => handler(s, p, o), baseUri, ct);
+
+    /// <summary>
+    /// The one parse of a document in any supported format, as quads: a triple format reports the default graph
+    /// (an empty graph). Every load and parse in <see cref="RdfEngine"/> and SPARQL LOAD reads a document through it.
+    /// </summary>
+    public static async Task ParseQuadsAsync(Stream stream, RdfFormat format, RdfQuadHandler handler,
         string? baseUri = null, CancellationToken ct = default)
     {
         switch (format)
         {
             case RdfFormat.Turtle:
                 using (var parser = new TurtleStreamParser(stream, baseUri: baseUri))
-                {
-                    await parser.ParseAsync((s, p, o) => handler(s, p, o), ct).ConfigureAwait(false);
-                }
+                    await parser.ParseAsync((s, p, o) => handler(s, p, o, ReadOnlySpan<char>.Empty), ct).ConfigureAwait(false);
                 break;
 
             case RdfFormat.NTriples:
                 using (var parser = new NTriplesStreamParser(stream))
-                {
-                    await parser.ParseAsync((s, p, o) => handler(s, p, o), ct).ConfigureAwait(false);
-                }
+                    await parser.ParseAsync((s, p, o) => handler(s, p, o, ReadOnlySpan<char>.Empty), ct).ConfigureAwait(false);
                 break;
 
             case RdfFormat.RdfXml:
                 using (var parser = new RdfXmlStreamParser(stream, baseUri: baseUri))
-                {
-                    await parser.ParseAsync((s, p, o) => handler(s, p, o), ct).ConfigureAwait(false);
-                }
+                    await parser.ParseAsync((s, p, o) => handler(s, p, o, ReadOnlySpan<char>.Empty), ct).ConfigureAwait(false);
                 break;
 
             case RdfFormat.NQuads:
                 using (var parser = new NQuadsStreamParser(stream))
-                {
-                    await parser.ParseAsync((s, p, o, _) => handler(s, p, o), ct).ConfigureAwait(false);
-                }
+                    await parser.ParseAsync((s, p, o, g) => handler(s, p, o, g), ct).ConfigureAwait(false);
                 break;
 
             case RdfFormat.TriG:
                 using (var parser = new TriGStreamParser(stream, baseUri))
-                {
-                    await parser.ParseAsync((s, p, o, _) => handler(s, p, o), ct).ConfigureAwait(false);
-                }
+                    await parser.ParseAsync((s, p, o, g) => handler(s, p, o, g), ct).ConfigureAwait(false);
                 break;
 
             case RdfFormat.JsonLd:
                 using (var parser = new JsonLdStreamParser(stream, baseUri))
-                {
-                    await parser.ParseAsync((s, p, o, _) => handler(s, p, o), ct).ConfigureAwait(false);
-                }
+                    await parser.ParseAsync((s, p, o, g) => handler(s, p, o, g), ct).ConfigureAwait(false);
                 break;
 
             default:

@@ -703,7 +703,7 @@ internal ref partial struct FilterEvaluator
                 // BNODE() - no argument, generate fresh blank node
                 Advance();
                 var counter = System.Threading.Interlocked.Increment(ref s_bnodeCounter);
-                _bnodeResult = $"_:b{s_processToken}x{counter}";
+                _bnodeResult = Rdf.BlankNodeScope.Process.Label($"b{counter}");
                 return new Value
                 {
                     Type = ValueType.BlankNode,
@@ -722,7 +722,12 @@ internal ref partial struct FilterEvaluator
 
             // Per-row seed: same label -> same bnode within a row, distinct across
             // rows (SPARQL §17.4.2.2). Mirrors what the (now-removed) BindExpressionEvaluator did.
-            _bnodeResult = $"_:r{s_processToken}x{s_bnodeRowSeed}_{label.ToString()}";
+            // The string's 64-bit FNV-1a hash names the node: any string is a valid label this way
+            ulong hash = 14695981039346656037UL;
+            foreach (var ch in label)
+                hash = (hash ^ ch) * 1099511628211UL;
+            _bnodeResult = Rdf.BlankNodeScope.Process.Label(
+                $"r{s_bnodeRowSeed}h{hash.ToString("x16", System.Globalization.CultureInfo.InvariantCulture)}");
             return new Value
             {
                 Type = ValueType.BlankNode,
@@ -1383,9 +1388,8 @@ internal ref partial struct FilterEvaluator
     // Static counter for generating unique blank node identifiers across all evaluations
     private static int s_bnodeCounter = 0;
 
-    // This process's part of a minted label: the counters restart in every process, and a label may be stored, so
-    // BNODE() in a later session must not repeat one minted in an earlier one
-    private static readonly string s_processToken = Guid.NewGuid().ToString("N");
+    // BNODE() mints in the process's blank-node scope (Rdf.BlankNodeScope.Process): the counters restart in every
+    // process, and its token does not, so a stored label is never minted again
 
     // Per-row seed so BNODE(label) yields the same blank node within a row but a
     // distinct one across rows (SPARQL §17.4.2.2). Bumped per result row by the

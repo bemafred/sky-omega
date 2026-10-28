@@ -4,6 +4,7 @@ using System.Linq;
 using SkyOmega.Mercury.Sparql.Types;
 using SkyOmega.Mercury.Sparql.Execution;
 using SkyOmega.Mercury.Sparql.Parsing;
+using SkyOmega.Mercury.Rdf;
 using SkyOmega.Mercury.Storage;
 using SkyOmega.Mercury.Rdf.Turtle;
 using SkyOmega.Mercury.Tests.Fixtures;
@@ -829,85 +830,30 @@ public class SparqlConformanceTests
         }));
     }
 
+    /// <summary>
+    /// Loads a data file into the default graph as the store loads a document: one parse of any format
+    /// (<see cref="RdfEngine.ParseQuadsAsync"/>), with the document's blank nodes its own (<see cref="BlankNodeScope"/>).
+    /// </summary>
     private async Task LoadDataAsync(QuadStore store, string path, string? baseUri = null)
+        => await LoadDataToNamedGraphAsync(store, path, graphIri: null, baseUri);
+
+    /// <summary>
+    /// Loads a data file into <paramref name="graphIri"/> (the default graph when null), as the store loads a document.
+    /// </summary>
+    private async Task<int> LoadDataToNamedGraphAsync(QuadStore store, string path, string? graphIri, string? baseUri = null)
     {
-        var extension = Path.GetExtension(path).ToLowerInvariant();
-        var effectiveBaseUri = baseUri ?? new Uri(path).AbsoluteUri;
-
-        if (extension == ".ttl" || extension == ".turtle")
-        {
-            await using var stream = File.OpenRead(path);
-            using var parser = new TurtleStreamParser(stream, baseUri: effectiveBaseUri);
-
-            await parser.ParseAsync((s, p, o) =>
-            {
-                store.AddCurrent(s.ToString(), p.ToString(), o.ToString());
-            });
-        }
-        else if (extension == ".nt" || extension == ".ntriples")
-        {
-            await using var stream = File.OpenRead(path);
-            using var parser = new Mercury.NTriples.NTriplesStreamParser(stream);
-
-            await parser.ParseAsync((s, p, o) =>
-            {
-                store.AddCurrent(s.ToString(), p.ToString(), o.ToString());
-            });
-        }
-        else if (extension == ".rdf" || extension == ".xml" || extension == ".rdfxml")
-        {
-            await using var stream = File.OpenRead(path);
-            using var parser = new Mercury.RdfXml.RdfXmlStreamParser(stream, baseUri: effectiveBaseUri);
-
-            await parser.ParseAsync((s, p, o) =>
-            {
-                store.AddCurrent(s.ToString(), p.ToString(), o.ToString());
-            });
-        }
-        // Add more formats as needed
-    }
-
-    private async Task<int> LoadDataToNamedGraphAsync(QuadStore store, string path, string graphIri, string? baseUri = null)
-    {
-        var extension = Path.GetExtension(path).ToLowerInvariant();
-        // Use provided base URI, or default to full file path
-        var effectiveBaseUri = baseUri ?? new Uri(path).AbsoluteUri;
+        var format = RdfFormatNegotiator.FromPath(path.AsSpan());
+        var blankNodes = new BlankNodeScope();
         int tripleCount = 0;
-
-        if (extension == ".ttl" || extension == ".turtle")
+        await using var stream = File.OpenRead(path);
+        await RdfEngine.ParseQuadsAsync(stream, format, (s, p, o, g) =>
         {
-            await using var stream = File.OpenRead(path);
-            using var parser = new TurtleStreamParser(stream, baseUri: effectiveBaseUri);
-
-            await parser.ParseAsync((s, p, o) =>
-            {
-                store.AddCurrent(s.ToString(), p.ToString(), o.ToString(), graphIri);
-                tripleCount++;
-            });
-        }
-        else if (extension == ".nt" || extension == ".ntriples")
-        {
-            await using var stream = File.OpenRead(path);
-            using var parser = new Mercury.NTriples.NTriplesStreamParser(stream);
-
-            await parser.ParseAsync((s, p, o) =>
-            {
-                store.AddCurrent(s.ToString(), p.ToString(), o.ToString(), graphIri);
-                tripleCount++;
-            });
-        }
-        else if (extension == ".rdf" || extension == ".xml" || extension == ".rdfxml")
-        {
-            await using var stream = File.OpenRead(path);
-            using var parser = new Mercury.RdfXml.RdfXmlStreamParser(stream, baseUri: effectiveBaseUri);
-
-            await parser.ParseAsync((s, p, o) =>
-            {
-                store.AddCurrent(s.ToString(), p.ToString(), o.ToString(), graphIri);
-                tripleCount++;
-            });
-        }
-
+            if (graphIri is null)
+                store.AddCurrent(blankNodes.Subject(s), p, blankNodes.Object(o));
+            else
+                store.AddCurrent(blankNodes.Subject(s), p, blankNodes.Object(o), graphIri);
+            tripleCount++;
+        }, baseUri ?? new Uri(path).AbsoluteUri);
         return tripleCount;
     }
 

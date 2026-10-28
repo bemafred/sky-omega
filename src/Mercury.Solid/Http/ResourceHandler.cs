@@ -275,6 +275,13 @@ public sealed class ResourceHandler
             }
 
             // Insert new triples
+            // The body is one document: its blank nodes are its own. The triples are kept as stored, so the ETag below is
+            // the one a GET computes from the store.
+            var blankNodes = new SkyOmega.Mercury.Rdf.BlankNodeScope();
+            var stored = new List<(string Subject, string Predicate, string Object)>(triples.Count);
+            foreach (var (subject, predicate, obj) in triples)
+                stored.Add((blankNodes.Subject(subject).ToString(), predicate, blankNodes.Object(obj).ToString()));
+            triples = stored;
             foreach (var (subject, predicate, obj) in triples)
             {
                 _store.AddCurrentBatched(subject, predicate, obj, resourceUri);

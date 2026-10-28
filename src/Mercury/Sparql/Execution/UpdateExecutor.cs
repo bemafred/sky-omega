@@ -41,7 +41,7 @@ internal class UpdateExecutor
 
     // Blank-node scope: within one operation's data, or one solution of a template, a label (or a template node)
     // names one node; every scope mints new nodes (SPARQL 1.1 Update §3.1.1, §3.1.3)
-    private Dictionary<string, string>? _bnodeScope;
+    private Rdf.BlankNodeScope _bnodeScope = new();
 
     public UpdateExecutor(QuadStore store, ReadOnlySpan<char> source, UpdateOperation update)
         : this(store, source, update, null)
@@ -315,7 +315,7 @@ internal class UpdateExecutor
         if (term.Start < 0)
         {
             if (Operators.SyntheticTerms.IsListNodeOffset(term.Start))
-                return GetScopedBlankNode("#" + Operators.SyntheticTerms.ListNodeIndex(term.Start).ToString(System.Globalization.CultureInfo.InvariantCulture)).ToString();
+                return GetScopedBlankNode("t" + Operators.SyntheticTerms.ListNodeIndex(term.Start).ToString(System.Globalization.CultureInfo.InvariantCulture)).ToString();
             return Operators.SyntheticTerms.GetSyntheticIri(term.Start).ToString();
         }
 
@@ -800,29 +800,20 @@ internal class UpdateExecutor
         return ExpandPrefixedName(term);
     }
 
-    /// <summary>The node <paramref name="label"/> names in the current scope, minted on its first use.</summary>
+    /// <summary>The node <paramref name="label"/> (a written _:label, or a template node's name) is in the current
+    /// scope: the same label is the same node until the scope ends.</summary>
     private ReadOnlySpan<char> GetScopedBlankNode(ReadOnlySpan<char> label)
     {
-        _bnodeScope ??= new Dictionary<string, string>();
-
-        var labelStr = label.ToString();
-        if (_bnodeScope.TryGetValue(labelStr, out var existing))
-            return existing.AsSpan();
-
-        // A new node: unique across operations, solutions and processes, so it never meets a node already stored
-        var newBnode = "_:g" + Guid.NewGuid().ToString("N");
-        _bnodeScope[labelStr] = newBnode;
-        _expandedTerm = newBnode; // Use existing buffer field for span lifetime
+        _expandedTerm = _bnodeScope.Label(label); // Use existing buffer field for span lifetime
         return _expandedTerm.AsSpan();
     }
 
     /// <summary>
-    /// Begin a new blank node scope. Call at the start of each UPDATE statement.
-    /// This ensures bnode labels in different statements create different nodes.
+    /// Begin a new blank node scope: an operation's data, or one solution of a template. Its labels name new nodes.
     /// </summary>
     private void BeginBnodeScope()
     {
-        _bnodeScope?.Clear();
+        _bnodeScope = new Rdf.BlankNodeScope();
     }
 
     /// <summary>

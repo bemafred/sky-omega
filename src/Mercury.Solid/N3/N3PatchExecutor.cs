@@ -266,6 +266,9 @@ public sealed class N3PatchExecutor
     private int ApplyInserts(N3Formula inserts, Dictionary<string, N3Term> binding, string graphUri)
     {
         int count = 0;
+        // A blank node the insert formula writes is a new node, one per application of the formula; a blank node a
+        // variable is bound to is a stored node and stays as it is
+        var blankNodes = new SkyOmega.Mercury.Rdf.BlankNodeScope();
 
         foreach (var pattern in inserts.Patterns)
         {
@@ -280,9 +283,9 @@ public sealed class N3PatchExecutor
             }
 
             _store.AddCurrentBatched(
-                subject.ToRdfString(),
+                pattern.Subject.Type == N3TermType.BlankNode ? blankNodes.Label(subject.ToRdfString()) : subject.ToRdfString(),
                 predicate.ToRdfString(),
-                obj.ToRdfString(),
+                pattern.Object.Type == N3TermType.BlankNode ? blankNodes.Label(obj.ToRdfString()) : obj.ToRdfString(),
                 graphUri);
             count++;
         }

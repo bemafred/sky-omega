@@ -634,7 +634,7 @@ internal partial class QueryExecutor : IDisposable
         {
             foreach (var g in (_defaultGraphs ?? []).Concat(_namedGraphs ?? []))
             {
-                var iri = g.Length > 0 && g[0] == '<' ? g : "<" + g + ">";
+                var iri = Rdf.RdfIri.GraphTerm(g);
                 if (!graphs.Contains(iri)) graphs.Add(iri);
             }
             return graphs;
@@ -644,7 +644,7 @@ internal partial class QueryExecutor : IDisposable
         while (named.MoveNext())
         {
             var g = named.Current;
-            graphs.Add(g.Length > 0 && g[0] == '<' ? g.ToString() : "<" + g.ToString() + ">");
+            graphs.Add(Rdf.RdfIri.GraphTerm(g.ToString()));
         }
         return graphs;
     }

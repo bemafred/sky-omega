@@ -262,22 +262,10 @@ public static class TurtleTool
 
         using var store = new QuadStore(storePath);
         await using var stream = File.OpenRead(inputFile);
-        using var parser = new TurtleStreamParser(stream);
 
+        // The store's one load of a document: its blank nodes are its own (BlankNodeScope)
         var sw = Stopwatch.StartNew();
-        long count = 0;
-
-        await parser.ParseAsync((subject, predicate, obj) =>
-        {
-            store.AddCurrent(subject.ToString(), predicate.ToString(), obj.ToString());
-            count++;
-
-            if (count % 100_000 == 0)
-            {
-                output.WriteLine($"  Loaded {count:N0} triples...");
-            }
-        });
-
+        var count = await RdfEngine.LoadAsync(store, stream, RdfFormat.Turtle);
         sw.Stop();
 
         await output.WriteLineAsync();

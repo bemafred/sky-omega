@@ -79,6 +79,13 @@ internal static class RdfIri
     }
 
     /// <summary>
+    /// A graph name as a term: an IRI in <c>&lt;…&gt;</c> or a blank node <c>_:label</c> (N-Quads and TriG may name a graph
+    /// with one) as it is; a bare IRI, as the store lists named graphs, in brackets.
+    /// </summary>
+    public static string GraphTerm(string name) =>
+        name.Length > 0 && (name[0] == '<' || (name.Length > 2 && name[0] == '_' && name[1] == ':')) ? name : "<" + name + ">";
+
+    /// <summary>
     /// True if <paramref name="reference"/> begins with an RFC 3986 scheme — i.e. it is an absolute reference to be
     /// stored verbatim rather than resolved against a base. A scheme is <c>ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )</c>
     /// followed by ':' before any '/', '?', or '#'. This is the single absolute-vs-relative test for every RDF parser

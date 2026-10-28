@@ -559,7 +559,7 @@ internal sealed class TreeJoinExecutor
         {
             foreach (var g in graphNames)
             {
-                string graphIri = g.Length > 0 && g[0] == '<' ? g : "<" + g + ">"; // the scan's active graph, in IRI form
+                string graphIri = Rdf.RdfIri.GraphTerm(g); // the scan's active graph, as a term
                 var bodyRows = EvalGroup(ref pa, graphHeaderIndex, graphIri, input);
                 if (bodyRows.Count == 0) continue;
 

@@ -54,13 +54,6 @@ public static class W3CTestContext
     /// </summary>
     private static readonly Dictionary<string, string> Sparql10Triage = new()
     {
-        ["data-r2/graph/manifest#dawg-graph-09"] = "SPARQL 1.0 triage: blank-node labels are not scoped to their document (loading two documents merges their blank nodes)",
-        ["data-r2/graph/manifest#dawg-graph-10b"] = "SPARQL 1.0 triage: blank-node labels are not scoped to their document (loading two documents merges their blank nodes)",
-        ["data-r2/graph/manifest#dawg-graph-11"] = "SPARQL 1.0 triage: blank-node labels are not scoped to their document (loading two documents merges their blank nodes)",
-        ["data-r2/dataset/manifest#dawg-dataset-09b"] = "SPARQL 1.0 triage: blank-node labels are not scoped to their document (loading two documents merges their blank nodes)",
-        ["data-r2/dataset/manifest#dawg-dataset-10b"] = "SPARQL 1.0 triage: blank-node labels are not scoped to their document (loading two documents merges their blank nodes)",
-        ["data-r2/dataset/manifest#dawg-dataset-11"] = "SPARQL 1.0 triage: blank-node labels are not scoped to their document (loading two documents merges their blank nodes)",
-        ["data-r2/dataset/manifest#dawg-dataset-12b"] = "SPARQL 1.0 triage: blank-node labels are not scoped to their document (loading two documents merges their blank nodes)",
         ["data-r2/algebra/manifest#nested-opt-1"] = "SPARQL 1.0 triage: nested and complex OPTIONAL",
         ["data-r2/basic/manifest#base-prefix-1"] = "SPARQL 1.0 triage: relative IRIs are not resolved against BASE",
         ["data-r2/basic/manifest#base-prefix-2"] = "SPARQL 1.0 triage: relative IRIs are not resolved against BASE",

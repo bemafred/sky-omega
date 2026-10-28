@@ -132,7 +132,7 @@ public class Adr049FunctionReconciliationProbeTests
         Assert.EndsWith("\"", struuid);
 
         var bnode = ViaFilter("BNODE(\"x\")");
-        Assert.Matches(@"^BlankNode:_:r[0-9a-f]{32}x\d+_x$", bnode); // a blank node; the label carries the process token
+        Assert.Matches(@"^BlankNode:_:g[-0-9A-Z_a-z]{22}r\d+h[0-9a-f]{16}$", bnode); // the process scope's token, row, label hash
 
         var rand = ViaFilter("RAND()");
         Assert.StartsWith("DBL:", rand);
