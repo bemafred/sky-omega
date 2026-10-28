@@ -173,6 +173,13 @@ two described resources once, and grows its buffer for long literals. CONSTRUCT 
 `Execute()` too: its own row source had ignored ORDER BY with LIMIT, and OFFSET. `DescribeTests` (12) and
 `ConstructSolutionTests` (3).
 
+**Which graphs, decided 2026-10-28** (after the 1.8.27 dogfood check, where `DESCRIBE <iri>` described nothing in the
+memory store). §16.4 leaves the description to the service. A DESCRIBE reads the default graph and every named graph,
+each triple once; with FROM or FROM NAMED, only the graphs they name. It reads them through the query's temporal
+clause (AS OF, DURING, ALL VERSIONS), by way of `TemporalScope`, which the triple scan now also uses. The target list
+now ends at the first token that is not a variable, IRI or prefixed name, so `orders:x` is a target and the temporal
+keywords end the list. `DescribeTests` (17).
+
 ### D4. Sub-SELECT
 
 `TreeJoinExecutor`'s sub-SELECT step evaluates the tree at `SubSelect.WhereGroupStart`, not at the first `{` after

@@ -620,7 +620,35 @@ internal partial class QueryExecutor : IDisposable
             }
         }
 
-        return new DescribeResults(_store, resources);
+        return new DescribeResults(_store, resources, DescribedGraphs(),
+            new TemporalScope(_temporalMode, _asOfTime, _rangeStart, _rangeEnd));
+    }
+
+    /// <summary>
+    /// The graphs a DESCRIBE reads, in IRI form (empty: the default graph). With FROM or FROM NAMED, the graphs they
+    /// name; otherwise the default graph and every named graph, so a store that keeps its triples in named graphs
+    /// can be described. (SPARQL 1.1 §16.4 leaves the description to the service.)
+    /// </summary>
+    private List<string> DescribedGraphs()
+    {
+        var graphs = new List<string>();
+        if (_defaultGraphs != null || _namedGraphs != null)
+        {
+            foreach (var g in (_defaultGraphs ?? []).Concat(_namedGraphs ?? []))
+            {
+                var iri = g.Length > 0 && g[0] == '<' ? g : "<" + g + ">";
+                if (!graphs.Contains(iri)) graphs.Add(iri);
+            }
+            return graphs;
+        }
+        graphs.Add("");
+        var named = _store.GetNamedGraphs();
+        while (named.MoveNext())
+        {
+            var g = named.Current;
+            graphs.Add(g.Length > 0 && g[0] == '<' ? g.ToString() : "<" + g.ToString() + ">");
+        }
+        return graphs;
     }
 
     /// <summary>

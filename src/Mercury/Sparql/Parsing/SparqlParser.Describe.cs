@@ -8,8 +8,10 @@ internal ref partial struct SparqlParser
     /// <summary>
     /// Reads [11] DescribeQuery's <c>VarOrIri+</c> from the source, one target at a time. The parser reads the list
     /// with it to check it, and the executor to collect what to describe, so the two cannot disagree; the list has no
-    /// size limit. The list ends at the first token that is not a variable or IRI: <c>{</c>, a clause keyword or the
-    /// end of the query.
+    /// size limit. A target is a variable (<c>?x</c>, <c>$x</c>), an IRI (<c>&lt;…&gt;</c>) or a prefixed name (a token
+    /// with a <c>:</c>); the list ends at the first token that is none of these: <c>{</c>, a keyword (WHERE, FROM, a
+    /// solution modifier, VALUES, Mercury's AS OF, DURING and ALL VERSIONS) or the end of the query. A keyword is
+    /// told from a prefixed name by its colon, so <c>orders:x</c> is a target.
     /// </summary>
     internal ref struct DescribeTargetReader
     {
@@ -32,11 +34,7 @@ internal ref partial struct SparqlParser
             target = default;
             int end = _parser._position;
             _parser.SkipWhitespace();
-            char ch = _parser.Peek();
-            var ahead = _parser.PeekSpan(6);
-            if (_parser.IsAtEnd() || ch == '{' || KeywordIs(ahead, "WHERE") || KeywordIs(ahead, "FROM") ||
-                KeywordIs(ahead, "ORDER") || KeywordIs(ahead, "GROUP") || KeywordIs(ahead, "HAVING") ||
-                KeywordIs(ahead, "LIMIT") || KeywordIs(ahead, "OFFSET") || KeywordIs(ahead, "VALUES"))
+            if (_parser.IsAtEnd() || !StartsTarget(_parser._source[_parser._position..]))
             {
                 _parser._position = end;
                 return false;
@@ -45,6 +43,19 @@ internal ref partial struct SparqlParser
             if (target.Length == 0 || (target.Type != TermType.Variable && target.Type != TermType.Iri))
                 throw new SparqlParseException("DESCRIBE expects variables, IRIs or '*'");
             return true;
+        }
+
+        /// <summary>True when <paramref name="rest"/> starts with a variable, an IRI or a prefixed name.</summary>
+        private static bool StartsTarget(ReadOnlySpan<char> rest)
+        {
+            if (VariableName.IsSigil(rest[0]) || rest[0] == '<')
+                return true;
+            for (int i = 0; i < rest.Length && !char.IsWhiteSpace(rest[i]) && rest[i] is not ('{' or '}' or '"' or '\'' or '('); i++)
+            {
+                if (rest[i] == ':')
+                    return true;
+            }
+            return false;
         }
     }
 }

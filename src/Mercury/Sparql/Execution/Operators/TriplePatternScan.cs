@@ -889,16 +889,7 @@ internal ref struct TriplePatternScan
         if (_trigramObjectCandidates != null && _temporalMode == TemporalQueryMode.Current)
             return _store.QueryCurrentWithCandidates(subject, predicate, obj, _trigramObjectCandidates, _graph);
 
-        return _temporalMode switch
-        {
-            TemporalQueryMode.AsOf =>
-                _store.QueryAsOf(subject, predicate, obj, _asOfTime, _graph),
-            TemporalQueryMode.During =>
-                _store.QueryChanges(_rangeStart, _rangeEnd, subject, predicate, obj, _graph),
-            TemporalQueryMode.AllVersions =>
-                _store.QueryEvolution(subject, predicate, obj, _graph),
-            _ => _store.QueryCurrent(subject, predicate, obj, _graph)
-        };
+        return new TemporalScope(_temporalMode, _asOfTime, _rangeStart, _rangeEnd).Query(_store, subject, predicate, obj, _graph);
     }
 
     /// <summary>
