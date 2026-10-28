@@ -1205,8 +1205,11 @@ internal ref partial struct SparqlParser
             }
         }
 
-        // Parse the base term
+        // Parse the base term: [78] Verb ::= VarOrIri | 'a', [94] PathPrimary ::= iri | 'a' | … — a blank node or a literal is
+        // never a predicate (W3C syn-bad-27, syn-bad-28)
         var term = ParseTerm();
+        if (term.Length > 0 && term.Type is TermType.BlankNode or TermType.Literal or TermType.QuotedTriple)
+            throw new SparqlParseException($"A predicate must be an IRI, 'a' or a variable, not '{_source.Slice(term.Start, term.Length).ToString()}'");
 
         // Check for path modifier after the term
         SkipWhitespace();

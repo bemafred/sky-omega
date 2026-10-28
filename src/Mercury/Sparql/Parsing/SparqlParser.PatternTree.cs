@@ -98,26 +98,35 @@ internal ref partial struct SparqlParser
 
     /// <summary>
     /// [54] GroupGraphPatternSub ::= TriplesBlock? ( GraphPatternNotTriples '.'? TriplesBlock? )*
+    /// [55] TriplesBlock ::= TriplesSameSubjectPath ( '.' TriplesBlock? )?
     /// The single body loop every group-like context recurses into — the heart of "one pattern path".
     /// Children are appended to whichever header is currently open (Group / Graph / Optional / Minus / Union branch).
     /// </summary>
     private void ParseGroupBodyTree(scoped ref PatternArray pa, int depth)
     {
         int groupFirstSlot = pa.Count; // this group's children (and their subtrees) are appended from here
+        // The '.' rules of [54] and [55]: one '.' may follow a triples statement or a clause (GRAPH, OPTIONAL, FILTER,
+        // BIND, VALUES, a group …); two triples statements need a '.' between them; a group never starts with one.
+        bool dotAllowed = false;  // the element before may be followed by a '.'
+        bool triplesOpen = false; // the element before is a triples statement with no '.' after it
         while (true)
         {
             SkipWhitespace();
             if (IsAtEnd() || Peek() == '}')
                 break;
 
-            // A '.' separates a TriplesBlock from a GraphPatternNotTriples in either order
-            // ([54] GroupGraphPatternSub). Consume it here so it is handled uniformly after a triple
-            // OR after a clause (GRAPH / OPTIONAL / FILTER / BIND / VALUES …), not only after a triple.
             if (Peek() == '.')
             {
+                if (!dotAllowed)
+                    throw new SparqlParseException($"Unexpected '.' at position {_position}");
                 Advance();
+                dotAllowed = false;
+                triplesOpen = false;
                 continue;
             }
+            bool needsDot = triplesOpen;
+            dotAllowed = true;
+            triplesOpen = false;
 
             // Peek enough for the longest keyword (OPTIONAL = 8).
             var span = PeekSpan(8);
@@ -178,9 +187,12 @@ internal ref partial struct SparqlParser
             if (AtKeyword("UNION"))
                 throw new SparqlParseException("UNION requires graph patterns enclosed in braces: { pattern } UNION { pattern }");
 
-            // Otherwise it is a triples block. Its trailing '.' is consumed at the loop top.
+            // Otherwise it is a triples statement. Its trailing '.' is consumed at the loop top.
+            if (needsDot)
+                throw new SparqlParseException($"Expected '.' between two triple patterns at position {_position}");
             if (!EmitTripleBlockTree(ref pa))
                 break;
+            triplesOpen = true;
         }
     }
 
@@ -223,8 +235,8 @@ internal ref partial struct SparqlParser
         ConsumeKeyword("GRAPH");
         SkipWhitespace();
 
-        var graphTerm = ParseTerm(); // VarOrIri
-        if (graphTerm.Length == 0)
+        var graphTerm = ParseTerm(); // VarOrIri: not a blank node (W3C syn-bad-31) or a literal
+        if (graphTerm.Length == 0 || (graphTerm.Type != TermType.Variable && graphTerm.Type != TermType.Iri))
             throw new SparqlParseException("Expected a variable or IRI after GRAPH");
 
         SkipWhitespace();
@@ -686,7 +698,6 @@ internal ref partial struct SparqlParser
         }
     }
 
-    /// <summary>True if a body keyword (one that ends a property list) begins <paramref name="span"/>.</summary>
     /// <summary>Lookahead used inside a property list to stop before a keyword that begins a new clause.</summary>
     private bool IsBodyKeywordAhead()
     {
