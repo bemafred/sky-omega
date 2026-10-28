@@ -96,7 +96,7 @@ internal ref partial struct QueryResults
         if (orderBy.HasOrderBy && rows.Count > 1)
         {
             var sourceStr = source.ToString();
-            rows.Sort(new MaterializedRowComparer(orderBy, sourceStr));
+            rows.Sort(new MaterializedRowComparer(orderBy, sourceStr, prefixes ?? buffer?.Prefixes));
         }
 
         return new QueryResults(rows, source, store, bindings, stringBuffer,

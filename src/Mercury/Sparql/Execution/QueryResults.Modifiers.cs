@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Globalization;
 using SkyOmega.Mercury.Abstractions;
 using SkyOmega.Mercury.Sparql.Types;
+using SkyOmega.Mercury.Sparql.Parsing;
+using SkyOmega.Mercury.Sparql.Patterns;
 using SkyOmega.Mercury.Sparql.Execution.Expressions;
 using ValueType = SkyOmega.Mercury.Sparql.Execution.Expressions.ValueType;
 
@@ -107,33 +109,13 @@ internal ref partial struct QueryResults
         if (_sortedResults.Count > 1)
         {
             var sourceStr = _source.ToString();
-            _sortedResults.Sort(new MaterializedRowComparer(_orderBy, sourceStr));
+            _sortedResults.Sort(new MaterializedRowComparer(_orderBy, sourceStr, _buffer?.Prefixes ?? _materializedPrefixes));
         }
 
         // Reset for iteration
         _sortedIndex = -1;
         _skipped = 0;
         _returned = 0;
-    }
-
-    /// <summary>
-    /// Compare two values, handling numeric comparison when possible.
-    /// </summary>
-    private static int CompareValues(ReadOnlySpan<char> a, ReadOnlySpan<char> b)
-    {
-        // Try numeric comparison first
-        if (TryParseNumber(a, out var aNum) && TryParseNumber(b, out var bNum))
-        {
-            return aNum.CompareTo(bNum);
-        }
-
-        // Fall back to string comparison
-        return a.SequenceCompareTo(b);
-    }
-
-    private static bool TryParseNumber(ReadOnlySpan<char> s, out double result)
-    {
-        return double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out result);
     }
 
     /// <summary>
@@ -354,19 +336,10 @@ internal ref partial struct QueryResults
                 if (span[pos] != '(')
                     break; // No more conditions
 
-                // Find matching closing paren
-                pos++; // Skip '('
-                int condStart = pos;
-                int depth = 1;
-                while (pos < span.Length && depth > 0)
-                {
-                    if (span[pos] == '(') depth++;
-                    else if (span[pos] == ')') depth--;
-                    if (depth > 0) pos++;
-                }
-
-                var condition = span.Slice(condStart, pos - condStart);
-                pos++; // Skip closing ')'
+                // The condition's brackets end where the parser's expression token rule says
+                int condStart = pos + 1;
+                pos = new SparqlParser(span).BracketedGroupEndAt(pos);
+                var condition = span.Slice(condStart, pos - 1 - condStart);
 
                 // Evaluate this condition
                 var evaluator = new FilterEvaluator(condition);
@@ -389,88 +362,38 @@ internal ref partial struct QueryResults
     private string SubstituteAggregatesInHaving(ReadOnlySpan<char> havingExpr, GroupedRow group, string source)
     {
         var expr = havingExpr.ToString();
+        var result = new System.Text.StringBuilder(expr.Length);
+        int cursor = 0;
 
-        // Match aggregate patterns and substitute with computed values
-        // Patterns: COUNT(*), COUNT(?var), SUM(?var), AVG(?var), MIN(?var), MAX(?var), SAMPLE(?var), GROUP_CONCAT(?var)
-        var aggregateFunctions = new[] { "COUNT", "SUM", "AVG", "MIN", "MAX", "SAMPLE", "GROUP_CONCAT" };
-
-        foreach (var funcName in aggregateFunctions)
+        // The aggregate calls in the expression, found by the parser's expression token rule
+        foreach (var (function, nameStart, _, end) in new SparqlParser(expr.AsSpan()).AggregateCallsIn(0, expr.Length))
         {
-            int searchStart = 0;
-            while (true)
+            var aggExpr = expr.Substring(nameStart, end - nameStart); // e.g. "COUNT(?O)" or "COUNT(*)"
+
+            // The matching aggregate of the SELECT clause, by its expression
+            string? computedValue = null;
+            for (int i = 0; i < group.AggregateCount; i++)
             {
-                // Find the function name (case-insensitive)
-                int funcIdx = expr.IndexOf(funcName, searchStart, StringComparison.OrdinalIgnoreCase);
-                if (funcIdx < 0) break;
-
-                // Find opening paren
-                int parenStart = funcIdx + funcName.Length;
-                while (parenStart < expr.Length && char.IsWhiteSpace(expr[parenStart]))
-                    parenStart++;
-
-                if (parenStart >= expr.Length || expr[parenStart] != '(')
+                var selectAgg = GetAggregateExpressionString(i, source);
+                if (selectAgg != null && AggregateExpressionsMatch(aggExpr, selectAgg))
                 {
-                    searchStart = funcIdx + 1;
-                    continue;
-                }
-
-                // Find matching closing paren
-                int depth = 1;
-                int parenEnd = parenStart + 1;
-                while (parenEnd < expr.Length && depth > 0)
-                {
-                    if (expr[parenEnd] == '(') depth++;
-                    else if (expr[parenEnd] == ')') depth--;
-                    parenEnd++;
-                }
-                parenEnd--; // Back to the closing paren
-
-                // Extract the full aggregate expression: e.g., "COUNT(?O)" or "COUNT(*)"
-                var aggExpr = expr.Substring(funcIdx, parenEnd - funcIdx + 1);
-
-                // Find matching aggregate in the group by comparing with stored aggregates
-                string? computedValue = null;
-                for (int i = 0; i < group.AggregateCount; i++)
-                {
-                    // Get the aggregate's alias and look it up in the binding table
-                    var aliasHash = group.GetAggregateHash(i);
-                    var aliasValue = group.GetAggregateValue(i);
-
-                    // Check if this aggregate matches by comparing the function and variable
-                    // We need to match the aggregate expression from SelectClause
-                    var selectAgg = GetAggregateExpressionString(i, source);
-                    if (selectAgg != null && AggregateExpressionsMatch(aggExpr, selectAgg))
-                    {
-                        computedValue = aliasValue.ToString();
-                        break;
-                    }
-                }
-
-                // If aggregate not found in SELECT, handle HAVING-only aggregates
-                if (computedValue == null)
-                {
-                    // COUNT(*) in HAVING but not in SELECT - use row count
-                    if (funcName.Equals("COUNT", StringComparison.OrdinalIgnoreCase) &&
-                        aggExpr.Contains("*"))
-                    {
-                        computedValue = group.RowCount.ToString(System.Globalization.CultureInfo.InvariantCulture);
-                    }
-                }
-
-                if (computedValue != null)
-                {
-                    // Replace the aggregate expression with the computed value
-                    expr = expr.Substring(0, funcIdx) + computedValue + expr.Substring(parenEnd + 1);
-                    searchStart = funcIdx + computedValue.Length;
-                }
-                else
-                {
-                    searchStart = parenEnd + 1;
+                    computedValue = group.GetAggregateValue(i).ToString();
+                    break;
                 }
             }
+
+            // COUNT(*) in HAVING but not in SELECT: the group's row count
+            if (computedValue == null && function == AggregateFunction.Count && aggExpr.Contains('*'))
+                computedValue = group.RowCount.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+            if (computedValue == null)
+                continue; // left as written
+            result.Append(expr, cursor, nameStart - cursor).Append(computedValue);
+            cursor = end;
         }
 
-        return expr;
+        result.Append(expr, cursor, expr.Length - cursor);
+        return result.ToString();
     }
 
     /// <summary>
@@ -740,11 +663,39 @@ internal sealed class MaterializedRowComparer : IComparer<MaterializedRow>
 {
     private readonly OrderByClause _orderBy;
     private readonly string _source;
+    private readonly PrefixMapping[]? _prefixes;
+    // Per condition: true when it is one variable, read from the row; otherwise an expression, evaluated
+    private readonly bool[] _isVariable;
+    // An expression condition's value for a row, evaluated once per row rather than once per comparison
+    private readonly Dictionary<MaterializedRow, string[]>? _values;
 
-    public MaterializedRowComparer(OrderByClause orderBy, string source)
+    public MaterializedRowComparer(OrderByClause orderBy, string source, PrefixMapping[]? prefixes = null)
     {
         _orderBy = orderBy;
         _source = source;
+        _prefixes = prefixes;
+        _isVariable = new bool[orderBy.Count];
+        bool anyExpression = false;
+        for (int i = 0; i < orderBy.Count; i++)
+        {
+            var cond = orderBy.GetCondition(i);
+            _isVariable[i] = IsOneVariable(source.AsSpan(cond.ExpressionStart, cond.ExpressionLength));
+            anyExpression |= !_isVariable[i];
+        }
+        if (anyExpression)
+            _values = new Dictionary<MaterializedRow, string[]>(ReferenceEqualityComparer.Instance);
+    }
+
+    private static bool IsOneVariable(ReadOnlySpan<char> text)
+    {
+        if (text.Length < 2 || !VariableName.IsSigil(text[0]))
+            return false;
+        foreach (var c in text[1..])
+        {
+            if (!char.IsLetterOrDigit(c) && c != '_')
+                return false;
+        }
+        return true;
     }
 
     public int Compare(MaterializedRow? a, MaterializedRow? b)
@@ -754,10 +705,18 @@ internal sealed class MaterializedRowComparer : IComparer<MaterializedRow>
         for (int i = 0; i < _orderBy.Count; i++)
         {
             var cond = _orderBy.GetCondition(i);
-            var varName = _source.AsSpan(cond.VariableStart, cond.VariableLength);
-
-            var aValue = a.GetValueByName(varName);
-            var bValue = b.GetValueByName(varName);
+            ReadOnlySpan<char> aValue, bValue;
+            if (_isVariable[i])
+            {
+                var varName = _source.AsSpan(cond.ExpressionStart, cond.ExpressionLength);
+                aValue = a.GetValueByName(varName);
+                bValue = b.GetValueByName(varName);
+            }
+            else
+            {
+                aValue = ExpressionValues(a)[i];
+                bValue = ExpressionValues(b)[i];
+            }
 
             int cmp = CompareValues(aValue, bValue);
             if (cmp != 0)
@@ -780,17 +739,73 @@ internal sealed class MaterializedRowComparer : IComparer<MaterializedRow>
         for (int i = 0; i < _orderBy.Count; i++)
         {
             var cond = _orderBy.GetCondition(i);
-            var varName = _source.AsSpan(cond.VariableStart, cond.VariableLength);
-
-            int idx = bindings.FindBinding(varName);
-            var aValue = idx >= 0 ? bindings.GetString(idx) : ReadOnlySpan<char>.Empty;
-            var bValue = row.GetValueByName(varName);
+            var text = _source.AsSpan(cond.ExpressionStart, cond.ExpressionLength);
+            ReadOnlySpan<char> aValue, bValue;
+            if (_isVariable[i])
+            {
+                int idx = bindings.FindBinding(text);
+                aValue = idx >= 0 ? bindings.GetString(idx) : ReadOnlySpan<char>.Empty;
+                bValue = row.GetValueByName(text);
+            }
+            else
+            {
+                aValue = Evaluate(text, ref bindings);
+                bValue = ExpressionValues(row)[i];
+            }
 
             int cmp = CompareValues(aValue, bValue);
             if (cmp != 0)
                 return cond.Direction == OrderDirection.Descending ? -cmp : cmp;
         }
         return 0;
+    }
+
+    /// <summary>The values of <paramref name="row"/>'s expression conditions (null at a variable's index).</summary>
+    private string[] ExpressionValues(MaterializedRow row)
+    {
+        if (_values!.TryGetValue(row, out var values))
+            return values;
+        values = new string[_orderBy.Count];
+        var bindingArray = System.Buffers.ArrayPool<Binding>.Shared.Rent(64);
+        var charArray = System.Buffers.ArrayPool<char>.Shared.Rent(1 << 13);
+        try
+        {
+            var table = new BindingTable(bindingArray.AsSpan(0, 64), charArray.AsSpan(0, 1 << 13));
+            row.RestoreBindings(ref table);
+            for (int i = 0; i < _orderBy.Count; i++)
+            {
+                if (_isVariable[i]) continue;
+                var cond = _orderBy.GetCondition(i);
+                values[i] = Evaluate(_source.AsSpan(cond.ExpressionStart, cond.ExpressionLength), ref table).ToString();
+            }
+            table.ReturnGrownBuffer();
+        }
+        finally
+        {
+            System.Buffers.ArrayPool<Binding>.Shared.Return(bindingArray);
+            System.Buffers.ArrayPool<char>.Shared.Return(charArray);
+        }
+        _values[row] = values;
+        return values;
+    }
+
+    /// <summary>
+    /// The value of an expression condition as an RDF term, by the one [110] evaluator FILTER and BIND use; empty when
+    /// it is unbound or an error, which sorts first (§15.1).
+    /// </summary>
+    private ReadOnlySpan<char> Evaluate(ReadOnlySpan<char> expression, scoped ref BindingTable bindings)
+    {
+        var evaluator = new FilterEvaluator(expression);
+        var value = evaluator.EvaluateToValue(bindings.GetBindings(), bindings.Count, bindings.GetStringBuffer(),
+            _prefixes, _source.AsSpan());
+        return value.Type switch
+        {
+            ValueType.Unbound => ReadOnlySpan<char>.Empty,
+            ValueType.Integer => value.IntegerValue.ToString(CultureInfo.InvariantCulture),
+            ValueType.Double => value.DoubleValue.ToString("G", CultureInfo.InvariantCulture),
+            ValueType.Boolean => value.BooleanValue ? "true" : "false",
+            _ => value.StringValue.ToString(),
+        };
     }
 
     private static int CompareValues(ReadOnlySpan<char> a, ReadOnlySpan<char> b)

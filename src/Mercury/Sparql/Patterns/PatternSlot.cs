@@ -1026,7 +1026,7 @@ internal sealed class QueryBuffer
         {
             foreach (var entry in OrderBy)
             {
-                clause.AddCondition(entry.VariableStart, entry.VariableLength,
+                clause.AddCondition(entry.ExpressionStart, entry.ExpressionLength,
                     entry.Descending ? OrderDirection.Descending : OrderDirection.Ascending);
             }
         }
@@ -1084,8 +1084,8 @@ internal struct PrefixMapping
 /// </summary>
 internal struct OrderByEntry
 {
-    public int VariableStart;
-    public int VariableLength;
+    public int ExpressionStart;
+    public int ExpressionLength;
     public bool Descending;
 }
 
@@ -1300,8 +1300,8 @@ internal static class QueryBufferAdapter
                 var cond = orderBy.GetCondition(i);
                 entries[i] = new OrderByEntry
                 {
-                    VariableStart = cond.VariableStart,
-                    VariableLength = cond.VariableLength,
+                    ExpressionStart = cond.ExpressionStart,
+                    ExpressionLength = cond.ExpressionLength,
                     Descending = cond.Direction == OrderDirection.Descending
                 };
             }

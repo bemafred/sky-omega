@@ -763,55 +763,26 @@ internal ref partial struct SparqlParser
             int exprStart = _position;
             int exprEnd = _position;
 
-            // Parse through the expression to find AS keyword and alias
-            int parenDepth = 0;
+            // The expression's tokens up to its AS keyword, then the alias
             bool foundAs = false;
-
-            while (!IsAtEnd() && !(parenDepth == 0 && Peek() == ')'))
+            while (!IsAtEnd() && Peek() != ')' && !AtExpressionKeyword("AS"))
+                SkipExpressionToken();
+            if (AtExpressionKeyword("AS"))
             {
-                var ch = Peek();
-                if (ch == '(')
-                {
-                    parenDepth++;
-                    Advance();
-                }
-                else if (ch == ')')
-                {
-                    if (parenDepth == 0) break;
-                    parenDepth--;
-                    Advance();
-                }
-                else
-                {
-                    // Check for AS keyword at depth 0
-                    if (parenDepth == 0)
-                    {
-                        var checkSpan = PeekSpan(3);
-                        if (checkSpan.Length >= 2 && checkSpan[..2].Equals("AS", StringComparison.OrdinalIgnoreCase) &&
-                            (checkSpan.Length < 3 || !char.IsLetterOrDigit(checkSpan[2])))
-                        {
-                            // Save expression end position (before whitespace and AS)
-                            exprEnd = _position;
-                            while (exprEnd > exprStart && char.IsWhiteSpace(_source[exprEnd - 1]))
-                                exprEnd--;
+                exprEnd = _position;
+                while (exprEnd > exprStart && char.IsWhiteSpace(_source[exprEnd - 1]))
+                    exprEnd--;
 
-                            ConsumeKeyword("AS");
-                            SkipWhitespace();
-
-                            // Parse the alias variable
-                            if (VariableName.IsSigil(Peek()))
-                            {
-                                agg.AliasStart = _position;
-                                Advance();
-                                while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_'))
-                                    Advance();
-                                agg.AliasLength = _position - agg.AliasStart;
-                                foundAs = true;
-                            }
-                            break;
-                        }
-                    }
+                ConsumeKeyword("AS");
+                SkipWhitespace();
+                if (VariableName.IsSigil(Peek()))
+                {
+                    agg.AliasStart = _position;
                     Advance();
+                    while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_'))
+                        Advance();
+                    agg.AliasLength = _position - agg.AliasStart;
+                    foundAs = true;
                 }
             }
 
@@ -875,36 +846,9 @@ internal ref partial struct SparqlParser
         }
         else
         {
-            // Complex expression argument: IF(...), xsd:double(?x), etc.
-            // Skip through the expression tracking parenthesis depth
-            int depth = 0;
-            while (!IsAtEnd())
-            {
-                var ch = Peek();
-
-                // Check for separator clause (GROUP_CONCAT only)
-                if (depth == 0 && ch == ';')
-                    break;
-
-                // Check for closing ) of aggregate function
-                if (depth == 0 && ch == ')')
-                    break;
-
-                if (ch == '(')
-                {
-                    depth++;
-                    Advance();
-                }
-                else if (ch == ')')
-                {
-                    depth--;
-                    Advance();
-                }
-                else
-                {
-                    Advance();
-                }
-            }
+            // An expression argument: IF(...), xsd:double(?x), etc., up to the aggregate's ')' or GROUP_CONCAT's ';'
+            while (!IsAtEnd() && Peek() != ')' && Peek() != ';')
+                SkipExpressionToken();
             agg.VariableLength = _position - agg.VariableStart;
         }
 
@@ -985,91 +929,10 @@ internal ref partial struct SparqlParser
     {
         var expr = _source.Slice(exprStart, exprLength);
 
-        var aggregateFunctions = new[] { ("COUNT", 5), ("SUM", 3), ("AVG", 3), ("MIN", 3), ("MAX", 3), ("SAMPLE", 6), ("GROUP_CONCAT", 12) };
-
-        int searchStart = 0;
-        while (searchStart < expr.Length)
+        foreach (var (bestFunc, _, parenStartAbs, endAbs) in new SparqlParser(_source).AggregateCallsIn(exprStart, exprLength))
         {
-            // Find the next aggregate function
-            int bestMatch = -1;
-            int bestMatchLen = 0;
-            AggregateFunction bestFunc = AggregateFunction.None;
-
-            foreach (var (funcName, funcLen) in aggregateFunctions)
-            {
-                if (searchStart + funcLen > expr.Length) continue;
-
-                var slice = expr.Slice(searchStart);
-                int idx = slice.ToString().IndexOf(funcName, StringComparison.OrdinalIgnoreCase);
-                if (idx < 0) continue;
-
-                int absIdx = searchStart + idx;
-                // Verify it's followed by '(' and not part of a longer identifier
-                if (absIdx + funcLen < expr.Length)
-                {
-                    // Skip whitespace between function name and '('
-                    int parenIdx = absIdx + funcLen;
-                    while (parenIdx < expr.Length && char.IsWhiteSpace(expr[parenIdx]))
-                        parenIdx++;
-
-                    if (parenIdx < expr.Length && expr[parenIdx] == '(')
-                    {
-                        // Check it's not part of a longer identifier (letter before)
-                        if (absIdx > 0 && char.IsLetterOrDigit(expr[absIdx - 1]))
-                            continue;
-
-                        if (bestMatch < 0 || absIdx < bestMatch)
-                        {
-                            bestMatch = absIdx;
-                            bestMatchLen = funcLen;
-                            bestFunc = funcName switch
-                            {
-                                "COUNT" => AggregateFunction.Count,
-                                "SUM" => AggregateFunction.Sum,
-                                "AVG" => AggregateFunction.Avg,
-                                "MIN" => AggregateFunction.Min,
-                                "MAX" => AggregateFunction.Max,
-                                "SAMPLE" => AggregateFunction.Sample,
-                                "GROUP_CONCAT" => AggregateFunction.GroupConcat,
-                                _ => AggregateFunction.None
-                            };
-                        }
-                    }
-                }
-            }
-
-            if (bestMatch < 0)
-            {
-                break; // No more aggregates found - this is expected
-            }
-
-            // Found an aggregate at bestMatch - parse its argument
-            int funcStart = bestMatch;
-            int parenStart = funcStart + bestMatchLen;
-            while (parenStart < expr.Length && char.IsWhiteSpace(expr[parenStart]))
-                parenStart++;
-
-            if (parenStart >= expr.Length || expr[parenStart] != '(')
-            {
-                searchStart = bestMatch + 1;
-                continue;
-            }
-
-            // Find matching closing paren
-            int depth = 1;
-            int parenEnd = parenStart + 1;
-            while (parenEnd < expr.Length && depth > 0)
-            {
-                if (expr[parenEnd] == '(') depth++;
-                else if (expr[parenEnd] == ')') depth--;
-                parenEnd++;
-            }
-
-            if (depth != 0)
-            {
-                searchStart = bestMatch + 1;
-                continue;
-            }
+            int parenStart = parenStartAbs - exprStart;
+            int parenEnd = endAbs - exprStart; // just past ')'
 
             // Extract the variable/argument (skip DISTINCT if present)
             // Work with positions, not strings, to get correct offsets
@@ -1103,10 +966,7 @@ internal ref partial struct SparqlParser
             // Now argStart..argEnd points to the actual variable/expression (without DISTINCT)
             int varLength = argEnd - argStart;
             if (varLength <= 0)
-            {
-                searchStart = parenEnd;
                 continue;
-            }
 
             // Create a hidden aggregate entry
             var embeddedAgg = new AggregateExpression
@@ -1142,8 +1002,6 @@ internal ref partial struct SparqlParser
             {
                 clause.AddAggregate(embeddedAgg);
             }
-
-            searchStart = parenEnd;
         }
     }
 

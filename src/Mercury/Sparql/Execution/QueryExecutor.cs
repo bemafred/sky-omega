@@ -361,7 +361,7 @@ internal partial class QueryExecutor : IDisposable
             if (!TreeJoinExecutor.IsFlatBgp(ref tree, root))
                 return false; // nested group / property path — full materialization handles those
 
-            var comparer = new MaterializedRowComparer(orderBy, _source);
+            var comparer = new MaterializedRowComparer(orderBy, _source, _prefixMappings);
             var rows = new TreeJoinExecutor(_store, _source, _prefixMappings, _source, _serviceExecutor,
                 _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _namedGraphs, _defaultGraphs, ReorderBgpInTree)
                 .StreamFlatBgpTopK(ref tree, root, "", comparer, capacity);

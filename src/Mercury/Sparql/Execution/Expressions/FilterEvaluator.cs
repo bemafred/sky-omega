@@ -237,8 +237,8 @@ internal ref partial struct FilterEvaluator
             return ParseVariable();
         }
 
-        // Literal value
-        if (ch == '"')
+        // Literal value: [156]–[159], in any of the four quote forms
+        if (ch == '"' || ch == '\'')
         {
             return ParseStringLiteral();
         }
@@ -311,10 +311,15 @@ internal ref partial struct FilterEvaluator
 
     private Value ParseStringLiteral()
     {
-        Advance(); // Skip '"'
+        // STRING_LITERAL1 '…', STRING_LITERAL2 "…", STRING_LITERAL_LONG1 '''…''', STRING_LITERAL_LONG2 """…"""
+        char quote = Peek();
+        bool isLong = _position + 2 < _expression.Length && _expression[_position + 1] == quote && _expression[_position + 2] == quote;
+        int quoteLength = isLong ? 3 : 1;
+        _position += quoteLength;
         var start = _position;
 
-        while (!IsAtEnd() && Peek() != '"')
+        while (!IsAtEnd() && !(Peek() == quote && (!isLong ||
+                   (_position + 2 < _expression.Length && _expression[_position + 1] == quote && _expression[_position + 2] == quote))))
         {
             if (Peek() == '\\')
                 Advance(); // Skip escape
@@ -329,7 +334,7 @@ internal ref partial struct FilterEvaluator
             out _literalScratch);
 
         if (!IsAtEnd())
-            Advance(); // Skip closing '"'
+            _position += quoteLength; // Skip the closing quote(s)
 
         // Language tag: "content"@lang — preserve the full wrapped term form so that
         // GetLexicalForm / GetLangTagOrDatatype (hence DATATYPE/LANG/UCASE/LCASE/CONCAT)

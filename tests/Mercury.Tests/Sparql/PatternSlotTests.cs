@@ -1033,8 +1033,8 @@ public class QueryBufferTests
 
         var orderBy = new OrderByEntry[]
         {
-            new() { VariableStart = 0, VariableLength = 4, Descending = false },
-            new() { VariableStart = 10, VariableLength = 5, Descending = true }
+            new() { ExpressionStart = 0, ExpressionLength = 4, Descending = false },
+            new() { ExpressionStart = 10, ExpressionLength = 5, Descending = true }
         };
         buffer.OrderBy = orderBy;
 

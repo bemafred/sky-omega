@@ -418,7 +418,11 @@ internal sealed class TreeJoinExecutor
         // FilterEvaluator has no EXISTS support, so resolve each embedded EXISTS per row against the store and
         // substitute its truth value into the expression text; any surrounding NOT / ! / || / && is then handled by
         // FilterEvaluator. (W3C subset-02 — NOT EXISTS inside a MINUS's FILTER.)
-        var existsSpans = FindEmbeddedExists(exprText);
+        // Each EXISTS { … } inside the expression, found by the parser's expression token rule (offsets relative to the
+        // expression: the keyword, just past the group, and the group's '{')
+        var existsSpans = new List<(int start, int end, int braceRel)>();
+        foreach (var (keywordStart, groupStart, end) in new SparqlParser(_source.AsSpan()).EmbeddedExistsIn(exprStart, slot.FilterLength))
+            existsSpans.Add((keywordStart - exprStart, end - exprStart, groupStart - exprStart));
         if (existsSpans.Count > 0)
             return ApplyFilterWithEmbeddedExists(exprText, exprStart, existsSpans, activeGraph, input);
 
@@ -510,52 +514,6 @@ internal sealed class TreeJoinExecutor
         {
             ArrayPool<byte>.Shared.Return(buf);
         }
-    }
-
-    /// <summary>
-    /// Locate each <c>EXISTS { … }</c> embedded in a FILTER expression (keyword + braced body), skipping string
-    /// literals so an "EXISTS" inside a quoted string is not matched. Returns (start, endExclusive, braceRel) per
-    /// occurrence, braceRel being the body '{' offset within <paramref name="expr"/>. A leading NOT is intentionally
-    /// left in place — the caller substitutes the bare EXISTS truth value and lets FilterEvaluator apply NOT / '!'.
-    /// </summary>
-    private static List<(int start, int end, int braceRel)> FindEmbeddedExists(string expr)
-    {
-        var spans = new List<(int, int, int)>();
-        int i = 0;
-        while (i < expr.Length)
-        {
-            char c = expr[i];
-            if (c == '"' || c == '\'')
-            {
-                char q = c; i++;
-                while (i < expr.Length && expr[i] != q) { if (expr[i] == '\\') i++; i++; }
-                i++; // closing quote
-                continue;
-            }
-            if ((c == 'E' || c == 'e') && IsKeywordAt(expr, i, "EXISTS"))
-            {
-                int braceRel = expr.IndexOf('{', i + 6);
-                if (braceRel < 0) break;
-                int braceEnd = MatchBrace(expr, braceRel);
-                spans.Add((i, braceEnd + 1, braceRel));
-                i = braceEnd + 1;
-                continue;
-            }
-            i++;
-        }
-        return spans;
-    }
-
-    /// <summary>Whether the case-insensitive keyword sits at <paramref name="pos"/> with non-identifier boundaries.</summary>
-    private static bool IsKeywordAt(string s, int pos, string kw)
-    {
-        if (pos + kw.Length > s.Length) return false;
-        for (int k = 0; k < kw.Length; k++)
-            if (char.ToUpperInvariant(s[pos + k]) != kw[k]) return false;
-        if (pos > 0 && (char.IsLetterOrDigit(s[pos - 1]) || s[pos - 1] == '_')) return false;
-        int after = pos + kw.Length;
-        if (after < s.Length && (char.IsLetterOrDigit(s[after]) || s[after] == '_')) return false;
-        return true;
     }
 
     /// <summary>
@@ -935,17 +893,6 @@ internal sealed class TreeJoinExecutor
         for (int i = 0; i < row.BindingCount; i++)
             if (row.GetHash(i) == hash) return true;
         return false;
-    }
-
-    private static int MatchBrace(string s, int open)
-    {
-        int depth = 0;
-        for (int i = open; i < s.Length; i++)
-        {
-            if (s[i] == '{') depth++;
-            else if (s[i] == '}' && --depth == 0) return i;
-        }
-        throw new ArgumentException("Unbalanced braces");
     }
 
     private static string StripIri(string t) => t.Length >= 2 && t[0] == '<' && t[^1] == '>' ? t[1..^1] : t;

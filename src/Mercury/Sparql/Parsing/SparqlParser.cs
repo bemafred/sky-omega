@@ -2189,21 +2189,7 @@ internal ref partial struct SparqlParser
                 // Parse all HAVING conditions
                 while (Peek() == '(')
                 {
-                    Advance(); // Skip '('
-
-                    // Find matching closing paren
-                    int depth = 1;
-                    while (!IsAtEnd() && depth > 0)
-                    {
-                        var ch = Peek();
-                        if (ch == '(') depth++;
-                        else if (ch == ')') depth--;
-                        if (depth > 0) Advance();
-                    }
-
-                    if (Peek() == ')')
-                        Advance(); // Skip ')'
-
+                    SkipBracketedGroup();
                     SkipWhitespace();
                 }
 
@@ -2439,47 +2425,14 @@ internal ref partial struct SparqlParser
                 Advance(); // Skip opening '('
                 SkipWhitespace();
 
-                // Find the matching closing paren and AS keyword
-                // The expression is everything between the opening ( and AS
-                int depth = 1;
+                // The expression's tokens up to its AS keyword
                 int asPosition = -1;
-
-                // Scan for AS keyword at depth 1
-                while (!IsAtEnd() && depth > 0)
+                while (!IsAtEnd() && Peek() != ')' && !AtExpressionKeyword("AS"))
+                    SkipExpressionToken();
+                if (AtExpressionKeyword("AS"))
                 {
-                    var c = Peek();
-                    if (c == '(')
-                    {
-                        depth++;
-                        Advance();
-                    }
-                    else if (c == ')')
-                    {
-                        depth--;
-                        if (depth > 0) Advance();
-                    }
-                    else if (depth == 1 && (c == 'A' || c == 'a'))
-                    {
-                        // Check for AS keyword
-                        var peek = PeekSpan(3);
-                        if (peek.Length >= 2 &&
-                            (peek[0] == 'A' || peek[0] == 'a') &&
-                            (peek[1] == 'S' || peek[1] == 's') &&
-                            (peek.Length < 3 || !IsLetterOrDigit(peek[2])))
-                        {
-                            asPosition = _position;
-                            ConsumeKeyword("AS");
-                            break;
-                        }
-                        else
-                        {
-                            Advance();
-                        }
-                    }
-                    else
-                    {
-                        Advance();
-                    }
+                    asPosition = _position;
+                    ConsumeKeyword("AS");
                 }
 
                 if (asPosition < 0)
@@ -2550,90 +2503,86 @@ internal ref partial struct SparqlParser
         return clause;
     }
 
+    /// <summary>
+    /// [22] OrderClause ::= 'ORDER' 'BY' OrderCondition+
+    /// [23] OrderCondition ::= ( ( 'ASC' | 'DESC' ) BrackettedExpression ) | ( Constraint | Var )
+    /// [69] Constraint ::= BrackettedExpression | BuiltInCall | FunctionCall
+    /// Each condition is kept as the span of its variable or expression; a BrackettedExpression without its brackets.
+    /// </summary>
     private OrderByClause ParseOrderByClause()
     {
         var clause = new OrderByClause();
-
-        // Parse one or more order conditions
-        while (!IsAtEnd() && clause.Count < 4)
+        while (true)
         {
             SkipWhitespace();
-
-            var direction = OrderDirection.Ascending;
-            bool hasDirectionKeyword = false;
-
-            // Check for ASC/DESC keyword with parenthesis: ASC(?var) or DESC(?var)
-            var span = PeekSpan(4);
-            if (span.Length >= 3 && span[..3].Equals("ASC", StringComparison.OrdinalIgnoreCase))
+            if (AtExpressionKeyword("ASC") || AtExpressionKeyword("DESC"))
             {
-                ConsumeKeyword("ASC");
+                var direction = AtExpressionKeyword("DESC") ? OrderDirection.Descending : OrderDirection.Ascending;
+                ConsumeKeyword(direction == OrderDirection.Descending ? "DESC" : "ASC");
                 SkipWhitespace();
-                hasDirectionKeyword = true;
+                if (Peek() != '(')
+                    throw new SparqlParseException("Expected '(' after ASC or DESC in ORDER BY");
+                AddBracketedOrderCondition(ref clause, direction);
             }
-            else if (span.Length >= 4 && span[..4].Equals("DESC", StringComparison.OrdinalIgnoreCase))
+            else if (VariableName.IsSigil(Peek()))
             {
-                ConsumeKeyword("DESC");
-                SkipWhitespace();
-                direction = OrderDirection.Descending;
-                hasDirectionKeyword = true;
+                int start = _position;
+                SkipExpressionToken();
+                clause.AddCondition(start, _position - start, OrderDirection.Ascending);
             }
-
-            // If we had ASC/DESC, expect parenthesis around variable
-            if (hasDirectionKeyword)
+            else if (Peek() == '(')
             {
-                if (Peek() == '(')
-                {
-                    Advance(); // Skip '('
-                    SkipWhitespace();
-                }
+                AddBracketedOrderCondition(ref clause, OrderDirection.Ascending);
             }
-
-            // Parse variable
-            if (VariableName.IsSigil(Peek()))
+            else if (!StartsOrderCall())
             {
-                var varStart = _position;
-                Advance(); // Skip '?'
-                while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_'))
-                    Advance();
-                var varLength = _position - varStart;
-
-                clause.AddCondition(varStart, varLength, direction);
-
-                // Skip closing parenthesis if we had direction keyword
-                if (hasDirectionKeyword)
-                {
-                    SkipWhitespace();
-                    if (Peek() == ')')
-                        Advance();
-                }
+                break;
             }
             else
             {
-                // Not a variable - stop parsing order conditions
-                break;
+                // BuiltInCall / FunctionCall: STRLEN(?o), xsd:integer(?o), <iri>(?o)
+                int start = _position;
+                SkipExpressionToken();
+                SkipWhitespace();
+                SkipBracketedGroup();
+                clause.AddCondition(start, _position - start, OrderDirection.Ascending);
             }
-
-            SkipWhitespace();
-
-            // Check if next token is LIMIT, OFFSET, or end - if so, stop
-            span = PeekSpan(6);
-            if (span.Length >= 5 && span[..5].Equals("LIMIT", StringComparison.OrdinalIgnoreCase))
-                break;
-            if (span.Length >= 6 && span[..6].Equals("OFFSET", StringComparison.OrdinalIgnoreCase))
-                break;
-
-            // Check for ASC/DESC or variable to continue
-            if (span.Length >= 3 && span[..3].Equals("ASC", StringComparison.OrdinalIgnoreCase))
-                continue;
-            if (span.Length >= 4 && span[..4].Equals("DESC", StringComparison.OrdinalIgnoreCase))
-                continue;
-            if (VariableName.IsSigil(Peek()))
-                continue;
-
-            break;
         }
-
+        if (!clause.HasOrderBy)
+            throw new SparqlParseException("ORDER BY expects a variable or an expression");
         return clause;
+    }
+
+    /// <summary>Adds the BrackettedExpression at the cursor as a condition, without its brackets.</summary>
+    private void AddBracketedOrderCondition(ref OrderByClause clause, OrderDirection direction)
+    {
+        int open = _position;
+        SkipBracketedGroup();
+        int start = open + 1, end = _position - 1;
+        while (start < end && char.IsWhiteSpace(_source[start])) start++;
+        while (end > start && char.IsWhiteSpace(_source[end - 1])) end--;
+        clause.AddCondition(start, end - start, direction);
+    }
+
+    /// <summary>
+    /// True when a built-in or function call starts at the cursor: a name or IRI followed by '('. What follows the
+    /// conditions (LIMIT, OFFSET, VALUES, the temporal clause, a sub-SELECT's '}') is not one.
+    /// </summary>
+    private bool StartsOrderCall()
+    {
+        char ch = Peek();
+        if (!(IsLetter(ch) || ch == '<' || ch == ':'))
+            return false;
+        if (AtExpressionKeyword("LIMIT") || AtExpressionKeyword("OFFSET") || AtExpressionKeyword("VALUES") ||
+            AtExpressionKeyword("AS") || AtExpressionKeyword("DURING") || AtExpressionKeyword("ALL") ||
+            AtExpressionKeyword("BINDINGS"))
+            return false;
+        int saved = _position;
+        SkipExpressionToken();
+        SkipWhitespace();
+        bool call = Peek() == '(';
+        _position = saved;
+        return call;
     }
 
     /// <summary>

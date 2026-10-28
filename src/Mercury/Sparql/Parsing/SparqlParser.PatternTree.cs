@@ -444,75 +444,67 @@ internal ref partial struct SparqlParser
         ConsumeKeyword("FILTER");
         SkipWhitespace();
 
-        // FILTER [NOT] EXISTS { … }, optionally wrapped in one level of parentheses.
+        // FILTER [NOT] EXISTS { … }, optionally wrapped in one level of parentheses. With parentheses it is that form
+        // only when ')' follows the group; FILTER(EXISTS { … } && …) is an expression with an EXISTS inside it.
         int savedPos = _position;
         bool paren = false;
         if (Peek() == '(') { Advance(); SkipWhitespace(); paren = true; }
 
-        var look = PeekSpan(10);
         bool negated = false;
-        if (look.Length >= 3 && look[..3].Equals("NOT", StringComparison.OrdinalIgnoreCase) &&
-            (look.Length < 4 || (!IsLetterOrDigit(look[3]) && look[3] != '_')))
+        if (AtExpressionKeyword("NOT"))
         {
             ConsumeKeyword("NOT");
             SkipWhitespace();
-            look = PeekSpan(6);
             negated = true;
         }
-        if (KeywordIs(look, "EXISTS"))
+        if (AtExpressionKeyword("EXISTS"))
         {
             ConsumeKeyword("EXISTS");
             SkipWhitespace();
             if (Peek() != '{')
                 throw new SparqlParseException("Expected '{' after EXISTS");
-            Advance(); // consume '{'
-            int header = pa.BeginExists(negated);
-            ParseGroupBodyTree(ref pa, depth + 1);
-            pa.EndExists(header);
-            SkipWhitespace();
-            ExpectChar('}');
-            if (paren) { SkipWhitespace(); ExpectChar(')'); }
-            return;
+            int groupStart = _position;
+            bool wholeConstraint = true;
+            if (paren)
+            {
+                SkipBracketedGroup();
+                SkipWhitespace();
+                wholeConstraint = Peek() == ')';
+                _position = groupStart;
+            }
+            if (wholeConstraint)
+            {
+                Advance(); // consume '{'
+                int header = pa.BeginExists(negated);
+                ParseGroupBodyTree(ref pa, depth + 1);
+                pa.EndExists(header);
+                SkipWhitespace();
+                ExpectChar('}');
+                if (paren) { SkipWhitespace(); ExpectChar(')'); }
+                return;
+            }
         }
 
-        // Not EXISTS — rewind any consumed '(' / NOT and parse a normal constraint.
+        // Not a whole [NOT] EXISTS: rewind any consumed '(' / NOT and capture the constraint
         _position = savedPos;
 
         if (Peek() == '(')
         {
-            // BrackettedExpression: FILTER(expr) — capture the interior, excluding the outer parentheses.
-            Advance(); // consume '('
-            int start = _position;
-            int parenDepth = 1;
-            while (!IsAtEnd() && parenDepth > 0)
-            {
-                char ch = Advance();
-                if (ch == '(') parenDepth++;
-                else if (ch == ')') parenDepth--;
-            }
-            int length = _position - start - 1; // exclude the closing ')'
-            pa.AddFilter(start, length, depth);
+            // BrackettedExpression: FILTER(expr), the interior without the outer parentheses
+            int open = _position;
+            SkipBracketedGroup();
+            pa.AddFilter(open + 1, _position - open - 2, depth);
         }
-        else if (IsLetter(Peek()))
+        else if (IsLetter(Peek()) || Peek() == '<')
         {
-            // BuiltInCall / FunctionCall: FILTER CONTAINS(...) — capture name + argument list.
+            // BuiltInCall / FunctionCall: FILTER CONTAINS(...), FILTER ex:fn(...), FILTER <iri>(...)
             int start = _position;
-            while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_' || Peek() == ':'))
-                Advance();
+            SkipExpressionToken(); // the name or IRI
             SkipWhitespace();
-            if (Peek() == '(')
-            {
-                int parenDepth = 1;
-                Advance(); // consume '('
-                while (!IsAtEnd() && parenDepth > 0)
-                {
-                    char ch = Advance();
-                    if (ch == '(') parenDepth++;
-                    else if (ch == ')') parenDepth--;
-                }
-            }
-            int length = _position - start;
-            pa.AddFilter(start, length, depth);
+            if (Peek() != '(')
+                throw new SparqlParseException("Expected '(' after the function in FILTER");
+            SkipBracketedGroup();
+            pa.AddFilter(start, _position - start, depth);
         }
         else
         {
@@ -521,8 +513,8 @@ internal ref partial struct SparqlParser
     }
 
     /// <summary>
-    /// [60] Bind ::= 'BIND' '(' Expression 'AS' Var ')'. Captures the expression span (everything up to 'AS' at
-    /// paren-depth 0) and the target variable span, emitting a Bind leaf at the current depth. The tree executor
+    /// [60] Bind ::= 'BIND' '(' Expression 'AS' Var ')'. Captures the expression span (its tokens up to the AS
+    /// keyword) and the target variable span, emitting a Bind leaf at the current depth. The tree executor
     /// evaluates children in document order, so a BIND's position is structural — no per-slot evaluation index.
     /// </summary>
     private void EmitBindTree(scoped ref PatternArray pa, int depth, int groupFirstSlot)
@@ -535,34 +527,8 @@ internal ref partial struct SparqlParser
         SkipWhitespace();
 
         int exprStart = _position;
-        int parenDepth = 0;
-        while (!IsAtEnd())
-        {
-            char ch = Peek();
-            if (ch == '(')
-            {
-                parenDepth++;
-                Advance();
-            }
-            else if (ch == ')')
-            {
-                if (parenDepth == 0)
-                    break;
-                parenDepth--;
-                Advance();
-            }
-            else
-            {
-                if (parenDepth == 0)
-                {
-                    var span = PeekSpan(3);
-                    if (span.Length >= 2 && span[..2].Equals("AS", StringComparison.OrdinalIgnoreCase) &&
-                        (span.Length < 3 || !IsLetterOrDigit(span[2])))
-                        break;
-                }
-                Advance();
-            }
-        }
+        while (!IsAtEnd() && Peek() != ')' && !AtExpressionKeyword("AS"))
+            SkipExpressionToken();
         int exprLength = _position - exprStart;
         while (exprLength > 0 && char.IsWhiteSpace(_source[exprStart + exprLength - 1]))
             exprLength--;
