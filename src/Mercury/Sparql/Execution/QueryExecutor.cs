@@ -470,9 +470,9 @@ internal partial class QueryExecutor : IDisposable
             return QueryResults.Empty();
 
         // ADR-047 B2: a FROM dataset (default-graph clauses) runs through the unified tree like everything else — the
-        // FROM graphs are passed to the TreeJoinExecutor as _defaultGraphs, and a default-context pattern scans their
-        // UNION (their RDF merge IS the default graph, SPARQL §13.2). The old separate FROM / cross-graph executor
-        // path is deleted.
+        // FROM graphs are passed to the TreeJoinExecutor as _defaultGraphs, and a default-context pattern reads their
+        // RDF merge, which IS the default graph (SPARQL §13.2), as one graph (MergedGraphEnumerator). The old separate
+        // FROM / cross-graph executor path is deleted.
 
         // ADR-047 CUTOVER (the flip): the default query path — plain BGP AND inline VALUES + triple — runs through the
         // unified zero-GC tree executor, the same one GRAPH queries use (ADR-045, "a default graph is also a graph").
@@ -537,7 +537,7 @@ internal partial class QueryExecutor : IDisposable
         // filters after the join); a group with FILTER / EXISTS / an operator is evaluated whole (the tree's existence
         // primitive, the one ExistsBodyHasMatch uses) and tested non-empty. An all-OPTIONAL group keeps the empty-row
         // seed, so it correctly ASKs true — the old path's requiredCount==0 → false silently dropped that solution. A
-        // FROM dataset is honoured here too (the tree unions _defaultGraphs), so ASK FROM tests the FROM graphs — the
+        // FROM dataset is honoured here too (the tree reads the merge of _defaultGraphs), so ASK FROM tests the FROM graphs — the
         // old slot path this never reached ignored FROM and tested the unnamed default (a latent bug the cutover fixes).
         return ExecuteGraphViaTree(askExistenceCap: 1).Count > 0;
     }

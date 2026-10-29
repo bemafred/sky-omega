@@ -17,11 +17,12 @@ internal ref struct TriplePatternScan
     private readonly QuadStore _store;
     private readonly ReadOnlySpan<char> _source;
     private readonly TriplePattern _pattern;
-    private TemporalResultEnumerator _enumerator;
+    private MergedGraphEnumerator _enumerator;
     private bool _initialized;
     private readonly BindingTable _initialBindings;
     private readonly int _initialBindingsCount;
     private readonly ReadOnlySpan<char> _graph;
+    private readonly string[]? _defaultGraphs; // a dataset's FROM graphs, whose merge is the default graph (null: no dataset)
 
     // Temporal query parameters
     private readonly TemporalQueryMode _temporalMode;
@@ -109,13 +110,17 @@ internal ref struct TriplePatternScan
 
     public TriplePatternScan(QuadStore store, ReadOnlySpan<char> source,
         TriplePattern pattern, BindingTable initialBindings, ReadOnlySpan<char> graph = default)
-        : this(store, source, pattern, initialBindings, graph,
+        : this(store, source, pattern, initialBindings, graph, null,
                TemporalQueryMode.Current, default, default, default, null)
     {
     }
 
+    /// <param name="graph">The graph the pattern reads: a GRAPH's IRI, or empty for the default graph.</param>
+    /// <param name="defaultGraphs">With an empty <paramref name="graph"/>, a dataset's FROM graphs, read as their merge
+    /// (empty: FROM NAMED alone, an empty default graph); null when the query has no dataset clause, and the default
+    /// graph is the store's.</param>
     public TriplePatternScan(QuadStore store, ReadOnlySpan<char> source,
-        TriplePattern pattern, BindingTable initialBindings, ReadOnlySpan<char> graph,
+        TriplePattern pattern, BindingTable initialBindings, ReadOnlySpan<char> graph, string[]? defaultGraphs,
         TemporalQueryMode temporalMode, DateTimeOffset asOfTime,
         DateTimeOffset rangeStart, DateTimeOffset rangeEnd,
         PrefixMapping[]? prefixes = null, HashSet<long>? trigramObjectCandidates = null)
@@ -127,6 +132,7 @@ internal ref struct TriplePatternScan
         _initialBindings = initialBindings;
         _initialBindingsCount = initialBindings.Count;
         _graph = graph;
+        _defaultGraphs = defaultGraphs;
         _initialized = false;
         _enumerator = default;
 
@@ -880,16 +886,46 @@ internal ref struct TriplePatternScan
 
     private enum TermPosition { Subject, Predicate, Object }
 
-    private TemporalResultEnumerator ExecuteTemporalQuery(
+    /// <summary>
+    /// Every store read the scan makes: the matches in the graph the pattern reads. A default-graph pattern under a
+    /// dataset with FROM reads the merge of the FROM graphs (<see cref="MergedGraphEnumerator"/>), so a path walks the
+    /// merge too.
+    /// </summary>
+    private MergedGraphEnumerator ExecuteTemporalQuery(
         ReadOnlySpan<char> subject, ReadOnlySpan<char> predicate, ReadOnlySpan<char> obj)
+    {
+        // One read per path, and the merge in a method of its own: each enumerator temporary is ~0.6 KB of this frame,
+        // which every scan's deepest call holds (three inlined reads made it 7 KB)
+        if (_graph.IsEmpty && _defaultGraphs is { Length: not 1 })
+            return QueryMerge(subject, predicate, obj);
+        var graph = _graph.IsEmpty && _defaultGraphs != null ? _defaultGraphs[0].AsSpan() : _graph;
+        return new MergedGraphEnumerator(QueryGraph(subject, predicate, obj, graph));
+    }
+
+    /// <summary>The matches in the merge of two or more FROM graphs, or none (FROM NAMED alone).</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private MergedGraphEnumerator QueryMerge(ReadOnlySpan<char> subject, ReadOnlySpan<char> predicate, ReadOnlySpan<char> obj)
+    {
+        var reads = _defaultGraphs!.Length == 0
+            ? Array.Empty<TemporalResultEnumerator>()
+            : new TemporalResultEnumerator[_defaultGraphs.Length];
+        for (int i = 0; i < reads.Length; i++)
+            reads[i] = QueryGraph(subject, predicate, obj, _defaultGraphs[i]);
+        return new MergedGraphEnumerator(new GraphMerge(reads, _defaultGraphs, _store,
+            new TemporalScope(_temporalMode, _asOfTime, _rangeStart, _rangeEnd)));
+    }
+
+    /// <summary>The matches in one graph (empty: the store's default graph).</summary>
+    private TemporalResultEnumerator QueryGraph(
+        ReadOnlySpan<char> subject, ReadOnlySpan<char> predicate, ReadOnlySpan<char> obj, ReadOnlySpan<char> graph)
     {
         // ADR-024 trigram pre-filter: when the object position is a text:match variable, the caller passes the
         // trigram candidate atom IDs so the scan skips non-candidate objects at the index level (set only for a simple
         // forward pattern, whose ONLY query is this basic scan, so the object is genuinely the object position).
         if (_trigramObjectCandidates != null && _temporalMode == TemporalQueryMode.Current)
-            return _store.QueryCurrentWithCandidates(subject, predicate, obj, _trigramObjectCandidates, _graph);
+            return _store.QueryCurrentWithCandidates(subject, predicate, obj, _trigramObjectCandidates, graph);
 
-        return new TemporalScope(_temporalMode, _asOfTime, _rangeStart, _rangeEnd).Query(_store, subject, predicate, obj, _graph);
+        return new TemporalScope(_temporalMode, _asOfTime, _rangeStart, _rangeEnd).Query(_store, subject, predicate, obj, graph);
     }
 
     /// <summary>
@@ -1045,7 +1081,7 @@ internal ref struct TriplePatternScan
 
         // Query in the effective direction. For inverse traversal from startNode, query with
         // startNode as object position and accumulate subjects.
-        TemporalResultEnumerator enumerator;
+        MergedGraphEnumerator enumerator;
         if (effectiveInverse)
             enumerator = ExecuteTemporalQuery(ReadOnlySpan<char>.Empty, predicate, startNode.AsSpan());
         else
@@ -1813,7 +1849,7 @@ internal ref struct TriplePatternScan
             var predicate = ExpandPathPredicateSpan(predSpan);
 
             // Execute query for this branch
-            TemporalResultEnumerator enumerator;
+            MergedGraphEnumerator enumerator;
             if (isInverse)
             {
                 // ^pred from :a: find triples where object=:a, collect subject as intermediate
