@@ -562,12 +562,10 @@ internal sealed class GroupedRow
                         bindings.GetStringBuffer(),
                         null, ReadOnlySpan<char>.Empty);
 
-                    // An error is skipped (COUNT counts it); a value is read as its term, as a bound variable is
+                    // An error is skipped by every aggregate, COUNT included (§18.5.1.2 counts bound, non-error
+                    // values); a value is read as its term, as a bound variable is
                     if (value.Type == ValueType.Unbound)
-                    {
-                        if (func != AggregateFunction.Count)
-                            continue;
-                    }
+                        continue;
                     else
                     {
                         valueStr = value.Term();
@@ -586,9 +584,8 @@ internal sealed class GroupedRow
                     }
                     else
                     {
-                        // Variable not bound - skip for most aggregates
-                        if (func != AggregateFunction.Count)
-                            continue;
+                        // An unbound variable is skipped by every aggregate, COUNT included (§18.5.1.2)
+                        continue;
                     }
                 }
             }
