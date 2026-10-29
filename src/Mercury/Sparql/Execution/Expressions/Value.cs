@@ -76,10 +76,18 @@ internal ref struct Value
 
     public readonly bool IsLiteral => Type >= ValueType.String;
     /// <summary>
-    /// True when a string function reads this term's text: a literal that is not a number or a boolean, or an IRI.
-    /// Reading an IRI's text is Mercury's (text:match over IRIs, ADR-051); SPARQL's string functions take literals.
+    /// True when the term has text Mercury's text:match reads: a literal that is not a number or a boolean, or an IRI
+    /// (text:match over IRIs is Lucy's recall, ADR-051). SPARQL's own string functions take a string literal
+    /// (<see cref="IsStringLiteral"/>), and STR gives an IRI's text.
     /// </summary>
     public readonly bool HasText => Type is ValueType.String or ValueType.LangString or ValueType.Typed or ValueType.Uri;
+
+    /// <summary>
+    /// SPARQL's string literal (§17.4.3): a simple literal, an xsd:string literal or a language-tagged literal — the
+    /// argument a string function takes. An IRI, a number or a literal of another datatype is a type error; STR gives
+    /// an IRI's text as a string.
+    /// </summary>
+    public readonly bool IsStringLiteral => Type is ValueType.String or ValueType.LangString;
 
     public readonly bool IsNumeric => Type is ValueType.Integer or ValueType.Decimal or ValueType.Float or ValueType.Double;
 

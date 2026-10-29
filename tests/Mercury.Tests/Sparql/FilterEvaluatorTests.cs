@@ -1216,7 +1216,10 @@ public class FilterEvaluatorTests
     [Fact]
     public void Concat_WithInteger()
     {
-        Assert.True(EvaluateWithMultipleBindings("CONCAT(?name, ?age) == \"Alice30\"",
+        // CONCAT takes string literals (§17.4.3.12): a number is a type error, and STR gives its lexical form
+        Assert.True(EvaluateWithMultipleBindings("CONCAT(?name, STR(?age)) == \"Alice30\"",
+            ("?name", (object)"Alice"), ("?age", (object)30L)));
+        Assert.False(EvaluateWithMultipleBindings("CONCAT(?name, ?age) == \"Alice30\"",
             ("?name", (object)"Alice"), ("?age", (object)30L)));
     }
 
@@ -2050,15 +2053,15 @@ public class FilterEvaluatorTests
     [Fact]
     public void Now_ReturnsValidDateTimeFormat()
     {
-        // NOW() returns xsd:dateTime format with T separator
-        Assert.True(Evaluate("CONTAINS(NOW(), \"T\")"));
+        // NOW() returns xsd:dateTime format with T separator; a string function reads it through STR (§17.4.3)
+        Assert.True(Evaluate("CONTAINS(STR(NOW()), \"T\")"));
     }
 
     [Fact]
     public void Now_ReturnsUtc()
     {
         // NOW() returns UTC time ending with Z
-        Assert.True(Evaluate("STRSTARTS(STRAFTER(NOW(), \"T\"), \"0\") || STRSTARTS(STRAFTER(NOW(), \"T\"), \"1\") || STRSTARTS(STRAFTER(NOW(), \"T\"), \"2\")"));
+        Assert.True(Evaluate("STRSTARTS(STRAFTER(STR(NOW()), \"T\"), \"0\") || STRSTARTS(STRAFTER(STR(NOW()), \"T\"), \"1\") || STRSTARTS(STRAFTER(STR(NOW()), \"T\"), \"2\")"));
     }
 
     [Fact]
@@ -2191,7 +2194,7 @@ public class FilterEvaluatorTests
     {
         // Verify lexical form is preserved with custom datatype
         Assert.True(EvaluateWithStringBinding(
-            "CONTAINS(STRDT(?x, <http://example.org/mytype>), \"value\")",
+            "CONTAINS(STR(STRDT(?x, <http://example.org/mytype>)), \"value\")",
             "?x", "\"value\""));
     }
 
@@ -2199,7 +2202,7 @@ public class FilterEvaluatorTests
     public void StrDt_PreservesLexicalForm()
     {
         Assert.True(EvaluateWithStringBinding(
-            "CONTAINS(STRDT(?x, <http://example.org/type>), \"hello world\")",
+            "CONTAINS(STR(STRDT(?x, <http://example.org/type>)), \"hello world\")",
             "?x", "\"hello world\""));
     }
 
@@ -2208,7 +2211,7 @@ public class FilterEvaluatorTests
     {
         // Verify case-insensitivity of function name and lexical form preservation
         Assert.True(EvaluateWithStringBinding(
-            "CONTAINS(STRDT(?x, <http://example.org/type>), \"test\")",
+            "CONTAINS(STR(STRDT(?x, <http://example.org/type>)), \"test\")",
             "?x", "\"test\""));
     }
 

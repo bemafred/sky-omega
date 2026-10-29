@@ -90,10 +90,16 @@ internal ref partial struct FilterEvaluator
             Advance();
     }
 
-    /// <summary>REGEX flags as .NET options: i, s, m and x (XPath fn:matches).</summary>
-    private static RegexOptions RegexFlags(ReadOnlySpan<char> flags)
+    /// <summary>
+    /// The regular expression REGEX and REPLACE use (§17.4.3.14–15), with XPath fn:matches' flags (XPath and XQuery
+    /// Functions §5.6.1.1): i, s, m and x as .NET options, and q, which makes every character of the pattern literal
+    /// (m, s and x then have no effect; i still applies). Null for a flag outside these, an error (FORX0001), or a
+    /// pattern that is not a regular expression.
+    /// </summary>
+    private static Regex? RegexOf(ReadOnlySpan<char> pattern, ReadOnlySpan<char> flags)
     {
         var options = RegexOptions.None;
+        bool literal = false;
         foreach (var flag in flags)
         {
             switch (flag)
@@ -102,13 +108,25 @@ internal ref partial struct FilterEvaluator
                 case 's': options |= RegexOptions.Singleline; break;
                 case 'm': options |= RegexOptions.Multiline; break;
                 case 'x': options |= RegexOptions.IgnorePatternWhitespace; break;
+                case 'q': literal = true; break;
+                default: return null;
             }
         }
-        return options;
+        if (literal)
+            options &= RegexOptions.IgnoreCase;
+        try
+        {
+            return new Regex(literal ? Regex.Escape(pattern.ToString()) : pattern.ToString(), options, TimeSpan.FromMilliseconds(100));
+        }
+        catch (ArgumentException)
+        {
+            return null;
+        }
     }
 
     /// <summary>
-    /// REGEX(text, pattern [, flags]) (§17.4.3.14); an error when an argument has no text or the pattern is invalid.
+    /// REGEX(text, pattern [, flags]) (§17.4.3.14): the text a string literal, the pattern and flags simple literals; an
+    /// error otherwise, or when the flags or the pattern are invalid.
     /// </summary>
     private Value ParseRegexFunction()
     {
@@ -125,27 +143,20 @@ internal ref partial struct FilterEvaluator
             Advance();
             SkipWhitespace();
             var flagsArg = ValueOr();
-            flagsValid = flagsArg.HasText;
+            flagsValid = flagsArg.Type == ValueType.String;
             flags = flagsArg.StringValue;
         }
         CloseArguments();
 
-        if (!stringArg.HasText || !patternArg.HasText || patternArg.Type == ValueType.Uri || !flagsValid)
+        if (!stringArg.IsStringLiteral || patternArg.Type != ValueType.String || !flagsValid)
             return Value.Error;
-
-        try
-        {
-            var regex = new Regex(patternArg.StringValue.ToString(), RegexFlags(flags), TimeSpan.FromMilliseconds(100));
-            return Value.FromBoolean(regex.IsMatch(TextOf(stringArg).ToString()));
-        }
-        catch (ArgumentException)
-        {
-            return Value.Error;
-        }
+        var regex = RegexOf(patternArg.StringValue, flags);
+        return regex == null ? Value.Error : Value.FromBoolean(regex.IsMatch(TextOf(stringArg).ToString()));
     }
 
     /// <summary>
     /// REPLACE(text, pattern, replacement [, flags]) (§17.4.3.15): every match replaced, the text's tag or datatype kept.
+    /// The text is a string literal, the others simple literals; with the q flag the replacement is literal too.
     /// </summary>
     private Value ParseReplaceFunction()
     {
@@ -165,23 +176,21 @@ internal ref partial struct FilterEvaluator
             Advance();
             SkipWhitespace();
             var flagsArg = ValueOr();
-            flagsValid = flagsArg.HasText;
+            flagsValid = flagsArg.Type == ValueType.String;
             flags = flagsArg.StringValue;
         }
         CloseArguments();
 
-        if (!stringArg.HasText || !patternArg.HasText || !replacementArg.HasText || !flagsValid)
+        if (!stringArg.IsStringLiteral || patternArg.Type != ValueType.String || replacementArg.Type != ValueType.String
+            || !flagsValid)
             return Value.Error;
-
-        try
-        {
-            var regex = new Regex(patternArg.StringValue.ToString(), RegexFlags(flags), TimeSpan.FromMilliseconds(100));
-            return WithText(stringArg, regex.Replace(TextOf(stringArg).ToString(), replacementArg.StringValue.ToString()));
-        }
-        catch (ArgumentException)
-        {
+        var regex = RegexOf(patternArg.StringValue, flags);
+        if (regex == null)
             return Value.Error;
-        }
+        var replacement = replacementArg.StringValue.ToString();
+        if (flags.Contains('q'))
+            replacement = replacement.Replace("$", "$$"); // a literal replacement: no group references
+        return WithText(stringArg, regex.Replace(TextOf(stringArg).ToString(), replacement));
     }
 
     /// <summary>
@@ -222,7 +231,7 @@ internal ref partial struct FilterEvaluator
             return Value.Error;
         var arg2 = ValueOr();
         CloseArguments();
-        if (!arg1.HasText || !arg2.HasText)
+        if (!arg1.IsStringLiteral || !arg2.IsStringLiteral || !ArgumentsCompatible(arg1, arg2))
             return Value.Error;
         return Value.FromBoolean(TextOf(arg1).Contains(TextOf(arg2), StringComparison.Ordinal));
     }
@@ -235,7 +244,7 @@ internal ref partial struct FilterEvaluator
             return Value.Error;
         var arg2 = ValueOr();
         CloseArguments();
-        if (!arg1.HasText || !arg2.HasText)
+        if (!arg1.IsStringLiteral || !arg2.IsStringLiteral || !ArgumentsCompatible(arg1, arg2))
             return Value.Error;
         return Value.FromBoolean(TextOf(arg1).StartsWith(TextOf(arg2), StringComparison.Ordinal));
     }
@@ -248,7 +257,7 @@ internal ref partial struct FilterEvaluator
             return Value.Error;
         var arg2 = ValueOr();
         CloseArguments();
-        if (!arg1.HasText || !arg2.HasText)
+        if (!arg1.IsStringLiteral || !arg2.IsStringLiteral || !ArgumentsCompatible(arg1, arg2))
             return Value.Error;
         return Value.FromBoolean(TextOf(arg1).EndsWith(TextOf(arg2), StringComparison.Ordinal));
     }
@@ -312,7 +321,7 @@ internal ref partial struct FilterEvaluator
         var delimiterArg = ValueOr();
         CloseArguments();
 
-        if (!stringArg.HasText || !delimiterArg.HasText || !ArgumentsCompatible(stringArg, delimiterArg))
+        if (!stringArg.IsStringLiteral || !delimiterArg.IsStringLiteral || !ArgumentsCompatible(stringArg, delimiterArg))
             return Value.Error;
 
         var text = TextOf(stringArg);
@@ -334,7 +343,7 @@ internal ref partial struct FilterEvaluator
         var delimiterArg = ValueOr();
         CloseArguments();
 
-        if (!stringArg.HasText || !delimiterArg.HasText || !ArgumentsCompatible(stringArg, delimiterArg))
+        if (!stringArg.IsStringLiteral || !delimiterArg.IsStringLiteral || !ArgumentsCompatible(stringArg, delimiterArg))
             return Value.Error;
 
         var text = TextOf(stringArg);
@@ -401,7 +410,7 @@ internal ref partial struct FilterEvaluator
         }
         CloseArguments();
 
-        if (!stringArg.HasText || !startArg.IsNumeric || (hasLength && !lengthArg.IsNumeric))
+        if (!stringArg.IsStringLiteral || !startArg.IsNumeric || (hasLength && !lengthArg.IsNumeric))
             return Value.Error;
 
         var text = TextOf(stringArg);
@@ -434,7 +443,7 @@ internal ref partial struct FilterEvaluator
         while (!IsAtEnd() && Peek() != ')')
         {
             var arg = ValueOr();
-            if (!arg.IsLiteral)
+            if (!arg.IsStringLiteral)
             {
                 SkipToCloseParen();
                 return Value.Error;

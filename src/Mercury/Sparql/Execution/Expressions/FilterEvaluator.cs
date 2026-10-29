@@ -495,7 +495,7 @@ internal ref partial struct FilterEvaluator
             SkipWhitespace();
             if (Peek() == ')')
                 Advance();
-            if (!labelArg.HasText)
+            if (labelArg.Type != ValueType.String) // a simple literal or xsd:string (§17.4.2.9)
                 return Value.Error;
 
             // Per-row seed: same label -> same bnode within a row, distinct across rows (SPARQL §17.4.2.9).
@@ -607,30 +607,30 @@ internal ref partial struct FilterEvaluator
 
         // STRLEN - length in Unicode code points
         if (funcName.Equals("strlen", StringComparison.OrdinalIgnoreCase))
-            return arg1.HasText
+            return arg1.IsStringLiteral
                 ? Value.FromInteger(CodePointOps.GetCodePointCount(TextOf(arg1)))
                 : Value.Error;
 
         // UCASE / LCASE - the lexical form in upper / lower case, the tag and datatype kept
         if (funcName.Equals("ucase", StringComparison.OrdinalIgnoreCase))
-            return arg1.HasText ? WithText(arg1, TextOf(arg1).ToString().ToUpperInvariant()) : Value.Error;
+            return arg1.IsStringLiteral ? WithText(arg1, TextOf(arg1).ToString().ToUpperInvariant()) : Value.Error;
         if (funcName.Equals("lcase", StringComparison.OrdinalIgnoreCase))
-            return arg1.HasText ? WithText(arg1, TextOf(arg1).ToString().ToLowerInvariant()) : Value.Error;
+            return arg1.IsStringLiteral ? WithText(arg1, TextOf(arg1).ToString().ToLowerInvariant()) : Value.Error;
 
         if (funcName.Equals("encode_for_uri", StringComparison.OrdinalIgnoreCase))
-            return arg1.HasText ? Value.FromString(Uri.EscapeDataString(TextOf(arg1).ToString())) : Value.Error;
+            return arg1.IsStringLiteral ? Value.FromString(Uri.EscapeDataString(TextOf(arg1).ToString())) : Value.Error;
 
-        // MD5 / SHA1 / SHA256 / SHA384 / SHA512 of the lexical form, as lower-case hex
+        // MD5 / SHA1 / SHA256 / SHA384 / SHA512 of a simple literal or xsd:string (§17.4.6), as lower-case hex
         if (funcName.Equals("md5", StringComparison.OrdinalIgnoreCase))
-            return arg1.HasText ? Value.FromString(Hex(MD5.HashData(Encoding.UTF8.GetBytes(TextOf(arg1).ToString())))) : Value.Error;
+            return arg1.Type == ValueType.String ? Value.FromString(Hex(MD5.HashData(Encoding.UTF8.GetBytes(TextOf(arg1).ToString())))) : Value.Error;
         if (funcName.Equals("sha1", StringComparison.OrdinalIgnoreCase))
-            return arg1.HasText ? Value.FromString(Hex(SHA1.HashData(Encoding.UTF8.GetBytes(TextOf(arg1).ToString())))) : Value.Error;
+            return arg1.Type == ValueType.String ? Value.FromString(Hex(SHA1.HashData(Encoding.UTF8.GetBytes(TextOf(arg1).ToString())))) : Value.Error;
         if (funcName.Equals("sha256", StringComparison.OrdinalIgnoreCase))
-            return arg1.HasText ? Value.FromString(Hex(SHA256.HashData(Encoding.UTF8.GetBytes(TextOf(arg1).ToString())))) : Value.Error;
+            return arg1.Type == ValueType.String ? Value.FromString(Hex(SHA256.HashData(Encoding.UTF8.GetBytes(TextOf(arg1).ToString())))) : Value.Error;
         if (funcName.Equals("sha384", StringComparison.OrdinalIgnoreCase))
-            return arg1.HasText ? Value.FromString(Hex(SHA384.HashData(Encoding.UTF8.GetBytes(TextOf(arg1).ToString())))) : Value.Error;
+            return arg1.Type == ValueType.String ? Value.FromString(Hex(SHA384.HashData(Encoding.UTF8.GetBytes(TextOf(arg1).ToString())))) : Value.Error;
         if (funcName.Equals("sha512", StringComparison.OrdinalIgnoreCase))
-            return arg1.HasText ? Value.FromString(Hex(SHA512.HashData(Encoding.UTF8.GetBytes(TextOf(arg1).ToString())))) : Value.Error;
+            return arg1.Type == ValueType.String ? Value.FromString(Hex(SHA512.HashData(Encoding.UTF8.GetBytes(TextOf(arg1).ToString())))) : Value.Error;
 
         // YEAR/MONTH/DAY/HOURS/MINUTES/SECONDS — the components of the lexical form as written (§17.4.5: no timezone
         // conversion, which a DateTime parse would apply)
