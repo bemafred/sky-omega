@@ -35,12 +35,10 @@ internal ref struct TriplePatternScan
     private readonly bool _isZeroOrMore;
     private readonly bool _isOneOrMore;
     private readonly bool _isZeroOrOne;
-    private readonly bool _isAlternative;
     private readonly bool _isNegatedSet;
     private readonly bool _isGroupedZeroOrMore;
     private readonly bool _isGroupedOneOrMore;
     private readonly bool _isGroupedZeroOrOne;
-    private readonly bool _isInverseGroup;
 
     // State for transitive path traversal
     private HashSet<string>? _visited;
@@ -56,18 +54,8 @@ internal ref struct TriplePatternScan
     private bool _inReflexivePhase;         // True when emitting reflexive bindings
     private List<string>? _reflexiveList;   // List of all nodes for reflexive iteration
 
-    // State for alternative path traversal (p1|p2|p3|...)
-    // Supports n-ary alternatives by tracking remaining span to process
-    private int _alternativePhase; // Current phase (0 = first segment, 1+ = subsequent segments)
-    private int _alternativeRemainingStart;  // Start of remaining right span
-    private int _alternativeRemainingLength; // Length of remaining right span
-
-    // State for sequence within alternative (e.g., p2/:p3 in p1|p2/:p3|p4)
-    private bool _inSequencePhase;           // Currently collecting intermediates from first step
-    private bool _inSequenceSecondStep;      // Currently executing second step (intermediates → final)
-    private bool _sequenceFirstStepIsInverse; // True if first step of sequence is inverse (^pred)
-    private Queue<string>? _sequenceIntermediates; // Intermediate nodes from first step of sequence
-    // Note: Second predicate stored in _expandedPredicate as string
+    // Zero-or-one: whether each start node is paired with itself (not a bound variable's value outside the graph)
+    private bool _startMatchesItself;
 
     // State for negated property set with inverse predicates
     // 0 = direct scan (check direct predicates), 1 = inverse scan (check inverse predicates, swap bindings)
@@ -147,12 +135,15 @@ internal ref struct TriplePatternScan
         _isZeroOrMore = pattern.Path.Type == PathType.ZeroOrMore;
         _isOneOrMore = pattern.Path.Type == PathType.OneOrMore;
         _isZeroOrOne = pattern.Path.Type == PathType.ZeroOrOne;
-        _isAlternative = pattern.Path.Type == PathType.Alternative;
         _isNegatedSet = pattern.Path.Type == PathType.NegatedSet;
         _isGroupedZeroOrMore = pattern.Path.Type == PathType.GroupedZeroOrMore;
         _isGroupedOneOrMore = pattern.Path.Type == PathType.GroupedOneOrMore;
         _isGroupedZeroOrOne = pattern.Path.Type == PathType.GroupedZeroOrOne;
-        _isInverseGroup = pattern.Path.Type == PathType.InverseGroup;
+
+        // An alternative and ^( P ) are translated when the query is parsed (SparqlParser.AddPathTriple): a UNION of
+        // branches, and P with its ends swapped
+        if (pattern.Path.Type is PathType.Alternative or PathType.InverseGroup)
+            throw new InvalidOperationException($"A {pattern.Path.Type} path is translated when the query is parsed");
 
         _visited = null;
         _frontier = null;
@@ -164,12 +155,6 @@ internal ref struct TriplePatternScan
         _reflexiveIndex = 0;
         _inReflexivePhase = false;
         _reflexiveList = null;
-        _alternativePhase = 0;
-        _alternativeRemainingStart = 0;
-        _alternativeRemainingLength = 0;
-        _inSequencePhase = false;
-        _sequenceFirstStepIsInverse = false;
-        _sequenceIntermediates = null;
         _negatedSetPhase = 0;
         _negatedSetHasInverse = false;
         _negatedSetHasDirect = false;
@@ -195,83 +180,8 @@ internal ref struct TriplePatternScan
             return MoveNextTransitive(ref bindings);
         }
 
-        // Handle inverse grouped path ^(p1/p2) - iterate over pre-computed results
-        if (_isInverseGroup && _groupedResults != null)
-        {
-            while (_groupedResults.Count > 0)
-            {
-                var result = _groupedResults.Dequeue();
-                bindings.TruncateTo(_initialBindingsCount);
-
-                // For ^(path), the subject in the pattern is where we started,
-                // and the result is what we found - bind appropriately
-                var subject = ResolveTermForQuery(_pattern.Subject);
-                if (!subject.IsEmpty)
-                {
-                    // Subject was bound (e.g., in:c ^(p1/p2) ?x) - bind result to object
-                    if (TryBindVariable(_pattern.Object, result.AsSpan(), ref bindings))
-                        return true;
-                }
-                else
-                {
-                    // Object was bound (e.g., ?x ^(p1/p2) in:c) - bind result to subject
-                    if (TryBindVariable(_pattern.Subject, result.AsSpan(), ref bindings))
-                        return true;
-                }
-            }
-            return false;
-        }
-
-        // Handle grouped zero-or-one path (p1/p2)? - iterate over sequence results, then emit reflexive
-        if (_isGroupedZeroOrOne)
-        {
-            // First, iterate over the sequence results (one occurrence of the path)
-            while (_groupedResults != null && _groupedResults.Count > 0)
-            {
-                var result = _groupedResults.Dequeue();
-                bindings.TruncateTo(_initialBindingsCount);
-
-                // Bind the result to the object variable
-                if (TryBindVariable(_pattern.Subject, _startNode!.AsSpan(), ref bindings) &&
-                    TryBindVariable(_pattern.Object, result.AsSpan(), ref bindings))
-                {
-                    return true;
-                }
-            }
-
-            // Then emit the reflexive case (zero occurrences: subject = object)
-            if (!_emittedReflexive && !string.IsNullOrEmpty(_startNode))
-            {
-                _emittedReflexive = true;
-                bindings.TruncateTo(_initialBindingsCount);
-
-                if (TryBindVariable(_pattern.Subject, _startNode.AsSpan(), ref bindings) &&
-                    TryBindVariable(_pattern.Object, _startNode.AsSpan(), ref bindings))
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        // ADR-047: a bound-start alternative was evaluated eagerly by the path walker (see the ctor); emit its
-        // reachable nodes here, binding by direction. Both-ends-unbound alternatives have no _groupedResults and fall
-        // through to the streaming loop below.
-        if (_isAlternative && _groupedResults != null)
-        {
-            while (_groupedResults.Count > 0)
-            {
-                var node = _groupedResults.Dequeue();
-                bindings.TruncateTo(_initialBindingsCount);
-                var subjVal = _startedFromObject ? node.AsSpan() : _startNode.AsSpan();
-                var objVal = _startedFromObject ? _startNode.AsSpan() : node.AsSpan();
-                if (TryBindVariable(_pattern.Subject, subjVal, ref bindings) &&
-                    TryBindVariable(_pattern.Object, objVal, ref bindings))
-                    return true;
-            }
-            return false;
-        }
+        if (_isZeroOrOne || _isGroupedZeroOrOne)
+            return MoveNextZeroOrOne(ref bindings);
 
         while (true)
         {
@@ -326,32 +236,6 @@ internal ref struct TriplePatternScan
                             continue;
                     }
                 }
-                else if (_isAlternative)
-                {
-                    // For alternative path, handling depends on whether we're in a sequence phase
-                    if (_inSequencePhase && _sequenceIntermediates != null)
-                    {
-                        // First step of sequence - collect intermediate, don't return yet
-                        // For inverse first step (^pred), we found ?x pred :start, so collect Subject
-                        // For direct first step, we found :start pred ?x, so collect Object
-                        var intermediate = _sequenceFirstStepIsInverse ? triple.Subject : triple.Object;
-                        _sequenceIntermediates.Enqueue(intermediate.ToString());
-                        continue;
-                    }
-
-                    // For second step of sequence, only bind object (subject is intermediate, not pattern subject)
-                    if (!_inSequenceSecondStep)
-                    {
-                        if (!TryBindVariable(_pattern.Subject, triple.Subject, ref bindings))
-                        {
-                            continue;
-                        }
-                    }
-                    if (!TryBindVariable(_pattern.Object, triple.Object, ref bindings))
-                    {
-                        continue;
-                    }
-                }
                 else
                 {
                     // Normal binding
@@ -364,121 +248,6 @@ internal ref struct TriplePatternScan
                 }
 
                 return true;
-            }
-
-            // Current predicate/phase exhausted - check for alternative path transitions
-            if (_isAlternative)
-            {
-                // If we were collecting sequence intermediates, now query the second step
-                if (_inSequencePhase && _sequenceIntermediates != null && _sequenceIntermediates.Count > 0)
-                {
-                    _enumerator.Dispose();
-                    _inSequencePhase = false;
-                    _inSequenceSecondStep = true;  // Mark that we're in second step (skip subject binding)
-
-                    // Get the second predicate of the sequence (stored in _expandedPredicate)
-                    var secondPred = _expandedPredicate != null ? _expandedPredicate.AsSpan() : ReadOnlySpan<char>.Empty;
-                    secondPred = ExpandPathPredicateSpan(secondPred);
-                    var obj = ResolveTermForQuery(_pattern.Object);
-
-                    // Query from each intermediate to the final object
-                    // We'll process intermediates one at a time
-                    var intermediate = _sequenceIntermediates.Dequeue();
-                    _enumerator = ExecuteTemporalQuery(intermediate.AsSpan(), secondPred, obj);
-                    continue;
-                }
-
-                // If we have more intermediates to process (from sequence), do them
-                if (!_inSequencePhase && _sequenceIntermediates != null && _sequenceIntermediates.Count > 0)
-                {
-                    _enumerator.Dispose();
-                    var secondPred = _expandedPredicate != null ? _expandedPredicate.AsSpan() : ReadOnlySpan<char>.Empty;
-                    secondPred = ExpandPathPredicateSpan(secondPred);
-                    var obj = ResolveTermForQuery(_pattern.Object);
-                    var intermediate = _sequenceIntermediates.Dequeue();
-                    _enumerator = ExecuteTemporalQuery(intermediate.AsSpan(), secondPred, obj);
-                    continue;
-                }
-
-                // Current segment exhausted - move to next segment in remaining span
-                if (_alternativeRemainingLength > 0)
-                {
-                    _alternativePhase++;
-                    _enumerator.Dispose();
-
-                    // Find next segment (up to next | or end)
-                    var remainingSpan = _source.Slice(_alternativeRemainingStart, _alternativeRemainingLength);
-                    var pipeIdx = FindTopLevelOperator(remainingSpan, '|');
-
-                    ReadOnlySpan<char> currentSegment;
-                    if (pipeIdx >= 0)
-                    {
-                        currentSegment = remainingSpan.Slice(0, pipeIdx);
-                        _alternativeRemainingStart += pipeIdx + 1;
-                        _alternativeRemainingLength -= pipeIdx + 1;
-                    }
-                    else
-                    {
-                        currentSegment = remainingSpan;
-                        _alternativeRemainingLength = 0; // No more segments
-                    }
-
-                    // Check if this segment is a sequence
-                    var slashIdx = FindTopLevelOperator(currentSegment, '/');
-                    var subject = ResolveTermForQuery(_pattern.Subject);
-                    var obj = ResolveTermForQuery(_pattern.Object);
-
-                    if (slashIdx >= 0)
-                    {
-                        // Sequence segment - execute first step, collect intermediates
-                        var firstPred = currentSegment.Slice(0, slashIdx);
-                        var secondPred = currentSegment.Slice(slashIdx + 1);
-
-                        // Check if first predicate is inverse (^pred)
-                        bool firstIsInverse = firstPred.Length > 0 && firstPred[0] == '^';
-                        if (firstIsInverse)
-                            firstPred = firstPred.Slice(1); // Strip ^
-
-                        // IMPORTANT: Expand second predicate FIRST and save as string,
-                        // because ExpandPathPredicateSpan overwrites _expandedPredicate
-                        var expandedSecondPred = ExpandPathPredicateSpan(secondPred).ToString();
-
-                        // Now expand first predicate (this will overwrite _expandedPredicate internally)
-                        var predicate = ExpandPathPredicateSpan(firstPred);
-
-                        // NOW store the second predicate (after first pred expansion is done)
-                        _expandedPredicate = expandedSecondPred;
-
-                        _inSequencePhase = true;
-                        _inSequenceSecondStep = false;  // Reset - starting new sequence first step
-                        _sequenceFirstStepIsInverse = firstIsInverse;
-                        _sequenceIntermediates = new Queue<string>();
-
-                        // For inverse first step ^pred from :a, query (*, pred, :a) to find triples where object=:a
-                        // For direct first step from :a, query (:a, pred, *) to find triples where subject=:a
-                        if (firstIsInverse)
-                            _enumerator = ExecuteTemporalQuery(ReadOnlySpan<char>.Empty, predicate, subject);
-                        else
-                            _enumerator = ExecuteTemporalQuery(subject, predicate, ReadOnlySpan<char>.Empty);
-                    }
-                    else
-                    {
-                        // Simple predicate - reset sequence state
-                        _inSequenceSecondStep = false;
-
-                        // Check if predicate is inverse (^pred)
-                        bool isInverse = currentSegment.Length > 0 && currentSegment[0] == '^';
-                        var predSpan = isInverse ? currentSegment.Slice(1) : currentSegment;
-                        var predicate = ExpandPathPredicateSpan(predSpan);
-
-                        // For inverse, swap subject and object in query
-                        if (isInverse)
-                            _enumerator = ExecuteTemporalQuery(obj, predicate, subject);
-                        else
-                            _enumerator = ExecuteTemporalQuery(subject, predicate, obj);
-                    }
-                    continue;
-                }
             }
 
             // Current scan exhausted - check for negated set inverse phase
@@ -496,54 +265,94 @@ internal ref struct TriplePatternScan
                 continue; // Try again with inverse bindings
             }
 
-            break; // No more alternatives or phases
-        }
-
-        // For zero-or-one, also emit reflexive case if subject == object and not yet emitted
-        if (_isZeroOrOne && !_emittedReflexive)
-        {
-            _emittedReflexive = true;
-            bindings.TruncateTo(_initialBindingsCount);
-
-            // Get subject and object values
-            var subjectSpan = ResolveTermForQuery(_pattern.Subject);
-            var objectSpan = ResolveTermForQuery(_pattern.Object);
-
-            // For reflexive: if subject is bound, use it; if subject is unbound but object is bound, use object
-            // This handles queries like "?s :p? :o" where the reflexive case should bind ?s = :o
-            ReadOnlySpan<char> reflexiveValue;
-            bool reflexiveFromVariable;
-            if (!subjectSpan.IsEmpty)
-            {
-                reflexiveValue = subjectSpan;
-                reflexiveFromVariable = _pattern.Subject.IsVariable;
-            }
-            else if (!objectSpan.IsEmpty)
-            {
-                reflexiveValue = objectSpan;
-                reflexiveFromVariable = _pattern.Object.IsVariable;
-            }
-            else
-            {
-                reflexiveValue = ReadOnlySpan<char>.Empty;
-                reflexiveFromVariable = false;
-            }
-
-            // SPARQL §9.3: the zero-length node set is the graph's nodes PLUS the terms written in the query. A
-            // CONSTANT endpoint (e.g. `?s :p? :o`) is a query term and always matches the reflexive, even on an empty
-            // graph; a value bound to a VARIABLE (e.g. via VALUES) matches only if it is a node of the graph.
-            if (!reflexiveValue.IsEmpty && (!reflexiveFromVariable || IsGraphNode(reflexiveValue)))
-            {
-                // Bind both subject and object to the same value (reflexive)
-                if (TryBindVariable(_pattern.Subject, reflexiveValue, ref bindings) &&
-                    TryBindVariable(_pattern.Object, reflexiveValue, ref bindings))
-                {
-                    return true;
-                }
-            }
+            break; // No more phases
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// A zero-or-one path, <c>p?</c> or <c>( P )?</c>: the start node paired with itself, and with each node one step of
+    /// the path reaches from it, as a set (SPARQL 1.1 §18.6). The start node is the bound end, the walk going backward
+    /// when that is the object; with both ends unbound every node of the graph is one, so each is paired with itself
+    /// (Path(?x, ZeroOrOnePath(P), ?y): "yn in nodes(G) and xn = yn"). A value bound to a variable is paired with itself
+    /// only when it is a node of the graph; a constant always is, being a term of the query (§9.3). Through 1.8.30 both
+    /// ends unbound gave no zero-length match, and a bound object end of ( P )? was walked forward.
+    /// </summary>
+    private void InitializeZeroOrOne(ReadOnlySpan<char> subject, ReadOnlySpan<char> obj)
+    {
+        _startingNodes = new Queue<string>();
+        _groupedResults = new Queue<string>();
+        if (subject.IsEmpty && obj.IsEmpty)
+        {
+            var nodes = new HashSet<string>();
+            AddGraphNodes(nodes);
+            foreach (var node in nodes)
+                _startingNodes.Enqueue(node);
+            _startMatchesItself = true; // every start is a node of the graph
+            return;
+        }
+
+        _startedFromObject = subject.IsEmpty;
+        var bound = _startedFromObject ? obj : subject;
+        _startingNodes.Enqueue(ExpandPrefixedName(bound).ToString());
+        var boundTerm = _startedFromObject ? _pattern.Object : _pattern.Subject;
+        _startMatchesItself = !boundTerm.IsVariable || IsGraphNode(bound);
+    }
+
+    private bool MoveNextZeroOrOne(ref BindingTable bindings)
+    {
+        while (true)
+        {
+            while (_groupedResults!.Count > 0)
+            {
+                var reached = _groupedResults.Dequeue();
+                bindings.TruncateTo(_initialBindingsCount);
+                var subjectValue = _startedFromObject ? reached.AsSpan() : _startNode.AsSpan();
+                var objectValue = _startedFromObject ? _startNode.AsSpan() : reached.AsSpan();
+                if (TryBindVariable(_pattern.Subject, subjectValue, ref bindings) &&
+                    TryBindVariable(_pattern.Object, objectValue, ref bindings))
+                    return true;
+            }
+            if (_startingNodes!.Count == 0)
+                return false;
+            QueryCancellation.ThrowIfCancellationRequested();
+
+            _startNode = _startingNodes.Dequeue();
+            var reachedOnce = new HashSet<string>();
+            if (_startMatchesItself)
+            {
+                reachedOnce.Add(_startNode); // zero steps
+                _groupedResults.Enqueue(_startNode);
+            }
+            // one step: p, or the group's path; ^p? and ^( P )? are groups walked in inverse
+            var step = _isZeroOrOne
+                ? _source.Slice(_pattern.Path.Iri.Start, _pattern.Path.Iri.Length)
+                : _source.Slice(_pattern.Path.LeftStart, _pattern.Path.LeftLength);
+            bool inverse = (_isGroupedZeroOrOne && _pattern.Path.IsInverseGroup) ^ _startedFromObject;
+            WalkOneBranchInto(_startNode, step, inverse, _groupedResults, reachedOnce);
+        }
+    }
+
+    /// <summary>Adds every node of the graph the pattern reads, each subject and object, to <paramref name="nodes"/>.</summary>
+    private void AddGraphNodes(HashSet<string> nodes)
+    {
+        var everyTriple = ExecuteTemporalQuery(ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty);
+        try
+        {
+            var lookup = nodes.GetAlternateLookup<ReadOnlySpan<char>>();
+            while (everyTriple.MoveNext())
+            {
+                QueryCancellation.ThrowIfCancellationRequested();
+                var triple = everyTriple.Current;
+                if (!lookup.Contains(triple.Subject)) nodes.Add(triple.Subject.ToString());
+                if (!lookup.Contains(triple.Object)) nodes.Add(triple.Object.ToString());
+            }
+        }
+        finally
+        {
+            everyTriple.Dispose();
+        }
     }
 
     /// <summary>
@@ -738,111 +547,18 @@ internal ref struct TriplePatternScan
         var subject = ResolveTermWithStorage(_pattern.Subject, TermPosition.Subject);
         var obj = ResolveTermWithStorage(_pattern.Object, TermPosition.Object);
 
+        if (_isZeroOrOne || _isGroupedZeroOrOne)
+        {
+            InitializeZeroOrOne(subject, obj);
+            return;
+        }
+
         ReadOnlySpan<char> predicate;
         if (_isInverse)
         {
             // For inverse path, query with swapped subject/object
             predicate = ResolveTermWithStorage(_pattern.Path.Iri, TermPosition.Predicate);
             _enumerator = ExecuteTemporalQuery(obj, predicate, subject);
-        }
-        else if (_isAlternative)
-        {
-            // ADR-047: route a bound-start alternative (p1|p2|...) through the general path WALKER, which unions over
-            // branches and recurses into composite branches (grouped sequences, nested alternatives, quantifiers) —
-            // the ad-hoc handler in the else below degraded a composite branch like (p/p) to a literal-predicate query
-            // (→ empty). The walker needs a concrete start node, so the rare both-ends-unbound alternative keeps the
-            // streaming path. Collect the reachable nodes (deduped, set semantics); MoveNext emits them.
-            var altStartSpan = !subject.IsEmpty ? subject : obj;
-            if (!altStartSpan.IsEmpty)
-            {
-                _startedFromObject = subject.IsEmpty; // object is the bound end ⇒ walk the path in reverse
-                _startNode = ExpandPrefixedName(altStartSpan).ToString();
-                int altContentStart = _pattern.Path.LeftStart;
-                int altContentLength = (_pattern.Path.RightStart + _pattern.Path.RightLength) - altContentStart;
-                var altOutput = RentTempQueue();
-                WalkPathContentInto(_startNode, _source.Slice(altContentStart, altContentLength), _startedFromObject, altOutput);
-                _groupedResults = new Queue<string>();
-                var altSeen = new HashSet<string>();
-                while (altOutput.Count > 0) { var node = altOutput.Dequeue(); if (altSeen.Add(node)) _groupedResults.Enqueue(node); }
-                ReturnTempQueue(altOutput);
-            }
-            else
-            {
-            // For alternative path (p1|p2|...), start with first segment from Left offsets
-            // Store remaining right span for subsequent phases (supports n-ary alternatives)
-            _alternativeRemainingStart = _pattern.Path.RightStart;
-            _alternativeRemainingLength = _pattern.Path.RightLength;
-
-            // Check if the left segment is a sequence (contains / at top level)
-            var leftSpan = _source.Slice(_pattern.Path.LeftStart, _pattern.Path.LeftLength);
-            var slashIdx = FindTopLevelOperator(leftSpan, '/');
-
-            if (slashIdx >= 0)
-            {
-                // Left segment is a sequence - execute first step, collect intermediates
-                var firstPred = leftSpan.Slice(0, slashIdx);
-                var secondPred = leftSpan.Slice(slashIdx + 1);
-
-                // Store second predicate for later use in MoveNext
-                _expandedPredicate = secondPred.ToString();
-                _sequenceIntermediates = new Queue<string>();
-
-                // Check if first step is a grouped alternative like (:p0|^:p1)
-                if (firstPred.Length > 2 && firstPred[0] == '(' && firstPred[^1] == ')')
-                {
-                    // Grouped alternative - execute each branch and collect all intermediates
-                    var groupInner = firstPred.Slice(1, firstPred.Length - 2);
-                    ExecuteGroupedAlternativeFirstStep(groupInner, subject);
-                    // We've collected all intermediates, skip straight to second step
-                    _inSequencePhase = false;
-                    _inSequenceSecondStep = true;
-                    // Start processing intermediates
-                    if (_sequenceIntermediates.Count > 0)
-                    {
-                        var expandedSecondPred = ExpandPathPredicateSpan(secondPred);
-                        var intermediate = _sequenceIntermediates.Dequeue();
-                        _enumerator = ExecuteTemporalQuery(intermediate.AsSpan(), expandedSecondPred, obj);
-                    }
-                    else
-                    {
-                        // No intermediates - set up empty enumerator
-                        _enumerator = ExecuteTemporalQuery("__no_match__".AsSpan(), "__no_match__".AsSpan(), "__no_match__".AsSpan());
-                    }
-                }
-                else
-                {
-                    // Simple predicate - check if first predicate is inverse (^pred)
-                    bool firstIsInverse = firstPred.Length > 0 && firstPred[0] == '^';
-                    if (firstIsInverse)
-                        firstPred = firstPred.Slice(1); // Strip ^
-
-                    predicate = ExpandPathPredicateSpan(firstPred);
-                    _inSequencePhase = true;
-                    _sequenceFirstStepIsInverse = firstIsInverse;
-
-                    // Query first step - results will be collected as intermediates
-                    // For inverse first step ^pred from :a, query (*, pred, :a) to find triples where object=:a
-                    // For direct first step from :a, query (:a, pred, *) to find triples where subject=:a
-                    if (firstIsInverse)
-                        _enumerator = ExecuteTemporalQuery(ReadOnlySpan<char>.Empty, predicate, subject);
-                    else
-                        _enumerator = ExecuteTemporalQuery(subject, predicate, ReadOnlySpan<char>.Empty);
-                }
-            }
-            else
-            {
-                // Simple predicate - check for inverse
-                bool isInverse = leftSpan.Length > 0 && leftSpan[0] == '^';
-                var predSpan = isInverse ? leftSpan.Slice(1) : leftSpan;
-                predicate = ExpandPathPredicateSpan(predSpan);
-
-                // For inverse, swap subject and object in query
-                if (isInverse)
-                    _enumerator = ExecuteTemporalQuery(obj, predicate, subject);
-                else
-                    _enumerator = ExecuteTemporalQuery(subject, predicate, obj);
-            }
-            } // end both-ends-unbound streaming path
         }
         else if (_isNegatedSet)
         {
@@ -852,30 +568,6 @@ internal ref struct TriplePatternScan
             _negatedSetHasInverse = NegatedSetHasInversePredicates();
             _negatedSetPhase = 0;  // Start with direct scan phase
             _enumerator = ExecuteTemporalQuery(subject, ReadOnlySpan<char>.Empty, obj);
-        }
-        else if (_isGroupedZeroOrOne)
-        {
-            // For grouped zero-or-one path (p1/p2)?, execute the sequence once
-            // and store results in _groupedResults. Also need to emit reflexive case (subject=object).
-            // Property paths use set semantics, so deduplicate the results.
-            var startNodeSpan = subject.IsEmpty ? obj : subject;
-            var expandedStart = ExpandPrefixedName(startNodeSpan);
-            _startNode = expandedStart.ToString();
-            var sequenceResults = ExecuteGroupedSequenceDirected(_startNode);
-            // Deduplicate and exclude reflexive (we'll emit it separately)
-            // Note: Copy _startNode to local to avoid capturing 'this' in lambda
-            var startNode = _startNode;
-            _groupedResults = new Queue<string>(sequenceResults.Where(r => r != startNode).Distinct());
-        }
-        else if (_isInverseGroup)
-        {
-            // For inverse grouped path ^(p1/p2), execute the sequence in reverse
-            // The subject is the start node, results go to _groupedResults for iteration in MoveNext
-            // Expand prefixed names to full IRIs for store queries
-            var startNodeSpan = subject.IsEmpty ? obj : subject;
-            var expandedStart = ExpandPrefixedName(startNodeSpan);
-            var startNode = expandedStart.ToString();
-            _groupedResults = new Queue<string>(ExecuteGroupedSequenceDirected(startNode));
         }
         else
         {
@@ -984,13 +676,11 @@ internal ref struct TriplePatternScan
     {
         var content = _source.Slice(_pattern.Path.LeftStart, _pattern.Path.LeftLength);
         // Inverse direction applies when:
-        //   * the path is the non-quantified InverseGroup (^(X)) — historically routed through
-        //     ExecuteInverseGroupedSequence, now unified here; or
         //   * the parser flagged a quantified group as inverse (e.g., from ^(P)*, ^((A|B))+); or
         //   * the BFS started from the bound OBJECT position (Case 2) — semantically requires
         //     walking the path's reverse direction from the start node to find subjects that
         //     reach the bound object via the original (un-flipped) path.
-        bool inverse = _pattern.Path.Type == PathType.InverseGroup || _pattern.Path.IsInverseGroup;
+        bool inverse = _pattern.Path.IsInverseGroup;
         if (_startedFromObject) inverse = !inverse;
         WalkPathContentInto(startNode, content, inverse, output);
     }
@@ -1375,7 +1065,7 @@ internal ref struct TriplePatternScan
         var allNodes = new HashSet<string>();
 
         var content = _source.Slice(_pattern.Path.LeftStart, _pattern.Path.LeftLength);
-        bool outerInverse = _pattern.Path.IsInverseGroup || _pattern.Path.Type == PathType.InverseGroup;
+        bool outerInverse = _pattern.Path.IsInverseGroup;
         DiscoverContentStartNodes(content, outerInverse, subjects, allNodes);
 
         // For zero-or-more, reflexive bindings include ALL nodes in the graph (per SPARQL 1.1
@@ -1813,88 +1503,6 @@ internal ref struct TriplePatternScan
         var expanded = PrefixExpander.TryExpand(predSpan, _prefixes, _source); // 'a' / prefixed name; throws on undefined
         if (expanded != null) { _expandedPredicate = expanded; return _expandedPredicate.AsSpan(); }
         return predSpan;
-    }
-
-    /// <summary>
-    /// Execute a grouped alternative as the first step of a sequence.
-    /// Parses alternatives from the group (e.g., ":p0|^:p1") and executes each,
-    /// collecting intermediates from all branches into _sequenceIntermediates.
-    /// </summary>
-    private void ExecuteGroupedAlternativeFirstStep(ReadOnlySpan<char> groupInner, ReadOnlySpan<char> subject)
-    {
-        // Split by | at top level
-        var remaining = groupInner;
-        while (!remaining.IsEmpty)
-        {
-            var pipeIdx = FindTopLevelOperator(remaining, '|');
-            ReadOnlySpan<char> current;
-
-            if (pipeIdx < 0)
-            {
-                current = remaining.Trim();
-                remaining = ReadOnlySpan<char>.Empty;
-            }
-            else
-            {
-                current = remaining[..pipeIdx].Trim();
-                remaining = remaining[(pipeIdx + 1)..];
-            }
-
-            if (current.IsEmpty)
-                continue;
-
-            // Check if this branch is inverse (^pred)
-            bool isInverse = current[0] == '^';
-            var predSpan = isInverse ? current.Slice(1) : current;
-            var predicate = ExpandPathPredicateSpan(predSpan);
-
-            // Execute query for this branch
-            MergedGraphEnumerator enumerator;
-            if (isInverse)
-            {
-                // ^pred from :a: find triples where object=:a, collect subject as intermediate
-                enumerator = ExecuteTemporalQuery(ReadOnlySpan<char>.Empty, predicate, subject);
-            }
-            else
-            {
-                // pred from :a: find triples where subject=:a, collect object as intermediate
-                enumerator = ExecuteTemporalQuery(subject, predicate, ReadOnlySpan<char>.Empty);
-            }
-
-            // Collect all results as intermediates
-            while (enumerator.MoveNext())
-            {
-                QueryCancellation.ThrowIfCancellationRequested();
-                var triple = enumerator.Current;
-                // For inverse, collect Subject; for direct, collect Object
-                var intermediate = isInverse ? triple.Subject : triple.Object;
-                _sequenceIntermediates!.Enqueue(intermediate.ToString());
-            }
-            enumerator.Dispose();
-        }
-    }
-
-    /// <summary>
-    /// Find the first top-level occurrence of an operator in a path span.
-    /// Returns -1 if not found. Skips operators inside parentheses and IRIs.
-    /// </summary>
-    private static int FindTopLevelOperator(ReadOnlySpan<char> span, char op)
-    {
-        int depth = 0;
-        bool inIri = false;
-        for (int i = 0; i < span.Length; i++)
-        {
-            var ch = span[i];
-            if (ch == '<' && !inIri) inIri = true;
-            else if (ch == '>' && inIri) inIri = false;
-            else if (!inIri)
-            {
-                if (ch == '(') depth++;
-                else if (ch == ')') depth--;
-                else if (ch == op && depth == 0) return i;
-            }
-        }
-        return -1;
     }
 
     /// <summary>

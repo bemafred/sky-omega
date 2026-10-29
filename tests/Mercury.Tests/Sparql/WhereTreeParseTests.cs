@@ -97,8 +97,6 @@ public class WhereTreeParseTests
     [InlineData("SELECT * WHERE { ?s <http://ex/knows>* ?o }", "ZeroOrMore")]
     [InlineData("SELECT * WHERE { ?s <http://ex/knows>+ ?o }", "OneOrMore")]
     [InlineData("SELECT * WHERE { ?s <http://ex/knows>? ?o }", "ZeroOrOne")]
-    [InlineData("SELECT * WHERE { ?s <http://ex/a>|<http://ex/b> ?o }", "Alternative")]
-    [InlineData("SELECT * WHERE { ?s ^(<http://ex/a>/<http://ex/b>) ?o }", "InverseGroup")]
     [InlineData("SELECT * WHERE { ?s !(<http://ex/a>|<http://ex/b>) ?o }", "NegatedSet")]
     [InlineData("SELECT * WHERE { ?s !<http://ex/a> ?o }", "NegatedSet")]
     [InlineData("SELECT * WHERE { ?s !^a ?o }", "NegatedSet")]
@@ -154,6 +152,73 @@ public class WhereTreeParseTests
         Assert.Equal(second.ObjectStart, third.SubjectStart);
         Assert.Equal("<http://ex/c>", query.Substring(third.PredicateStart, third.PredicateLength));
         Assert.Equal("?o", query.Substring(third.ObjectStart, third.ObjectLength));
+    }
+
+    [Fact]
+    public void AlternativePath_IsAUnionWithABranchPerAlternative()
+    {
+        // [89] PathAlternative: eval(Path(X, alt(P,Q), Y)) = Union(eval(Path(X,P,Y)), eval(Path(X,Q,Y))) (§18.6), so
+        // ?s a|b/c|^d ?o is one UNION of three groups: ?s a ?o; ?s b ?#j0 . ?#j0 c ?o; ?s ^d ?o
+        const string query = "SELECT * WHERE { ?s <http://ex/a>|<http://ex/b>/<http://ex/c>|^<http://ex/d> ?o }";
+        var parsed = new SparqlParser(query.AsSpan()).ParseQuery();
+        var tree = new PatternArray(new byte[PatternSlot.Size * 64]);
+        int root = new SparqlParser(query.AsSpan()).ParsePatternTreeAt(parsed.WhereClause.GroupStart, ref tree);
+
+        var children = tree.EnumerateDirectChildren(root);
+        Assert.True(children.MoveNext());
+        Assert.Equal(PatternKind.UnionHeader, children.Current.Kind);
+        int union = children.CurrentIndex;
+        Assert.False(children.MoveNext());
+
+        var branches = tree.EnumerateDirectChildren(union);
+        Assert.True(branches.MoveNext());
+        Assert.Equal(PatternKind.GroupHeader, branches.Current.Kind);
+        var first = tree.EnumerateDirectChildren(branches.CurrentIndex);
+        Assert.True(first.MoveNext());
+        Assert.Equal("?s", query.Substring(first.Current.SubjectStart, first.Current.SubjectLength));
+        Assert.Equal("<http://ex/a>", query.Substring(first.Current.PredicateStart, first.Current.PredicateLength));
+        Assert.Equal("?o", query.Substring(first.Current.ObjectStart, first.Current.ObjectLength));
+        Assert.False(first.MoveNext());
+
+        Assert.True(branches.MoveNext());
+        var second = tree.EnumerateDirectChildren(branches.CurrentIndex);
+        Assert.True(second.MoveNext());
+        Assert.Equal("<http://ex/b>", query.Substring(second.Current.PredicateStart, second.Current.PredicateLength));
+        Assert.True(second.Current.ObjectStart < 0); // a join variable
+        Assert.True(second.MoveNext());
+        Assert.Equal("<http://ex/c>", query.Substring(second.Current.PredicateStart, second.Current.PredicateLength));
+        Assert.Equal("?o", query.Substring(second.Current.ObjectStart, second.Current.ObjectLength));
+        Assert.False(second.MoveNext());
+
+        Assert.True(branches.MoveNext());
+        var third = tree.EnumerateDirectChildren(branches.CurrentIndex);
+        Assert.True(third.MoveNext());
+        Assert.Equal("Inverse", third.Current.PathKind.ToString());
+        Assert.False(third.MoveNext());
+        Assert.False(branches.MoveNext());
+    }
+
+    [Fact]
+    public void InverseGroupPath_IsItsPathWithTheEndsSwapped()
+    {
+        // X ^P Y is Y P X: ?s ^(a/b) ?o is ?o a ?#j0 . ?#j0 b ?s
+        const string query = "SELECT * WHERE { ?s ^(<http://ex/a>/<http://ex/b>) ?o }";
+        var parsed = new SparqlParser(query.AsSpan()).ParseQuery();
+        var tree = new PatternArray(new byte[PatternSlot.Size * 64]);
+        int root = new SparqlParser(query.AsSpan()).ParsePatternTreeAt(parsed.WhereClause.GroupStart, ref tree);
+
+        var children = tree.EnumerateDirectChildren(root);
+        Assert.True(children.MoveNext());
+        var first = children.Current;
+        Assert.True(children.MoveNext());
+        var second = children.Current;
+        Assert.False(children.MoveNext());
+
+        Assert.Equal("?o", query.Substring(first.SubjectStart, first.SubjectLength));
+        Assert.Equal("<http://ex/a>", query.Substring(first.PredicateStart, first.PredicateLength));
+        Assert.Equal(first.ObjectStart, second.SubjectStart);
+        Assert.Equal("<http://ex/b>", query.Substring(second.PredicateStart, second.PredicateLength));
+        Assert.Equal("?s", query.Substring(second.ObjectStart, second.ObjectLength));
     }
 
     [Theory]

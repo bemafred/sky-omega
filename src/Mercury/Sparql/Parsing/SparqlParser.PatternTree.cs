@@ -450,16 +450,26 @@ internal ref partial struct SparqlParser
     }
 
     /// <summary>
-    /// A triple whose verb is <paramref name="path"/>, written at <c>[spanStart, spanStart + spanLength)</c>. A top-level
-    /// [88] PathSequence is one triple per step, the steps joined by join variables of this parse, so they are distinct
-    /// from every other node of the query. Through 1.8.30 the executor expanded a sequence when it ran, numbering its
-    /// join variables from 0 again: two sequences in one pattern, or a sequence beside a <c>[ … ]</c>, shared a node and
-    /// matched nothing. Any other path form is one triple carrying its span, for the evaluator's path algebra.
+    /// A triple whose verb is <paramref name="path"/>, written at <c>[spanStart, spanStart + spanLength)</c>, translated
+    /// as SPARQL 1.1 §18.2.2.4 and §18.6 define the path forms that are not a closure:
+    /// <list type="bullet">
+    /// <item>[88] PathSequence: one triple per step, the steps joined by join variables of this parse, so they are
+    /// distinct from every other node of the query. Through 1.8.30 the executor expanded a sequence when it ran,
+    /// numbering its join variables from 0 again: two sequences in one pattern, or a sequence beside a <c>[ … ]</c>,
+    /// shared a node and matched nothing.</item>
+    /// <item>[89] PathAlternative: a UNION with a branch per alternative, eval(Path(X, alt(P,Q), Y)) =
+    /// Union(eval(Path(X,P,Y)), eval(Path(X,Q,Y))). Through 1.8.30 the scan evaluated an alternative itself: with both
+    /// ends unbound it split the path's text on '|' and '/' and read a grouped branch as a name.</item>
+    /// <item>^( P ): P with its ends swapped, X ^P Y being Y P X. Through 1.8.30 the scan needed a bound end to walk
+    /// it from.</item>
+    /// </list>
+    /// Each part is translated again, so a branch or a step can be any path. A closure (*, +, ?), an inverse IRI and a
+    /// negated set are one triple carrying its span, for the scan's path algebra.
     /// </summary>
     private void AddPathTriple(scoped ref PatternArray pa, Term subject, Term predicate, Term obj, PropertyPath path,
         int spanStart, int spanLength)
     {
-        if (path.Type != PathType.Sequence)
+        if (path.Type is not (PathType.Sequence or PathType.Alternative or PathType.InverseGroup))
         {
             AddTreeTriple(ref pa, subject, predicate, obj, path.Type,
                 path.Type == PathType.None ? path.Iri.Start : spanStart,
@@ -467,10 +477,42 @@ internal ref partial struct SparqlParser
             return;
         }
 
-        // Only a parenthesized sequence inside a sequence, (p1/p2)/p3, recurses; it counts toward the depth limit
+        // Only a path inside a path, (p1/p2)/p3 or (p|q)/r, recurses; it counts toward the depth limit
         IncrementDepth("Property path");
         try
         {
+            if (path.Type == PathType.InverseGroup)
+            {
+                var (innerPredicate, innerPath) = ParsePathSegment(path.LeftStart, path.LeftLength);
+                AddPathTriple(ref pa, obj, innerPredicate, subject, innerPath, path.LeftStart, path.LeftLength);
+                return;
+            }
+
+            if (path.Type == PathType.Alternative)
+            {
+                // p|q|r is read as p | (q|r): the right part is the rest, so one UNION takes every branch
+                int union = pa.BeginGroupHeader(PatternKind.UnionHeader);
+                while (true)
+                {
+                    int rightStart = path.RightStart, rightLength = path.RightLength;
+                    var (leftPredicate, leftPath) = ParsePathSegment(path.LeftStart, path.LeftLength);
+                    int branch = pa.BeginGroupHeader(PatternKind.GroupHeader);
+                    AddPathTriple(ref pa, subject, leftPredicate, obj, leftPath, path.LeftStart, path.LeftLength);
+                    pa.EndGroupHeader(branch);
+
+                    (predicate, path) = ParsePathSegment(rightStart, rightLength);
+                    if (path.Type != PathType.Alternative)
+                    {
+                        branch = pa.BeginGroupHeader(PatternKind.GroupHeader);
+                        AddPathTriple(ref pa, subject, predicate, obj, path, rightStart, rightLength);
+                        pa.EndGroupHeader(branch);
+                        break;
+                    }
+                }
+                pa.EndGroupHeader(union);
+                return;
+            }
+
             while (path.Type == PathType.Sequence)
             {
                 var middle = NewJoinVariable(); // the node between two steps
@@ -484,10 +526,7 @@ internal ref partial struct SparqlParser
                 spanStart = rightStart;
                 spanLength = rightLength;
             }
-            if (path.Type == PathType.None)
-                AddTreeTriple(ref pa, subject, predicate, obj, PathType.None, path.Iri.Start, path.Iri.Length);
-            else
-                AddTreeTriple(ref pa, subject, predicate, obj, path.Type, spanStart, spanLength);
+            AddPathTriple(ref pa, subject, predicate, obj, path, spanStart, spanLength);
         }
         finally
         {

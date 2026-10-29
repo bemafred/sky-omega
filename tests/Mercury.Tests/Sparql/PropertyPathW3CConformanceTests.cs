@@ -68,8 +68,9 @@ public class PropertyPathW3CConformanceTests : IDisposable
     [InlineData("alt-obj-bound", "?x (<urn:p>|<urn:q>) <urn:c>", "b")]  // object-bound: ?x reaches c via p|q ⇒ b (b-p→c)
     [InlineData("alt-of-seq", "<urn:a> ((<urn:p>/<urn:p>)|(<urn:q>/<urn:q>)) ?x", "c,f")]  // FIXED (walker re-entrancy)
     [InlineData("alt-of-seq-star", "<urn:a> ((<urn:p>/<urn:p>*)|(<urn:q>/<urn:q>*)) ?x", "b,c,d,e,f")]  // FIXED (quantifier-closure)
-    [InlineData("alt-of-quant", "<urn:b> (<urn:p>*|<urn:r>*) ?x", "b,c,d,g")]  // alternation of bare quantifiers (constant subject)
-    [InlineData("seq-alt-of-star", "<urn:a> (<urn:p>/(<urn:p>*|<urn:r>*)) ?x", "b,c,d,g")]  // ADR-047 D: grouped alternation as the 2nd segment of a top-level sequence; p* from b ∪ r* from b
+    // An alternative is the Union of its branches (§18.6), which keeps duplicates: b is in p* from b and in r* from b
+    [InlineData("alt-of-quant", "<urn:b> (<urn:p>*|<urn:r>*) ?x", "b,b,c,d,g")]  // alternation of bare quantifiers (constant subject)
+    [InlineData("seq-alt-of-star", "<urn:a> (<urn:p>/(<urn:p>*|<urn:r>*)) ?x", "b,b,c,d,g")]  // ADR-047 D: grouped alternation as the 2nd segment of a top-level sequence; p* from b ∪ r* from b
     // ── [91] PathEltOrInverse ::= '^' PathElt ──
     [InlineData("inv-simple", "<urn:d> ^<urn:p> ?x", "c")]
     [InlineData("inv-star", "<urn:d> (^<urn:p>)* ?x", "a,b,c,d")]          // reverse closure
