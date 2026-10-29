@@ -140,6 +140,7 @@ internal sealed class OrderedPipeline<TIn, TOut> : IDisposable
     private int _nextEnqueueOrdinal;
     private int _nextDequeueOrdinal;
     private int _workersAlive;
+    private bool _producerDone;
     private Exception? _firstError;
 
     private readonly Task[] _workerTasks;
@@ -173,6 +174,16 @@ internal sealed class OrderedPipeline<TIn, TOut> : IDisposable
     public void CompleteEnqueue()
     {
         _input.Writer.Complete();
+        // The consumer's end condition is this flag, set under its lock and then signalled, as in
+        // ParallelBZip2DecompressorStream. The channel's Reader.Completion is not: TryComplete marks the
+        // writer done inside the channel's lock and completes Completion after leaving it, so the last
+        // worker can see WaitToReadAsync return false, signal, and exit before Completion is set, and a
+        // consumer that checked Completion then waited with no signal to come.
+        lock (_outputLock)
+        {
+            _producerDone = true;
+        }
+        _outputAvailable.Release();
     }
 
     public bool TryDequeue(out TOut value)
@@ -186,7 +197,7 @@ internal sealed class OrderedPipeline<TIn, TOut> : IDisposable
                 {
                     next = _pending.Dequeue();
                 }
-                else if (_input.Reader.Completion.IsCompleted && _workersAlive == 0 && _pending.Count == 0)
+                else if (_producerDone && _workersAlive == 0 && _pending.Count == 0)
                 {
                     ThrowIfErrored();
                     value = default!;
