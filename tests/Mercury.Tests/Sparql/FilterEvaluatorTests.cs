@@ -2067,67 +2067,67 @@ public class FilterEvaluatorTests
     [Fact]
     public void Year_ExtractsYear()
     {
-        Assert.True(EvaluateWithStringBinding("YEAR(?x) == 2024", "?x", "2024-12-25T10:30:00Z"));
+        Assert.True(EvaluateWithStringBinding("YEAR(?x) == 2024", "?x", "\"2024-12-25T10:30:00Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime>"));
     }
 
     [Fact]
     public void Month_ExtractsMonth()
     {
-        Assert.True(EvaluateWithStringBinding("MONTH(?x) == 12", "?x", "2024-12-25T10:30:00Z"));
+        Assert.True(EvaluateWithStringBinding("MONTH(?x) == 12", "?x", "\"2024-12-25T10:30:00Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime>"));
     }
 
     [Fact]
     public void Day_ExtractsDay()
     {
-        Assert.True(EvaluateWithStringBinding("DAY(?x) == 25", "?x", "2024-12-25T10:30:00Z"));
+        Assert.True(EvaluateWithStringBinding("DAY(?x) == 25", "?x", "\"2024-12-25T10:30:00Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime>"));
     }
 
     [Fact]
     public void Hours_ExtractsHours()
     {
-        Assert.True(EvaluateWithStringBinding("HOURS(?x) == 10", "?x", "2024-12-25T10:30:00Z"));
+        Assert.True(EvaluateWithStringBinding("HOURS(?x) == 10", "?x", "\"2024-12-25T10:30:00Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime>"));
     }
 
     [Fact]
     public void Minutes_ExtractsMinutes()
     {
-        Assert.True(EvaluateWithStringBinding("MINUTES(?x) == 30", "?x", "2024-12-25T10:30:00Z"));
+        Assert.True(EvaluateWithStringBinding("MINUTES(?x) == 30", "?x", "\"2024-12-25T10:30:00Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime>"));
     }
 
     [Fact]
     public void Seconds_ExtractsSeconds()
     {
-        Assert.True(EvaluateWithStringBinding("SECONDS(?x) == 45", "?x", "2024-12-25T10:30:45Z"));
+        Assert.True(EvaluateWithStringBinding("SECONDS(?x) == 45", "?x", "\"2024-12-25T10:30:45Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime>"));
     }
 
     [Fact]
     public void Seconds_WithMilliseconds()
     {
-        Assert.True(EvaluateWithStringBinding("SECONDS(?x) > 45.0 && SECONDS(?x) < 46.0", "?x", "2024-12-25T10:30:45.500Z"));
+        Assert.True(EvaluateWithStringBinding("SECONDS(?x) > 45.0 && SECONDS(?x) < 46.0", "?x", "\"2024-12-25T10:30:45.500Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime>"));
     }
 
     [Fact]
     public void Tz_ExtractsUtc()
     {
-        Assert.True(EvaluateWithStringBinding("TZ(?x) == \"Z\"", "?x", "2024-12-25T10:30:00Z"));
+        Assert.True(EvaluateWithStringBinding("TZ(?x) == \"Z\"", "?x", "\"2024-12-25T10:30:00Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime>"));
     }
 
     [Fact]
     public void Tz_ExtractsPositiveOffset()
     {
-        Assert.True(EvaluateWithStringBinding("TZ(?x) == \"+05:30\"", "?x", "2024-12-25T10:30:00+05:30"));
+        Assert.True(EvaluateWithStringBinding("TZ(?x) == \"+05:30\"", "?x", "\"2024-12-25T10:30:00+05:30\"^^<http://www.w3.org/2001/XMLSchema#dateTime>"));
     }
 
     [Fact]
     public void Tz_ExtractsNegativeOffset()
     {
-        Assert.True(EvaluateWithStringBinding("TZ(?x) == \"-08:00\"", "?x", "2024-12-25T10:30:00-08:00"));
+        Assert.True(EvaluateWithStringBinding("TZ(?x) == \"-08:00\"", "?x", "\"2024-12-25T10:30:00-08:00\"^^<http://www.w3.org/2001/XMLSchema#dateTime>"));
     }
 
     [Fact]
     public void Tz_NoTimezone_ReturnsEmpty()
     {
-        Assert.True(EvaluateWithStringBinding("TZ(?x) == \"\"", "?x", "2024-12-25T10:30:00"));
+        Assert.True(EvaluateWithStringBinding("TZ(?x) == \"\"", "?x", "\"2024-12-25T10:30:00\"^^<http://www.w3.org/2001/XMLSchema#dateTime>"));
     }
 
     #endregion
@@ -2338,7 +2338,7 @@ public class FilterEvaluatorTests
     {
         Assert.True(EvaluateWithStringBinding(
             "STR(TIMEZONE(?x)) == \"PT0S\"",
-            "?x", "2024-12-25T10:30:00Z"));
+            "?x", "\"2024-12-25T10:30:00Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime>"));
     }
 
     [Fact]
@@ -2346,7 +2346,7 @@ public class FilterEvaluatorTests
     {
         Assert.True(EvaluateWithStringBinding(
             "STR(TIMEZONE(?x)) == \"PT5H30M\"",
-            "?x", "2024-12-25T10:30:00+05:30"));
+            "?x", "\"2024-12-25T10:30:00+05:30\"^^<http://www.w3.org/2001/XMLSchema#dateTime>"));
     }
 
     [Fact]
@@ -2354,7 +2354,7 @@ public class FilterEvaluatorTests
     {
         Assert.True(EvaluateWithStringBinding(
             "STR(TIMEZONE(?x)) == \"-PT8H\"",
-            "?x", "2024-12-25T10:30:00-08:00"));
+            "?x", "\"2024-12-25T10:30:00-08:00\"^^<http://www.w3.org/2001/XMLSchema#dateTime>"));
     }
 
     [Fact]
@@ -2362,7 +2362,7 @@ public class FilterEvaluatorTests
     {
         Assert.True(EvaluateWithStringBinding(
             "STR(TIMEZONE(?x)) == \"PT2H\"",
-            "?x", "2024-12-25T10:30:00+02:00"));
+            "?x", "\"2024-12-25T10:30:00+02:00\"^^<http://www.w3.org/2001/XMLSchema#dateTime>"));
     }
 
     [Fact]
@@ -2371,7 +2371,7 @@ public class FilterEvaluatorTests
         // TIMEZONE with no timezone returns unbound (different from TZ which returns "")
         Assert.False(EvaluateWithStringBinding(
             "BOUND(TIMEZONE(?x))",
-            "?x", "2024-12-25T10:30:00"));
+            "?x", "\"2024-12-25T10:30:00\"^^<http://www.w3.org/2001/XMLSchema#dateTime>"));
     }
 
     [Fact]
@@ -2379,7 +2379,7 @@ public class FilterEvaluatorTests
     {
         Assert.True(EvaluateWithStringBinding(
             "STR(timezone(?x)) == \"PT0S\"",
-            "?x", "2024-12-25T10:30:00Z"));
+            "?x", "\"2024-12-25T10:30:00Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime>"));
     }
 
     #endregion

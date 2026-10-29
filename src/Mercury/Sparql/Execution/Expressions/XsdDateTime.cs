@@ -39,6 +39,35 @@ internal static class XsdDateTime
     {
         ticksUtc = 0;
         hasTimezone = false;
+        if (!TryRead(lexical, isDate, out var fields))
+            return false;
+
+        // The fraction of a second as ticks: its first seven digits, the rest truncated
+        long time = fields.Hour * TimeSpan.TicksPerHour + fields.Minute * TimeSpan.TicksPerMinute
+            + (long)decimal.Truncate(fields.Second * TimeSpan.TicksPerSecond);
+        long offset = 0;
+        if (fields.Zone.Length == 6)
+        {
+            int zoneHours = (fields.Zone[1] - '0') * 10 + (fields.Zone[2] - '0');
+            int zoneMinutes = (fields.Zone[4] - '0') * 10 + (fields.Zone[5] - '0');
+            offset = (zoneHours * TimeSpan.TicksPerHour + zoneMinutes * TimeSpan.TicksPerMinute) * (fields.Zone[0] == '-' ? -1 : 1);
+        }
+
+        hasTimezone = !fields.Zone.IsEmpty;
+        ticksUtc = new DateTime(fields.Year, fields.Month, fields.Day).Ticks + time - offset;
+        return true;
+    }
+
+    /// <summary>
+    /// The fields of a valid <c>xsd:dateTime</c> lexical form <c>yyyy-MM-ddThh:mm:ss(.s+)?(Z|±hh:mm)?</c>, or of an
+    /// <c>xsd:date</c> <c>yyyy-MM-dd(Z|±hh:mm)?</c>, as written, except that <c>24:00:00</c> is the next day's
+    /// <c>00:00:00</c>: SPARQL's YEAR … TZ read them with no timezone conversion (§17.4.5). The one reader of the
+    /// form: <see cref="TryParse"/> computes the instant from these fields.
+    /// False when the form is not valid (a month, day, hour, minute, second or timezone out of range included).
+    /// </summary>
+    public static bool TryRead(ReadOnlySpan<char> lexical, bool isDate, out XsdDateTimeFields fields)
+    {
+        fields = default;
         if (lexical.Length < 10 || lexical[4] != '-' || lexical[7] != '-'
             || !Digits(lexical[..4], out int year) || !Digits(lexical.Slice(5, 2), out int month)
             || !Digits(lexical.Slice(8, 2), out int day)
@@ -46,48 +75,44 @@ internal static class XsdDateTime
             return false;
 
         int at = 10;
-        long time = 0;
+        int hour = 0, minute = 0;
+        decimal second = 0;
         if (!isDate)
         {
             if (lexical.Length < 19 || lexical[10] != 'T' || lexical[13] != ':' || lexical[16] != ':'
-                || !Digits(lexical.Slice(11, 2), out int hour) || !Digits(lexical.Slice(14, 2), out int minute)
-                || !Digits(lexical.Slice(17, 2), out int second) || minute > 59 || second > 59)
+                || !Digits(lexical.Slice(11, 2), out hour) || !Digits(lexical.Slice(14, 2), out minute)
+                || !Digits(lexical.Slice(17, 2), out int wholeSeconds) || minute > 59 || wholeSeconds > 59)
                 return false;
             at = 19;
-            long fraction = 0;
             if (at < lexical.Length && lexical[at] == '.')
             {
                 int start = ++at;
                 while (at < lexical.Length && char.IsAsciiDigit(lexical[at])) at++;
                 if (at == start)
                     return false;
-                var digits = lexical[start..Math.Min(at, start + 7)];
-                fraction = long.Parse(digits, CultureInfo.InvariantCulture);
-                for (int i = digits.Length; i < 7; i++) fraction *= 10;
             }
-            if (hour > 24 || (hour == 24 && (minute != 0 || second != 0 || fraction != 0)))
+            second = decimal.Parse(lexical[17..at], NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture);
+            if (hour > 24 || (hour == 24 && (minute != 0 || second != 0)))
                 return false;
-            time = hour * TimeSpan.TicksPerHour + minute * TimeSpan.TicksPerMinute + second * TimeSpan.TicksPerSecond + fraction;
+            if (hour == 24)
+            {
+                // 24:00:00 is the first instant of the next day (XML Schema 2 §3.2.7)
+                if (year == 9999 && month == 12 && day == 31)
+                    return false;
+                var next = new DateTime(year, month, day).AddDays(1);
+                (year, month, day, hour) = (next.Year, next.Month, next.Day, 0);
+            }
         }
 
-        long offset = 0;
         var zone = lexical[at..];
-        if (zone is "Z")
-        {
-        }
-        else if (zone.Length == 6 && zone[0] is '+' or '-' && zone[3] == ':'
-                 && Digits(zone.Slice(1, 2), out int zoneHours) && Digits(zone.Slice(4, 2), out int zoneMinutes)
-                 && zoneHours <= 14 && zoneMinutes <= 59)
-        {
-            offset = (zoneHours * TimeSpan.TicksPerHour + zoneMinutes * TimeSpan.TicksPerMinute) * (zone[0] == '-' ? -1 : 1);
-        }
-        else if (!zone.IsEmpty)
-        {
+        bool zoneValid = zone.IsEmpty || zone is "Z"
+            || (zone.Length == 6 && zone[0] is '+' or '-' && zone[3] == ':'
+                && Digits(zone.Slice(1, 2), out int zoneHours) && Digits(zone.Slice(4, 2), out int zoneMinutes)
+                && zoneHours <= 14 && zoneMinutes <= 59);
+        if (!zoneValid)
             return false;
-        }
 
-        hasTimezone = !zone.IsEmpty;
-        ticksUtc = new DateTime(year, month, day).Ticks + time - offset;
+        fields = new XsdDateTimeFields(year, month, day, hour, minute, second, zone);
         return true;
     }
 
@@ -101,5 +126,30 @@ internal static class XsdDateTime
             value = value * 10 + (c - '0');
         }
         return true;
+    }
+}
+
+/// <summary>The fields of an <c>xsd:dateTime</c> or <c>xsd:date</c> lexical form, as written (<see cref="XsdDateTime.TryRead"/>).</summary>
+internal readonly ref struct XsdDateTimeFields
+{
+    public readonly int Year;
+    public readonly int Month;
+    public readonly int Day;
+    public readonly int Hour;
+    public readonly int Minute;
+    /// <summary>The seconds with their fraction, as written.</summary>
+    public readonly decimal Second;
+    /// <summary>The timezone as written: "Z", "+hh:mm" or "-hh:mm"; empty when there is none.</summary>
+    public readonly ReadOnlySpan<char> Zone;
+
+    public XsdDateTimeFields(int year, int month, int day, int hour, int minute, decimal second, ReadOnlySpan<char> zone)
+    {
+        Year = year;
+        Month = month;
+        Day = day;
+        Hour = hour;
+        Minute = minute;
+        Second = second;
+        Zone = zone;
     }
 }

@@ -632,41 +632,40 @@ internal ref partial struct FilterEvaluator
         if (funcName.Equals("sha512", StringComparison.OrdinalIgnoreCase))
             return arg1.Type == ValueType.String ? Value.FromString(Hex(SHA512.HashData(Encoding.UTF8.GetBytes(TextOf(arg1).ToString())))) : Value.Error;
 
-        // YEAR/MONTH/DAY/HOURS/MINUTES/SECONDS — the components of the lexical form as written (§17.4.5: no timezone
-        // conversion, which a DateTime parse would apply)
+        // YEAR, MONTH, DAY, HOURS, MINUTES, SECONDS, TZ and TIMEZONE take an xsd:dateTime (§17.4.5) and read its fields
+        // as written, with no timezone conversion (XsdDateTime.TryRead); anything else is an error
         if (funcName.Equals("year", StringComparison.OrdinalIgnoreCase))
-            return arg1.HasText && TryParseDateTime(arg1.StringValue, out var year, out _, out _, out _, out _, out _)
-                ? Value.FromInteger(year) : Value.Error;
+            return arg1.IsDateTime && XsdDateTime.TryRead(arg1.StringValue, isDate: false, out var yearOf)
+                ? Value.FromInteger(yearOf.Year) : Value.Error;
         if (funcName.Equals("month", StringComparison.OrdinalIgnoreCase))
-            return arg1.HasText && TryParseDateTime(arg1.StringValue, out _, out var month, out _, out _, out _, out _)
-                ? Value.FromInteger(month) : Value.Error;
+            return arg1.IsDateTime && XsdDateTime.TryRead(arg1.StringValue, isDate: false, out var monthOf)
+                ? Value.FromInteger(monthOf.Month) : Value.Error;
         if (funcName.Equals("day", StringComparison.OrdinalIgnoreCase))
-            return arg1.HasText && TryParseDateTime(arg1.StringValue, out _, out _, out var day, out _, out _, out _)
-                ? Value.FromInteger(day) : Value.Error;
+            return arg1.IsDateTime && XsdDateTime.TryRead(arg1.StringValue, isDate: false, out var dayOf)
+                ? Value.FromInteger(dayOf.Day) : Value.Error;
         if (funcName.Equals("hours", StringComparison.OrdinalIgnoreCase))
-            return arg1.HasText && TryParseDateTime(arg1.StringValue, out _, out _, out _, out var hour, out _, out _)
-                ? Value.FromInteger(hour) : Value.Error;
+            return arg1.IsDateTime && XsdDateTime.TryRead(arg1.StringValue, isDate: false, out var hoursOf)
+                ? Value.FromInteger(hoursOf.Hour) : Value.Error;
         if (funcName.Equals("minutes", StringComparison.OrdinalIgnoreCase))
-            return arg1.HasText && TryParseDateTime(arg1.StringValue, out _, out _, out _, out _, out var minute, out _)
-                ? Value.FromInteger(minute) : Value.Error;
+            return arg1.IsDateTime && XsdDateTime.TryRead(arg1.StringValue, isDate: false, out var minutesOf)
+                ? Value.FromInteger(minutesOf.Minute) : Value.Error;
         // SECONDS is an xsd:decimal (§17.4.5.7)
         if (funcName.Equals("seconds", StringComparison.OrdinalIgnoreCase))
-            return arg1.HasText && TryParseDateTime(arg1.StringValue, out _, out _, out _, out _, out _, out var second)
-                ? Value.FromDecimal(second) : Value.Error;
+            return arg1.IsDateTime && XsdDateTime.TryRead(arg1.StringValue, isDate: false, out var secondsOf)
+                ? Value.FromDecimal(secondsOf.Second) : Value.Error;
 
-        // TZ - the timezone as written, a simple literal
+        // TZ - the timezone as written, a simple literal ("" when there is none)
         if (funcName.Equals("tz", StringComparison.OrdinalIgnoreCase))
-            return arg1.HasText ? Value.FromString(ExtractTimezone(arg1.StringValue)) : Value.Error;
+            return arg1.IsDateTime && XsdDateTime.TryRead(arg1.StringValue, isDate: false, out var tzOf)
+                ? Value.FromString(tzOf.Zone.ToString()) : Value.Error;
 
         // TIMEZONE - the timezone as an xsd:dayTimeDuration; an error when there is none
         if (funcName.Equals("timezone", StringComparison.OrdinalIgnoreCase))
         {
-            if (!arg1.HasText)
+            if (!arg1.IsDateTime || !XsdDateTime.TryRead(arg1.StringValue, isDate: false, out var timezoneOf)
+                || timezoneOf.Zone.IsEmpty)
                 return Value.Error;
-            var tzStr = ExtractTimezone(arg1.StringValue);
-            return string.IsNullOrEmpty(tzStr)
-                ? Value.Error
-                : Value.FromTyped(ConvertToXsdDuration(tzStr), XsdDatatype.DayTimeDuration);
+            return Value.FromTyped(ConvertToXsdDuration(timezoneOf.Zone.ToString()), XsdDatatype.DayTimeDuration);
         }
 
         // ABS / ROUND / CEIL / FLOOR, in the operand's type (XPath fn:abs, fn:round, fn:ceiling, fn:floor)
@@ -757,58 +756,6 @@ internal ref partial struct FilterEvaluator
 
     /// <summary>Advance the per-row BNODE seed (called once per result row by the BIND pipeline).</summary>
     public static void IncrementBnodeRowSeed() => System.Threading.Interlocked.Increment(ref s_bnodeRowSeed);
-
-    /// <summary>
-    /// The components of an xsd:dateTime lexical form, read directly (no timezone conversion) per SPARQL §17.4.5.
-    /// </summary>
-    private static bool TryParseDateTime(ReadOnlySpan<char> parseSpan, out int year, out int month, out int day,
-        out int hour, out int minute, out decimal second)
-    {
-        year = month = day = hour = minute = 0;
-        second = 0;
-
-        // Format: yyyy-MM-ddTHH:mm:ss[.fff][Z|+HH:MM|-HH:MM] — minimum 19 chars.
-        if (parseSpan.Length < 19)
-            return false;
-        if (parseSpan[4] != '-' || parseSpan[7] != '-' || parseSpan[10] != 'T' ||
-            parseSpan[13] != ':' || parseSpan[16] != ':')
-            return false;
-
-        if (!int.TryParse(parseSpan.Slice(0, 4), NumberStyles.None, CultureInfo.InvariantCulture, out year)) return false;
-        if (!int.TryParse(parseSpan.Slice(5, 2), NumberStyles.None, CultureInfo.InvariantCulture, out month)) return false;
-        if (!int.TryParse(parseSpan.Slice(8, 2), NumberStyles.None, CultureInfo.InvariantCulture, out day)) return false;
-        if (!int.TryParse(parseSpan.Slice(11, 2), NumberStyles.None, CultureInfo.InvariantCulture, out hour)) return false;
-        if (!int.TryParse(parseSpan.Slice(14, 2), NumberStyles.None, CultureInfo.InvariantCulture, out minute)) return false;
-
-        // Seconds, including any fractional part.
-        var secondsEnd = 19;
-        for (int i = 19; i < parseSpan.Length; i++)
-        {
-            var c = parseSpan[i];
-            if (c == '.' || IsDigit(c)) secondsEnd = i + 1;
-            else break;
-        }
-        return decimal.TryParse(parseSpan.Slice(17, secondsEnd - 17),
-            NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out second);
-    }
-
-    /// <summary>
-    /// The timezone of an xsd:dateTime as written: "Z", "+HH:MM" or "-HH:MM"; "" when there is none.
-    /// </summary>
-    private static string ExtractTimezone(ReadOnlySpan<char> str)
-    {
-        if (str.IsEmpty)
-            return "";
-        if (str[^1] == 'Z')
-            return "Z";
-        if (str.Length >= 6)
-        {
-            var potentialTz = str.Slice(str.Length - 6);
-            if ((potentialTz[0] == '+' || potentialTz[0] == '-') && potentialTz[3] == ':')
-                return potentialTz.ToString();
-        }
-        return "";
-    }
 
     /// <summary>
     /// A timezone as an xsd:dayTimeDuration: "Z" → "PT0S", "+05:30" → "PT5H30M", "-08:00" → "-PT8H".

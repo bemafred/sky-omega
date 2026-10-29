@@ -89,6 +89,12 @@ internal ref struct Value
     /// </summary>
     public readonly bool IsStringLiteral => Type is ValueType.String or ValueType.LangString;
 
+    /// <summary>
+    /// A valid <c>xsd:dateTime</c> literal: what YEAR, MONTH, DAY, HOURS, MINUTES, SECONDS, TIMEZONE and TZ take
+    /// (§17.4.5). A string, an IRI, an <c>xsd:date</c> or an ill-typed dateTime is a type error.
+    /// </summary>
+    public readonly bool IsDateTime => Space == ValueSpace.DateTime;
+
     public readonly bool IsNumeric => Type is ValueType.Integer or ValueType.Decimal or ValueType.Float or ValueType.Double;
 
     // ── Reading a term ─────────────────────────────────────────────────────────────────────────────────────────────
