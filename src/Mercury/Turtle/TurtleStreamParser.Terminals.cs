@@ -51,37 +51,35 @@ internal sealed partial class TurtleStreamParser
                 break;
             }
 
-            // Check for invalid characters
-            // IRIREF disallows: #x00-#x20 (inclusive of space), < > " { } | ^ ` \
-            if (ch <= 0x20 || ch == '<' || ch == '"' || ch == '{' ||
-                ch == '}' || ch == '|' || ch == '^' || ch == '`' || ch == '\\')
+            // [18] IRIREF: a character of the IRIREF class (RdfIri.IsIriRefCharacter), or a UCHAR for one
+            if (ch == '\\')
             {
-                // Check if it's an escape sequence
-                if (ch == '\\')
+                Consume(); // Consume backslash
+                var escapeType = Peek();
+                if (escapeType == 'u')
                 {
-                    Consume(); // Consume backslash
-                    var escapeType = Peek();
-                    if (escapeType == 'u')
-                    {
-                        Consume();
-                        var escaped = ParseUnicodeEscape(4);
-                        _sb.Append(escaped);
-                    }
-                    else if (escapeType == 'U')
-                    {
-                        Consume();
-                        var codePoint = ParseUnicodeCodePoint(8);
-                        AppendCodePointToSb(codePoint);
-                    }
-                    else
-                    {
-                        throw ParserException($"Invalid escape in IRI: \\{(char)escapeType}");
-                    }
-                    continue;
+                    Consume();
+                    var escaped = ParseUnicodeEscape(4);
+                    if (!RdfIri.IsIriRefCharacter(escaped))
+                        throw ParserException($"Invalid character in IRI reference: \\u{(int)escaped:X4} stands for U+{(int)escaped:X4}");
+                    _sb.Append(escaped);
                 }
-
-                throw ParserException($"Invalid character in IRI reference: U+{ch:X4}");
+                else if (escapeType == 'U')
+                {
+                    Consume();
+                    var codePoint = ParseUnicodeCodePoint(8);
+                    if (!RdfIri.IsIriRefCharacter(codePoint))
+                        throw ParserException($"Invalid character in IRI reference: \\U{codePoint:X8} stands for U+{codePoint:X4}");
+                    AppendCodePointToSb(codePoint);
+                }
+                else
+                {
+                    throw ParserException($"Invalid escape in IRI: \\{(char)escapeType}");
+                }
+                continue;
             }
+            if (!RdfIri.IsIriRefCharacter(ch))
+                throw ParserException($"Invalid character in IRI reference: U+{ch:X4}");
 
             Consume();
             _sb.Append((char)ch);
@@ -737,35 +735,35 @@ internal sealed partial class TurtleStreamParser
                 break;
             }
 
-            // IRIREF disallows: #x00-#x20 (inclusive of space), < > " { } | ^ ` \
-            if (ch <= 0x20 || ch == '<' || ch == '"' || ch == '{' ||
-                ch == '}' || ch == '|' || ch == '^' || ch == '`' || ch == '\\')
+            // [18] IRIREF: a character of the IRIREF class (RdfIri.IsIriRefCharacter), or a UCHAR for one
+            if (ch == '\\')
             {
-                if (ch == '\\')
+                Consume(); // Consume backslash
+                var escapeType = Peek();
+                if (escapeType == 'u')
                 {
-                    Consume(); // Consume backslash
-                    var escapeType = Peek();
-                    if (escapeType == 'u')
-                    {
-                        Consume();
-                        var escaped = ParseUnicodeEscape(4);
-                        AppendToOutput(escaped);
-                    }
-                    else if (escapeType == 'U')
-                    {
-                        Consume();
-                        var codePoint = ParseUnicodeCodePoint(8);
-                        AppendCodePoint(codePoint);
-                    }
-                    else
-                    {
-                        throw ParserException($"Invalid escape in IRI: \\{(char)escapeType}");
-                    }
-                    continue;
+                    Consume();
+                    var escaped = ParseUnicodeEscape(4);
+                    if (!RdfIri.IsIriRefCharacter(escaped))
+                        throw ParserException($"Invalid character in IRI reference: \\u{(int)escaped:X4} stands for U+{(int)escaped:X4}");
+                    AppendToOutput(escaped);
                 }
-
-                throw ParserException($"Invalid character in IRI reference: U+{ch:X4}");
+                else if (escapeType == 'U')
+                {
+                    Consume();
+                    var codePoint = ParseUnicodeCodePoint(8);
+                    if (!RdfIri.IsIriRefCharacter(codePoint))
+                        throw ParserException($"Invalid character in IRI reference: \\U{codePoint:X8} stands for U+{codePoint:X4}");
+                    AppendCodePoint(codePoint);
+                }
+                else
+                {
+                    throw ParserException($"Invalid escape in IRI: \\{(char)escapeType}");
+                }
+                continue;
             }
+            if (!RdfIri.IsIriRefCharacter(ch))
+                throw ParserException($"Invalid character in IRI reference: U+{ch:X4}");
 
             Consume();
             // Use AppendCodePoint for proper handling of supplementary characters (> U+FFFF)

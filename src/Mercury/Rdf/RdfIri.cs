@@ -86,6 +86,15 @@ internal static class RdfIri
         name.Length > 0 && (name[0] == '<' || (name.Length > 2 && name[0] == '_' && name[1] == ':')) ? name : "<" + name + ">";
 
     /// <summary>
+    /// Whether <paramref name="codePoint"/> may stand in an IRIREF (Turtle and TriG [18], N-Triples and N-Quads [8],
+    /// SPARQL [139]): any character but #x00-#x20 and <c>&lt; &gt; " { } | ^ ` \</c>. The one statement of the class for
+    /// every reader. A UCHAR escape stands for its character, so an escape of an excluded one is rejected as the
+    /// character is (W3C turtle-syntax-bad-uri-escape-01 to -03).
+    /// </summary>
+    public static bool IsIriRefCharacter(int codePoint)
+        => codePoint > 0x20 && codePoint is not ('<' or '>' or '"' or '{' or '}' or '|' or '^' or '`' or '\\');
+
+    /// <summary>
     /// True if <paramref name="reference"/> begins with an RFC 3986 scheme — i.e. it is an absolute reference to be
     /// stored verbatim rather than resolved against a base. A scheme is <c>ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )</c>
     /// followed by ':' before any '/', '?', or '#'. This is the single absolute-vs-relative test for every RDF parser

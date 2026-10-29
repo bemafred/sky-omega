@@ -82,13 +82,6 @@ public static class W3CTestContext
         // The W3C suite update of 2026-10-28 (rdf-tests f172950 -> d01b141), by cause
         ["rdf-xml/manifest.ttl#xml-canon-test001"] = "W3C update: an XMLLiteral keeps the in-scope namespace declarations it doesn't use; exclusive canonicalization drops them",
         ["rdf-xml/manifest.ttl#xml-canon-test002"] = "W3C update: an XMLLiteral keeps the in-scope namespace declarations it doesn't use; exclusive canonicalization drops them",
-        ["rdf-turtle/manifest.ttl#turtle-syntax-bad-uri-escape-01"] = "W3C update: a character an IRIREF excludes is checked only when written raw, and not '{' or '}': a \\u escape to a space, '<' or '>' is accepted",
-        ["rdf-turtle/manifest.ttl#turtle-syntax-bad-uri-escape-02"] = "W3C update: a character an IRIREF excludes is checked only when written raw, and not '{' or '}': a \\u escape to a space, '<' or '>' is accepted",
-        ["rdf-turtle/manifest.ttl#turtle-syntax-bad-uri-escape-03"] = "W3C update: a character an IRIREF excludes is checked only when written raw, and not '{' or '}': a \\u escape to a space, '<' or '>' is accepted",
-        ["rdf-trig/manifest.ttl#trig-syntax-bad-uri-escape-01"] = "W3C update: a character an IRIREF excludes is checked only when written raw, and not '{' or '}': a \\u escape to a space, '<' or '>' is accepted",
-        ["rdf-trig/manifest.ttl#trig-syntax-bad-uri-escape-02"] = "W3C update: a character an IRIREF excludes is checked only when written raw, and not '{' or '}': a \\u escape to a space, '<' or '>' is accepted",
-        ["rdf-trig/manifest.ttl#trig-syntax-bad-uri-escape-03"] = "W3C update: a character an IRIREF excludes is checked only when written raw, and not '{' or '}': a \\u escape to a space, '<' or '>' is accepted",
-        ["rdf-trig/manifest.ttl#trig-syntax-bad-uri-escape-04"] = "W3C update: a character an IRIREF excludes is checked only when written raw, and not '{' or '}': a \\u escape to a space, '<' or '>' is accepted",
     };
 
 

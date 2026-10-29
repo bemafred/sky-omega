@@ -407,12 +407,10 @@ internal sealed class NQuadsStreamParser : IDisposable, IAsyncDisposable
                 break;
             }
 
-            // Validate disallowed characters per N-Quads spec
-            // IRIREF ::= '<' ([^#x00-#x20<>"{}|^`\] | UCHAR)* '>'
-            if (ch <= 0x20) // Control chars and space
+            // [8] IRIREF ::= '<' ([^#x00-#x20<>"{}|^`\] | UCHAR)* '>': a character of the class
+            // (RdfIri.IsIriRefCharacter), or a UCHAR for one
+            if (ch != '\\' && !RdfIri.IsIriRefCharacter(ch))
                 throw ParserException($"Invalid character in IRI: U+{ch:X4}");
-            if (ch == '"' || ch == '{' || ch == '}' || ch == '|' || ch == '^' || ch == '`')
-                throw ParserException($"Invalid character in IRI: '{(char)ch}'");
 
             if (ch == '\\')
             {
@@ -422,12 +420,16 @@ internal sealed class NQuadsStreamParser : IDisposable, IAsyncDisposable
                 {
                     Consume();
                     var escaped = ParseUnicodeEscape(4);
+                    if (!RdfIri.IsIriRefCharacter(escaped))
+                        throw ParserException($"Invalid character in IRI: an escape for U+{escaped:X4}");
                     AppendCodePoint(escaped);
                 }
                 else if (next == 'U')
                 {
                     Consume();
                     var escaped = ParseUnicodeEscape(8);
+                    if (!RdfIri.IsIriRefCharacter(escaped))
+                        throw ParserException($"Invalid character in IRI: an escape for U+{escaped:X4}");
                     AppendCodePoint(escaped);
                 }
                 else

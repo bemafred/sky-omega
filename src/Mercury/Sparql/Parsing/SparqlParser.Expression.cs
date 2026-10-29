@@ -131,7 +131,7 @@ internal ref partial struct SparqlParser
                 _position = i + 1;
                 return true;
             }
-            if (c <= ' ' || c is '<' or '"' or '{' or '}' or '|' or '^' or '`' or '\\')
+            if (!Rdf.RdfIri.IsIriRefCharacter(c))
                 return false;
         }
         return false;

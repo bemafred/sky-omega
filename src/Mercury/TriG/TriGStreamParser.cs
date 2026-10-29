@@ -675,24 +675,18 @@ internal sealed class TriGStreamParser : IDisposable, IAsyncDisposable
             {
                 Consume();
                 var next = Peek();
-                if (next == 'u')
-                {
-                    Consume();
-                    AppendCodePoint(ParseUnicodeEscape(4));
-                }
-                else if (next == 'U')
-                {
-                    Consume();
-                    AppendCodePoint(ParseUnicodeEscape(8));
-                }
-                else
-                {
+                if (next is not ('u' or 'U'))
                     throw ParserException($"Invalid escape in IRI: \\{(char)next}");
-                }
+                Consume();
+                int escaped = ParseUnicodeEscape(next == 'u' ? 4 : 8);
+                if (!RdfIri.IsIriRefCharacter(escaped))
+                    throw ParserException($"Invalid character in IRI: an escape for U+{escaped:X4}");
+                AppendCodePoint(escaped);
             }
-            else if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r')
+            else if (!RdfIri.IsIriRefCharacter(ch))
             {
-                throw ParserException("Invalid character in IRI: whitespace not allowed");
+                // [18] IRIREF: a character of the IRIREF class (RdfIri.IsIriRefCharacter), or a UCHAR for one
+                throw ParserException($"Invalid character in IRI: U+{ch:X4}");
             }
             else
             {

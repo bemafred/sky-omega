@@ -342,13 +342,9 @@ internal sealed class NTriplesStreamParser : IDisposable, IAsyncDisposable
                 break;
             }
 
-            // Reject disallowed characters per N-Triples spec
-            // [^#x00-#x20<>"{}|^`\]
-            if (ch <= 0x20) // Control chars and space
+            // [8] IRIREF: a character of the IRIREF class (RdfIri.IsIriRefCharacter), or a UCHAR for one
+            if (ch != '\\' && !RdfIri.IsIriRefCharacter(ch))
                 throw ParserException($"Invalid character in IRI: U+{ch:X4}");
-            if (ch == '<' || ch == '"' || ch == '{' || ch == '}' ||
-                ch == '|' || ch == '^' || ch == '`')
-                throw ParserException($"Invalid character in IRI: '{(char)ch}'");
 
             // Track scheme detection: scheme starts with letter, contains letters/digits/+/-/.
             // followed by ':'
@@ -368,12 +364,16 @@ internal sealed class NTriplesStreamParser : IDisposable, IAsyncDisposable
                 {
                     Consume();
                     var escaped = ParseUnicodeEscape(4);
+                    if (!RdfIri.IsIriRefCharacter(escaped.Value))
+                        throw ParserException($"Invalid character in IRI: an escape for U+{escaped.Value:X4}");
                     AppendRune(escaped);
                 }
                 else if (next == 'U')
                 {
                     Consume();
                     var escaped = ParseUnicodeEscape(8);
+                    if (!RdfIri.IsIriRefCharacter(escaped.Value))
+                        throw ParserException($"Invalid character in IRI: an escape for U+{escaped.Value:X4}");
                     AppendRune(escaped);
                 }
                 else
