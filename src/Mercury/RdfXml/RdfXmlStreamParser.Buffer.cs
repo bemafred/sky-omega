@@ -580,8 +580,9 @@ internal sealed partial class RdfXmlStreamParser
     private ReadOnlySpan<char> ParseXmlLiteralContent(ReadOnlySpan<char> elementName)
     {
         int start = _outputOffset;
-        // Per open element: the bindings in scope (prefix to IRI, "" the default) and those output ancestors declared
-        var inScope = new List<Dictionary<string, string>> { new(_namespaces, StringComparer.Ordinal) };
+        // Per open element: where its namespace scope starts in the parser's undo log, and the bindings output
+        // ancestors declared (prefix to IRI, "" the default; the first entry is the property element's: none)
+        var openScopes = new List<int>();
         var declared = new List<Dictionary<string, string>> { new(StringComparer.Ordinal) };
 
         while (!IsEndOfInput())
@@ -594,12 +595,13 @@ internal sealed partial class RdfXmlStreamParser
                 var name = ReadXmlName();
                 SkipWhitespace();
                 TryConsume('>');
-                if (inScope.Count == 1)
+                if (openScopes.Count == 0)
                     break; // the property element's end tag
                 AppendToOutput("</".AsSpan());
                 AppendToOutput(name.AsSpan());
                 AppendToOutput('>');
-                inScope.RemoveAt(inScope.Count - 1);
+                EndNamespaceScope(openScopes[^1]);
+                openScopes.RemoveAt(openScopes.Count - 1);
                 declared.RemoveAt(declared.Count - 1);
             }
             else if (ch == '<' && PeekAhead(1) == '!' && PeekAhead(2) == '-')
@@ -622,7 +624,7 @@ internal sealed partial class RdfXmlStreamParser
             }
             else if (ch == '<')
             {
-                ParseCanonicalElement(inScope, declared);
+                ParseCanonicalElement(openScopes, declared);
             }
             else if (ch == '&')
             {
@@ -642,13 +644,14 @@ internal sealed partial class RdfXmlStreamParser
 
     /// <summary>
     /// An element of an XML literal, canonicalized (<see cref="ParseXmlLiteralContent"/>), from its '&lt;'. A start tag
-    /// opens a scope in <paramref name="inScope"/> and <paramref name="declared"/>; an empty element is closed at once.
+    /// declares its namespaces in the parser's scope and opens an entry in <paramref name="openScopes"/> and
+    /// <paramref name="declared"/>; an empty element is closed at once.
     /// </summary>
-    private void ParseCanonicalElement(List<Dictionary<string, string>> inScope, List<Dictionary<string, string>> declared)
+    private void ParseCanonicalElement(List<int> openScopes, List<Dictionary<string, string>> declared)
     {
         Consume(); // '<'
         var tagName = ReadXmlName();
-        var bindings = new Dictionary<string, string>(inScope[^1], StringComparer.Ordinal);
+        int namespaceScope = _namespaceUndo.Count;
         var attributes = new List<(string Name, string Value)>();
 
         SkipWhitespace();
@@ -686,9 +689,9 @@ internal sealed partial class RdfXmlStreamParser
             TryConsume((char)quote);
 
             if (attrName.StartsWith("xmlns:", StringComparison.Ordinal))
-                bindings[attrName[6..]] = attrValue;
+                DeclareNamespace(attrName[6..], attrValue);
             else if (attrName == "xmlns")
-                bindings[""] = attrValue;
+                DeclareNamespace("", attrValue);
             else
                 attributes.Add((attrName, attrValue));
             SkipWhitespace();
@@ -713,10 +716,16 @@ internal sealed partial class RdfXmlStreamParser
         {
             if (prefix == "xml")
                 continue; // the xml namespace is never declared
-            var iri = bindings.TryGetValue(prefix, out var bound) ? bound : "";
+            // An unprefixed name with no default namespace is in no namespace; a prefix must be declared
+            if (!_namespaces.TryGetValue(prefix, out var iri))
+            {
+                if (prefix.Length > 0)
+                    throw ParserException($"Namespace prefix '{prefix}' is not declared");
+                iri = "";
+            }
             var outerIri = outer.TryGetValue(prefix, out var rendered) ? rendered : "";
-            if (iri == outerIri || (prefix.Length > 0 && iri.Length == 0))
-                continue; // already declared by an output ancestor, or an undeclared prefix
+            if (iri == outerIri)
+                continue; // already declared by an output ancestor
             AppendToOutput(prefix.Length == 0 ? " xmlns=\"".AsSpan() : " xmlns:".AsSpan());
             if (prefix.Length > 0)
             {
@@ -731,7 +740,7 @@ internal sealed partial class RdfXmlStreamParser
         // Attributes sorted by namespace IRI (none first), then local name
         attributes.Sort((x, y) =>
         {
-            int byNamespace = string.CompareOrdinal(XmlAttributeNamespace(x.Name, bindings), XmlAttributeNamespace(y.Name, bindings));
+            int byNamespace = string.CompareOrdinal(XmlAttributeNamespace(x.Name, _namespaces), XmlAttributeNamespace(y.Name, _namespaces));
             return byNamespace != 0 ? byNamespace : string.CompareOrdinal(XmlLocalName(x.Name), XmlLocalName(y.Name));
         });
         foreach (var (name, value) in attributes)
@@ -749,9 +758,10 @@ internal sealed partial class RdfXmlStreamParser
             AppendToOutput("</".AsSpan());
             AppendToOutput(tagName.AsSpan());
             AppendToOutput('>');
+            EndNamespaceScope(namespaceScope);
             return;
         }
-        inScope.Add(bindings);
+        openScopes.Add(namespaceScope);
         declared.Add(nowDeclared);
     }
 
@@ -859,7 +869,7 @@ internal sealed partial class RdfXmlStreamParser
             return "";
         if (prefix == "xml")
             return "http://www.w3.org/XML/1998/namespace";
-        return bindings.TryGetValue(prefix, out var iri) ? iri : "";
+        return bindings[prefix]; // declared: the element's prefixes were checked before its attributes are sorted
     }
 
     /// <summary>

@@ -114,7 +114,7 @@ internal sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
 
     private void InitializeStandardNamespaces()
     {
-        _namespaces["rdf"] = RdfNamespace;
+        // Bound by XML itself (Namespaces in XML §3); rdf, like any other prefix, must be declared
         _namespaces["xml"] = XmlNamespace;
         _namespaces["xmlns"] = "http://www.w3.org/2000/xmlns/";
     }
@@ -1204,7 +1204,11 @@ internal sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
         if (_namespaces.TryGetValue(key, out var uri))
             return uri;
 
-        return string.Empty;
+        // An unprefixed name with no default namespace is in no namespace; a prefix must be declared
+        // (Namespaces in XML, constraint Prefix Declared), or eg:p would be read as the IRI <p>
+        if (key.Length == 0)
+            return string.Empty;
+        throw ParserException($"Namespace prefix '{key}' is not declared");
     }
 
     /// <summary>
@@ -1213,6 +1217,9 @@ internal sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
     /// </summary>
     private void DeclareNamespace(string prefix, string iri)
     {
+        // Namespaces in XML 1.0 §3: a prefixed declaration's value must not be empty (only the default can be undone)
+        if (prefix.Length > 0 && iri.Length == 0)
+            throw ParserException($"Namespace prefix '{prefix}' is declared with an empty namespace name");
         _namespaceUndo.Add((prefix, _namespaces.TryGetValue(prefix, out var replaced) ? replaced : null));
         _namespaces[prefix] = iri;
     }

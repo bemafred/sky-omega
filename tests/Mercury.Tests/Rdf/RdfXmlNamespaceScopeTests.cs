@@ -12,7 +12,7 @@ namespace SkyOmega.Mercury.Tests.Rdf;
 /// Namespaces in XML §6.1: a namespace declaration's scope is the element it is on and that element's content.
 /// Through 1.8.35 the RDF/XML parser kept one table of prefixes for the whole document, so a declaration stayed bound
 /// after its element ended: a prefix redeclared inside one element kept the inner namespace for every later sibling,
-/// and so did a default namespace. Each test parses the content under an rdf:RDF that binds both the default
+/// and so did a default namespace. Declaration_EndsWithItsElement parses the content under an rdf:RDF that binds both the default
 /// namespace and eg: to http://a/; the inner elements redeclare them as http://b/. Generated blank node labels are
 /// read as _:b, since only their places matter here.
 /// </summary>
@@ -63,5 +63,33 @@ public class RdfXmlNamespaceScopeTests
         // Each expected row is "subject predicate object " (the raw literals end with a space before their closing quotes)
         var actual = triples.Select(t => Regex.Replace($"{t.Subject} {t.Predicate} {t.Object} ", @"_:\S+", "_:b"));
         Assert.Equal(expected.OrderBy(row => row, System.StringComparer.Ordinal), actual.OrderBy(row => row, System.StringComparer.Ordinal));
+    }
+
+    // Namespaces in XML: a prefix must be declared (constraint Prefix Declared), and a prefixed declaration's value must
+    // not be empty (1.0 §3); only xml is bound without a declaration. Through 1.8.35 an undeclared prefix read as an empty
+    // namespace, so eg:p was stored as the IRI <p>, and rdf was bound without a declaration.
+    [Theory]
+    [InlineData("""<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><zz:Thing rdf:about="http://s/1"/></rdf:RDF>""", "'zz' is not declared")]
+    [InlineData("""<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description rdf:about="http://s/1"><zz:p>1</zz:p></rdf:Description></rdf:RDF>""", "'zz' is not declared")]
+    [InlineData("""<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description rdf:about="http://s/1" zz:p="1"/></rdf:RDF>""", "'zz' is not declared")]
+    [InlineData( // out of scope: declared on the earlier sibling only
+        """<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description rdf:about="http://s/1" xmlns:zz="http://b/"><zz:p>1</zz:p></rdf:Description><rdf:Description rdf:about="http://s/2"><zz:p>2</zz:p></rdf:Description></rdf:RDF>""",
+        "'zz' is not declared")]
+    [InlineData( // inside an XML literal
+        """<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:eg="http://a/"><rdf:Description rdf:about="http://s/1"><eg:p rdf:parseType="Literal"><zz:x/></eg:p></rdf:Description></rdf:RDF>""",
+        "'zz' is not declared")]
+    [InlineData("""<rdf:RDF xmlns:eg="http://a/"><rdf:Description rdf:about="http://s/1"><eg:p>1</eg:p></rdf:Description></rdf:RDF>""", "'rdf' is not declared")]
+    [InlineData("""<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description rdf:about="http://s/1" xmlns:zz=""/></rdf:RDF>""", "'zz' is declared with an empty namespace name")]
+    [InlineData( // an empty prefixed declaration inside an XML literal
+        """<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:eg="http://a/"><rdf:Description rdf:about="http://s/1"><eg:p rdf:parseType="Literal"><x xmlns:zz=""/></eg:p></rdf:Description></rdf:RDF>""",
+        "'zz' is declared with an empty namespace name")]
+    public async Task Prefix_MustBeDeclared(string document, string message)
+    {
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(document));
+
+        var error = await Assert.ThrowsAsync<InvalidDataException>(() =>
+            RdfEngine.ParseTriplesAsync(stream, RdfFormat.RdfXml, ct: TestContext.Current.CancellationToken));
+
+        Assert.Contains(message, error.Message);
     }
 }
