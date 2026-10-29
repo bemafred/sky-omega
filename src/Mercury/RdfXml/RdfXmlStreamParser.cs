@@ -981,37 +981,49 @@ internal sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
     }
 
     /// <summary>
-    /// Check if attributes dictionary contains any property attributes (non-RDF/XML namespace).
+    /// The predicate of a property attribute (RDF/XML §7.2.11, propertyAttr), or null for an attribute that is not one:
+    /// a namespace declaration, an xml attribute, or one of the RDF/XML syntax attributes. An attribute is keyed by its
+    /// namespace (<see cref="ParseAttributes"/>), so rdf:about written with another prefix is still rdf:about. An
+    /// unprefixed attribute is not a property attribute, except type (§6.1.4: read as rdf:type).
+    /// </summary>
+    private static string? PropertyAttributePredicate(string key)
+    {
+        if (key == "type")
+            return $"{RdfNamespace}type";
+        if (key.StartsWith("rdf:", StringComparison.Ordinal))
+        {
+            var local = key[4..];
+            return RdfSyntaxAttributes.Contains(local) ? null : RdfNamespace + local;
+        }
+        if (key.StartsWith('{'))
+        {
+            int close = key.IndexOf('}');
+            return string.Concat(key.AsSpan(1, close - 1), key.AsSpan(close + 1));
+        }
+        return null; // xmlns, xml:, or unprefixed
+    }
+
+    // The RDF/XML syntax attributes, which carry no triple of their own (§7.2.11: propertyAttr excludes them)
+    private static readonly HashSet<string> RdfSyntaxAttributes = new(StringComparer.Ordinal)
+    {
+        "about", "ID", "nodeID", "resource", "parseType", "datatype"
+    };
+
+    /// <summary>
+    /// Whether an element has a property attribute (<see cref="PropertyAttributePredicate"/>).
     /// </summary>
     private static bool HasPropertyAttributes(Dictionary<string, string> attributes)
     {
-        foreach (var name in attributes.Keys)
+        foreach (var key in attributes.Keys)
         {
-            // rdf:type is a property attribute
-            if (name == "rdf:type" || name == "type")
+            if (PropertyAttributePredicate(key) is not null)
                 return true;
-
-            // Skip other RDF/XML control attributes
-            if (name.StartsWith("rdf:") || name.StartsWith("xml:") || name.StartsWith("xmlns"))
-                continue;
-
-            // Skip namespace declarations
-            if (name.Contains(':'))
-            {
-                var colonIdx = name.IndexOf(':');
-                var prefix = name[..colonIdx];
-                if (prefix == "xmlns")
-                    continue;
-
-                // Found a property attribute
-                return true;
-            }
         }
         return false;
     }
 
     /// <summary>
-    /// Emit triples for property attributes (shorthand syntax).
+    /// Emit a triple for each property attribute (shorthand syntax): rdf:type's value is an IRI, any other a literal.
     /// </summary>
     private void EmitPropertyAttributes(
         TripleHandler handler,
@@ -1019,61 +1031,25 @@ internal sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
         Dictionary<string, string> attributes,
         string? xmlLang = null)
     {
-        // RDF control attributes that are NOT property attributes
-        var rdfControlAttrs = new HashSet<string>
+        foreach (var (key, value) in attributes)
         {
-            "about", "ID", "nodeID", "resource", "parseType", "datatype"
-        };
+            var predicateIri = PropertyAttributePredicate(key);
+            if (predicateIri is null)
+                continue;
 
-        foreach (var (name, value) in attributes)
-        {
-            // Handle rdf:type specially - value is a URI, not a literal
-            if (name == "rdf:type" || name == "type")
+            ResetOutputBuffer();
+            var predicate = WrapIri(predicateIri.AsSpan());
+            if (predicateIri == $"{RdfNamespace}type")
             {
-                ResetOutputBuffer();
-                var predicate = $"<{RdfNamespace}type>".AsSpan();
                 var resolvedUri = ResolveUri(value);
-                var obj = WrapIri(resolvedUri.AsSpan());
-                handler(subjectStr.AsSpan(), predicate, obj);
+                handler(subjectStr.AsSpan(), predicate, WrapIri(resolvedUri.AsSpan()));
                 continue;
             }
 
-            // Skip XML/namespace control attributes
-            if (name.StartsWith("xml:") || name.StartsWith("xmlns"))
-                continue;
-
-            // Skip if it's a namespace declaration
-            if (name.Contains(':'))
-            {
-                var colonIdx = name.IndexOf(':');
-                var prefix = name[..colonIdx];
-                if (prefix == "xmlns")
-                    continue;
-
-                // Check if this is an RDF control attribute (not a property attribute)
-                if (prefix == "rdf")
-                {
-                    var local = name[(colonIdx + 1)..];
-                    if (rdfControlAttrs.Contains(local))
-                        continue;
-                }
-
-                // Property attribute (including rdf:Seq, rdf:Bag, rdf:Alt, rdf:value, etc.)
-                var ns = ResolveNamespace(prefix);
-                var localName = name[(colonIdx + 1)..];
-
-                ResetOutputBuffer();
-                var predicate = BuildIri(ns.AsSpan(), localName.AsSpan());
-
-                // Use xml:lang if present
-                ReadOnlySpan<char> literal;
-                if (!string.IsNullOrEmpty(xmlLang))
-                    literal = BuildLangLiteral(value.AsSpan(), xmlLang.AsSpan());
-                else
-                    literal = BuildPlainLiteral(value.AsSpan());
-
-                handler(subjectStr.AsSpan(), predicate, literal);
-            }
+            ReadOnlySpan<char> literal = !string.IsNullOrEmpty(xmlLang)
+                ? BuildLangLiteral(value.AsSpan(), xmlLang.AsSpan())
+                : BuildPlainLiteral(value.AsSpan());
+            handler(subjectStr.AsSpan(), predicate, literal);
         }
     }
 

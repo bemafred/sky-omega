@@ -449,12 +449,15 @@ internal sealed partial class RdfXmlStreamParser
     }
 
     /// <summary>
-    /// Parse attributes and namespace declarations.
-    /// Returns dictionary mapping attribute name to value (as strings for async boundary crossing).
+    /// Parse a start tag's attributes, declaring its namespaces. Each attribute is keyed by its namespace, not by the
+    /// prefix it was written with (RDF/XML §5.1: the RDF namespace may have any prefix): "rdf:local" in the RDF
+    /// namespace, "xml:local" in the xml namespace, "{iri}local" in any other; a namespace declaration and an
+    /// unprefixed attribute keep their name. The values are strings for the async boundary crossing.
     /// </summary>
     private Dictionary<string, string> ParseAttributes()
     {
-        var attributes = new Dictionary<string, string>();
+        // Read the whole tag first: a declaration binds the prefixes of every attribute on its element, before or after it
+        var written = new List<(string Name, string Value)>();
 
         while (true)
         {
@@ -517,13 +520,35 @@ internal sealed partial class RdfXmlStreamParser
             }
 
             var value = _outputBuffer.AsSpan(valueStart, _outputOffset - valueStart).ToString();
-            attributes[name] = value;
+            written.Add((name, value));
 
             // A namespace declaration is in scope until its element ends (EndNamespaceScope)
             if (name.StartsWith("xmlns:"))
                 DeclareNamespace(name[6..], value);
             else if (name == "xmlns")
                 DeclareNamespace("", value);
+        }
+
+        var attributes = new Dictionary<string, string>(written.Count, StringComparer.Ordinal);
+        foreach (var (name, value) in written)
+        {
+            int colon = name.IndexOf(':');
+            string key;
+            if (colon < 0 || name.StartsWith("xmlns:") || name.StartsWith("xml:"))
+            {
+                key = name;
+            }
+            else
+            {
+                var iri = ResolveNamespace(name[..colon]);
+                var local = name[(colon + 1)..];
+                key = iri == RdfNamespace ? "rdf:" + local
+                    : iri == XmlNamespace ? "xml:" + local
+                    : "{" + iri + "}" + local;
+            }
+            // Namespaces in XML §6.3: no two attributes of an element have the same namespace and local name
+            if (!attributes.TryAdd(key, value))
+                throw ParserException($"Attribute '{name}' appears twice on its element (by namespace and local name)");
         }
 
         return attributes;
