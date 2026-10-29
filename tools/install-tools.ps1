@@ -7,7 +7,13 @@ $ScriptDir = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path
 $NupkgDir = Join-Path $ScriptDir "nupkg"
 
 Write-Host "Building and packing Sky Omega tools..."
-dotnet build (Join-Path $ScriptDir "SkyOmega.sln") -c Release
+# Clean both configurations: out-of-solution ProjectReferences (the legacy VSTest
+# integration target) can leave stale Debug obj/ state that breaks subsequent
+# Release builds with CS0006 "ref/*.dll could not be found".
+dotnet clean (Join-Path $ScriptDir "SkyOmega.sln") -c Release -v quiet
+dotnet clean (Join-Path $ScriptDir "SkyOmega.sln") -c Debug   -v quiet
+# -m:1 serializes project builds — avoids the ref-assembly race on cold builds.
+dotnet build (Join-Path $ScriptDir "SkyOmega.sln") -c Release -m:1
 dotnet pack (Join-Path $ScriptDir "SkyOmega.sln") -c Release --no-build -o $NupkgDir -p:PackageReadmeFile=""
 
 Write-Host ""

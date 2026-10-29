@@ -8,7 +8,13 @@ SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 NUPKG_DIR="$SCRIPT_DIR/nupkg"
 
 echo "Building and packing Sky Omega tools..."
-dotnet build "$SCRIPT_DIR/SkyOmega.sln" -c Release
+# Clean both configurations: out-of-solution ProjectReferences (the legacy VSTest
+# integration target) can leave stale Debug obj/ state that breaks subsequent
+# Release builds with CS0006 "ref/*.dll could not be found".
+dotnet clean "$SCRIPT_DIR/SkyOmega.sln" -c Release -v quiet
+dotnet clean "$SCRIPT_DIR/SkyOmega.sln" -c Debug   -v quiet
+# -m:1 serializes project builds — avoids the ref-assembly race on cold builds.
+dotnet build "$SCRIPT_DIR/SkyOmega.sln" -c Release -m:1
 dotnet pack "$SCRIPT_DIR/SkyOmega.sln" -c Release --no-build -o "$NUPKG_DIR" -p:PackageReadmeFile=""
 
 echo ""
