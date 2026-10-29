@@ -10,4 +10,6 @@ git -C $ScriptDir submodule update --init --recursive
 
 Write-Host ""
 Write-Host "Done. Submodules initialized:"
-git -C $ScriptDir submodule foreach --quiet 'echo "  $sm_path"' | ForEach-Object { Write-Host $_ }
+# No quotes nested in git's argument: Windows PowerShell 5.1 mangles them when calling a native program,
+# and the list printed "$sm_path" literally. The indent is added here instead.
+git -C $ScriptDir submodule foreach --quiet 'echo $sm_path' | ForEach-Object { Write-Host "  $_" }
