@@ -462,11 +462,19 @@ internal sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
                             if (reifyId != null)
                                 EmitReification(handler, reifyId, subjectStr, predicateStr, objStr);
                         }
-                        // Other parseTypes on self-closing produce empty literal
+                        // An empty collection is rdf:nil (§7.2.19)
+                        else if (selfParseType == "Collection")
+                        {
+                            var nil = $"<{RdfNamespace}nil>";
+                            handler(subjectStr.AsSpan(), predicateStr.AsSpan(), nil.AsSpan());
+                            if (reifyId != null)
+                                EmitReification(handler, reifyId, subjectStr, predicateStr, nil);
+                        }
+                        // parseType="Literal", and any other value (§7.2.20), is the empty XML literal
                         else
                         {
                             ResetOutputBuffer();
-                            var obj = BuildPlainLiteral(ReadOnlySpan<char>.Empty);
+                            var obj = BuildTypedLiteral(ReadOnlySpan<char>.Empty, $"{RdfNamespace}XMLLiteral".AsSpan());
                             var objStr = obj.ToString();
                             handler(subjectStr.AsSpan(), predicateStr.AsSpan(), obj);
                             if (reifyId != null)
@@ -575,9 +583,9 @@ internal sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
                         await ParsePropertyElementsAsync(handler, blankNodeStr, effectiveLangNonSelf, cancellationToken);
                         continue;
                     }
-                    else if (parseType == "Literal")
+                    else if (parseType != "Collection")
                     {
-                        // XML literal
+                        // XML literal: parseType="Literal", and any value but Resource and Collection (§7.2.20)
                         ResetOutputBuffer();
                         var xmlContent = ParseXmlLiteralContent(propNameStr);
                         var literal = BuildTypedLiteral(xmlContent, $"{RdfNamespace}XMLLiteral".AsSpan());

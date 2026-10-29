@@ -567,99 +567,78 @@ internal sealed partial class RdfXmlStreamParser
     }
 
     /// <summary>
-    /// Parse XML literal content with Exclusive XML Canonicalization (C14N).
-    /// - Includes in-scope namespace declarations on each element
-    /// - Converts self-closing tags to start/end tag pairs
-    /// - Sorts namespace declarations by prefix
+    /// The lexical form of a parseType="Literal" property element's content (RDF/XML §7.2.17): its Exclusive XML
+    /// Canonicalization (W3C xml-exc-c14n), with comments and an empty InclusiveNamespaces PrefixList, the form RDF/XML
+    /// 2004 defined and the W3C tests expect (xml-canon-test001, -002).
+    /// <list type="bullet">
+    /// <item>An element declares only the namespaces it visibly uses: its own prefix (the default namespace when it has
+    /// none) and its attributes' prefixes, and only where no output ancestor declared the same binding.</item>
+    /// <item>Declarations are sorted by prefix, the default first; attributes by namespace IRI, then local name.</item>
+    /// <item>An empty element is a start tag and an end tag.</item>
+    /// <item>Text and attribute values have their references decoded, then &amp; &lt; &gt; (text) or &amp; &lt; "
+    /// tab, LF, CR (attributes) written as references; a CDATA section is its text; line ends are LF.</item>
+    /// <item>Comments and processing instructions are kept.</item>
+    /// </list>
+    /// The content ends at the property element's end tag, which is not part of it. The namespaces in scope at the
+    /// property element are the parser's; those declared inside the literal are in scope for their element's content.
     /// </summary>
     private ReadOnlySpan<char> ParseXmlLiteralContent(ReadOnlySpan<char> elementName)
     {
         int start = _outputOffset;
-        int depth = 1;
+        // Per open element: the bindings in scope (prefix to IRI, "" the default) and those output ancestors declared
+        var inScope = new List<Dictionary<string, string>> { new(_namespaces, StringComparer.Ordinal) };
+        var declared = new List<Dictionary<string, string>> { new(StringComparer.Ordinal) };
 
-        // Collect in-scope namespaces for canonicalization (sorted by prefix)
-        var inScopeNamespaces = new SortedDictionary<string, string>(StringComparer.Ordinal);
-        foreach (var kvp in _namespaces)
-        {
-            if (!string.IsNullOrEmpty(kvp.Key) && kvp.Key != "xml" && kvp.Key != "xmlns")
-            {
-                inScopeNamespaces[kvp.Key] = kvp.Value;
-            }
-        }
-
-        while (!IsEndOfInput() && depth > 0)
+        while (!IsEndOfInput())
         {
             var ch = Peek();
-
-            if (ch == '<')
+            if (ch == '<' && PeekAhead(1) == '/')
             {
-                Consume(); // consume '<'
-
-                if (Peek() == '/')
-                {
-                    // Closing tag
-                    depth--;
-                    if (depth == 0)
-                    {
-                        // Don't include closing tag of wrapper element
-                        while (Peek() != '>' && !IsEndOfInput())
-                            Consume();
-                        TryConsume('>');
-                        break;
-                    }
-                    // Include closing tag
-                    AppendToOutput('<');
-                    AppendToOutput('/');
-                    while (Peek() != '>' && !IsEndOfInput())
-                    {
-                        var codePoint = ReadUtf8Char();
-                        if (codePoint == -1) break;
-                        AppendCodePoint(codePoint);
-                    }
-                    if (Peek() == '>')
-                    {
-                        AppendToOutput('>');
-                        Consume();
-                    }
-                }
-                else if (Peek() == '!')
-                {
-                    // Comment or CDATA - include as-is
-                    AppendToOutput('<');
-                    AppendToOutput('!');
+                Consume();
+                Consume();
+                var name = ReadXmlName();
+                SkipWhitespace();
+                TryConsume('>');
+                if (inScope.Count == 1)
+                    break; // the property element's end tag
+                AppendToOutput("</".AsSpan());
+                AppendToOutput(name.AsSpan());
+                AppendToOutput('>');
+                inScope.RemoveAt(inScope.Count - 1);
+                declared.RemoveAt(declared.Count - 1);
+            }
+            else if (ch == '<' && PeekAhead(1) == '!' && PeekAhead(2) == '-')
+            {
+                AppendXmlLiteralMarkup("<!--", "-->");
+            }
+            else if (ch == '<' && PeekAhead(1) == '!' && PeekAhead(2) == '[')
+            {
+                // <![CDATA[ … ]]> is its text
+                for (int i = 0; i < "<![CDATA[".Length; i++)
                     Consume();
-                    while (Peek() != '>' && !IsEndOfInput())
-                    {
-                        var codePoint = ReadUtf8Char();
-                        if (codePoint == -1) break;
-                        AppendCodePoint(codePoint);
-                    }
-                    if (Peek() == '>')
-                    {
-                        AppendToOutput('>');
-                        Consume();
-                    }
-                }
-                else if (Peek() == '?')
-                {
-                    // PI - skip entirely per C14N (PIs in XMLLiteral are excluded)
-                    while (!(Peek() == '?' && PeekAhead(1) == '>') && !IsEndOfInput())
-                        Consume();
-                    TryConsume('?');
-                    TryConsume('>');
-                }
-                else
-                {
-                    // Opening tag - apply canonicalization
-                    ParseCanonicalElement(inScopeNamespaces, ref depth);
-                }
+                while (!IsEndOfInput() && !(Peek() == ']' && PeekAhead(1) == ']' && PeekAhead(2) == '>'))
+                    AppendCanonicalText(ReadXmlLiteralChar());
+                for (int i = 0; i < "]]>".Length && !IsEndOfInput(); i++)
+                    Consume();
+            }
+            else if (ch == '<' && PeekAhead(1) == '?')
+            {
+                AppendXmlLiteralMarkup("<?", "?>");
+            }
+            else if (ch == '<')
+            {
+                ParseCanonicalElement(inScope, declared);
+            }
+            else if (ch == '&')
+            {
+                AppendCanonicalText(ParseEntityReference());
             }
             else
             {
-                // Text content - UTF-8 decode
-                var codePoint = ReadUtf8Char();
-                if (codePoint == -1) break;
-                AppendCodePoint(codePoint);
+                var codePoint = ReadXmlLiteralChar();
+                if (codePoint == -1)
+                    break;
+                AppendCanonicalText(codePoint);
             }
         }
 
@@ -667,164 +646,225 @@ internal sealed partial class RdfXmlStreamParser
     }
 
     /// <summary>
-    /// Parse and canonicalize an XML element for XMLLiteral.
+    /// An element of an XML literal, canonicalized (<see cref="ParseXmlLiteralContent"/>), from its '&lt;'. A start tag
+    /// opens a scope in <paramref name="inScope"/> and <paramref name="declared"/>; an empty element is closed at once.
     /// </summary>
-    private void ParseCanonicalElement(SortedDictionary<string, string> inScopeNamespaces, ref int depth)
+    private void ParseCanonicalElement(List<Dictionary<string, string>> inScope, List<Dictionary<string, string>> declared)
     {
-        // Parse element name
-        int nameStart = _outputOffset;
-        while (IsNameChar(Peek()))
-        {
-            var codePoint = ReadUtf8Char();
-            if (codePoint == -1) break;
-            AppendCodePoint(codePoint);
-        }
-        var tagName = GetOutputSpan(nameStart).ToString();
-        _outputOffset = nameStart; // Reset - we'll output canonicalized form
-
-        // Parse attributes (we need to collect them for sorting)
-        var elementAttrs = new SortedDictionary<string, string>(StringComparer.Ordinal);
-        var elementNsDecls = new SortedDictionary<string, string>(StringComparer.Ordinal);
-        bool selfClosing = false;
+        Consume(); // '<'
+        var tagName = ReadXmlName();
+        var bindings = new Dictionary<string, string>(inScope[^1], StringComparer.Ordinal);
+        var attributes = new List<(string Name, string Value)>();
 
         SkipWhitespace();
         while (Peek() != '>' && Peek() != '/' && !IsEndOfInput())
         {
-            // Parse attribute name
-            int attrNameStart = _outputOffset;
-            while (IsNameChar(Peek()))
-            {
-                var codePoint = ReadUtf8Char();
-                if (codePoint == -1) break;
-                AppendCodePoint(codePoint);
-            }
-            var attrName = GetOutputSpan(attrNameStart).ToString();
-            _outputOffset = attrNameStart;
-
+            var attrName = ReadXmlName();
             SkipWhitespace();
-            if (!TryConsume('='))
-            {
-                SkipWhitespace();
-                continue;
-            }
+            if (attrName.Length == 0 || !TryConsume('='))
+                break; // not well-formed: the element ends here
             SkipWhitespace();
-
-            // Parse attribute value
             var quote = Peek();
             if (quote != '"' && quote != '\'')
-                continue;
+                break;
             Consume();
 
+            // XML attribute-value normalization: a reference is its character, a written tab, LF or CR (a CRLF once)
+            // a space
             int valueStart = _outputOffset;
             while (Peek() != quote && !IsEndOfInput())
             {
                 if (Peek() == '&')
                 {
-                    var entity = ParseEntityReference();
-                    AppendCodePoint(entity);
+                    AppendCodePoint(ParseEntityReference());
+                    continue;
                 }
-                else
-                {
-                    var codePoint = ReadUtf8Char();
-                    if (codePoint == -1) break;
-                    AppendCodePoint(codePoint);
-                }
+                var codePoint = ReadUtf8Char();
+                if (codePoint == -1)
+                    break;
+                if (codePoint == '\r' && Peek() == '\n')
+                    continue;
+                AppendCodePoint(codePoint is '\t' or '\n' or '\r' ? ' ' : codePoint);
             }
             var attrValue = GetOutputSpan(valueStart).ToString();
             _outputOffset = valueStart;
             TryConsume((char)quote);
 
-            // Classify as namespace declaration or regular attribute
-            if (attrName.StartsWith("xmlns:"))
-            {
-                var prefix = attrName[6..];
-                elementNsDecls[prefix] = attrValue;
-            }
+            if (attrName.StartsWith("xmlns:", StringComparison.Ordinal))
+                bindings[attrName[6..]] = attrValue;
             else if (attrName == "xmlns")
-            {
-                // Default namespace - skip for Exclusive C14N unless used
-            }
+                bindings[""] = attrValue;
             else
-            {
-                elementAttrs[attrName] = attrValue;
-            }
-
+                attributes.Add((attrName, attrValue));
             SkipWhitespace();
         }
-
-        // Check for self-closing
-        if (Peek() == '/')
-        {
-            selfClosing = true;
-            Consume();
-        }
+        bool empty = TryConsume('/');
         TryConsume('>');
 
-        // Output canonicalized element
         AppendToOutput('<');
         AppendToOutput(tagName.AsSpan());
 
-        // Output namespace declarations (in-scope + element's own)
-        // Per RDF/XML XMLLiteral canonicalization, rdf namespace comes first, then others alphabetically
-        var allNsDecls = new SortedDictionary<string, string>(StringComparer.Ordinal);
-        foreach (var kvp in inScopeNamespaces)
-            allNsDecls[kvp.Key] = kvp.Value;
-        foreach (var kvp in elementNsDecls)
-            allNsDecls[kvp.Key] = kvp.Value;
-
-        // Output rdf namespace first if present
-        if (allNsDecls.TryGetValue("rdf", out var rdfNs))
+        // The namespaces the element visibly uses, sorted by prefix ("" the default, first)
+        var used = new SortedSet<string>(StringComparer.Ordinal) { XmlPrefixOf(tagName) };
+        foreach (var (name, _) in attributes)
         {
-            AppendToOutput(" xmlns:rdf=\"".AsSpan());
-            AppendToOutput(rdfNs.AsSpan());
+            var prefix = XmlPrefixOf(name);
+            if (prefix.Length > 0)
+                used.Add(prefix);
+        }
+        var outer = declared[^1];
+        var nowDeclared = new Dictionary<string, string>(outer, StringComparer.Ordinal);
+        foreach (var prefix in used)
+        {
+            if (prefix == "xml")
+                continue; // the xml namespace is never declared
+            var iri = bindings.TryGetValue(prefix, out var bound) ? bound : "";
+            var outerIri = outer.TryGetValue(prefix, out var rendered) ? rendered : "";
+            if (iri == outerIri || (prefix.Length > 0 && iri.Length == 0))
+                continue; // already declared by an output ancestor, or an undeclared prefix
+            AppendToOutput(prefix.Length == 0 ? " xmlns=\"".AsSpan() : " xmlns:".AsSpan());
+            if (prefix.Length > 0)
+            {
+                AppendToOutput(prefix.AsSpan());
+                AppendToOutput("=\"".AsSpan());
+            }
+            AppendCanonicalAttributeValue(iri);
             AppendToOutput('"');
+            nowDeclared[prefix] = iri;
         }
 
-        // Then output other namespaces alphabetically
-        foreach (var kvp in allNsDecls)
+        // Attributes sorted by namespace IRI (none first), then local name
+        attributes.Sort((x, y) =>
         {
-            if (kvp.Key == "rdf") continue; // Already output
-            AppendToOutput(" xmlns:".AsSpan());
-            AppendToOutput(kvp.Key.AsSpan());
-            AppendToOutput("=\"".AsSpan());
-            AppendToOutput(kvp.Value.AsSpan());
-            AppendToOutput('"');
-        }
-
-        // Output attributes (sorted)
-        foreach (var kvp in elementAttrs)
+            int byNamespace = string.CompareOrdinal(XmlAttributeNamespace(x.Name, bindings), XmlAttributeNamespace(y.Name, bindings));
+            return byNamespace != 0 ? byNamespace : string.CompareOrdinal(XmlLocalName(x.Name), XmlLocalName(y.Name));
+        });
+        foreach (var (name, value) in attributes)
         {
             AppendToOutput(' ');
-            AppendToOutput(kvp.Key.AsSpan());
+            AppendToOutput(name.AsSpan());
             AppendToOutput("=\"".AsSpan());
-            // Escape attribute value
-            foreach (var c in kvp.Value)
-            {
-                switch (c)
-                {
-                    case '<': AppendToOutput("&lt;".AsSpan()); break;
-                    case '>': AppendToOutput("&gt;".AsSpan()); break;
-                    case '&': AppendToOutput("&amp;".AsSpan()); break;
-                    case '"': AppendToOutput("&quot;".AsSpan()); break;
-                    default: AppendToOutput(c); break;
-                }
-            }
+            AppendCanonicalAttributeValue(value);
             AppendToOutput('"');
         }
-
         AppendToOutput('>');
 
-        if (selfClosing)
+        if (empty)
         {
-            // C14N: self-closing becomes explicit close tag
             AppendToOutput("</".AsSpan());
             AppendToOutput(tagName.AsSpan());
             AppendToOutput('>');
+            return;
         }
-        else
+        inScope.Add(bindings);
+        declared.Add(nowDeclared);
+    }
+
+    /// <summary>An XML name at the cursor (an element or attribute name), read past.</summary>
+    private string ReadXmlName()
+    {
+        int nameStart = _outputOffset;
+        while (IsNameChar(Peek()))
         {
-            depth++;
+            var codePoint = ReadUtf8Char();
+            if (codePoint == -1)
+                break;
+            AppendCodePoint(codePoint);
         }
+        var name = GetOutputSpan(nameStart).ToString();
+        _outputOffset = nameStart;
+        return name;
+    }
+
+    /// <summary>A character of an XML literal's content, with XML's line-end handling: CRLF and CR are LF.</summary>
+    private int ReadXmlLiteralChar()
+    {
+        var codePoint = ReadUtf8Char();
+        if (codePoint == '\r')
+        {
+            if (Peek() == '\n')
+                Consume();
+            return '\n';
+        }
+        return codePoint;
+    }
+
+    /// <summary>A comment or processing instruction, from <paramref name="open"/> through <paramref name="close"/>, as written (line ends as LF).</summary>
+    private void AppendXmlLiteralMarkup(string open, string close)
+    {
+        for (int i = 0; i < open.Length; i++)
+            Consume();
+        AppendToOutput(open.AsSpan());
+        while (!IsEndOfInput())
+        {
+            bool atClose = true;
+            for (int i = 0; i < close.Length && atClose; i++)
+                atClose = PeekAhead(i) == close[i];
+            if (atClose)
+                break;
+            var codePoint = ReadXmlLiteralChar();
+            if (codePoint == -1)
+                break;
+            AppendCodePoint(codePoint);
+        }
+        for (int i = 0; i < close.Length && !IsEndOfInput(); i++)
+            Consume();
+        AppendToOutput(close.AsSpan());
+    }
+
+    /// <summary>A text character in canonical form: &amp;, &lt;, &gt; and CR as references.</summary>
+    private void AppendCanonicalText(int codePoint)
+    {
+        switch (codePoint)
+        {
+            case -1: break;
+            case '&': AppendToOutput("&amp;".AsSpan()); break;
+            case '<': AppendToOutput("&lt;".AsSpan()); break;
+            case '>': AppendToOutput("&gt;".AsSpan()); break;
+            case '\r': AppendToOutput("&#xD;".AsSpan()); break;
+            default: AppendCodePoint(codePoint); break;
+        }
+    }
+
+    /// <summary>An attribute value in canonical form: &amp;, &lt;, ", tab, LF and CR as references.</summary>
+    private void AppendCanonicalAttributeValue(string value)
+    {
+        foreach (var c in value)
+        {
+            switch (c)
+            {
+                case '&': AppendToOutput("&amp;".AsSpan()); break;
+                case '<': AppendToOutput("&lt;".AsSpan()); break;
+                case '"': AppendToOutput("&quot;".AsSpan()); break;
+                case '\t': AppendToOutput("&#x9;".AsSpan()); break;
+                case '\n': AppendToOutput("&#xA;".AsSpan()); break;
+                case '\r': AppendToOutput("&#xD;".AsSpan()); break;
+                default: AppendToOutput(c); break;
+            }
+        }
+    }
+
+    private static string XmlPrefixOf(string qualifiedName)
+    {
+        int colon = qualifiedName.IndexOf(':');
+        return colon > 0 ? qualifiedName[..colon] : "";
+    }
+
+    private static string XmlLocalName(string qualifiedName)
+    {
+        int colon = qualifiedName.IndexOf(':');
+        return colon > 0 ? qualifiedName[(colon + 1)..] : qualifiedName;
+    }
+
+    /// <summary>An attribute's namespace IRI: none for an unprefixed one (the default namespace is not an attribute's).</summary>
+    private static string XmlAttributeNamespace(string qualifiedName, Dictionary<string, string> bindings)
+    {
+        var prefix = XmlPrefixOf(qualifiedName);
+        if (prefix.Length == 0)
+            return "";
+        if (prefix == "xml")
+            return "http://www.w3.org/XML/1998/namespace";
+        return bindings.TryGetValue(prefix, out var iri) ? iri : "";
     }
 
     /// <summary>

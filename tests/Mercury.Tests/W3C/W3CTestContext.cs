@@ -64,8 +64,6 @@ public static class W3CTestContext
         ["data-r2/syntax-sparql3/manifest#syn-bad-30"] = "SPARQL 1.0 triage: invalid syntax accepted: an expression the grammar does not read (a blank node in FILTER; ?x<?a&&?b>?y)",
 
         // The W3C suite update of 2026-10-28 (rdf-tests f172950 -> d01b141), by cause
-        ["rdf-xml/manifest.ttl#xml-canon-test001"] = "W3C update: an XMLLiteral keeps the in-scope namespace declarations it doesn't use; exclusive canonicalization drops them",
-        ["rdf-xml/manifest.ttl#xml-canon-test002"] = "W3C update: an XMLLiteral keeps the in-scope namespace declarations it doesn't use; exclusive canonicalization drops them",
     };
 
 
