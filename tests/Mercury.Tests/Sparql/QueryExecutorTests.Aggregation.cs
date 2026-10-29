@@ -246,8 +246,8 @@ public partial class QueryExecutorTests
             Assert.True(avgIdx >= 0);
 
             var avg = ExtractLiteralValue(results.Current.GetString(avgIdx).ToString());
-            // (30 + 25 + 35) / 3 = 30
-            Assert.Equal("30", avg);
+            // (30 + 25 + 35) / 3: op:numeric-divide of integers is a decimal, written in its canonical form (§18.5.1.4)
+            Assert.Equal("30.0", avg);
 
             results.Dispose();
         }

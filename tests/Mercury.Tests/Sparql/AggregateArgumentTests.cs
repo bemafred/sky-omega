@@ -21,7 +21,7 @@ public class AggregateArgumentTests : PooledStoreTestBase
     [Theory]
     [InlineData("SELECT (COUNT(?o + 1) AS ?n) WHERE { ?s :p ?o }", new[] { "n=3" })]
     [InlineData("SELECT (COUNT(?o / 0) AS ?n) WHERE { ?s :p ?o }", new[] { "n=0" })]                  // each is an error
-    [InlineData("SELECT (SUM(?o / 2) AS ?n) WHERE { ?s :p ?o }", new[] { "n=3" })]
+    [InlineData("SELECT (SUM(?o / 2) AS ?n) WHERE { ?s :p ?o }", new[] { "n=3.0" })]
     [InlineData("SELECT (COUNT(DISTINCT ?o + 1) AS ?n) WHERE { ?s ?p ?o }", new[] { "n=4" })]
     [InlineData("SELECT (MAX(?o) - MIN(?o) AS ?span) WHERE { ?s :p ?o }", new[] { "span=2" })]       // led by an aggregate
     [InlineData("SELECT (MAX(?o + 1) * 2 AS ?x) WHERE { ?s :p ?o }", new[] { "x=8" })]

@@ -434,16 +434,13 @@ internal sealed class GroupedRow
 
     // Aggregate accumulators
     private readonly long[] _counts;
-    private readonly double[] _sums;
-    private readonly decimal[] _decimalSums;    // For precise decimal arithmetic
+    private readonly NumericTotal[] _totals;    // SUM and AVG: the op:numeric-add total of the values (§18.5.1.3)
     private readonly string?[] _minTerms;   // MIN/MAX keep the winning term itself, ordered as ORDER BY orders it
     private readonly string?[] _maxTerms;   // (§18.5.1.4–5); re-formatting it broke a join on the result (W3C sq08).
-    private readonly bool[] _useDecimal;        // True if all values are decimal (not double/float)
     private readonly HashSet<string>?[] _distinctSets;
     private readonly List<string>?[] _concatValues;  // For GROUP_CONCAT
     private readonly string[] _separators;           // For GROUP_CONCAT
     private readonly string?[] _sampleValues;        // For SAMPLE
-    private readonly bool[] _hasError;               // True if aggregate encountered error (e.g., non-numeric for AVG/SUM)
 
     public int KeyCount => _keyCount;
     public int AggregateCount => _aggCount;
@@ -472,16 +469,13 @@ internal sealed class GroupedRow
         _aggVarHashes = new int[_aggCount];
         _aggExpressions = new string?[_aggCount];
         _counts = new long[_aggCount];
-        _sums = new double[_aggCount];
-        _decimalSums = new decimal[_aggCount];
+        _totals = new NumericTotal[_aggCount]; // each the integer 0, the total of nothing
         _minTerms = new string?[_aggCount];
         _maxTerms = new string?[_aggCount];
-        _useDecimal = new bool[_aggCount];
         _distinctSets = new HashSet<string>?[_aggCount];
         _concatValues = new List<string>?[_aggCount];
         _separators = new string[_aggCount];
         _sampleValues = new string?[_aggCount];
-        _hasError = new bool[_aggCount];
 
         for (int i = 0; i < _aggCount; i++)
         {
@@ -505,7 +499,6 @@ internal sealed class GroupedRow
             _aggExpressions[i] = isExpression ? varName.ToString() : null;
 
             // Initialize accumulators
-            _useDecimal[i] = true; // Assume decimal until we see a double/float
             if (agg.Distinct)
             {
                 _distinctSets[i] = new HashSet<string>();
@@ -532,10 +525,6 @@ internal sealed class GroupedRow
 
             // Find the value for this aggregate's variable
             string? valueStr = null;
-            double numValue = 0;
-            decimal decimalValue = 0;
-            bool hasNumValue = false;
-            bool isDouble = false;
 
             // For COUNT(*), we don't need a specific variable
             if (varHash != VariableName.Hash("*".AsSpan()))
@@ -558,11 +547,7 @@ internal sealed class GroupedRow
                     // values); a value is read as its term, as a bound variable is
                     if (value.Type == ValueType.Unbound)
                         continue;
-                    else
-                    {
-                        valueStr = value.Term();
-                        hasNumValue = TryParseRdfNumeric(valueStr, out numValue, out decimalValue, out isDouble);
-                    }
+                    valueStr = value.Term();
                 }
                 else
                 {
@@ -571,8 +556,6 @@ internal sealed class GroupedRow
                     if (idx >= 0)
                     {
                         valueStr = bindings.GetString(idx).ToString();
-                        // Use RDF-aware numeric parsing to handle typed literals like "1"^^<xsd:integer>
-                        hasNumValue = TryParseRdfNumeric(valueStr, out numValue, out decimalValue, out isDouble);
                     }
                     else
                     {
@@ -605,10 +588,6 @@ internal sealed class GroupedRow
                     continue; // Already seen this value
             }
 
-            // If we encounter a double/float value, switch to double mode
-            if (hasNumValue && isDouble)
-                _useDecimal[i] = false;
-
             // Update accumulator based on function
             switch (func)
             {
@@ -616,29 +595,11 @@ internal sealed class GroupedRow
                     _counts[i]++;
                     break;
                 case AggregateFunction.Sum:
-                    if (hasNumValue)
-                    {
-                        _sums[i] += numValue;
-                        _decimalSums[i] += decimalValue;
-                    }
-                    else if (valueStr != null)
-                    {
-                        // Bound but not numeric - SPARQL error propagation
-                        _hasError[i] = true;
-                    }
+                    _totals[i].Add(Value.FromTerm(valueStr));
                     break;
                 case AggregateFunction.Avg:
-                    if (hasNumValue)
-                    {
-                        _sums[i] += numValue;
-                        _decimalSums[i] += decimalValue;
-                        _counts[i]++;
-                    }
-                    else if (valueStr != null)
-                    {
-                        // Bound but not numeric - SPARQL error propagation
-                        _hasError[i] = true;
-                    }
+                    _totals[i].Add(Value.FromTerm(valueStr));
+                    _counts[i]++;
                     break;
                 case AggregateFunction.Min:
                     if (valueStr != null &&
@@ -669,28 +630,12 @@ internal sealed class GroupedRow
     {
         for (int i = 0; i < _aggCount; i++)
         {
-            // Check for error first - return empty (no binding) for numeric aggregates with errors
-            if (_hasError[i])
-            {
-                var func = _aggFunctions[i];
-                if (func == AggregateFunction.Sum || func == AggregateFunction.Avg)
-                {
-                    _aggValues[i] = "";
-                    continue;
-                }
-            }
-
             _aggValues[i] = _aggFunctions[i] switch
             {
                 AggregateFunction.Count => FormatTypedLiteral(_counts[i].ToString(), XsdInteger),
-                AggregateFunction.Sum => _useDecimal[i]
-                    ? FormatTypedLiteral(FormatDecimal(_decimalSums[i]), XsdDecimal)
-                    : FormatTypedLiteral(_sums[i].ToString(CultureInfo.InvariantCulture), XsdDouble),
-                AggregateFunction.Avg => _counts[i] > 0
-                    ? (_useDecimal[i]
-                        ? FormatTypedLiteral(FormatDecimal(_decimalSums[i] / _counts[i]), XsdDecimal)
-                        : FormatTypedLiteral((_sums[i] / _counts[i]).ToString(CultureInfo.InvariantCulture), XsdDouble))
-                    : FormatTypedLiteral("0", XsdInteger),
+                // An error, a value that is no number among them, leaves the aggregate unbound (§18.5.1)
+                AggregateFunction.Sum => _totals[i].Term(),
+                AggregateFunction.Avg => _totals[i].AverageTerm(_counts[i]),
                 // MIN/MAX return the winning term itself, so MAX(?y) of xsd:integer values can join back (sq08)
                 AggregateFunction.Min => _minTerms[i] ?? "",
                 AggregateFunction.Max => _maxTerms[i] ?? "",
@@ -704,8 +649,6 @@ internal sealed class GroupedRow
     }
 
     private const string XsdInteger = "http://www.w3.org/2001/XMLSchema#integer";
-    private const string XsdDecimal = "http://www.w3.org/2001/XMLSchema#decimal";
-    private const string XsdDouble = "http://www.w3.org/2001/XMLSchema#double";
 
     /// <summary>
     /// Format a value as a typed RDF literal: "value"^^&lt;datatype&gt;
@@ -731,98 +674,58 @@ internal sealed class GroupedRow
         return term;
     }
 
-    /// <summary>
-    /// Format a decimal value, removing trailing zeros but keeping at least one decimal place
-    /// if the original value had decimals.
-    /// </summary>
-    private static string FormatDecimal(decimal value)
-    {
-        // Use G29 to get up to 29 significant digits without trailing zeros
-        var str = value.ToString("G29", CultureInfo.InvariantCulture);
-        return str;
-    }
-
     public int GetKeyHash(int index) => _keyHashes[index];
     public ReadOnlySpan<char> GetKeyValue(int index) => _keyValues[index];
     public int GetAggregateHash(int index) => _aggHashes[index];
     public ReadOnlySpan<char> GetAggregateValue(int index) => _aggValues[index];
 
-
     /// <summary>
-    /// Try to parse a numeric value from an RDF literal string.
-    /// Handles formats: "42", "3.14", "1"^^&lt;xsd:integer&gt;, "2.0"^^&lt;xsd:decimal&gt;
-    /// Returns both double and decimal representations, and indicates if the value
-    /// is a double (scientific notation or xsd:double/xsd:float type).
+    /// A running op:numeric-add total (SPARQL 1.1 §18.5.1.3), kept as the number the evaluator computes: an integer,
+    /// decimal, float or double, promoted as XPath promotes (<see cref="Value.Arithmetic"/>). Its default is the
+    /// integer 0, the total of nothing; a value that is no number makes it an error, which it stays.
     /// </summary>
-    private static bool TryParseRdfNumeric(string str, out double doubleResult, out decimal decimalResult, out bool isDouble)
+    private struct NumericTotal
     {
-        doubleResult = 0;
-        decimalResult = 0;
-        isDouble = false;
+        private bool _isError;
+        private ValueType _type; // Unbound (the default) is the integer 0
+        private long _integer;
+        private decimal _decimal;
+        private double _double;
 
-        if (string.IsNullOrEmpty(str))
-            return false;
-
-        string valueStr;
-        string? datatype = null;
-
-        // Handle typed literals: "value"^^<datatype>
-        if (str.StartsWith('"'))
+        private readonly Value AsValue() => _isError ? Value.Error : _type switch
         {
-            // Find end of quoted value - it's either ^^ (typed), @ (language), or closing quote
-            int endQuote = str.IndexOf('"', 1);
-            if (endQuote <= 0)
-                return false;
+            ValueType.Decimal => Value.FromDecimal(_decimal),
+            ValueType.Float => Value.FromFloat(_double),
+            ValueType.Double => Value.FromDouble(_double),
+            _ => Value.FromInteger(_integer),
+        };
 
-            // Extract the value between quotes
-            valueStr = str.Substring(1, endQuote - 1);
-
-            // Check for datatype
-            var suffix = str.AsSpan(endQuote + 1);
-            if (suffix.StartsWith("^^"))
-            {
-                var dtStr = suffix.Slice(2).ToString();
-                if (dtStr.StartsWith('<') && dtStr.EndsWith('>'))
-                    datatype = dtStr.Substring(1, dtStr.Length - 2);
-                else
-                    datatype = dtStr;
-            }
-        }
-        else
+        public void Add(scoped in Value value)
         {
-            valueStr = str;
+            var total = Value.Arithmetic('+', AsValue(), value);
+            _isError = total.Type == ValueType.Unbound;
+            _type = total.Type;
+            _integer = total.IntegerValue;
+            _decimal = total.DecimalValue;
+            _double = total.DoubleValue;
         }
 
-        // Determine if this is a double/float type
-        isDouble = datatype != null &&
-            (datatype.EndsWith("double", StringComparison.OrdinalIgnoreCase) ||
-             datatype.EndsWith("float", StringComparison.OrdinalIgnoreCase));
+        /// <summary>The total as a term; empty for an error.</summary>
+        public readonly string Term() => _isError ? "" : AsValue().Term();
 
-        // Also check for scientific notation (indicates double)
-        if (!isDouble && (valueStr.Contains('e') || valueStr.Contains('E')))
-            isDouble = true;
-
-        // Try to parse as double (always)
-        if (!double.TryParse(valueStr, NumberStyles.Float, CultureInfo.InvariantCulture, out doubleResult))
-            return false;
-
-        // Try to parse as decimal (may fail for very large/small numbers or scientific notation)
-        if (!decimal.TryParse(valueStr, NumberStyles.Float, CultureInfo.InvariantCulture, out decimalResult))
+        /// <summary>
+        /// §18.5.1.4 Avg: the total divided by the count (op:numeric-divide, so integers give a decimal), and 0 for
+        /// no values; empty for an error.
+        /// </summary>
+        public readonly string AverageTerm(long count)
         {
-            // If decimal parse fails, use the double value converted to decimal
-            // This will lose precision but at least gives us a value
-            try
-            {
-                decimalResult = (decimal)doubleResult;
-            }
-            catch
-            {
-                decimalResult = 0;
-                isDouble = true; // Force double mode since decimal can't represent this
-            }
+            if (_isError)
+                return "";
+            if (count == 0)
+                return Value.FromInteger(0).Term();
+            var average = Value.Arithmetic('/', AsValue(), Value.FromInteger(count));
+            return average.Type == ValueType.Unbound ? "" : average.Term();
         }
-
-        return true;
     }
 }
 
