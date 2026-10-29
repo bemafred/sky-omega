@@ -46,6 +46,7 @@ public static class SparqlEngine
 
         try
         {
+            sparql = SparqlParser.ResolveAgainstBase(sparql); // §4.1.1.1: relative IRIs against BASE, at parse
             var parser = new SparqlParser(sparql.AsSpan());
             Query parsed;
 
@@ -164,6 +165,7 @@ public static class SparqlEngine
 
         try
         {
+            sparql = SparqlParser.ResolveAgainstBase(sparql); // §4.1.1.1: relative IRIs against BASE, at parse
             var parser = new SparqlParser(sparql.AsSpan());
             UpdateOperation[] operations;
 
@@ -219,6 +221,7 @@ public static class SparqlEngine
     /// <returns>The formatted explain plan as a string.</returns>
     public static string Explain(string sparql, QuadStore? store = null)
     {
+        sparql = SparqlParser.ResolveAgainstBase(sparql); // §4.1.1.1: relative IRIs against BASE, at parse
         var parser = new SparqlParser(sparql.AsSpan());
         var query = parser.ParseQuery();
 

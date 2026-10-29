@@ -56,11 +56,6 @@ public static class W3CTestContext
     /// </summary>
     private static readonly Dictionary<string, string> KnownFailures = new()
     {
-        ["data-r2/basic/manifest#base-prefix-1"] = "SPARQL 1.0 triage: relative IRIs are not resolved against BASE",
-        ["data-r2/basic/manifest#base-prefix-2"] = "SPARQL 1.0 triage: relative IRIs are not resolved against BASE",
-        ["data-r2/basic/manifest#base-prefix-6"] = "SPARQL 1.0 triage: relative IRIs are not resolved against BASE",
-        ["data-r2/basic/manifest#base-prefix-4"] = "SPARQL 1.0 triage: relative IRIs are not resolved against BASE",
-        ["data-r2/basic/manifest#base-prefix-5"] = "SPARQL 1.0 triage: relative IRIs are not resolved against BASE",
         ["data-r2/basic/manifest#quotes-1"] = "SPARQL 1.0 triage: long string literals in a pattern",
         ["data-r2/basic/manifest#quotes-2"] = "SPARQL 1.0 triage: long string literals in a pattern",
         ["data-r2/basic/manifest#quotes-3"] = "SPARQL 1.0 triage: long string literals in a pattern",

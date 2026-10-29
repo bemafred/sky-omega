@@ -43,7 +43,7 @@ public class SparqlConformanceTests
         _output.WriteLine($"File: {test.ActionPath}");
 
         // Read the query
-        var query = File.ReadAllText(test.ActionPath);
+        var query = SparqlParser.ResolveAgainstBase(File.ReadAllText(test.ActionPath)); // as SparqlEngine reads it
         _output.WriteLine($"Query:\n{query}");
 
         // Positive syntax test: should parse without error
@@ -68,7 +68,7 @@ public class SparqlConformanceTests
         _output.WriteLine($"File: {test.ActionPath}");
 
         // Read the query
-        var query = File.ReadAllText(test.ActionPath);
+        var query = SparqlParser.ResolveAgainstBase(File.ReadAllText(test.ActionPath)); // as SparqlEngine reads it
         _output.WriteLine($"Query:\n{query}");
 
         // Negative syntax test: should throw an exception
@@ -92,7 +92,7 @@ public class SparqlConformanceTests
             Assert.SkipWhen(true, reason);
         Assert.SkipUnless(test.IsApproved, $"Rejected by the working group ({test.Approval})");
 
-        var update = File.ReadAllText(test.ActionPath);
+        var update = SparqlParser.ResolveAgainstBase(File.ReadAllText(test.ActionPath)); // as SparqlEngine reads it
         _output.WriteLine($"Update:\n{update}");
 
         // Positive Update syntax test: the Update parser reads it without error
@@ -111,7 +111,7 @@ public class SparqlConformanceTests
             Assert.SkipWhen(true, reason);
         Assert.SkipUnless(test.IsApproved, $"Rejected by the working group ({test.Approval})");
 
-        var update = File.ReadAllText(test.ActionPath);
+        var update = SparqlParser.ResolveAgainstBase(File.ReadAllText(test.ActionPath)); // as SparqlEngine reads it
         _output.WriteLine($"Update:\n{update}");
 
         // Negative Update syntax test: the Update parser rejects it
@@ -145,7 +145,8 @@ public class SparqlConformanceTests
         Assert.SkipUnless(File.Exists(test.ResultPath), $"Result file not found: {test.ResultPath}");
 
         // Read the query
-        var query = await File.ReadAllTextAsync(test.ActionPath, TestContext.Current.CancellationToken);
+        var query = SparqlParser.ResolveAgainstBase( // as SparqlEngine reads it
+            await File.ReadAllTextAsync(test.ActionPath, TestContext.Current.CancellationToken));
         _output.WriteLine($"Query:\n{query}");
 
         // Create a temporary store and load data
@@ -975,7 +976,8 @@ public class SparqlConformanceTests
         Assert.SkipUnless(File.Exists(test.ActionPath), $"Update file not found: {test.ActionPath}");
 
         // Read the update query (.ru file)
-        var update = await File.ReadAllTextAsync(test.ActionPath, TestContext.Current.CancellationToken);
+        var update = SparqlParser.ResolveAgainstBase( // as SparqlEngine reads it
+            await File.ReadAllTextAsync(test.ActionPath, TestContext.Current.CancellationToken));
         _output.WriteLine($"Update:\n{update}");
 
         // Create a temporary store and load initial data

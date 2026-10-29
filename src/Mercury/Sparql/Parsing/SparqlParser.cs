@@ -533,6 +533,70 @@ internal ref partial struct SparqlParser
         return prologue;
     }
 
+    /// <summary>
+    /// SPARQL 1.1 §4.1.1.1: a relative IRI is resolved against the base IRI (RFC 3986 §5.2) when the query is parsed.
+    /// Returns <paramref name="text"/> with every relative IRIREF written as the absolute IRI it resolves to, so the
+    /// parser and the executor read absolute IRIs only. Each BASE sets the base for the text after it (a relative BASE
+    /// is resolved against the one before it), so a PREFIX IRI resolves against the base where it is declared, and an
+    /// Update's later operation against its own BASE. IRIREFs are found with the expression token rule, so a '&lt;'
+    /// inside a literal or comment, or the less-than operator, is not one. A relative IRI with no absolute base in
+    /// scope is left as written; a query with no BASE is returned as it is.
+    /// </summary>
+    internal static string ResolveAgainstBase(string text)
+    {
+        if (text.IndexOf("BASE", StringComparison.OrdinalIgnoreCase) < 0)
+            return text;
+
+        var parser = new SparqlParser(text.AsSpan());
+        System.Text.StringBuilder? resolved = null;
+        string? baseIri = null;
+        bool baseFollows = false; // the next IRIREF is a BASE declaration's
+        int copied = 0;
+        while (true)
+        {
+            parser.SkipWhitespace();
+            if (parser.IsAtEnd())
+                break;
+
+            char ch = parser.Peek();
+            if (ch == '<')
+            {
+                int start = parser._position;
+                if (!parser.TrySkipIriRef())
+                {
+                    parser.Advance(); // the less-than operator
+                    continue;
+                }
+                string iri = text.Substring(start + 1, parser._position - start - 2);
+                if (baseIri != null && !Rdf.RdfIri.HasScheme(iri))
+                {
+                    iri = Rdf.RdfIri.Resolve(baseIri, iri);
+                    resolved ??= new System.Text.StringBuilder(text.Length + 64);
+                    resolved.Append(text, copied, start - copied).Append('<').Append(iri).Append('>');
+                    copied = parser._position;
+                }
+                if (baseFollows && Rdf.RdfIri.HasScheme(iri))
+                    baseIri = iri;
+                baseFollows = false;
+                continue;
+            }
+            if (parser.AtKeyword("BASE"))
+            {
+                parser.ConsumeKeyword("BASE");
+                baseFollows = true;
+                continue;
+            }
+            if (ch is '(' or ')' or '{' or '}')
+                parser.Advance(); // into groups: their IRIs are read token by token
+            else
+                parser.SkipExpressionToken();
+        }
+
+        if (resolved == null)
+            return text;
+        return resolved.Append(text, copied, text.Length - copied).ToString();
+    }
+
     private void ParseBaseDecl(ref Prologue prologue)
     {
         ConsumeKeyword("BASE");
