@@ -16,7 +16,7 @@ public class LiteralFormTests
 {
     private static string Canon(string input)
     {
-        var result = LiteralForm.Canonicalize(input.AsSpan(), out _);
+        var result = LiteralForm.StoredTerm(input.AsSpan(), null, ReadOnlySpan<char>.Empty, out _);
         return result.ToString();
     }
 
@@ -42,7 +42,7 @@ public class LiteralFormTests
     public void LiteralWithoutEscapes_FastPath_VerbatimSpan()
     {
         var input = "\"hello\"";
-        var span = LiteralForm.Canonicalize(input.AsSpan(), out var scratch);
+        var span = LiteralForm.StoredTerm(input.AsSpan(), null, ReadOnlySpan<char>.Empty, out var scratch);
 
         Assert.Null(scratch);
         Assert.True(span == input.AsSpan(), "fast-path span must equal the input span exactly");
@@ -52,7 +52,7 @@ public class LiteralFormTests
     public void LiteralWithoutEscapes_WithLangTag_FastPath()
     {
         var input = "\"hello\"@en";
-        var span = LiteralForm.Canonicalize(input.AsSpan(), out var scratch);
+        var span = LiteralForm.StoredTerm(input.AsSpan(), null, ReadOnlySpan<char>.Empty, out var scratch);
 
         Assert.Null(scratch);
         Assert.True(span == input.AsSpan());
@@ -62,7 +62,7 @@ public class LiteralFormTests
     public void LiteralWithoutEscapes_WithDatatype_FastPath()
     {
         var input = "\"42\"^^<http://www.w3.org/2001/XMLSchema#integer>";
-        var span = LiteralForm.Canonicalize(input.AsSpan(), out var scratch);
+        var span = LiteralForm.StoredTerm(input.AsSpan(), null, ReadOnlySpan<char>.Empty, out var scratch);
 
         Assert.Null(scratch);
         Assert.True(span == input.AsSpan());
@@ -155,7 +155,7 @@ public class LiteralFormTests
     {
         // U+D800 is a surrogate, not allowed as a Unicode code point.
         Assert.Throws<InvalidOperationException>(() =>
-            LiteralForm.Canonicalize("\"\\uD800\"".AsSpan(), out _));
+            LiteralForm.StoredTerm("\"\\uD800\"".AsSpan(), null, ReadOnlySpan<char>.Empty, out _));
     }
 
     [Fact]
@@ -163,7 +163,7 @@ public class LiteralFormTests
     {
         // U+110000 exceeds U+10FFFF.
         Assert.Throws<InvalidOperationException>(() =>
-            LiteralForm.Canonicalize("\"\\U00110000\"".AsSpan(), out _));
+            LiteralForm.StoredTerm("\"\\U00110000\"".AsSpan(), null, ReadOnlySpan<char>.Empty, out _));
     }
 
     [Fact]
@@ -197,7 +197,7 @@ public class LiteralFormTests
         // but in our verbatim form, no \ appears here. This is a control: literal
         // "" with no escapes should fast-path.
         var input = "\"\"";
-        var span = LiteralForm.Canonicalize(input.AsSpan(), out var scratch);
+        var span = LiteralForm.StoredTerm(input.AsSpan(), null, ReadOnlySpan<char>.Empty, out var scratch);
         Assert.Null(scratch);
         Assert.True(span == input.AsSpan());
     }
@@ -260,11 +260,11 @@ public class LiteralFormTests
     public void ScratchOwner_BoundOnSlowPath_NullOnFastPath()
     {
         // Fast path
-        LiteralForm.Canonicalize("\"plain\"".AsSpan(), out var s1);
+        LiteralForm.StoredTerm("\"plain\"".AsSpan(), null, ReadOnlySpan<char>.Empty, out var s1);
         Assert.Null(s1);
 
         // Slow path
-        LiteralForm.Canonicalize("\"a\\\"b\"".AsSpan(), out var s2);
+        LiteralForm.StoredTerm("\"a\\\"b\"".AsSpan(), null, ReadOnlySpan<char>.Empty, out var s2);
         Assert.NotNull(s2);
         Assert.Equal("\"a\"b\"", s2);
     }
@@ -276,8 +276,8 @@ public class LiteralFormTests
         // returns a span into a fresh immutable string. Two consecutive slow-path
         // calls bound to two different scratch fields keep both spans alive
         // independently.
-        var span1 = LiteralForm.Canonicalize("\"a\\\"x\"".AsSpan(), out var owner1);
-        var span2 = LiteralForm.Canonicalize("\"b\\\"y\"".AsSpan(), out var owner2);
+        var span1 = LiteralForm.StoredTerm("\"a\\\"x\"".AsSpan(), null, ReadOnlySpan<char>.Empty, out var owner1);
+        var span2 = LiteralForm.StoredTerm("\"b\\\"y\"".AsSpan(), null, ReadOnlySpan<char>.Empty, out var owner2);
 
         Assert.NotNull(owner1);
         Assert.NotNull(owner2);
@@ -337,7 +337,7 @@ public class LiteralFormTests
         // In practice IRIs cannot contain '\' per RFC 3987, but the contract
         // documents that non-literal inputs are pass-through.
         var input = "<urn:ex\\backslash>";
-        var span = LiteralForm.Canonicalize(input.AsSpan(), out var scratch);
+        var span = LiteralForm.StoredTerm(input.AsSpan(), null, ReadOnlySpan<char>.Empty, out var scratch);
         Assert.Null(scratch);
         Assert.True(span == input.AsSpan());
     }

@@ -2,6 +2,7 @@ using System;
 using System.Text;
 using SkyOmega.Mercury.Rdf;
 using SkyOmega.Mercury.Sparql.Types;
+using SkyOmega.Mercury.Sparql.Patterns;
 
 namespace SkyOmega.Mercury.Sparql.Execution;
 
@@ -13,7 +14,7 @@ namespace SkyOmega.Mercury.Sparql.Execution;
 /// literal whose abstract value is <c>a"b</c>. The SPARQL parser by contrast retains
 /// verbatim source spans like <c>"a\"b"</c>. This helper bridges the asymmetry: each
 /// SPARQL-source-literal materialization site that flows to atom storage or
-/// atom-store-match comparison runs the span through <see cref="Canonicalize"/> so the
+/// atom-store-match comparison runs the span through <see cref="StoredTerm"/> so the
 /// stored / compared form converges on the streaming-parser canonical bytes.
 ///
 /// Fast path: a literal with no <c>\</c> in it returns verbatim (zero allocation).
@@ -35,55 +36,45 @@ namespace SkyOmega.Mercury.Sparql.Execution;
 /// </summary>
 internal static class LiteralForm
 {
-    public static ReadOnlySpan<char> Canonicalize(
-        ReadOnlySpan<char> sourceLiteral,
-        out string? scratchOwner)
+    /// <summary>
+    /// The stored form of a SPARQL constant that is not an IRI or a prefixed name: an RDFLiteral ([129]), a
+    /// NumericLiteral ([130]) or a BooleanLiteral ([134]), as the RDF parsers store the term. Its lexical form is
+    /// decoded and wrapped in a double quote, so a single-quoted or a long string is the same literal as its short
+    /// double-quoted form; a prefixed datatype is expanded through the prologue ("456."^^xsd:decimal); a number or
+    /// boolean is its typed literal, as written (+5 is "+5"^^xsd:integer). It is read by the expression evaluator's
+    /// constant reader (ADR-056), the one reader of a SPARQL literal, so a pattern, VALUES, a CONSTRUCT template and
+    /// Update data store and match the term a FILTER or BIND reads. A constant already in stored form ("x", "x"@en,
+    /// "x"^^&lt;iri&gt;, no escape), an IRI or a blank node is returned as it is, with no allocation; so is a token the
+    /// evaluator does not read as a constant.
+    /// </summary>
+    public static ReadOnlySpan<char> StoredTerm(ReadOnlySpan<char> constant, PrefixMapping[]? prefixes,
+        ReadOnlySpan<char> source, out string? scratchOwner)
     {
         scratchOwner = null;
+        if (constant.Length == 0 || constant[0] is '<' or '_' || IsStoredLiteral(constant))
+            return constant;
 
-        if (sourceLiteral.Length == 0 || sourceLiteral[0] != '"')
-            return sourceLiteral;
-
-        if (sourceLiteral.IndexOf('\\') < 0)
-            return sourceLiteral;
-
-        var sb = new StringBuilder(sourceLiteral.Length);
-        sb.Append('"');
-
-        int i = 1;
-        bool closedWrapper = false;
-
-        while (i < sourceLiteral.Length)
-        {
-            var ch = sourceLiteral[i];
-
-            if (ch == '"')
-            {
-                sb.Append('"');
-                i++;
-                closedWrapper = true;
-                break;
-            }
-
-            if (ch == '\\')
-                i = DecodeEscapeAppend(sourceLiteral, i, sb);
-            else
-            {
-                sb.Append(ch);
-                i++;
-            }
-        }
-
-        if (!closedWrapper)
-            throw new InvalidOperationException(
-                "Unterminated literal: opening '\"' has no matching close. " +
-                "Should have been rejected at parse time.");
-
-        if (i < sourceLiteral.Length)
-            sb.Append(sourceLiteral.Slice(i));
-
-        scratchOwner = sb.ToString();
+        var value = new Expressions.FilterEvaluator(constant).EvaluateToValue(
+            ReadOnlySpan<Binding>.Empty, 0, ReadOnlySpan<char>.Empty, prefixes, source);
+        if (value.Type == Expressions.ValueType.Unbound)
+            return constant;
+        scratchOwner = value.Term();
         return scratchOwner.AsSpan();
+    }
+
+    /// <summary>A short double-quoted literal with no escape, alone or with '@lang' or '^^&lt;iri&gt;': the stored form.</summary>
+    private static bool IsStoredLiteral(ReadOnlySpan<char> term)
+    {
+        const char Backslash = (char)92;
+        if (term.Length < 2 || term[0] != '"' || term.IndexOf(Backslash) >= 0)
+            return false;
+        if (term.Length >= 3 && term[1] == '"' && term[2] == '"')
+            return false; // a long string: three quotes open it
+        int close = term.LastIndexOf('"');
+        if (close == 0)
+            return false;
+        var suffix = term[(close + 1)..];
+        return suffix.IsEmpty || suffix[0] == '@' || suffix.StartsWith("^^<");
     }
 
     /// <summary>

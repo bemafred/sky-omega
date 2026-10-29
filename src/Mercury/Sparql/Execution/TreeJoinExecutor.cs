@@ -1006,14 +1006,15 @@ internal sealed class TreeJoinExecutor
     {
         if (text.Length == 0) return text;
         char c = text[0];
-        if (c is '<' or '"' or '\'' or '_') return text; // IRI / literal / blank node — already a canonical term
+        if (c is '<' or '_') return text; // IRI / blank node: already a term
 
-        // Numeric and boolean VALUES tokens are typed literals in SPARQL (25 ≡ "25"^^xsd:integer) — canonicalize via
-        // the shared LiteralForm so VALUES and the constant-object scan (TriplePatternScan) stay identical; the old
-        // path matched these value-aware. A non-numeric/non-boolean token falls through to prefix expansion below.
-        _ = LiteralForm.CanonicalizeNumericOrBoolean(text.AsSpan(), out var canonical);
-        if (canonical != null) return canonical;
-
+        // A literal, number or boolean is the term it denotes, as the constant-object scan matches it
+        // (LiteralForm.StoredTerm); any other token is a prefixed name
+        if (c is '"' or '+' or '-' or '.' || c == (char)39 || char.IsAsciiDigit(c) || text is "true" or "false")
+        {
+            var stored = LiteralForm.StoredTerm(text.AsSpan(), _prefixes, _prefixSource.AsSpan(), out var scratch);
+            return scratch ?? stored.ToString();
+        }
         return text.Contains(':') ? ExpandPname(text) : text; // a prefixed name; everything else has no ':' to expand
     }
 

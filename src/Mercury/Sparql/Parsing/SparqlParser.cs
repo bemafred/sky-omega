@@ -151,10 +151,7 @@ internal ref partial struct SparqlParser
             }
             // Skip any trailing quantifier (*+?)
             SkipWhitespace();
-            ch = Peek();
-            if (ch == '*' || ch == '+')
-                Advance();
-            else if (ch == '?' && !IsLetter(PeekAt(1)) && PeekAt(1) != '_')
+            if (PathModAt() != '\0')
                 Advance();
             return;
         }
@@ -191,10 +188,7 @@ internal ref partial struct SparqlParser
         // Check for quantifier suffix on simple term (WITHOUT skipping whitespace first)
         // We must not skip whitespace here because callers rely on _position being
         // at the end of the path element content, not after any trailing whitespace.
-        ch = Peek();
-        if (ch == '*' || ch == '+')
-            Advance();
-        else if (ch == '?' && !IsLetter(PeekAt(1)) && PeekAt(1) != '_')
+        if (PathModAt() != '\0')
             Advance();
     }
 
@@ -811,9 +805,9 @@ internal ref partial struct SparqlParser
             //    preserve as Grouped{ZeroOrMore,OneOrMore,ZeroOrOne} with a content span; the
             //    walker re-parses the content on demand. This is what enables `((A|B))+` to keep
             //    its alternative semantics rather than collapsing to `A+`.
-            if (ch == '*' || ch == '+' || (ch == '?' && !IsLetter(PeekAt(1)) && PeekAt(1) != '_'))
+            char outer = PathModAt();
+            if (outer != '\0')
             {
-                char outer = ch;
                 Advance();
 
                 if (innerPath.Type == PathType.None)
@@ -968,9 +962,18 @@ internal ref partial struct SparqlParser
         // early was the (p*/p) "Expected ')'" parse bug WDBench breadth surfaced (ADR-047).
         bool hasQuantifier = false;
         PropertyPath quantified = default;
-        if (ch == '*') { Advance(); quantified = PropertyPath.ZeroOrMore(term); hasQuantifier = true; }
-        else if (ch == '+') { Advance(); quantified = PropertyPath.OneOrMore(term); hasQuantifier = true; }
-        else if (ch == '?' && !IsLetter(PeekAt(1)) && PeekAt(1) != '_') { Advance(); quantified = PropertyPath.ZeroOrOne(term); hasQuantifier = true; }
+        char mod = PathModAt();
+        if (mod != '\0')
+        {
+            Advance();
+            quantified = mod switch
+            {
+                '*' => PropertyPath.ZeroOrMore(term),
+                '+' => PropertyPath.OneOrMore(term),
+                _ => PropertyPath.ZeroOrOne(term),
+            };
+            hasQuantifier = true;
+        }
 
         // The left PathElt span — base term plus the modifier char if present — is the left operand of any following
         // sequence/alternative, so that p*/q re-parses its left as p*, not p. Without a modifier it is exactly the
@@ -1252,23 +1255,8 @@ internal ref partial struct SparqlParser
         var ch = Peek();
 
         // Trailing quantifier: *, +, ?
-        bool hasQuantifier = false;
-        char q = '\0';
-        if (ch == '*' || ch == '+')
-        {
-            hasQuantifier = true;
-            q = ch;
-        }
-        else if (ch == '?')
-        {
-            // Distinguish from variable — '?' followed by letter/underscore is a variable
-            var next = PeekAt(1);
-            if (!IsLetter(next) && next != '_')
-            {
-                hasQuantifier = true;
-                q = '?';
-            }
-        }
+        char q = PathModAt();
+        bool hasQuantifier = q != '\0';
 
         if (hasQuantifier)
         {
@@ -1843,6 +1831,30 @@ internal ref partial struct SparqlParser
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    /// <summary>
+    /// [93] PathMod ::= '?' | '*' | '+' at the cursor: the modifier, or '\0' for none. Tokens are matched longest
+    /// first (§19.8), so a '?' that begins a VARNAME (?x, ?1) is a variable, and a '+' that begins INTEGER_POSITIVE,
+    /// DECIMAL_POSITIVE or DOUBLE_POSITIVE (+5, +.5) is a number: <c>:p +5</c> is :p with the object +5, not :p+. The
+    /// one reading of a path modifier for every path parse.
+    /// </summary>
+    private char PathModAt()
+    {
+        char ch = Peek();
+        if (ch == '*')
+            return '*';
+        if (ch == '+')
+        {
+            char next = PeekAt(1);
+            return IsDigit(next) || (next == '.' && IsDigit(PeekAt(2))) ? '\0' : '+';
+        }
+        if (ch == '?')
+        {
+            char next = PeekAt(1);
+            return IsLetter(next) || next == '_' || IsDigit(next) ? '\0' : '?';
+        }
+        return '\0';
+    }
+
     private char PeekAt(int offset)
     {
         var pos = _position + offset;

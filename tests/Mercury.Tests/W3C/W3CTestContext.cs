@@ -56,17 +56,9 @@ public static class W3CTestContext
     /// </summary>
     private static readonly Dictionary<string, string> KnownFailures = new()
     {
-        ["data-r2/basic/manifest#quotes-1"] = "SPARQL 1.0 triage: long string literals in a pattern",
-        ["data-r2/basic/manifest#quotes-2"] = "SPARQL 1.0 triage: long string literals in a pattern",
-        ["data-r2/basic/manifest#quotes-3"] = "SPARQL 1.0 triage: long string literals in a pattern",
-        ["data-r2/basic/manifest#quotes-4"] = "SPARQL 1.0 triage: long string literals in a pattern",
-        ["data-r2/basic/manifest#term-6"] = "SPARQL 1.0 triage: numeric literal forms in a pattern (\"456.\"^^xsd:decimal, +5)",
-        ["data-r2/basic/manifest#term-7"] = "SPARQL 1.0 triage: numeric literal forms in a pattern (\"456.\"^^xsd:decimal, +5)",
-        ["data-r2/basic/manifest#term-8"] = "SPARQL 1.0 triage: numeric literal forms in a pattern (\"456.\"^^xsd:decimal, +5)",
         ["data-r2/distinct/manifest#distinct-2"] = "SPARQL 1.0 triage: a simple literal and its xsd:string form are stored as two atoms (ADR-053 D1.5)",
         ["data-r2/distinct/manifest#distinct-9"] = "SPARQL 1.0 triage: a simple literal and its xsd:string form are stored as two atoms (ADR-053 D1.5)",
         ["data-r2/expr-builtin/manifest#dawg-lang-3"] = "SPARQL 1.0 triage: a pattern constant matches a language tag by case (ADR-053, language tags)",
-        ["data-r2/open-world/manifest#open-eq-02"] = "SPARQL 1.0 triage: a prefixed datatype in a pattern constant is not expanded (ADR-053 D1)",
         ["data-r2/regex/manifest#dawg-regex-003"] = "SPARQL 1.0 triage: REGEX escapes and the q flag",
         ["data-r2/regex/manifest#regex-no-metacharacters"] = "SPARQL 1.0 triage: REGEX escapes and the q flag",
         ["data-r2/regex/manifest#regex-no-metacharacters-case-insensitive"] = "SPARQL 1.0 triage: REGEX escapes and the q flag",

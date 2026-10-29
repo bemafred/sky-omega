@@ -219,7 +219,7 @@ internal ref struct ConstructResults
     private ReadOnlySpan<char> ExpandPrefixedName(ReadOnlySpan<char> term)
     {
         var expanded = PrefixExpander.TryExpand(term, _prefixes, _source);
-        if (expanded is null) return term;
+        if (expanded is null) return LiteralForm.StoredTerm(term, _prefixes, _source, out _expandedTerm); // a literal: its stored term
         _expandedTerm = expanded;
         return _expandedTerm.AsSpan();
     }

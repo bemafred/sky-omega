@@ -1409,15 +1409,9 @@ internal ref struct TriplePatternScan
             }
         }
 
-        // ADR-044: canonicalize quoted-literal source spans before atom-store match.
-        if (termSpan.Length > 0 && termSpan[0] == '"')
-            return LiteralForm.Canonicalize(termSpan, out _literalScratch);
-
-        // ADR-047: a bare numeric or boolean object token is a typed literal in SPARQL (30 ≡ "30"^^xsd:integer,
-        // true ≡ "true"^^xsd:boolean). The tree reuses this scan for every constant-object match (MINUS/EXISTS bodies,
-        // plain BGP); without value-aware canonicalization here the raw "30" never matches the stored
-        // "30"^^<…integer> atom, so numeric/boolean constants would silently under-match.
-        return LiteralForm.CanonicalizeNumericOrBoolean(termSpan, out _literalScratch);
+        // A literal, number or boolean constant matches the term it denotes, in its stored form
+        // (LiteralForm.StoredTerm): a long string matches its short form, 30 matches "30"^^xsd:integer
+        return LiteralForm.StoredTerm(termSpan, _prefixes, _source, out _literalScratch);
     }
 
     /// <summary>
@@ -1471,15 +1465,9 @@ internal ref struct TriplePatternScan
             return _expandedSubject.AsSpan();
         }
 
-        // ADR-044: canonicalize quoted-literal source spans before atom-store match.
-        if (termSpan.Length > 0 && termSpan[0] == '"')
-            return LiteralForm.Canonicalize(termSpan, out _literalScratch);
-
-        // ADR-047: a bare numeric or boolean object token is a typed literal in SPARQL (30 ≡ "30"^^xsd:integer,
-        // true ≡ "true"^^xsd:boolean). The tree reuses this scan for every constant-object match (MINUS/EXISTS bodies,
-        // plain BGP); without value-aware canonicalization here the raw "30" never matches the stored
-        // "30"^^<…integer> atom, so numeric/boolean constants would silently under-match.
-        return LiteralForm.CanonicalizeNumericOrBoolean(termSpan, out _literalScratch);
+        // A literal, number or boolean constant matches the term it denotes, in its stored form
+        // (LiteralForm.StoredTerm): a long string matches its short form, 30 matches "30"^^xsd:integer
+        return LiteralForm.StoredTerm(termSpan, _prefixes, _source, out _literalScratch);
     }
 
     /// <summary>

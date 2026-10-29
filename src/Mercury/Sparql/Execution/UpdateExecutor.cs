@@ -826,13 +826,10 @@ internal class UpdateExecutor
 
     private ReadOnlySpan<char> ExpandPrefixedName(ReadOnlySpan<char> term)
     {
-        // ADR-044: literals canonicalize to the wrapped-decoded form (UpdateExecutor-specific) so SPARQL
-        // INSERT produces the same atom bytes as Turtle/N-Triples ingestion — handled here before the
-        // shared prefixed-name expander takes over for IRIs / 'a' / prefixed names (and throws on undefined).
-        if (term.Length > 0 && term[0] == '"')
-            return LiteralForm.Canonicalize(term, out _literalScratch);
+        // IRIs, 'a' and prefixed names through the shared expander (it throws on an undefined prefix); a literal,
+        // number or boolean is stored as the term it denotes (LiteralForm.StoredTerm), as Turtle stores it
         var expanded = PrefixExpander.TryExpand(term, PrefixMappings, _source.AsSpan());
-        if (expanded is null) return term;
+        if (expanded is null) return LiteralForm.StoredTerm(term, PrefixMappings, _source.AsSpan(), out _literalScratch);
         _expandedTerm = expanded;
         return _expandedTerm.AsSpan();
     }
