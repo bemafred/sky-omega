@@ -445,12 +445,8 @@ internal sealed class GroupedRow
     private readonly string?[] _sampleValues;        // For SAMPLE
     private readonly bool[] _hasError;               // True if aggregate encountered error (e.g., non-numeric for AVG/SUM)
 
-    // Row count for HAVING COUNT(*) when not in SELECT
-    private long _rowCount;
-
     public int KeyCount => _keyCount;
     public int AggregateCount => _aggCount;
-    public long RowCount => _rowCount;
 
     public GroupedRow(GroupByClause groupBy, SelectClause selectClause, BindingTable bindings, string source)
     {
@@ -529,9 +525,6 @@ internal sealed class GroupedRow
 
     public void UpdateAggregates(BindingTable bindings, string source)
     {
-        // Track total rows for HAVING COUNT(*) when not in SELECT aggregates
-        _rowCount++;
-
         for (int i = 0; i < _aggCount; i++)
         {
             var func = _aggFunctions[i];

@@ -235,6 +235,36 @@ internal ref partial struct SparqlParser
     }
 
     /// <summary>
+    /// Whether the expressions at <c>[aStart, aStart + aLength)</c> and <c>[bStart, bStart + bLength)</c> are the same
+    /// tokens, read with the expression token rule: whitespace between tokens does not matter, and a variable is
+    /// compared by name, so <c>?x+1</c> is <c>$x + 1</c>. Brackets are tokens of their own, so the comparison goes into
+    /// sub-expressions.
+    /// </summary>
+    internal readonly bool SameExpression(int aStart, int aLength, int bStart, int bLength)
+    {
+        var a = new SparqlParser(_source) { _position = aStart };
+        var b = new SparqlParser(_source) { _position = bStart };
+        int aEnd = aStart + aLength, bEnd = bStart + bLength;
+        while (true)
+        {
+            a.SkipWhitespace();
+            b.SkipWhitespace();
+            bool aDone = a._position >= aEnd, bDone = b._position >= bEnd;
+            if (aDone || bDone)
+                return aDone && bDone;
+
+            int aToken = a._position, bToken = b._position;
+            if (a.Peek() is '(' or ')' or '{' or '}') a.Advance(); else a.SkipExpressionToken();
+            if (b.Peek() is '(' or ')' or '{' or '}') b.Advance(); else b.SkipExpressionToken();
+            var x = _source[aToken..a._position];
+            var y = _source[bToken..b._position];
+            bool same = VariableName.IsSigil(x[0]) && VariableName.IsSigil(y[0]) ? VariableName.Same(x, y) : x.SequenceEqual(y);
+            if (!same)
+                return false;
+        }
+    }
+
+    /// <summary>
     /// True when <c>[start, start + length)</c> is one variable and nothing else, as the expression token rule reads
     /// it: <c>?o</c> is, <c>?o + 1</c> is not.
     /// </summary>

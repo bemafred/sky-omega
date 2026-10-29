@@ -208,6 +208,9 @@ internal ref partial struct QueryResults
     private void MakeGroupedSolutions()
     {
         _groupedSolutions = new List<MaterializedRow>(_groupedResults!.Count);
+        var comparer = _orderBy.HasOrderBy
+            ? new MaterializedRowComparer(_orderBy, _source.ToString(), _buffer?.Prefixes ?? _materializedPrefixes)
+            : null;
         for (int g = 0; g < _groupedResults.Count; g++)
         {
             var group = _groupedResults[g];
@@ -225,11 +228,27 @@ internal ref partial struct QueryResults
 
             // Non-aggregate SELECT expressions, which may contain aggregates: ((MIN(?p) + MAX(?p)) / 2 AS ?c)
             EvaluateGroupedSelectExpressions(group);
-            _groupedSolutions.Add(new MaterializedRow(_bindingTable));
+            var solution = new MaterializedRow(_bindingTable);
+            _groupedSolutions.Add(solution);
+
+            // An ORDER BY expression's value, with the group's aggregates (ORDER BY COUNT(*)); an error sorts first
+            if (comparer != null)
+            {
+                var values = new string[_orderBy.Count];
+                for (int c = 0; c < _orderBy.Count; c++)
+                {
+                    if (comparer.IsVariableCondition(c))
+                        continue;
+                    var condition = _orderBy.GetCondition(c);
+                    var expression = WithAggregateValues(condition.ExpressionStart, condition.ExpressionLength, group);
+                    values[c] = expression == null ? "" : comparer.Evaluate(expression, ref _bindingTable).ToString();
+                }
+                comparer.SetExpressionValues(solution, values);
+            }
         }
 
-        if (_orderBy.HasOrderBy && _groupedSolutions.Count > 1)
-            _groupedSolutions.Sort(new MaterializedRowComparer(_orderBy, _source.ToString(), _buffer?.Prefixes ?? _materializedPrefixes));
+        if (comparer != null && _groupedSolutions.Count > 1)
+            _groupedSolutions.Sort(comparer);
 
         _groupedIndex = -1;
         _skipped = 0;
@@ -308,16 +327,11 @@ internal ref partial struct QueryResults
             {
                 BindGroup(group);
 
-                // Evaluate HAVING expression
-                // HAVING can reference aggregates by alias (e.g., ?count > 2) OR by expression (e.g., COUNT(?x) > 2)
-                // W3C Grammar: HavingClause ::= 'HAVING' HavingCondition+
-                // Multiple conditions are ANDed together: (cond1) (cond2) means cond1 AND cond2
-                var havingExpr = _source.Slice(_having.ExpressionStart, _having.ExpressionLength);
-                var substitutedExpr = SubstituteAggregatesInHaving(havingExpr, group, sourceStr);
-
-                // Evaluate all conditions - each (expression) must be true
-                if (!EvaluateMultipleHavingConditions(substitutedExpr, _bindingTable))
-                    continue; // Skip this group - doesn't match HAVING
+                // HavingClause ::= 'HAVING' HavingCondition+, ANDed: each condition's aggregates are the group's
+                // (§18.2.4.1), and an error, an aggregate's included, removes the group as FILTER does
+                var condition = WithAggregateValues(_having.ExpressionStart, _having.ExpressionLength, group);
+                if (condition == null || !EvaluateMultipleHavingConditions(condition, _bindingTable))
+                    continue;
             }
 
             _groupedResults.Add(group);
@@ -333,8 +347,9 @@ internal ref partial struct QueryResults
     }
 
     /// <summary>
-    /// The group's solution in the binding table: its GROUP BY variables and its aggregates. A key the group's
-    /// solutions leave unbound, and an aggregate that is an error, are unbound (§18.5).
+    /// The group's solution in the binding table: its GROUP BY variables and its aggregates' variables. A key the
+    /// group's solutions leave unbound, and an aggregate that is an error, are unbound (§18.5); an aggregate inside an
+    /// expression, HAVING or ORDER BY has no variable (its value is substituted, WithAggregateValues).
     /// </summary>
     private void BindGroup(GroupedRow group)
     {
@@ -348,7 +363,7 @@ internal ref partial struct QueryResults
         for (int i = 0; i < group.AggregateCount; i++)
         {
             var value = group.GetAggregateValue(i);
-            if (value.Length > 0)
+            if (value.Length > 0 && _selectClause.GetAggregate(i).AliasLength > 0)
                 _bindingTable.BindWithHash(group.GetAggregateHash(i), value);
         }
     }
@@ -426,104 +441,32 @@ internal ref partial struct QueryResults
     }
 
     /// <summary>
-    /// Substitute aggregate expressions in HAVING clause with their computed values.
-    /// E.g., "COUNT(?O) > 2" becomes "5 > 2" where 5 is the computed COUNT value.
+    /// The expression at <c>[start, start + length)</c> of the source with each aggregate call in it replaced by the
+    /// group's value of that aggregate: §18.2.4.1 computes the aggregates of the SELECT expressions, HAVING and ORDER BY
+    /// for each group (the parser adds those of HAVING and ORDER BY to the SELECT clause, hidden). Null when one of
+    /// them is an error, which makes the expression one.
     /// </summary>
-    private string SubstituteAggregatesInHaving(ReadOnlySpan<char> havingExpr, GroupedRow group, string source)
+    private string? WithAggregateValues(int start, int length, GroupedRow group)
     {
-        var expr = havingExpr.ToString();
-        var result = new System.Text.StringBuilder(expr.Length);
-        int cursor = 0;
-
-        // The aggregate calls in the expression, found by the parser's expression token rule
-        foreach (var (function, nameStart, _, end) in new SparqlParser(expr.AsSpan()).AggregateCallsIn(0, expr.Length))
+        var parser = new SparqlParser(_source);
+        var text = new System.Text.StringBuilder(length);
+        int cursor = start;
+        foreach (var (function, nameStart, parenStart, end) in parser.AggregateCallsIn(start, length))
         {
-            var aggExpr = expr.Substring(nameStart, end - nameStart); // e.g. "COUNT(?O)" or "COUNT(*)"
-
-            // The matching aggregate of the SELECT clause, by its expression
-            string? computedValue = null;
-            for (int i = 0; i < group.AggregateCount; i++)
+            var call = parser.AggregateCallAt(function, parenStart);
+            string? value = null;
+            for (int i = 0; i < group.AggregateCount && value == null; i++)
             {
-                var selectAgg = GetAggregateExpressionString(i, source);
-                if (selectAgg != null && AggregateExpressionsMatch(aggExpr, selectAgg))
-                {
-                    computedValue = group.GetAggregateValue(i).ToString();
-                    break;
-                }
+                if (parser.SameAggregate(_selectClause.GetAggregate(i), call))
+                    value = group.GetAggregateValue(i).ToString();
             }
-
-            // COUNT(*) in HAVING but not in SELECT: the group's row count
-            if (computedValue == null && function == AggregateFunction.Count && aggExpr.Contains('*'))
-                computedValue = group.RowCount.ToString(System.Globalization.CultureInfo.InvariantCulture);
-
-            if (computedValue == null)
-                continue; // left as written
-            result.Append(expr, cursor, nameStart - cursor).Append(computedValue);
+            if (string.IsNullOrEmpty(value))
+                return null;
+            text.Append(_source[cursor..nameStart]).Append(value);
             cursor = end;
         }
-
-        result.Append(expr, cursor, expr.Length - cursor);
-        return result.ToString();
-    }
-
-    /// <summary>
-    /// Get the string representation of an aggregate expression from the SELECT clause.
-    /// </summary>
-    private string? GetAggregateExpressionString(int index, string source)
-    {
-        if (_selectClause.AggregateCount <= index)
-            return null;
-
-        var agg = _selectClause.GetAggregate(index);
-        var funcName = agg.Function switch
-        {
-            AggregateFunction.Count => "COUNT",
-            AggregateFunction.Sum => "SUM",
-            AggregateFunction.Avg => "AVG",
-            AggregateFunction.Min => "MIN",
-            AggregateFunction.Max => "MAX",
-            AggregateFunction.Sample => "SAMPLE",
-            AggregateFunction.GroupConcat => "GROUP_CONCAT",
-            _ => null
-        };
-
-        if (funcName == null) return null;
-
-        // Build the expression string
-        if (agg.VariableLength == 0)
-        {
-            // COUNT(*) case
-            return agg.Distinct ? $"{funcName}(DISTINCT *)" : $"{funcName}(*)";
-        }
-
-        var variable = source.AsSpan(agg.VariableStart, agg.VariableLength).ToString();
-        return agg.Distinct ? $"{funcName}(DISTINCT {variable})" : $"{funcName}({variable})";
-    }
-
-    /// <summary>
-    /// Check if two aggregate expressions match (e.g., "COUNT(?O)" matches "COUNT(?O)").
-    /// Handles case-insensitivity and whitespace differences.
-    /// </summary>
-    private static bool AggregateExpressionsMatch(string expr1, string expr2)
-    {
-        // Normalize: remove whitespace, uppercase
-        var norm1 = NormalizeAggregateExpr(expr1);
-        var norm2 = NormalizeAggregateExpr(expr2);
-        return norm1.Equals(norm2, StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static string NormalizeAggregateExpr(string expr)
-    {
-        // Case, whitespace and the variable sigil do not matter: COUNT(?s) is count( $s )
-        var sb = new System.Text.StringBuilder(expr.Length);
-        foreach (var c in expr)
-        {
-            if (VariableName.IsSigil(c))
-                sb.Append('?');
-            else if (!char.IsWhiteSpace(c))
-                sb.Append(char.ToUpperInvariant(c));
-        }
-        return sb.ToString();
+        text.Append(_source[cursor..(start + length)]);
+        return text.ToString();
     }
 
     /// <summary>
@@ -571,8 +514,6 @@ internal ref partial struct QueryResults
     /// </summary>
     private void EvaluateGroupedSelectExpressions(GroupedRow group)
     {
-        var sourceStr = _source.ToString();
-
         for (int i = 0; i < _selectClause.AggregateCount; i++)
         {
             var agg = _selectClause.GetAggregate(i);
@@ -583,16 +524,10 @@ internal ref partial struct QueryResults
             // Skip if no expression to evaluate
             if (agg.VariableLength == 0) continue;
 
-            // Get expression and alias
-            var expr = _source.Slice(agg.VariableStart, agg.VariableLength).ToString();
+            // The expression with its aggregates' values, e.g. (MIN(?p) + MAX(?p)) / 2; an error leaves it unbound
             var aliasName = _source.Slice(agg.AliasStart, agg.AliasLength);
-
-            // Substitute aggregate expressions with computed values
-            // This handles expressions like (MIN(?p) + MAX(?p)) / 2
-            var substitutedExpr = SubstituteAggregatesInExpression(expr, group, sourceStr);
-
-            // If substitution failed (aggregate not found), leave unbound
-            if (string.IsNullOrEmpty(substitutedExpr))
+            var substitutedExpr = WithAggregateValues(agg.VariableStart, agg.VariableLength, group);
+            if (substitutedExpr == null)
                 continue;
 
             // Evaluate the expression
@@ -605,78 +540,6 @@ internal ref partial struct QueryResults
 
             value.BindTo(ref _bindingTable, aliasName); // the term, or nothing for an error (ADR-056 D6)
         }
-    }
-
-    /// <summary>
-    /// Substitute aggregate expressions in an expression with their computed values.
-    /// Returns null if any aggregate produces an error.
-    /// </summary>
-    private string? SubstituteAggregatesInExpression(string expr, GroupedRow group, string source)
-    {
-        var aggregateFunctions = new[] { "COUNT", "SUM", "AVG", "MIN", "MAX", "SAMPLE", "GROUP_CONCAT" };
-
-        foreach (var funcName in aggregateFunctions)
-        {
-            int searchStart = 0;
-            while (true)
-            {
-                int funcIdx = expr.IndexOf(funcName, searchStart, StringComparison.OrdinalIgnoreCase);
-                if (funcIdx < 0) break;
-
-                // Find opening paren
-                int parenStart = funcIdx + funcName.Length;
-                while (parenStart < expr.Length && char.IsWhiteSpace(expr[parenStart]))
-                    parenStart++;
-
-                if (parenStart >= expr.Length || expr[parenStart] != '(')
-                {
-                    searchStart = funcIdx + 1;
-                    continue;
-                }
-
-                // Find matching closing paren
-                int depth = 1;
-                int parenEnd = parenStart + 1;
-                while (parenEnd < expr.Length && depth > 0)
-                {
-                    if (expr[parenEnd] == '(') depth++;
-                    else if (expr[parenEnd] == ')') depth--;
-                    parenEnd++;
-                }
-                parenEnd--; // Back to the closing paren
-
-                var aggExpr = expr.Substring(funcIdx, parenEnd - funcIdx + 1);
-
-                // Try to find matching aggregate in the group
-                string? computedValue = null;
-                for (int i = 0; i < group.AggregateCount; i++)
-                {
-                    var selectAgg = GetAggregateExpressionString(i, source);
-                    if (selectAgg != null && AggregateExpressionsMatch(aggExpr, selectAgg))
-                    {
-                        var aggValue = group.GetAggregateValue(i).ToString();
-                        // If aggregate has error (empty), return null to indicate error
-                        if (string.IsNullOrEmpty(aggValue))
-                            return null;
-                        computedValue = aggValue;
-                        break;
-                    }
-                }
-
-                if (computedValue != null)
-                {
-                    expr = expr.Substring(0, funcIdx) + computedValue + expr.Substring(parenEnd + 1);
-                    searchStart = funcIdx + computedValue.Length;
-                }
-                else
-                {
-                    // Aggregate not found in tracked aggregates - can't evaluate
-                    return null;
-                }
-            }
-        }
-
-        return expr;
     }
 }
 
@@ -704,23 +567,24 @@ internal sealed class MaterializedRowComparer : IComparer<MaterializedRow>
         for (int i = 0; i < orderBy.Count; i++)
         {
             var cond = orderBy.GetCondition(i);
-            _isVariable[i] = IsOneVariable(source.AsSpan(cond.ExpressionStart, cond.ExpressionLength));
+            _isVariable[i] = new SparqlParser(source.AsSpan()).IsOneVariable(cond.ExpressionStart, cond.ExpressionLength);
             anyExpression |= !_isVariable[i];
         }
         if (anyExpression)
             _values = new Dictionary<MaterializedRow, string[]>(ReferenceEqualityComparer.Instance);
     }
 
-    private static bool IsOneVariable(ReadOnlySpan<char> text)
+    /// <summary>Whether ORDER BY condition <paramref name="index"/> is one variable, read from the row.</summary>
+    internal bool IsVariableCondition(int index) => _isVariable[index];
+
+    /// <summary>
+    /// The values of <paramref name="row"/>'s expression conditions, computed by the caller: a grouped solution's are
+    /// evaluated with its group's aggregates, which the row does not hold.
+    /// </summary>
+    internal void SetExpressionValues(MaterializedRow row, string[] values)
     {
-        if (text.Length < 2 || !VariableName.IsSigil(text[0]))
-            return false;
-        foreach (var c in text[1..])
-        {
-            if (!char.IsLetterOrDigit(c) && c != '_')
-                return false;
-        }
-        return true;
+        if (_values != null)
+            _values[row] = values;
     }
 
     public int Compare(MaterializedRow? a, MaterializedRow? b)
@@ -818,7 +682,7 @@ internal sealed class MaterializedRowComparer : IComparer<MaterializedRow>
     /// The value of an expression condition as an RDF term, by the one [110] evaluator FILTER and BIND use; empty when
     /// it is unbound or an error, which sorts first (§15.1).
     /// </summary>
-    private ReadOnlySpan<char> Evaluate(ReadOnlySpan<char> expression, scoped ref BindingTable bindings)
+    internal ReadOnlySpan<char> Evaluate(ReadOnlySpan<char> expression, scoped ref BindingTable bindings)
     {
         var evaluator = new FilterEvaluator(expression);
         var value = evaluator.EvaluateToValue(bindings.GetBindings(), bindings.Count, bindings.GetStringBuffer(),

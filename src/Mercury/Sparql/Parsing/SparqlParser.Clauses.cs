@@ -617,37 +617,51 @@ internal ref partial struct SparqlParser
     /// </summary>
     private void ExtractEmbeddedAggregates(int exprStart, int exprLength, ref SelectClause clause)
     {
-        foreach (var (bestFunc, _, parenStart, _) in new SparqlParser(_source).AggregateCallsIn(exprStart, exprLength))
+        foreach (var (function, _, parenStart, _) in new SparqlParser(_source).AggregateCallsIn(exprStart, exprLength))
         {
-            // A hidden aggregate: no alias
-            var embeddedAgg = new AggregateExpression { Function = bestFunc };
-            var reader = new SparqlParser(_source) { _position = parenStart };
-            reader.ReadAggregateArguments(ref embeddedAgg);
-
-            // Add if not already present (check by function + variable)
-            bool alreadyExists = false;
-            for (int i = 0; i < clause.AggregateCount; i++)
-            {
-                var existing = clause.GetAggregate(i);
-                if (existing.Function == embeddedAgg.Function &&
-                    existing.Distinct == embeddedAgg.Distinct)
-                {
-                    var existingVar = _source.Slice(existing.VariableStart, existing.VariableLength);
-                    var newVar = _source.Slice(embeddedAgg.VariableStart, embeddedAgg.VariableLength);
-                    if (existingVar.Equals(newVar, StringComparison.Ordinal))
-                    {
-                        alreadyExists = true;
-                        break;
-                    }
-                }
-            }
-
-            if (!alreadyExists)
-            {
-                clause.AddAggregate(embeddedAgg);
-            }
+            // A hidden aggregate (no alias), unless the clause has the same aggregate already
+            var embedded = AggregateCallAt(function, parenStart);
+            bool present = false;
+            for (int i = 0; i < clause.AggregateCount && !present; i++)
+                present = SameAggregate(clause.GetAggregate(i), embedded);
+            if (!present)
+                clause.AddAggregate(embedded);
         }
     }
+
+    /// <summary>
+    /// §18.2.4.1: the aggregates of HAVING and ORDER BY are computed for each group, as the SELECT clause's are. Each
+    /// one the clause does not have is added to it, hidden (no alias); an aggregate in either makes the query group.
+    /// </summary>
+    private void AddModifierAggregates(ref SelectClause select, in SolutionModifier modifier)
+    {
+        if (modifier.Having.HasHaving)
+            ExtractEmbeddedAggregates(modifier.Having.ExpressionStart, modifier.Having.ExpressionLength, ref select);
+        for (int c = 0; c < modifier.OrderBy.Count; c++)
+        {
+            var condition = modifier.OrderBy.GetCondition(c);
+            ExtractEmbeddedAggregates(condition.ExpressionStart, condition.ExpressionLength, ref select);
+        }
+    }
+
+    /// <summary>The aggregate call of <paramref name="function"/> whose '(' is at <paramref name="parenStart"/>: its
+    /// DISTINCT, argument and separator (<see cref="ReadAggregateArguments"/>), with no alias.</summary>
+    internal readonly AggregateExpression AggregateCallAt(AggregateFunction function, int parenStart)
+    {
+        var call = new AggregateExpression { Function = function };
+        var reader = new SparqlParser(_source) { _position = parenStart };
+        reader.ReadAggregateArguments(ref call);
+        return call;
+    }
+
+    /// <summary>
+    /// Whether two aggregates are one: the same function, DISTINCT, separator, and argument token for token
+    /// (<see cref="SameExpression"/>), so COUNT(?x) in HAVING is the SELECT's count( $x ).
+    /// </summary>
+    internal readonly bool SameAggregate(in AggregateExpression a, in AggregateExpression b)
+        => a.Function == b.Function && a.Distinct == b.Distinct
+           && _source.Slice(a.SeparatorStart, a.SeparatorLength).SequenceEqual(_source.Slice(b.SeparatorStart, b.SeparatorLength))
+           && SameExpression(a.VariableStart, a.VariableLength, b.VariableStart, b.VariableLength);
 
     /// <summary>
     /// [13] DatasetClause ::= 'FROM' ( DefaultGraphClause | NamedGraphClause )
@@ -803,6 +817,7 @@ internal ref partial struct SparqlParser
         subSelect.Select = ParseSelectClause();
         _position = modifiersStart;
         ParseSubSelectSolutionModifiers(ref subSelect);
+        AddModifierAggregates(ref subSelect.Select, subSelect.Modifier);
         return subSelect;
     }
 
