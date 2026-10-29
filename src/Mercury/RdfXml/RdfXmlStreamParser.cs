@@ -74,6 +74,9 @@ internal sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
 
     // XML state
     private readonly Dictionary<string, string> _namespaces;
+    // Each declaration's replaced binding (null: the prefix was unbound), in document order. An element's
+    // declarations end with it: its parser notes the log's length before the start tag and rolls back to it.
+    private readonly List<(string Prefix, string? Replaced)> _namespaceUndo = new();
     private int _blankNodeCounter;
 
     // Current parse state
@@ -202,69 +205,78 @@ internal sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
         // Store element name for later use
         var elementNameStr = elementName.ToString();
 
-        // Parse attributes
-        var attributes = ParseAttributes();
-
-        // Determine element kind and handle accordingly
-        SplitQName(elementNameStr, out var prefix, out var localName);
-        var namespaceUri = ResolveNamespace(prefix);
-
-        // Check for self-closing tag
-        SkipWhitespace();
-        bool selfClosing = TryConsume('/');
-        if (!TryConsume('>'))
+        // The element's namespace declarations end with it
+        int namespaceScope = _namespaceUndo.Count;
+        try
         {
-            // Skip to end of tag if malformed
-            while (Peek() != '>' && !IsEndOfInput())
-                Consume();
-            TryConsume('>');
-        }
+            // Parse attributes
+            var attributes = ParseAttributes();
 
-        if (namespaceUri == RdfNamespace)
-        {
-            if (localName == "RDF")
+            // Determine element kind and handle accordingly
+            SplitQName(elementNameStr, out var prefix, out var localName);
+            var namespaceUri = ResolveNamespace(prefix);
+
+            // Check for self-closing tag
+            SkipWhitespace();
+            bool selfClosing = TryConsume('/');
+            if (!TryConsume('>'))
             {
-                // Nested rdf:RDF is not allowed
-                if (_insideRdfRoot)
-                    throw ParserException("rdf:RDF is forbidden as a node element name");
+                // Skip to end of tag if malformed
+                while (Peek() != '>' && !IsEndOfInput())
+                    Consume();
+                TryConsume('>');
+            }
 
-                // Capture xml:base from rdf:RDF element (strip fragment per RFC 3986)
-                if (attributes.TryGetValue("xml:base", out var xmlBase))
+            if (namespaceUri == RdfNamespace)
+            {
+                if (localName == "RDF")
                 {
-                    var resolved = ResolveUri(xmlBase);
-                    var hashIdx = resolved.IndexOf('#');
-                    _baseUri = hashIdx >= 0 ? resolved[..hashIdx] : resolved;
-                }
+                    // Nested rdf:RDF is not allowed
+                    if (_insideRdfRoot)
+                        throw ParserException("rdf:RDF is forbidden as a node element name");
 
-                // Root rdf:RDF element - parse children
-                _insideRdfRoot = true;
-                try
-                {
-                    if (!selfClosing)
+                    // Capture xml:base from rdf:RDF element (strip fragment per RFC 3986)
+                    if (attributes.TryGetValue("xml:base", out var xmlBase))
                     {
-                        await ParseRdfRootContentAsync(handler, cancellationToken);
+                        var resolved = ResolveUri(xmlBase);
+                        var hashIdx = resolved.IndexOf('#');
+                        _baseUri = hashIdx >= 0 ? resolved[..hashIdx] : resolved;
+                    }
+
+                    // Root rdf:RDF element - parse children
+                    _insideRdfRoot = true;
+                    try
+                    {
+                        if (!selfClosing)
+                        {
+                            await ParseRdfRootContentAsync(handler, cancellationToken);
+                        }
+                    }
+                    finally
+                    {
+                        _insideRdfRoot = false;
                     }
                 }
-                finally
+                else if (localName == "Description")
                 {
-                    _insideRdfRoot = false;
+                    // rdf:Description element
+                    await ParseDescriptionElementAsync(handler, attributes, selfClosing, cancellationToken);
                 }
-            }
-            else if (localName == "Description")
-            {
-                // rdf:Description element
-                await ParseDescriptionElementAsync(handler, attributes, selfClosing, cancellationToken);
+                else
+                {
+                    // Other RDF elements inside rdf:RDF (like rdf:Seq, rdf:Bag, etc.)
+                    await ParseTypedNodeElementAsync(handler, namespaceUri, localName, attributes, selfClosing, cancellationToken);
+                }
             }
             else
             {
-                // Other RDF elements inside rdf:RDF (like rdf:Seq, rdf:Bag, etc.)
+                // Typed node element (e.g., foaf:Person)
                 await ParseTypedNodeElementAsync(handler, namespaceUri, localName, attributes, selfClosing, cancellationToken);
             }
         }
-        else
+        finally
         {
-            // Typed node element (e.g., foaf:Person)
-            await ParseTypedNodeElementAsync(handler, namespaceUri, localName, attributes, selfClosing, cancellationToken);
+            EndNamespaceScope(namespaceScope);
         }
     }
 
@@ -391,8 +403,13 @@ internal sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
         // Counter for rdf:li elements (starts at 1 per W3C spec)
         int liCounter = 1;
 
+        // A property element's namespace declarations end with it. Each one is parsed whole, its content
+        // included, before the next, so the scope goes back to this mark before each sibling and at the end.
+        int namespaceScope = _namespaceUndo.Count;
+
         while (!IsEndOfInput())
         {
+            EndNamespaceScope(namespaceScope);
             await RefillIfNeededAsync(cancellationToken);
             SkipWhitespace();
 
@@ -681,6 +698,7 @@ internal sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
                 Consume(); // Skip text content between elements
             }
         }
+        EndNamespaceScope(namespaceScope);
     }
 
     /// <summary>
@@ -699,56 +717,66 @@ internal sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
             return string.Empty;
 
         var elementNameStr = elementName.ToString();
-        var attributes = ParseAttributes();
 
-        SplitQName(elementNameStr, out var prefix, out var localName);
-        var namespaceUri = ResolveNamespace(prefix);
-
-        // Validate node element name (unless it's rdf:Description)
-        if (namespaceUri != RdfNamespace || localName != "Description")
+        // The element's namespace declarations end with it
+        int namespaceScope = _namespaceUndo.Count;
+        try
         {
-            ValidateNodeElementName(namespaceUri, localName);
+            var attributes = ParseAttributes();
+
+            SplitQName(elementNameStr, out var prefix, out var localName);
+            var namespaceUri = ResolveNamespace(prefix);
+
+            // Validate node element name (unless it's rdf:Description)
+            if (namespaceUri != RdfNamespace || localName != "Description")
+            {
+                ValidateNodeElementName(namespaceUri, localName);
+            }
+
+            // Validate node element attributes
+            ValidateNodeElementAttributes(attributes);
+
+            SkipWhitespace();
+            bool selfClosing = TryConsume('/');
+            TryConsume('>');
+
+            // Push xml:base scope if present
+            bool pushedBase = PushBaseIfPresent(attributes);
+
+            // Get subject for nested element
+            var subjectStr = DetermineSubjectString(attributes);
+
+            // If typed node, emit type triple
+            if (namespaceUri != RdfNamespace || localName != "Description")
+            {
+                ResetOutputBuffer();
+                var typeUri = BuildIri(namespaceUri.AsSpan(), localName.AsSpan());
+                handler(subjectStr.AsSpan(), $"<{RdfNamespace}type>".AsSpan(), typeUri);
+            }
+
+            // Get xml:lang (inherit from parent if not specified)
+            attributes.TryGetValue("xml:lang", out var xmlLang);
+            var effectiveLang = xmlLang ?? inheritedLang;
+
+            // Process property attributes
+            EmitPropertyAttributes(handler, subjectStr, attributes, effectiveLang);
+
+            if (!selfClosing)
+            {
+                // Parse nested properties
+                await ParsePropertyElementsAsync(handler, subjectStr, effectiveLang, cancellationToken);
+            }
+
+            // Pop xml:base scope if we pushed one
+            if (pushedBase)
+                PopBase();
+
+            return subjectStr;
         }
-
-        // Validate node element attributes
-        ValidateNodeElementAttributes(attributes);
-
-        SkipWhitespace();
-        bool selfClosing = TryConsume('/');
-        TryConsume('>');
-
-        // Push xml:base scope if present
-        bool pushedBase = PushBaseIfPresent(attributes);
-
-        // Get subject for nested element
-        var subjectStr = DetermineSubjectString(attributes);
-
-        // If typed node, emit type triple
-        if (namespaceUri != RdfNamespace || localName != "Description")
+        finally
         {
-            ResetOutputBuffer();
-            var typeUri = BuildIri(namespaceUri.AsSpan(), localName.AsSpan());
-            handler(subjectStr.AsSpan(), $"<{RdfNamespace}type>".AsSpan(), typeUri);
+            EndNamespaceScope(namespaceScope);
         }
-
-        // Get xml:lang (inherit from parent if not specified)
-        attributes.TryGetValue("xml:lang", out var xmlLang);
-        var effectiveLang = xmlLang ?? inheritedLang;
-
-        // Process property attributes
-        EmitPropertyAttributes(handler, subjectStr, attributes, effectiveLang);
-
-        if (!selfClosing)
-        {
-            // Parse nested properties
-            await ParsePropertyElementsAsync(handler, subjectStr, effectiveLang, cancellationToken);
-        }
-
-        // Pop xml:base scope if we pushed one
-        if (pushedBase)
-            PopBase();
-
-        return subjectStr;
     }
 
     /// <summary>
@@ -1177,6 +1205,33 @@ internal sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
             return uri;
 
         return string.Empty;
+    }
+
+    /// <summary>
+    /// Bind a prefix ("" for the default namespace) for the rest of the current element, recording the binding it
+    /// replaces (Namespaces in XML §6.1: a declaration's scope is the element it is on and that element's content).
+    /// </summary>
+    private void DeclareNamespace(string prefix, string iri)
+    {
+        _namespaceUndo.Add((prefix, _namespaces.TryGetValue(prefix, out var replaced) ? replaced : null));
+        _namespaces[prefix] = iri;
+    }
+
+    /// <summary>
+    /// End the declarations made since the undo log had <paramref name="start"/> entries, latest first, so each
+    /// prefix gets back the binding it had before them.
+    /// </summary>
+    private void EndNamespaceScope(int start)
+    {
+        for (int i = _namespaceUndo.Count - 1; i >= start; i--)
+        {
+            var (prefix, replaced) = _namespaceUndo[i];
+            if (replaced is null)
+                _namespaces.Remove(prefix);
+            else
+                _namespaces[prefix] = replaced;
+        }
+        _namespaceUndo.RemoveRange(start, _namespaceUndo.Count - start);
     }
 
     /// <summary>

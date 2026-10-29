@@ -519,16 +519,11 @@ internal sealed partial class RdfXmlStreamParser
             var value = _outputBuffer.AsSpan(valueStart, _outputOffset - valueStart).ToString();
             attributes[name] = value;
 
-            // Handle namespace declarations
+            // A namespace declaration is in scope until its element ends (EndNamespaceScope)
             if (name.StartsWith("xmlns:"))
-            {
-                var prefix = name[6..];
-                _namespaces[prefix] = value;
-            }
+                DeclareNamespace(name[6..], value);
             else if (name == "xmlns")
-            {
-                _namespaces[""] = value;
-            }
+                DeclareNamespace("", value);
         }
 
         return attributes;
