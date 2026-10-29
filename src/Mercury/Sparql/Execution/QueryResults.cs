@@ -500,14 +500,13 @@ internal sealed class GroupedRow
             var varName = source.AsSpan(agg.VariableStart, agg.VariableLength);
             _aggVarHashes[i] = VariableName.Hash(varName);
 
-            // Check if this is a complex expression (not a simple variable)
-            // Simple variables start with ? or $, or are just *
-            var trimmed = varName.Trim();
-            bool isSimpleVariable = trimmed.Length == 0 ||
-                                    trimmed[0] == '?' ||
-                                    trimmed[0] == '$' ||
-                                    (trimmed.Length == 1 && trimmed[0] == '*');
-            _aggExpressions[i] = isSimpleVariable ? null : varName.ToString();
+            // An aggregate's argument is *, one variable (read by its hash) or an expression (evaluated per solution),
+            // as the expression token rule reads it: ?o + 1 is an expression. A SELECT expression that is not an
+            // aggregate (Function None) is evaluated once per group, not here.
+            bool isExpression = agg.Function != AggregateFunction.None && agg.VariableLength > 0
+                && !varName.Trim().SequenceEqual("*")
+                && !new Parsing.SparqlParser(source.AsSpan()).IsOneVariable(agg.VariableStart, agg.VariableLength);
+            _aggExpressions[i] = isExpression ? varName.ToString() : null;
 
             // Initialize accumulators
             _useDecimal[i] = true; // Assume decimal until we see a double/float

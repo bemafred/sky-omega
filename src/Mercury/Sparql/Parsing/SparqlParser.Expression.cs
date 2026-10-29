@@ -235,6 +235,23 @@ internal ref partial struct SparqlParser
     }
 
     /// <summary>
+    /// True when <c>[start, start + length)</c> is one variable and nothing else, as the expression token rule reads
+    /// it: <c>?o</c> is, <c>?o + 1</c> is not.
+    /// </summary>
+    internal bool IsOneVariable(int start, int length)
+    {
+        _position = start;
+        int end = start + length;
+        SkipWhitespace();
+        if (_position >= end || !VariableName.IsSigil(Peek()))
+            return false;
+        SkipExpressionToken();
+        while (_position < end && char.IsWhiteSpace(_source[_position]))
+            _position++;
+        return _position == end;
+    }
+
+    /// <summary>
     /// True when the expression at <c>[start, start + length)</c> reads the variable <paramref name="variable"/>
     /// (with or without its sigil). Read with the expression token rule, so a "?x" inside a literal or IRI is not one;
     /// the scan goes into sub-expressions.

@@ -497,6 +497,12 @@ internal ref partial struct SparqlParser
     }
 
 
+    /// <summary>
+    /// A SELECT expression, <c>'(' Expression 'AS' Var ')'</c> ([9]). An aggregate alone, <c>(COUNT(?x) AS ?n)</c>, is an
+    /// aggregate entry, its argument read by <see cref="ReadAggregateArguments"/>; any other expression, aggregates
+    /// inside it or not (<c>(MAX(?o) - MIN(?o) AS ?span)</c>), is an expression entry (Function None) whose text is
+    /// evaluated, with its aggregates extracted by the caller.
+    /// </summary>
     private AggregateExpression ParseAggregateExpression()
     {
         var agg = new AggregateExpression();
@@ -507,108 +513,57 @@ internal ref partial struct SparqlParser
         Advance(); // Skip '('
         SkipWhitespace();
 
-        // Parse aggregate function name
-        var span = PeekSpan(12);
-        if (AtKeyword("GROUP_CONCAT"))
-        {
-            ConsumeKeyword("GROUP_CONCAT");
-            agg.Function = AggregateFunction.GroupConcat;
-        }
-        else if (AtKeyword("COUNT"))
-        {
-            ConsumeKeyword("COUNT");
-            agg.Function = AggregateFunction.Count;
-        }
-        else if (AtKeyword("SUM"))
-        {
-            ConsumeKeyword("SUM");
-            agg.Function = AggregateFunction.Sum;
-        }
-        else if (AtKeyword("AVG"))
-        {
-            ConsumeKeyword("AVG");
-            agg.Function = AggregateFunction.Avg;
-        }
-        else if (AtKeyword("MIN"))
-        {
-            ConsumeKeyword("MIN");
-            agg.Function = AggregateFunction.Min;
-        }
-        else if (AtKeyword("MAX"))
-        {
-            ConsumeKeyword("MAX");
-            agg.Function = AggregateFunction.Max;
-        }
-        else if (AtKeyword("SAMPLE"))
-        {
-            ConsumeKeyword("SAMPLE");
-            agg.Function = AggregateFunction.Sample;
-        }
-        else
-        {
-            // Not a recognized aggregate - parse as expression (expr AS ?var)
-            // Store expression start position for later evaluation
-            int exprStart = _position;
-            int exprEnd = _position;
+        // The expression's tokens up to its AS keyword, then the alias (syn-bad-04, syn-bad-05: AS is required)
+        int exprStart = _position;
+        while (!IsAtEnd() && Peek() != ')' && !AtKeyword("AS"))
+            SkipExpressionToken();
+        if (!AtKeyword("AS"))
+            throw new SparqlParseException("Expression in SELECT must use AS to assign an alias variable");
+        int exprEnd = _position;
+        while (exprEnd > exprStart && char.IsWhiteSpace(_source[exprEnd - 1]))
+            exprEnd--;
+        if (exprEnd == exprStart)
+            throw new SparqlParseException($"Expected an expression before AS at position {_position}");
 
-            // The expression's tokens up to its AS keyword, then the alias
-            bool foundAs = false;
-            while (!IsAtEnd() && Peek() != ')' && !AtKeyword("AS"))
-                SkipExpressionToken();
-            if (AtKeyword("AS"))
-            {
-                exprEnd = _position;
-                while (exprEnd > exprStart && char.IsWhiteSpace(_source[exprEnd - 1]))
-                    exprEnd--;
+        ConsumeKeyword("AS");
+        SkipWhitespace();
+        if (!VariableName.IsSigil(Peek()))
+            throw new SparqlParseException($"Expected a variable after AS at position {_position}");
+        agg.AliasStart = _position;
+        Advance();
+        while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_'))
+            Advance();
+        agg.AliasLength = _position - agg.AliasStart;
+        SkipWhitespace();
+        if (Peek() != ')')
+            throw new SparqlParseException($"Expected ')' to close the SELECT expression at position {_position}");
+        Advance();
 
-                ConsumeKeyword("AS");
-                SkipWhitespace();
-                if (VariableName.IsSigil(Peek()))
-                {
-                    agg.AliasStart = _position;
-                    Advance();
-                    while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_'))
-                        Advance();
-                    agg.AliasLength = _position - agg.AliasStart;
-                    foundAs = true;
-                }
-            }
-
-            // syn-bad-04: Expression in SELECT must use AS to assign alias
-            if (!foundAs)
-            {
-                throw new SparqlParseException("Expression in SELECT must use AS to assign an alias variable");
-            }
-
-            // Store expression in VariableStart/VariableLength for evaluation
-            agg.VariableStart = exprStart;
-            agg.VariableLength = exprEnd - exprStart;
-
-            // Skip closing ')' of expression
-            SkipWhitespace();
-            if (Peek() == ')')
-                Advance();
-
+        var calls = new SparqlParser(_source).AggregateCallsIn(exprStart, exprEnd - exprStart);
+        if (calls.Count == 1 && calls[0].NameStart == exprStart && calls[0].End == exprEnd)
+        {
+            agg.Function = calls[0].Function;
+            var reader = new SparqlParser(_source) { _position = calls[0].ParenStart };
+            reader.ReadAggregateArguments(ref agg);
             return agg;
         }
 
+        agg.VariableStart = exprStart;
+        agg.VariableLength = exprEnd - exprStart;
+        return agg;
+    }
+
+    /// <summary>
+    /// [127] Aggregate, from its '(': <c>'(' 'DISTINCT'? ( '*' | Expression ) ( ';' 'SEPARATOR' '=' String )? ')'</c>
+    /// (the separator for GROUP_CONCAT only). Sets the aggregate's DISTINCT, its argument (<c>*</c>, or the
+    /// expression, which may be one variable) and its separator's content; the cursor ends past the ')'. The argument
+    /// is read with the expression token rule, so a ')' or ';' inside a literal or a bracket does not end it. The one
+    /// reader of an aggregate's argument, for an aggregate a SELECT expression is and one inside an expression.
+    /// </summary>
+    private void ReadAggregateArguments(ref AggregateExpression agg)
+    {
+        Advance(); // '('
         SkipWhitespace();
-
-        // Expect '(' for function arguments
-        if (Peek() != '(')
-        {
-            // Skip to closing paren
-            while (!IsAtEnd() && Peek() != ')')
-                Advance();
-            if (Peek() == ')') Advance();
-            return agg;
-        }
-
-        Advance(); // Skip '('
-        SkipWhitespace();
-
-        // Check for DISTINCT
-        span = PeekSpan(8);
         if (AtKeyword("DISTINCT"))
         {
             ConsumeKeyword("DISTINCT");
@@ -616,97 +571,44 @@ internal ref partial struct SparqlParser
             agg.Distinct = true;
         }
 
-        // Parse aggregate argument: variable, *, or expression
-        // Store the start of the expression for evaluation
         agg.VariableStart = _position;
+        while (!IsAtEnd() && Peek() is not (')' or ';' or ','))
+            SkipExpressionToken();
+        if (Peek() == ',')
+            throw new SparqlParseException($"An aggregate takes one argument; unexpected ',' at position {_position}"); // syn-bad-06
+        int end = _position;
+        while (end > agg.VariableStart && char.IsWhiteSpace(_source[end - 1]))
+            end--;
+        agg.VariableLength = end - agg.VariableStart;
+        if (agg.VariableLength == 0)
+            throw new SparqlParseException($"Expected an expression or '*' as the aggregate's argument at position {_position}");
 
-        if (Peek() == '*')
+        if (Peek() == ';')
         {
             Advance();
-            agg.VariableLength = 1;
-        }
-        else if (VariableName.IsSigil(Peek()))
-        {
-            Advance();
-            while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_'))
-                Advance();
-            agg.VariableLength = _position - agg.VariableStart;
-        }
-        else
-        {
-            // An expression argument: IF(...), xsd:double(?x), etc., up to the aggregate's ')' or GROUP_CONCAT's ';'
-            while (!IsAtEnd() && Peek() != ')' && Peek() != ';')
-                SkipExpressionToken();
-            agg.VariableLength = _position - agg.VariableStart;
-        }
-
-        SkipWhitespace();
-
-        // For GROUP_CONCAT, parse optional SEPARATOR clause: ; SEPARATOR = "..."
-        if (agg.Function == AggregateFunction.GroupConcat && Peek() == ';')
-        {
-            Advance(); // Skip ';'
             SkipWhitespace();
-
-            span = PeekSpan(9);
-            if (AtKeyword("SEPARATOR"))
-            {
-                ConsumeKeyword("SEPARATOR");
-                SkipWhitespace();
-
-                if (Peek() == '=')
-                {
-                    Advance(); // Skip '='
-                    SkipWhitespace();
-
-                    // Parse string literal (single or double quoted)
-                    if (Peek() == '"' || Peek() == '\'')
-                    {
-                        var quote = Peek();
-                        Advance(); // Skip opening quote
-                        agg.SeparatorStart = _position;
-                        while (!IsAtEnd() && Peek() != quote)
-                            Advance();
-                        agg.SeparatorLength = _position - agg.SeparatorStart;
-                        if (Peek() == quote)
-                            Advance(); // Skip closing quote
-                    }
-                }
-            }
-
+            if (agg.Function != AggregateFunction.GroupConcat || !AtKeyword("SEPARATOR"))
+                throw new SparqlParseException($"Expected ')' to close the aggregate at position {_position}");
+            ConsumeKeyword("SEPARATOR");
+            SkipWhitespace();
+            if (Peek() != '=')
+                throw new SparqlParseException($"Expected '=' after SEPARATOR at position {_position}");
+            Advance();
+            SkipWhitespace();
+            if (Peek() is not ('"' or '\''))
+                throw new SparqlParseException($"Expected a string after SEPARATOR = at position {_position}");
+            int literalStart = _position;
+            SkipStringLiteral();
+            int quotes = _position - literalStart >= 6 && _source[literalStart + 1] == _source[literalStart]
+                && _source[literalStart + 2] == _source[literalStart] ? 3 : 1;
+            agg.SeparatorStart = literalStart + quotes;
+            agg.SeparatorLength = _position - quotes - agg.SeparatorStart;
             SkipWhitespace();
         }
 
-        // Skip closing ')' of function
-        if (Peek() == ')')
-            Advance();
-
-        SkipWhitespace();
-
-        // Parse AS ?alias
-        span = PeekSpan(3);
-        if (span.Length >= 2 && span[..2].Equals("AS", StringComparison.OrdinalIgnoreCase))
-        {
-            ConsumeKeyword("AS");
-            SkipWhitespace();
-
-            if (VariableName.IsSigil(Peek()))
-            {
-                agg.AliasStart = _position;
-                Advance();
-                while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_'))
-                    Advance();
-                agg.AliasLength = _position - agg.AliasStart;
-            }
-        }
-
-        SkipWhitespace();
-
-        // Skip closing ')' of expression
-        if (Peek() == ')')
-            Advance();
-
-        return agg;
+        if (Peek() != ')')
+            throw new SparqlParseException($"Expected ')' to close the aggregate at position {_position}");
+        Advance();
     }
 
     /// <summary>
@@ -715,58 +617,12 @@ internal ref partial struct SparqlParser
     /// </summary>
     private void ExtractEmbeddedAggregates(int exprStart, int exprLength, ref SelectClause clause)
     {
-        var expr = _source.Slice(exprStart, exprLength);
-
-        foreach (var (bestFunc, _, parenStartAbs, endAbs) in new SparqlParser(_source).AggregateCallsIn(exprStart, exprLength))
+        foreach (var (bestFunc, _, parenStart, _) in new SparqlParser(_source).AggregateCallsIn(exprStart, exprLength))
         {
-            int parenStart = parenStartAbs - exprStart;
-            int parenEnd = endAbs - exprStart; // just past ')'
-
-            // Extract the variable/argument (skip DISTINCT if present)
-            // Work with positions, not strings, to get correct offsets
-            int argStart = parenStart + 1;
-            int argEnd = parenEnd - 1; // Position of ')'
-
-            // Skip leading whitespace
-            while (argStart < argEnd && char.IsWhiteSpace(expr[argStart]))
-                argStart++;
-
-            // Skip trailing whitespace
-            while (argEnd > argStart && char.IsWhiteSpace(expr[argEnd - 1]))
-                argEnd--;
-
-            // Check for DISTINCT keyword
-            bool isDistinct = false;
-            var argSlice = expr.Slice(argStart, argEnd - argStart);
-            if (argSlice.Length >= 8)
-            {
-                var distinctCheck = argSlice.Slice(0, 8);
-                if (distinctCheck.Equals("DISTINCT", StringComparison.OrdinalIgnoreCase))
-                {
-                    isDistinct = true;
-                    argStart += 8;
-                    // Skip whitespace after DISTINCT
-                    while (argStart < argEnd && char.IsWhiteSpace(expr[argStart]))
-                        argStart++;
-                }
-            }
-
-            // Now argStart..argEnd points to the actual variable/expression (without DISTINCT)
-            int varLength = argEnd - argStart;
-            if (varLength <= 0)
-                continue;
-
-            // Create a hidden aggregate entry
-            var embeddedAgg = new AggregateExpression
-            {
-                Function = bestFunc,
-                VariableStart = exprStart + argStart,
-                VariableLength = varLength,
-                Distinct = isDistinct,
-                // No alias - this is a hidden aggregate
-                AliasStart = 0,
-                AliasLength = 0
-            };
+            // A hidden aggregate: no alias
+            var embeddedAgg = new AggregateExpression { Function = bestFunc };
+            var reader = new SparqlParser(_source) { _position = parenStart };
+            reader.ReadAggregateArguments(ref embeddedAgg);
 
             // Add if not already present (check by function + variable)
             bool alreadyExists = false;
