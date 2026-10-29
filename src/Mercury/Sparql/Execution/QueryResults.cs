@@ -43,6 +43,7 @@ internal ref partial struct QueryResults
     private readonly bool _hasOrderBy;
     private List<MaterializedRow>? _sortedResults;
     private int _sortedIndex;
+    private bool _sortedResultsMade; // pre-materialized rows: SELECT expressions evaluated and ORDER BY applied
 
     // Pre-materialized results support (for grouping pre-materialized data)
     private readonly bool _isMaterialized;
@@ -69,6 +70,14 @@ internal ref partial struct QueryResults
     private List<GroupedRow>? _groupedResults;
     private int _groupedIndex;
 
+    // A grouped query's trailing VALUES: its data rows, joined with the groups after HAVING (§18.2.4.3), and the data
+    // row each entry of _groupedResults was joined with
+    private readonly List<MaterializedRow>? _trailingValues;
+    private List<MaterializedRow>? _groupedValues;
+
+    // A grouped query's solutions, one per (joined) group, with its SELECT expressions, in ORDER BY's order (§18.2.5)
+    private List<MaterializedRow>? _groupedSolutions;
+
     // HAVING support
     private readonly bool _hasHaving;
     private readonly HavingClause _having;
@@ -90,18 +99,20 @@ internal ref partial struct QueryResults
         ReadOnlySpan<char> source, QuadStore store, Binding[] bindings, char[] stringBuffer,
         LimitOffsetClause limitOffset = default, bool distinct = false, OrderByClause orderBy = default,
         GroupByClause groupBy = default, SelectClause selectClause = default, HavingClause having = default,
-        Patterns.QueryBuffer? buffer = null, PrefixMapping[]? prefixes = null)
+        Patterns.QueryBuffer? buffer = null, PrefixMapping[]? prefixes = null, List<MaterializedRow>? trailingValues = null)
     {
-        // If actual ORDER BY is specified, sort the materialized results
-        if (orderBy.HasOrderBy && rows.Count > 1)
-        {
-            var sourceStr = source.ToString();
-            rows.Sort(new MaterializedRowComparer(orderBy, sourceStr, prefixes ?? buffer?.Prefixes));
-        }
-
+        // ORDER BY sorts the solutions with their SELECT expressions (§18.2.5): the presentation does, on its first row
+        // (MoveNextOrdered, or MoveNextGrouped for a grouped query's solutions)
         return new QueryResults(rows, source, store, bindings, stringBuffer,
-            limitOffset, distinct, orderBy, groupBy, selectClause, having, buffer, prefixes);
+            limitOffset, distinct, orderBy, groupBy, selectClause, having, buffer, prefixes, trailingValues);
     }
+
+    /// <summary>
+    /// Whether a query level groups its solutions: it has GROUP BY, or aggregates (one group, §18.2.4.1). A grouped
+    /// query's trailing VALUES is joined with the groups, after HAVING; any other query's with the WHERE's solutions.
+    /// </summary>
+    internal static bool UsesGrouping(GroupByClause groupBy, SelectClause selectClause)
+        => groupBy.HasGroupBy || selectClause.HasRealAggregates;
 
     private static readonly List<MaterializedRow> EmptyMaterializedRows = new();
 
@@ -152,7 +163,7 @@ internal ref partial struct QueryResults
         QuadStore store, Binding[] bindings, char[] stringBuffer,
         LimitOffsetClause limitOffset, bool distinct, OrderByClause orderBy,
         GroupByClause groupBy, SelectClause selectClause, HavingClause having,
-        Patterns.QueryBuffer? buffer = null, PrefixMapping[]? prefixes = null)
+        Patterns.QueryBuffer? buffer = null, PrefixMapping[]? prefixes = null, List<MaterializedRow>? trailingValues = null)
     {
         // ADR-047 cutover: the tree path passes its QueryBuffer so the pre-materialized presentation can evaluate
         // computed SELECT projections ((expr AS ?var)) — EvaluateSelectExpressions needs prefixes. The other _has* flags
@@ -178,12 +189,12 @@ internal ref partial struct QueryResults
         _sortedIndex = -1;
         _isMaterialized = true;  // Enable iteration from pre-materialized list
         _materializedIndex = -1;
-        // A trailing (post-query) VALUES is JOINED into the rows during materialization (ExecuteGraphViaTree →
-        // JoinPostQueryValues), not filtered here — so the presentation does not re-apply it.
+        // A trailing VALUES is joined by the caller with the WHERE's solutions, unless the query groups: then it comes
+        // here as data rows, and is joined with the groups after HAVING (CollectAndGroupResults)
+        _trailingValues = trailingValues;
         _groupBy = groupBy;
         _selectClause = selectClause;
-        // Enable grouping for explicit GROUP BY OR implicit aggregation (aggregates without GROUP BY)
-        _hasGroupBy = groupBy.HasGroupBy || selectClause.HasRealAggregates;
+        _hasGroupBy = UsesGrouping(groupBy, selectClause);
         _groupedResults = null;
         _groupedIndex = -1;
         _having = having;

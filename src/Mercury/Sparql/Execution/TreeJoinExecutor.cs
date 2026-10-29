@@ -630,14 +630,20 @@ internal sealed class TreeJoinExecutor
     /// The trailing (post-query) VALUES is a JOIN with the inline data, not a filter — it can MULTIPLY a solution (one
     /// that is compatible with several data rows) and BIND a variable left unbound by an OPTIONAL (W3C values5/values7).
     /// The buffer's ValuesClause carries offsets into this executor's source, so it reuses the same join as inline VALUES.
+    /// A query that groups joins it with its groups instead (§18.2.4.3): its <see cref="DataBlockRows"/> go to the
+    /// modifier layer.
     /// </summary>
     public List<MaterializedRow> JoinPostQueryValues(List<MaterializedRow> input, ValuesClause postValues)
         => JoinValuesClause(input, postValues);
 
-    /// <summary>Build a row per VALUES data row (UNDEF leaves the variable unbound) and join it with the input — the
-    /// join multiplies and merges, so a solution compatible with several data rows yields several solutions. The clause
-    /// is read from this executor's source with the reader the parser checked it with.</summary>
+    /// <summary>A VALUES data row per row (UNDEF leaves the variable unbound) and join it with the input — the join
+    /// multiplies and merges, so a solution compatible with several data rows yields several solutions.</summary>
     private List<MaterializedRow> JoinValuesClause(List<MaterializedRow> input, ValuesClause vc)
+        => Join(input, DataBlockRows(vc));
+
+    /// <summary>The rows of the VALUES clause <paramref name="vc"/>, one per data row, UNDEF unbound, each value a
+    /// term. The clause is read from this executor's source with the reader the parser checked it with.</summary>
+    internal List<MaterializedRow> DataBlockRows(ValuesClause vc)
     {
         var reader = new SparqlParser.DataBlockReader(_source.AsSpan(), vc.Start);
         var varNames = new List<string>();
@@ -666,7 +672,7 @@ internal sealed class TreeJoinExecutor
             ArrayPool<Binding>.Shared.Return(bindingArray);
             ArrayPool<char>.Shared.Return(charArray);
         }
-        return Join(input, valueRows);
+        return valueRows;
     }
 
     // ── SERVICE (federation) ──────────────────────────────────────────────────────────────────────────
@@ -762,10 +768,16 @@ internal sealed class TreeJoinExecutor
                 _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _namedGraphs, _defaultGraphs)
             .Evaluate(ref pa, slot.ChildStartIndex, activeGraph);
 
-        // A trailing VALUES inside the sub-SELECT joins its WHERE solutions BEFORE the modifier layer (W3C inline02).
-        // sub.Values offsets index _source (parsed at absolute offset above), so the shared join reuses _source.
+        // A trailing VALUES inside the sub-SELECT joins its WHERE solutions before the modifier layer (W3C inline02), or,
+        // when it groups, its groups (§18.2.4.3). sub.Values offsets index _source (parsed at absolute offset above).
+        List<MaterializedRow>? groupedValues = null;
         if (sub.Values.IsPresent)
-            innerBag = JoinPostQueryValues(innerBag, sub.Values);
+        {
+            if (QueryResults.UsesGrouping(sub.Modifier.GroupBy, sub.Select))
+                groupedValues = DataBlockRows(sub.Values);
+            else
+                innerBag = JoinPostQueryValues(innerBag, sub.Values);
+        }
 
         // Project before Distinct (§18.2.5), as the query does: see QueryExecutor.ExecuteViaTreeMaterialized
         var outNames = OutputVarNames(ref pa, headerIndex);
@@ -779,7 +791,8 @@ internal sealed class TreeJoinExecutor
         // projection like ( CONCAT(?f," ",?l) AS ?full ) — without them EvaluateSelectExpressions never ran and the alias
         // came out unbound (W3C sq12, surfaced by the C2 CONSTRUCT-subquery cutover).
         var qr = QueryResults.FromMaterializedSimple(innerBag, _source.AsSpan(), _store, qrBindings, qrStringBuffer,
-            sub.Modifier.LimitOffset, sub.Select.Distinct || sub.Select.Reduced, sub.Modifier.OrderBy, sub.Modifier.GroupBy, selectClause, sub.Modifier.Having, buffer: null, prefixes: _prefixes);
+            sub.Modifier.LimitOffset, sub.Select.Distinct || sub.Select.Reduced, sub.Modifier.OrderBy, sub.Modifier.GroupBy, selectClause, sub.Modifier.Having, buffer: null, prefixes: _prefixes,
+            trailingValues: groupedValues);
 
         var projected = new List<MaterializedRow>();
         var bindingArray = ArrayPool<Binding>.Shared.Rent(64);
@@ -957,7 +970,7 @@ internal sealed class TreeJoinExecutor
     }
 
     /// <summary>Two rows are compatible iff every shared variable (same name-hash) has the same value.</summary>
-    private static bool Compatible(MaterializedRow a, MaterializedRow b)
+    internal static bool Compatible(MaterializedRow a, MaterializedRow b)
     {
         for (int i = 0; i < a.BindingCount; i++)
         {

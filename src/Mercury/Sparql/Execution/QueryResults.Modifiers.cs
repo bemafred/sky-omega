@@ -22,9 +22,9 @@ internal ref partial struct QueryResults
     {
         // First call - collect and sort all results
         if (_sortedResults == null)
-        {
             CollectAndSortResults();
-        }
+        else if (!_sortedResultsMade)
+            MakeSortedResults();
 
         // Check if we've hit the limit
         if (_limitOffset.LimitReached(_returned))
@@ -41,29 +41,48 @@ internal ref partial struct QueryResults
                 _bindingTable.BindWithHash(row.GetHash(i), row.GetValue(i));
             }
 
-            // ADR-047 cutover: pre-materialized rows from the tree carry only the joined pattern bindings — the lazy
-            // per-row SELECT-expression evaluation the streaming/collection path applies (MoveNextUnorderedForCollection
-            // line 235) never ran for them. Evaluate computed projections ((expr AS ?var)) now, before FILTER/DISTINCT
-            // see them and before the projection reads them. Gated on _isMaterialized so the scan-collected ORDER BY path
-            // (already evaluated during collection, _isMaterialized=false) is not re-evaluated — a second eval would
-            // diverge for non-deterministic expressions (UUID/RAND/NOW). C2: gate on the SELECT clause actually having
-            // computed projections (Function=None aggregates), not on _buffer — the sub-SELECT path has expressions to
-            // evaluate but no outer buffer (it lends prefixes via _materializedPrefixes instead). A clause with no such
-            // expressions makes the block a no-op, so this never fires spuriously.
-            if (_isMaterialized && _selectClause.AggregateCount > 0)
-            {
-                // Per-row bnode seed so BNODE(str) yields a fresh blank node per row (same str → same bnode WITHIN a row,
-                // different across rows), matching the streaming/collection path (W3C bnode01).
-                FilterEvaluator.IncrementBnodeRowSeed();
-                EvaluateSelectExpressions();
-            }
-
             if (!KeepAfterDistinctAndOffset())
                 continue;
             return true;
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Pre-materialized rows (the tree's), made into the solutions ORDER BY sorts: each with its SELECT expressions
+    /// (§18.2.4.4), then sorted, since §18.2.5 orders after them, so ORDER BY can read an expression's variable. The
+    /// rows the collection path makes have their expressions already (CollectAndSortResults); evaluating them again
+    /// would diverge for UUID, RAND and NOW.
+    /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private void MakeSortedResults()
+    {
+        _sortedResultsMade = true;
+        var rows = _sortedResults!;
+
+        // The sub-SELECT path has expressions but no outer buffer (it lends its prefixes via _materializedPrefixes), so
+        // the gate is the SELECT clause having computed projections (Function=None aggregates)
+        if (_isMaterialized && _selectClause.AggregateCount > 0)
+        {
+            for (int r = 0; r < rows.Count; r++)
+            {
+                _bindingTable.Clear();
+                var row = rows[r];
+                for (int i = 0; i < row.BindingCount; i++)
+                    _bindingTable.BindWithHash(row.GetHash(i), row.GetValue(i));
+
+                // Per-row bnode seed so BNODE(str) yields a fresh blank node per row (same str → same bnode WITHIN a
+                // row, different across rows), matching the collection path (W3C bnode01)
+                FilterEvaluator.IncrementBnodeRowSeed();
+                EvaluateSelectExpressions();
+                rows[r] = new MaterializedRow(_bindingTable);
+            }
+        }
+
+        if (_orderBy.HasOrderBy && rows.Count > 1)
+            rows.Sort(new MaterializedRowComparer(_orderBy, _source.ToString(), _buffer?.Prefixes ?? _materializedPrefixes));
+        _bindingTable.Clear();
     }
 
     /// <summary>
@@ -153,58 +172,68 @@ internal ref partial struct QueryResults
     }
 
     /// <summary>
-    /// Move to next result for GROUP BY queries.
-    /// Collects all results on first call, groups them, then iterates.
-    /// NoInlining prevents stack frame merging (ADR-003).
+    /// Move to next result for GROUP BY queries. On the first call the solutions are grouped (with HAVING and the
+    /// trailing VALUES), each group's solution is made with its SELECT expressions, and the solutions are ordered by
+    /// ORDER BY: §18.2.5 orders after the SELECT expressions, so ORDER BY reads an aggregate's or expression's
+    /// variable, and a trailing VALUES' variable. NoInlining prevents stack frame merging (ADR-003).
     /// </summary>
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     private bool MoveNextGrouped()
     {
-        // First call - collect and group results
         if (_groupedResults == null)
-        {
             CollectAndGroupResults();
-        }
+        if (_groupedSolutions == null)
+            MakeGroupedSolutions();
 
-        // Check if we've hit the limit
         if (_limitOffset.LimitReached(_returned))
             return false;
 
-        // Iterate through grouped results
-        while (++_groupedIndex < _groupedResults!.Count)
+        while (++_groupedIndex < _groupedSolutions!.Count)
         {
-            // Load the grouped row into binding table
-            var group = _groupedResults[_groupedIndex];
             _bindingTable.Clear();
-
-            // Bind the grouping variables
-            for (int i = 0; i < group.KeyCount; i++)
-            {
-                _bindingTable.BindWithHash(group.GetKeyHash(i), group.GetKeyValue(i));
-            }
-
-            // Bind the aggregate results
-            // Skip empty values - they indicate errors (e.g., AVG with non-numeric values)
-            // Per W3C SPARQL semantics, aggregates with errors should return UNBOUND (no binding)
-            for (int i = 0; i < group.AggregateCount; i++)
-            {
-                var value = group.GetAggregateValue(i);
-                if (value.Length > 0)
-                {
-                    _bindingTable.BindWithHash(group.GetAggregateHash(i), value);
-                }
-            }
-
-            // Evaluate non-aggregate SELECT expressions that may contain aggregate functions
-            // e.g., ((MIN(?p) + MAX(?p)) / 2 AS ?c)
-            EvaluateGroupedSelectExpressions(group);
-
+            _groupedSolutions[_groupedIndex].RestoreBindings(ref _bindingTable);
             if (!KeepAfterDistinctAndOffset())
                 continue;
             return true;
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// The grouped solutions: for each group HAVING kept, its GROUP BY variables and aggregates, what the trailing
+    /// VALUES row it was joined with binds (§18.2.4.3), and its SELECT expressions (§18.2.4.4); then sorted by ORDER BY.
+    /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private void MakeGroupedSolutions()
+    {
+        _groupedSolutions = new List<MaterializedRow>(_groupedResults!.Count);
+        for (int g = 0; g < _groupedResults.Count; g++)
+        {
+            var group = _groupedResults[g];
+            BindGroup(group);
+
+            if (_groupedValues != null)
+            {
+                var values = _groupedValues[g];
+                for (int i = 0; i < values.BindingCount; i++)
+                {
+                    if (_bindingTable.FindBindingByHash(values.GetHash(i)) < 0)
+                        _bindingTable.BindWithHash(values.GetHash(i), values.GetValue(i), values.GetValueType(i));
+                }
+            }
+
+            // Non-aggregate SELECT expressions, which may contain aggregates: ((MIN(?p) + MAX(?p)) / 2 AS ?c)
+            EvaluateGroupedSelectExpressions(group);
+            _groupedSolutions.Add(new MaterializedRow(_bindingTable));
+        }
+
+        if (_orderBy.HasOrderBy && _groupedSolutions.Count > 1)
+            _groupedSolutions.Sort(new MaterializedRowComparer(_orderBy, _source.ToString(), _buffer?.Prefixes ?? _materializedPrefixes));
+
+        _groupedIndex = -1;
+        _skipped = 0;
+        _returned = 0;
     }
 
     /// <summary>
@@ -277,16 +306,7 @@ internal ref partial struct QueryResults
             // Apply HAVING filter if present
             if (_hasHaving)
             {
-                // Load group bindings into binding table for filter evaluation
-                _bindingTable.Clear();
-                for (int i = 0; i < group.KeyCount; i++)
-                {
-                    _bindingTable.BindWithHash(group.GetKeyHash(i), group.GetKeyValue(i));
-                }
-                for (int i = 0; i < group.AggregateCount; i++)
-                {
-                    _bindingTable.BindWithHash(group.GetAggregateHash(i), group.GetAggregateValue(i));
-                }
+                BindGroup(group);
 
                 // Evaluate HAVING expression
                 // HAVING can reference aggregates by alias (e.g., ?count > 2) OR by expression (e.g., COUNT(?x) > 2)
@@ -303,10 +323,60 @@ internal ref partial struct QueryResults
             _groupedResults.Add(group);
         }
 
+        if (_trailingValues != null)
+            JoinTrailingValues();
+
         // Reset for iteration
         _groupedIndex = -1;
         _skipped = 0;
         _returned = 0;
+    }
+
+    /// <summary>
+    /// The group's solution in the binding table: its GROUP BY variables and its aggregates. A key the group's
+    /// solutions leave unbound, and an aggregate that is an error, are unbound (§18.5).
+    /// </summary>
+    private void BindGroup(GroupedRow group)
+    {
+        _bindingTable.Clear();
+        for (int i = 0; i < group.KeyCount; i++)
+        {
+            var key = group.GetKeyValue(i);
+            if (key.Length > 0)
+                _bindingTable.BindWithHash(group.GetKeyHash(i), key);
+        }
+        for (int i = 0; i < group.AggregateCount; i++)
+        {
+            var value = group.GetAggregateValue(i);
+            if (value.Length > 0)
+                _bindingTable.BindWithHash(group.GetAggregateHash(i), value);
+        }
+    }
+
+    /// <summary>
+    /// §18.2.4.3: a grouped query's trailing VALUES is joined with the groups that HAVING keeps, before the SELECT
+    /// expressions. A group is kept once for each data row compatible with its solution, so a data row can bind a
+    /// variable the SELECT clause projects, and one with no compatible group removes nothing but itself.
+    /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private void JoinTrailingValues()
+    {
+        var joined = new List<GroupedRow>();
+        var values = new List<MaterializedRow>();
+        foreach (var group in _groupedResults!)
+        {
+            BindGroup(group);
+            var solution = new MaterializedRow(_bindingTable);
+            foreach (var row in _trailingValues!)
+            {
+                if (!TreeJoinExecutor.Compatible(solution, row))
+                    continue;
+                joined.Add(group);
+                values.Add(row);
+            }
+        }
+        _groupedResults = joined;
+        _groupedValues = values;
     }
 
     /// <summary>

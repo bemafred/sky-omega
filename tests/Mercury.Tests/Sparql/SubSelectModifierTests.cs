@@ -40,15 +40,18 @@ public class SubSelectModifierTests : PooledStoreTestBase
     }
 
     [Fact]
-    public void SubSelect_TrailingValues_JoinsBeforeItsModifiers()
+    public void SubSelect_TrailingValues_JoinsAfterItsAggregate()
     {
-        // The sub-SELECT's VALUES is parsed by the query's [28] ValuesClause parser
+        // The sub-SELECT's VALUES is parsed by the query's [28] ValuesClause parser. The empty WHERE is one solution in
+        // one group, so COUNT(*) is 1; the VALUES is joined with the group after aggregating (§18.2.4.3), once per data row
         var result = SparqlEngine.Query(Store,
-            "SELECT ?n WHERE { { SELECT (COUNT(?x) AS ?n) WHERE { } VALUES ?x { 1 2 3 } } }",
+            "SELECT ?n ?x WHERE { { SELECT ?x (COUNT(*) AS ?n) WHERE { } VALUES ?x { 1 2 3 } } }",
             TestContext.Current.CancellationToken);
 
         Assert.True(result.Success, result.ErrorMessage);
-        var row = Assert.Single(result.Rows!);
-        Assert.Equal("\"3\"^^<http://www.w3.org/2001/XMLSchema#integer>", row["n"]);
+        Assert.Equal(
+            new[] { "1", "2", "3" },
+            result.Rows!.Select(row => row["x"].Split('"')[1]).OrderBy(x => x, StringComparer.Ordinal));
+        Assert.All(result.Rows!, row => Assert.Equal("\"1\"^^<http://www.w3.org/2001/XMLSchema#integer>", row["n"]));
     }
 }

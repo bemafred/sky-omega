@@ -243,7 +243,7 @@ internal partial class QueryExecutor : IDisposable
         if (TryStreamOrderByTopK(out var topk))
             return topk;
 
-        var rows = ExecuteGraphViaTree();
+        var rows = ExecuteGraphViaTree(out var groupedValues);
         // §18.2.5 applies Project before Distinct, and a SELECT * projects the in-scope variables: a pattern's blank node,
         // bound only to join its triples, must not tell two solutions apart. Without DISTINCT the projection is the
         // result's to make (the rows keep their other bindings until then).
@@ -258,7 +258,7 @@ internal partial class QueryExecutor : IDisposable
         return QueryResults.FromMaterializedSimple(rows, _source.AsSpan(), _store, bindings, _stringBuffer,
             _buffer.LimitOffset, _buffer.SelectDistinct,
             _buffer.GetOrderByClause(), _buffer.GetGroupByClause(),
-            _buffer.GetSelectClause(), _buffer.GetHavingClause(), _buffer);
+            _buffer.GetSelectClause(), _buffer.GetHavingClause(), _buffer, trailingValues: groupedValues);
     }
 
     /// <summary>
@@ -330,6 +330,28 @@ internal partial class QueryExecutor : IDisposable
     /// kept rows are re-sorted (cheap, ≤ capacity) and paged by the shared modifier layer — identical bag to the old
     /// path, which sorts the whole set then slices the same page.
     /// </summary>
+    /// <summary>
+    /// True when an ORDER BY condition reads a variable a SELECT expression assigns: ORDER BY sorts after the SELECT
+    /// expressions (§18.2.5), so such a condition cannot be applied to the WHERE's rows.
+    /// </summary>
+    private bool OrderByReadsASelectExpression(OrderByClause orderBy, SelectClause select)
+    {
+        for (int a = 0; a < select.AggregateCount; a++)
+        {
+            var assigned = select.GetAggregate(a);
+            if (assigned.AliasLength == 0)
+                continue;
+            var alias = _source.AsSpan(assigned.AliasStart, assigned.AliasLength);
+            for (int c = 0; c < orderBy.Count; c++)
+            {
+                var condition = orderBy.GetCondition(c);
+                if (new SparqlParser(_source.AsSpan()).ExpressionReads(condition.ExpressionStart, condition.ExpressionLength, alias))
+                    return true;
+            }
+        }
+        return false;
+    }
+
     private bool TryStreamOrderByTopK(out QueryResults result)
     {
         result = default;
@@ -343,6 +365,7 @@ internal partial class QueryExecutor : IDisposable
         if (select.HasRealAggregates) return false;   // aggregates go through the fold / grouped path
         if (_buffer.GetGroupByClause().HasGroupBy) return false;
         if (_buffer.GetHavingClause().HasHaving) return false;
+        if (OrderByReadsASelectExpression(orderBy, select)) return false; // the scan's rows have no SELECT expressions yet
 
         // The heap retains `capacity` (= OFFSET + LIMIT) rows. Bound that by a fraction of available physical memory so
         // a pathological OFFSET+LIMIT cannot itself OOM the heap; above the cap, fall back to full materialization (the
@@ -384,9 +407,10 @@ internal partial class QueryExecutor : IDisposable
     /// ADR-045 cutover: evaluate the GRAPH-clause WHERE group through the unified zero-GC tree executor. Parses the
     /// WHERE group over the FULL query (so the tree's slot offsets index the same source as the prologue prefixes),
     /// threads the active graph per pattern and the dataset (USING / FROM NAMED) restriction, and returns
-    /// materialized rows for the shared modifier layer.
+    /// materialized rows for the shared modifier layer. A trailing VALUES is joined with the rows, unless the query
+    /// groups: then <paramref name="groupedValues"/> is its data rows, which the modifier layer joins with the groups.
     /// </summary>
-    private List<MaterializedRow> ExecuteGraphViaTree(int askExistenceCap = 0)
+    private List<MaterializedRow> ExecuteGraphViaTree(out List<MaterializedRow>? groupedValues, int askExistenceCap = 0)
     {
         int whereStart = _buffer.WhereGroupStart;
         // Pool the pattern-tree buffer — it is per-query setup, not the hot path, but renting keeps the GRAPH path's
@@ -428,9 +452,16 @@ internal partial class QueryExecutor : IDisposable
                 _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _namedGraphs, _defaultGraphs, ReorderBgpInTree, trigramMap);
             var rows = executor.Evaluate(ref tree, root, "", maxRows);
 
-            // A trailing (post-query) VALUES is JOINED with the whole-pattern solution (multiply + bind), not filtered.
+            // A trailing (post-query) VALUES is JOINED with the whole-pattern solution (multiply + bind), not filtered; in
+            // a query that groups, with the groups after HAVING (§18.2.4.3), so the modifier layer joins it
+            groupedValues = null;
             if (_buffer.HasPostQueryValues)
-                rows = executor.JoinPostQueryValues(rows, _buffer.PostQueryValues);
+            {
+                if (askExistenceCap == 0 && UsesGrouping())
+                    groupedValues = executor.DataBlockRows(_buffer.PostQueryValues);
+                else
+                    rows = executor.JoinPostQueryValues(rows, _buffer.PostQueryValues);
+            }
 
             return rows;
         }
@@ -439,6 +470,12 @@ internal partial class QueryExecutor : IDisposable
             System.Buffers.ArrayPool<byte>.Shared.Return(treeBuffer);
         }
     }
+
+    /// <summary>Whether the query groups its solutions (<see cref="QueryResults.UsesGrouping"/>).</summary>
+    /// <remarks>NoInlining keeps the clause structs out of <see cref="ExecuteGraphViaTree"/>'s frame, which is under
+    /// every join's recursion.</remarks>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private bool UsesGrouping() => QueryResults.UsesGrouping(_buffer.GetGroupByClause(), _buffer.GetSelectClause());
 
     /// <summary>The store's result-row cap (<c>StorageOptions.MaxResultRows</c>; 0 = unbounded) — the drain loops
     /// check it via <see cref="ResultLimitExceededException.ThrowIfExceeded"/>. The unbounded-result guard.</summary>
@@ -539,7 +576,8 @@ internal partial class QueryExecutor : IDisposable
         // seed, so it correctly ASKs true — the old path's requiredCount==0 → false silently dropped that solution. A
         // FROM dataset is honoured here too (the tree reads the merge of _defaultGraphs), so ASK FROM tests the FROM graphs — the
         // old slot path this never reached ignored FROM and tested the unnamed default (a latent bug the cutover fixes).
-        return ExecuteGraphViaTree(askExistenceCap: 1).Count > 0;
+        // ASK applies no solution modifiers, so its trailing VALUES joins the WHERE's solutions even with GROUP BY
+        return ExecuteGraphViaTree(out _, askExistenceCap: 1).Count > 0;
     }
 
     /// <summary>

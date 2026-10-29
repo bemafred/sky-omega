@@ -9,7 +9,8 @@ namespace SkyOmega.Mercury.Sparql.Parsing;
 internal ref partial struct SparqlParser
 {
     /// <summary>
-    /// [7] SelectQuery ::= SelectClause DatasetClause* WhereClause SolutionModifier
+    /// [7] SelectQuery ::= SelectClause DatasetClause* WhereClause SolutionModifier. Its scope rules are checked by
+    /// <see cref="ValidateSelectScope"/> once the query's trailing VALUES is read, since its variables are in scope.
     /// </summary>
     private Query ParseSelectQuery(Prologue prologue)
     {
@@ -17,12 +18,6 @@ internal ref partial struct SparqlParser
         var datasets = ParseDatasetClauses();
         var whereClause = ParseWhereClause();
         var modifier = ParseQuerySolutionModifier();
-
-        // Validate GROUP BY semantics
-        ValidateGroupBySemantics(selectClause, modifier.GroupBy);
-
-        // Validate SELECT alias scope conflicts with subqueries (syntax-SELECTscope2)
-        ValidateSelectSubqueryScope(selectClause, whereClause.GroupStart);
 
         return new Query
         {
@@ -36,76 +31,64 @@ internal ref partial struct SparqlParser
     }
 
     /// <summary>
-    /// Validates that SELECT clause aliases don't conflict with subquery projections (syntax-SELECTscope2).
+    /// A SELECT query's scope rules: what a grouped query projects (<see cref="ValidateGroupBySemantics"/>) and where
+    /// a SELECT expression assigns (<see cref="ThrowIfAssignedInScope"/>), checked against the WHERE group at
+    /// <paramref name="whereGroupStart"/> and the trailing VALUES.
     /// </summary>
-    private void ValidateSelectSubqueryScope(SelectClause selectClause, int whereGroupStart)
+    private void ValidateSelectScope(SelectClause selectClause, GroupByClause groupBy, ValuesClause values, int whereGroupStart)
     {
-        // Collect SELECT clause aliases
-        Span<int> selectAliasHashes = stackalloc int[32];
-        int selectAliasCount = 0;
+        ValidateGroupBySemantics(selectClause, groupBy, values);
+        if (selectClause.AggregateCount == 0)
+            return;
 
-        // Check aggregate expression aliases
-        for (int i = 0; i < selectClause.AggregateCount; i++)
-        {
-            var agg = selectClause.GetAggregate(i);
-            if (agg.AliasLength > 0)
-            {
-                var hash = VariableName.Hash(_source.Slice(agg.AliasStart, agg.AliasLength));
-                if (selectAliasCount < 32) selectAliasHashes[selectAliasCount++] = hash;
-            }
-        }
-
-        // If no aliases to check, nothing to do
-        if (selectAliasCount == 0 || whereGroupStart < 0) return;
-
-        // Check each sub-SELECT of the WHERE group (the group itself, or its direct children) for a projected
-        // variable or expression alias that one of the outer aliases reuses
-        const int treeBytes = PatternSlot.Size * 1024;
-        var treeBuffer = System.Buffers.ArrayPool<byte>.Shared.Rent(treeBytes);
+        var visible = new InScopeVariables(_source);
         try
         {
-            var tree = new PatternArray(treeBuffer.AsSpan(0, treeBytes));
-            int root = new SparqlParser(_source).ParsePatternTreeAt(whereGroupStart, ref tree);
-            if (tree[root].Kind == PatternKind.SubSelectHeader)
-                ThrowOnSubSelectAliasConflict(tree[root], selectAliasHashes[..selectAliasCount]);
-            var e = tree.EnumerateDirectChildren(root);
-            while (e.MoveNext())
-            {
-                if (e.Current.Kind == PatternKind.SubSelectHeader)
-                    ThrowOnSubSelectAliasConflict(e.Current, selectAliasHashes[..selectAliasCount]);
-            }
+            if (whereGroupStart >= 0)
+                AddInScopeVariables(whereGroupStart, ref visible);
+            ThrowIfAssignedInScope(selectClause, groupBy, values, ref visible);
         }
         finally
         {
-            System.Buffers.ArrayPool<byte>.Shared.Return(treeBuffer);
-        }
-    }
-
-    /// <summary>syntax-SELECTscope2: an outer SELECT alias must not reuse a variable the sub-SELECT at
-    /// <paramref name="subSelect"/> projects.</summary>
-    private void ThrowOnSubSelectAliasConflict(PatternSlot subSelect, scoped ReadOnlySpan<int> aliasHashes)
-    {
-        var subquery = new SparqlParser(_source).ParseSubSelectClausesAt(subSelect.GraphTermStart, subSelect.SubSelectModifiersStart);
-        int projected = subquery.Select.ProjectedVariableCount;
-        for (int j = 0; j < projected + subquery.Select.AggregateCount; j++)
-        {
-            var (start, len) = j < projected
-                ? subquery.Select.GetProjectedVariable(j)
-                : (subquery.Select.GetAggregate(j - projected).AliasStart, subquery.Select.GetAggregate(j - projected).AliasLength);
-            if (len == 0) continue;
-            var hash = VariableName.Hash(_source.Slice(start, len));
-            foreach (var aliasHash in aliasHashes)
-            {
-                if (aliasHash == hash)
-                    throw new SparqlParseException($"Variable {_source.Slice(start, len).ToString()} in SELECT conflicts with same variable in subquery projection");
-            }
+            visible.Dispose();
         }
     }
 
     /// <summary>
-    /// Validates GROUP BY semantic constraints according to SPARQL 1.1 spec.
+    /// SPARQL 1.1 §18.2.4.4: the variable of a SELECT expression <c>(expr AS v)</c> must not be visible where it is
+    /// assigned. (Nor projected earlier in the SELECT clause: <see cref="ParseSelectClause"/> rejects a name used
+    /// twice.) Visible are the WHERE's in-scope variables (a
+    /// sub-SELECT's projection among them), filled into <paramref name="visible"/> by the caller, and the variables
+    /// of GROUP BY and of the trailing VALUES, which is joined before the SELECT expressions (§18.2.4.3).
     /// </summary>
-    private void ValidateGroupBySemantics(SelectClause selectClause, GroupByClause groupBy)
+    private void ThrowIfAssignedInScope(SelectClause selectClause, GroupByClause groupBy, ValuesClause values,
+        scoped ref InScopeVariables visible)
+    {
+        for (int i = 0; i < groupBy.Count; i++)
+        {
+            var (start, length) = groupBy.GetVariable(i);
+            if (length > 0)
+                visible.Add(start, length);
+        }
+        if (values.IsPresent)
+            AddDataBlockVariables(values.Start, ref visible);
+
+        for (int a = 0; a < selectClause.AggregateCount; a++)
+        {
+            var assigned = selectClause.GetAggregate(a);
+            if (assigned.AliasLength == 0)
+                continue;
+            var name = _source.Slice(assigned.AliasStart, assigned.AliasLength);
+            if (visible.Contains(name))
+                throw new SparqlParseException($"Variable {name.ToString()} is already in scope where a SELECT expression assigns it");
+        }
+    }
+
+    /// <summary>
+    /// Validates GROUP BY semantic constraints according to SPARQL 1.1 spec. A grouped query projects its GROUP BY
+    /// variables and its trailing VALUES' (<paramref name="values"/>), which is joined after grouping (§18.2.4.3).
+    /// </summary>
+    private void ValidateGroupBySemantics(SelectClause selectClause, GroupByClause groupBy, ValuesClause values)
     {
         // Rule 1: SELECT * is not allowed with GROUP BY (syn-bad-01)
         if (selectClause.SelectAll && groupBy.HasGroupBy)
@@ -121,7 +104,7 @@ internal ref partial struct SparqlParser
         // These require tracking SELECT variables, which is done by ValidateSelectVariables
         if (selectClause.HasProjectedVariables && (groupBy.HasGroupBy || hasActualAggregates))
         {
-            ValidateSelectVariables(selectClause, groupBy, hasActualAggregates);
+            ValidateSelectVariables(selectClause, groupBy, values, hasActualAggregates);
         }
     }
 
@@ -200,56 +183,39 @@ internal ref partial struct SparqlParser
     }
 
     /// <summary>
-    /// Validates that SELECT variables are properly scoped for GROUP BY.
+    /// What a grouped query projects (§11.4): a projected variable is a GROUP BY variable, or a variable of the
+    /// trailing VALUES, which is joined after grouping (§18.2.4.3). With aggregates and no GROUP BY there is one group
+    /// and no GROUP BY variable.
     /// </summary>
-    private void ValidateSelectVariables(SelectClause selectClause, GroupByClause groupBy, bool hasActualAggregates)
+    private void ValidateSelectVariables(SelectClause selectClause, GroupByClause groupBy, ValuesClause values, bool hasActualAggregates)
     {
-        // If there are actual aggregate functions but no GROUP BY, non-aggregate variables are not allowed
-        if (hasActualAggregates && !groupBy.HasGroupBy)
+        if (!groupBy.HasGroupBy && !hasActualAggregates)
+            return;
+
+        for (int i = 0; i < selectClause.ProjectedVariableCount; i++)
         {
-            // Any projected variable is an error - only aggregates allowed
-            for (int i = 0; i < selectClause.ProjectedVariableCount; i++)
+            var (varStart, varLen) = selectClause.GetProjectedVariable(i);
+            if (varLen == 0) continue;
+            var varName = _source.Slice(varStart, varLen);
+
+            bool found = false;
+            for (int j = 0; j < groupBy.Count && !found; j++)
             {
-                var (start, len) = selectClause.GetProjectedVariable(i);
-                if (len > 0)
-                {
-                    var varName = _source.Slice(start, len);
-                    throw new SparqlParseException($"Variable {varName.ToString()} is not allowed in SELECT with aggregates but no GROUP BY");
-                }
+                var (gbStart, gbLen) = groupBy.GetVariable(j);
+                found = gbLen > 0 && VariableName.Same(varName, _source.Slice(gbStart, gbLen));
             }
-        }
-
-        // If there's GROUP BY, all projected variables must be in GROUP BY
-        if (groupBy.HasGroupBy)
-        {
-            for (int i = 0; i < selectClause.ProjectedVariableCount; i++)
+            if (values.IsPresent)
             {
-                var (varStart, varLen) = selectClause.GetProjectedVariable(i);
-                if (varLen == 0) continue;
-
-                var varName = _source.Slice(varStart, varLen);
-                bool found = false;
-
-                // Check if variable is in GROUP BY
-                for (int j = 0; j < groupBy.Count; j++)
-                {
-                    var (gbStart, gbLen) = groupBy.GetVariable(j);
-                    if (gbLen > 0)
-                    {
-                        var gbName = _source.Slice(gbStart, gbLen);
-                        if (VariableName.Same(varName, gbName))
-                        {
-                            found = true;
-                            break;
-                        }
-                    }
-                }
-
-                if (!found)
-                {
-                    throw new SparqlParseException($"Variable {varName.ToString()} in SELECT is not in GROUP BY and is not an aggregate");
-                }
+                var reader = new DataBlockReader(_source, values.Start);
+                while (!found && reader.MoveNextVariable(out int vStart, out int vLen))
+                    found = VariableName.Same(varName, _source.Slice(vStart, vLen));
             }
+            if (found)
+                continue;
+
+            throw new SparqlParseException(groupBy.HasGroupBy
+                ? $"Variable {varName.ToString()} in SELECT is not in GROUP BY and is not an aggregate"
+                : $"Variable {varName.ToString()} is not allowed in SELECT with aggregates but no GROUP BY");
         }
     }
 
@@ -917,10 +883,11 @@ internal ref partial struct SparqlParser
     {
         int header = pa.BeginSubSelect(_position);
         ParseSubSelectHead();
+        int where = pa.Count;
         ParseGroupTree(ref pa, depth + 1); // [17] WhereClause ::= 'WHERE'? GroupGraphPattern
         SkipWhitespace();
         int modifiersStart = _position;
-        ParseSubSelectTail(pa[header].GraphTermStart, modifiersStart);
+        ParseSubSelectTail(ref pa, where, pa[header].GraphTermStart, modifiersStart);
         pa.EndSubSelect(header, modifiersStart, _position);
     }
 
@@ -938,14 +905,35 @@ internal ref partial struct SparqlParser
     }
 
     /// <summary>
-    /// SolutionModifier ValuesClause, checked against the SelectClause as a query's are (GROUP BY rules): moves the
-    /// cursor past the sub-SELECT.
+    /// SolutionModifier ValuesClause, checked against the SelectClause as a query's are (<see cref="ValidateSelectScope"/>),
+    /// with the WHERE the slots from <paramref name="where"/> on: moves the cursor past the sub-SELECT.
     /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private void ParseSubSelectTail(int selectStart, int modifiersStart)
+    private void ParseSubSelectTail(scoped ref PatternArray pa, int where, int selectStart, int modifiersStart)
     {
         var clauses = ParseSubSelectClausesAt(selectStart, modifiersStart);
-        ValidateGroupBySemantics(clauses.Select, clauses.Modifier.GroupBy);
+        ValidateGroupBySemantics(clauses.Select, clauses.Modifier.GroupBy, clauses.Values);
+        if (clauses.Select.AggregateCount > 0)
+            ThrowIfAssignedInScope(ref pa, where, in clauses);
+    }
+
+    /// <summary>
+    /// <see cref="ThrowIfAssignedInScope(SelectClause, GroupByClause, ValuesClause, ref InScopeVariables)"/> for a
+    /// sub-SELECT, whose WHERE is the slots from <paramref name="where"/> on.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)] // the in-scope set stays out of the sub-SELECT parse's frame
+    private void ThrowIfAssignedInScope(scoped ref PatternArray pa, int where, in SubSelect clauses)
+    {
+        var visible = new InScopeVariables(_source);
+        try
+        {
+            AddInScopeVariables(ref pa, where, pa.Count, ref visible);
+            ThrowIfAssignedInScope(clauses.Select, clauses.Modifier.GroupBy, clauses.Values, ref visible);
+        }
+        finally
+        {
+            visible.Dispose();
+        }
     }
 
     /// <summary>

@@ -234,6 +234,27 @@ internal ref partial struct SparqlParser
         return found;
     }
 
+    /// <summary>
+    /// True when the expression at <c>[start, start + length)</c> reads the variable <paramref name="variable"/>
+    /// (with or without its sigil). Read with the expression token rule, so a "?x" inside a literal or IRI is not one;
+    /// the scan goes into sub-expressions.
+    /// </summary>
+    internal bool ExpressionReads(int start, int length, ReadOnlySpan<char> variable)
+    {
+        _position = start;
+        int end = start + length;
+        while (_position < end)
+        {
+            char ch = Peek();
+            if (ch is '(' or ')' or '{' or '}') { Advance(); continue; } // into and out of sub-expressions
+            int tokenStart = _position;
+            SkipExpressionToken();
+            if (VariableName.IsSigil(ch) && VariableName.Same(_source[tokenStart.._position], variable))
+                return true;
+        }
+        return false;
+    }
+
     private static readonly (string Name, AggregateFunction Function)[] AggregateNames =
     [
         ("COUNT", AggregateFunction.Count), ("SUM", AggregateFunction.Sum), ("AVG", AggregateFunction.Avg),

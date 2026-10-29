@@ -482,6 +482,9 @@ internal ref partial struct SparqlParser
         if (!IsAtEnd())
             throw new SparqlParseException($"Unexpected text after the query at position {_position}");
 
+        if (query.Type == QueryType.Select)
+            ValidateSelectScope(query.SelectClause, query.SolutionModifier.GroupBy, query.Values, query.WhereClause.GroupStart);
+
         return query;
     }
 
