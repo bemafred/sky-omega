@@ -124,29 +124,48 @@ internal sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
         SkipXmlDeclaration();
         SkipWhitespace();
 
-        // Parse root element (should be rdf:RDF or a single description)
-        while (!IsEndOfInput())
+        // XML 1.0 [1] document ::= prolog element Misc*. The one root element (rdf:RDF or a node element) may be
+        // preceded by comments, processing instructions and a document type declaration, and followed by comments and
+        // processing instructions, with whitespace between them; nothing else.
+        bool rootRead = false;
+        while (true)
         {
-            SkipWhitespace();
-            if (IsEndOfInput())
-                break;
-
-            // Refill buffer if running low
             await _input.TopUpAsync(cancellationToken);
             SkipWhitespace();
-
             if (IsEndOfInput())
                 break;
 
-            if (Peek() == '<')
+            if (Peek() != '<')
+                throw ParserException(rootRead ? "Text after the root element" : "Text before the root element");
+
+            int next = PeekAhead(1);
+            bool comment = next == '!' && PeekAhead(2) == '-' && PeekAhead(3) == '-';
+            if (next == '?' || comment)
+            {
+                // A processing instruction or a comment, skipped
+                await ParseElementAsync(handler, cancellationToken);
+                continue;
+            }
+
+            bool doctype = next == '!' && PeekAhead(2) == 'D' && PeekAhead(3) == 'O' && PeekAhead(4) == 'C' &&
+                           PeekAhead(5) == 'T' && PeekAhead(6) == 'Y' && PeekAhead(7) == 'P' && PeekAhead(8) == 'E';
+            if (doctype && !rootRead)
             {
                 await ParseElementAsync(handler, cancellationToken);
+                continue;
             }
-            else
-            {
-                // Skip unexpected content
-                Consume();
-            }
+
+            if (next == '/')
+                throw ParserException("An end tag with no start tag");
+            if (doctype)
+                throw ParserException("A document type declaration after the root element");
+            if (next == '!')
+                throw ParserException("A CDATA section outside the root element");
+            if (rootRead)
+                throw ParserException("A second root element");
+
+            await ParseElementAsync(handler, cancellationToken);
+            rootRead = true;
         }
     }
 

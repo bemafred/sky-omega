@@ -565,6 +565,48 @@ public class RdfXmlStreamParserTests
 
     #endregion
 
+    #region Document Structure
+
+    [Theory]
+    [InlineData("xyz<rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\"/>", "Text before the root element")]
+    [InlineData("<rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\"/>xyz", "Text after the root element")]
+    [InlineData("<rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\"/><rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\"/>", "A second root element")]
+    [InlineData("</rdf:RDF>", "An end tag with no start tag")]
+    [InlineData("<rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\"/><!DOCTYPE rdf:RDF>", "A document type declaration after the root element")]
+    [InlineData("<![CDATA[x]]><rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\"/>", "A CDATA section outside the root element")]
+    public async Task ParseAsync_ContentOutsideTheRootElement_IsAParseError(string rdfXml, string expected)
+    {
+        // XML 1.0 [1] document ::= prolog element Misc*. Until 2026-10-30 the parser skipped any character outside
+        // markup and parsed every element at the top level, so all of these loaded.
+        await using var stream = new MemoryStream(Encoding.UTF8.GetBytes(rdfXml));
+        using var parser = new RdfXmlStreamParser(stream);
+
+        var error = await Assert.ThrowsAsync<InvalidDataException>(() =>
+            parser.ParseAsync((s, p, o) => { }, TestContext.Current.CancellationToken));
+
+        Assert.Contains(expected, error.Message);
+    }
+
+    [Fact]
+    public async Task ParseAsync_PrologAndTrailingMisc_AreAccepted()
+    {
+        // Comments, processing instructions and a document type declaration before the root; comments and
+        // processing instructions after it.
+        var rdfXml = "<?xml version=\"1.0\"?>\n<!-- before -->\n<!DOCTYPE rdf:RDF>\n<?pi x?>\n" +
+                     "<rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\" xmlns:e=\"http://example.org/\">" +
+                     "<rdf:Description rdf:about=\"http://example.org/s\"><e:p>x</e:p></rdf:Description></rdf:RDF>\n" +
+                     "<!-- after -->\n<?pi y?>\n";
+        await using var stream = new MemoryStream(Encoding.UTF8.GetBytes(rdfXml));
+        using var parser = new RdfXmlStreamParser(stream);
+
+        var triples = new List<string>();
+        await parser.ParseAsync((s, p, o) => triples.Add($"{s} {p} {o}"), TestContext.Current.CancellationToken);
+
+        Assert.Equal(new[] { "<http://example.org/s> <http://example.org/p> \"x\"" }, triples);
+    }
+
+    #endregion
+
     #region Non-ASCII Names
 
     [Fact]
