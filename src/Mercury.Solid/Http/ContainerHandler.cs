@@ -249,7 +249,7 @@ public sealed class ContainerHandler
             var results = _store.QueryCurrent(null, null, null, containerUri);
 
             using var memStream = new MemoryStream();
-            using var writer = new StreamWriter(memStream, Encoding.UTF8, leaveOpen: true);
+            using var writer = new StreamWriter(memStream, leaveOpen: true);
 
             bool hasTriples = false;
 

@@ -305,7 +305,7 @@ public static class TurtleTool
         using var parser = new TurtleStreamParser(inputStream);
 
         TextWriter outputWriter = outputFile != null
-            ? new StreamWriter(outputFile, append: false, Encoding.UTF8)
+            ? new StreamWriter(outputFile, append: false)
             : output;
 
         try

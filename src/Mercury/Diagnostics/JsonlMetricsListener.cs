@@ -66,7 +66,7 @@ public sealed class JsonlMetricsListener : IObservabilityListener, IQueryMetrics
         TimeSpan? flushInterval = null)
     {
         // AutoFlush=true so a missed explicit Dispose still leaves the file complete on disk.
-        _writer = new StreamWriter(stream, System.Text.Encoding.UTF8, leaveOpen: leaveOpen) { AutoFlush = true };
+        _writer = new StreamWriter(stream, leaveOpen: leaveOpen) { AutoFlush = true };
         _ownsWriter = !leaveOpen;
         _stateTimer = StartTimerIfRequested(stateEmissionInterval, StateTimerTick);
         _flushTimer = StartTimerIfRequested(flushInterval ?? DefaultFlushInterval, FlushTimerTick);
@@ -84,7 +84,7 @@ public sealed class JsonlMetricsListener : IObservabilityListener, IQueryMetrics
         TimeSpan? flushInterval = null)
     {
         var stream = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.Read);
-        _writer = new StreamWriter(stream, System.Text.Encoding.UTF8) { AutoFlush = true };
+        _writer = new StreamWriter(stream) { AutoFlush = true };
         _ownsWriter = true;
         _stateTimer = StartTimerIfRequested(stateEmissionInterval, StateTimerTick);
         _flushTimer = StartTimerIfRequested(flushInterval ?? DefaultFlushInterval, FlushTimerTick);

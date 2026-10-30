@@ -132,7 +132,7 @@ public sealed class PipeServer : IDisposable
             using (pipe)
             {
                 var reader = new StreamReader(pipe, Encoding.UTF8);
-                var writer = new StreamWriter(pipe, Encoding.UTF8) { AutoFlush = true };
+                var writer = new StreamWriter(pipe) { AutoFlush = true };
 
                 // Send welcome
                 await writer.WriteLineAsync(_welcomeMessage).ConfigureAwait(false);

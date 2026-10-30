@@ -689,4 +689,55 @@ public class SparqlHttpServerTests : IDisposable
     }
 
     #endregion
+
+    #region Response Encoding
+
+    // A response body is UTF-8 with no byte order mark: RFC 8259 §8.1 forbids one in networked JSON, and an
+    // N-Triples document is its statements. ReadAsStringAsync drops a byte order mark, so these tests read bytes.
+
+    [Fact]
+    public async Task QueryEndpoint_SelectJson_StartsWithTheJsonObject()
+    {
+        await using var server = new SparqlHttpServer(_store, $"http://localhost:{_port}/");
+        server.Start();
+        using var client = new HttpClient();
+
+        var query = "SELECT ?name WHERE { <http://example.org/alice> <http://xmlns.com/foaf/0.1/name> ?name }";
+        var body = await client.GetByteArrayAsync(
+            $"http://localhost:{_port}/sparql?query={WebUtility.UrlEncode(query)}", TestContext.Current.CancellationToken);
+
+        Assert.Equal((byte)'{', body[0]);
+    }
+
+    [Fact]
+    public async Task QueryEndpoint_AskJson_IsTheJsonObjectAlone()
+    {
+        await using var server = new SparqlHttpServer(_store, $"http://localhost:{_port}/");
+        server.Start();
+        using var client = new HttpClient();
+
+        var query = "ASK WHERE { <http://example.org/alice> ?p ?o }";
+        var body = await client.GetByteArrayAsync(
+            $"http://localhost:{_port}/sparql?query={WebUtility.UrlEncode(query)}", TestContext.Current.CancellationToken);
+
+        Assert.Equal("{\"boolean\":true}"u8.ToArray(), body);
+    }
+
+    [Fact]
+    public async Task QueryEndpoint_ConstructNTriples_IsTheStatementsAlone()
+    {
+        await using var server = new SparqlHttpServer(_store, $"http://localhost:{_port}/");
+        server.Start();
+        using var client = new HttpClient();
+        client.DefaultRequestHeaders.Add("Accept", "application/n-triples");
+
+        var query = "CONSTRUCT { <http://example.org/alice> <http://xmlns.com/foaf/0.1/name> ?name } " +
+                    "WHERE { <http://example.org/alice> <http://xmlns.com/foaf/0.1/name> ?name }";
+        var body = await client.GetByteArrayAsync(
+            $"http://localhost:{_port}/sparql?query={WebUtility.UrlEncode(query)}", TestContext.Current.CancellationToken);
+
+        Assert.Equal("<http://example.org/alice> <http://xmlns.com/foaf/0.1/name> \"Alice\" .\n"u8.ToArray(), body);
+    }
+
+    #endregion
 }

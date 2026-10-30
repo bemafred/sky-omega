@@ -78,7 +78,7 @@ public sealed class ResourceHandler
 
             // Serialize the graph
             using var memStream = new MemoryStream();
-            using var writer = new StreamWriter(memStream, Encoding.UTF8, leaveOpen: true);
+            using var writer = new StreamWriter(memStream, leaveOpen: true);
 
             var contentType = RdfFormatNegotiator.GetContentType(format);
             var hasher = IncrementalHash.CreateHash(HashAlgorithmName.MD5);

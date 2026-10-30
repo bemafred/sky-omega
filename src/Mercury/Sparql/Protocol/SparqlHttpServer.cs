@@ -302,7 +302,7 @@ public sealed class SparqlHttpServer : IDisposable, IAsyncDisposable
     private static byte[] FormatSelectResult(QueryResult result, SparqlResultFormat format)
     {
         using var memStream = new MemoryStream();
-        using var writer = new StreamWriter(memStream, Encoding.UTF8, leaveOpen: true);
+        using var writer = new StreamWriter(memStream, leaveOpen: true);
 
         var variables = result.Variables ?? [];
         var rows = result.Rows ?? [];
@@ -333,7 +333,7 @@ public sealed class SparqlHttpServer : IDisposable, IAsyncDisposable
     private static byte[] FormatAskResult(QueryResult result, SparqlResultFormat format)
     {
         using var memStream = new MemoryStream();
-        using var writer = new StreamWriter(memStream, Encoding.UTF8, leaveOpen: true);
+        using var writer = new StreamWriter(memStream, leaveOpen: true);
 
         var boolStr = result.AskResult == true ? "true" : "false";
 
@@ -360,7 +360,7 @@ public sealed class SparqlHttpServer : IDisposable, IAsyncDisposable
     private static byte[] FormatGraphResult(QueryResult result, RdfFormat rdfFormat)
     {
         using var memStream = new MemoryStream();
-        using var writer = new StreamWriter(memStream, Encoding.UTF8, leaveOpen: true);
+        using var writer = new StreamWriter(memStream, leaveOpen: true);
 
         // Fall back to NTriples for quad-only formats
         var format = rdfFormat switch

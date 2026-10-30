@@ -154,6 +154,26 @@ public class TurtleToolTests : IDisposable
     }
 
     [Fact]
+    public async Task TurtleTool_Convert_ToAFile_WritesNoByteOrderMark_AndTheFileValidates()
+    {
+        // A byte order mark is U+FEFF, which no RDF grammar admits: the tool's own parser rejected the files it wrote.
+        var outputFile = Path.Combine(_tempDir, "output.nt");
+        var options = new TurtleToolOptions
+        {
+            InputFile = _testTurtleFile,
+            OutputFile = outputFile
+        };
+
+        var convert = await TurtleToolLib.RunAsync(options, new StringWriter(), new StringWriter());
+        var validate = await TurtleToolLib.RunAsync(
+            new TurtleToolOptions { InputFile = outputFile, Validate = true }, new StringWriter(), new StringWriter());
+
+        Assert.Equal(0, convert.ExitCode);
+        Assert.Equal((byte)'<', File.ReadAllBytes(outputFile)[0]);
+        Assert.Equal(0, validate.ExitCode);
+    }
+
+    [Fact]
     public async Task TurtleTool_Load_CreatesStore()
     {
         var storePath = Path.Combine(_tempDir, "store");

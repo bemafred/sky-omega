@@ -72,7 +72,7 @@ public sealed class PipeClient : IDisposable
         }
 
         _reader = new StreamReader(_pipe, Encoding.UTF8);
-        _writer = new StreamWriter(_pipe, Encoding.UTF8) { AutoFlush = true };
+        _writer = new StreamWriter(_pipe) { AutoFlush = true };
     }
 
     /// <summary>

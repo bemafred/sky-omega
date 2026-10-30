@@ -205,6 +205,51 @@ public class MetricsListenerTests : IDisposable
         Assert.False(root.TryGetProperty("error", out _));
     }
 
+    // A JSONL record is a JSON text, so a byte order mark before the first one breaks strict readers: Python's
+    // json.loads rejects it. StreamReader drops one, so these tests read bytes.
+
+    [Fact]
+    public void JsonlMetricsListener_OnAStream_StartsWithTheFirstRecord()
+    {
+        using var buffer = new MemoryStream();
+        var jsonl = new JsonlMetricsListener(buffer, leaveOpen: true);
+
+        var metrics = new QueryMetrics(
+            Timestamp: new DateTimeOffset(2026, 10, 30, 12, 0, 0, TimeSpan.Zero),
+            Profile: StoreProfile.Cognitive,
+            Kind: QueryMetricsKind.Ask,
+            ParseTime: TimeSpan.FromMilliseconds(1),
+            ExecutionTime: TimeSpan.FromMilliseconds(2),
+            RowsReturned: 1,
+            Success: true,
+            ErrorMessage: null);
+        jsonl.OnQueryMetrics(in metrics);
+        jsonl.Flush();
+
+        Assert.Equal((byte)'{', buffer.ToArray()[0]);
+    }
+
+    [Fact]
+    public void JsonlMetricsListener_ANewFile_StartsWithTheFirstRecord()
+    {
+        var path = Path.Combine(_testDir, "metrics.jsonl");
+        using (var jsonl = new JsonlMetricsListener(path))
+        {
+            var metrics = new QueryMetrics(
+                Timestamp: new DateTimeOffset(2026, 10, 30, 12, 0, 0, TimeSpan.Zero),
+                Profile: StoreProfile.Cognitive,
+                Kind: QueryMetricsKind.Ask,
+                ParseTime: TimeSpan.FromMilliseconds(1),
+                ExecutionTime: TimeSpan.FromMilliseconds(2),
+                RowsReturned: 1,
+                Success: true,
+                ErrorMessage: null);
+            jsonl.OnQueryMetrics(in metrics);
+        }
+
+        Assert.Equal((byte)'{', File.ReadAllBytes(path)[0]);
+    }
+
     [Fact]
     public void JsonlMetricsListener_RebuildPhaseAndSummary_Distinguishable()
     {
