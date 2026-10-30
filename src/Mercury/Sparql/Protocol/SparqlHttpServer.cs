@@ -372,20 +372,19 @@ public sealed class SparqlHttpServer : IDisposable, IAsyncDisposable
         return memStream.ToArray();
     }
 
+    /// <summary>
+    /// A CONSTRUCT or DESCRIBE result in the negotiated format, any of the six, its triples in the default graph. The
+    /// format is the one the Content-Type names: N-Quads, TriG and JSON-LD used to get N-Triples under their own type.
+    /// </summary>
     private static byte[] FormatGraphResult(QueryResult result, RdfFormat rdfFormat)
     {
         using var memStream = new MemoryStream();
-        using var writer = new StreamWriter(memStream, leaveOpen: true);
-
-        // Fall back to NTriples for quad-only formats
-        var format = rdfFormat switch
+        using (var writer = new StreamWriter(memStream, leaveOpen: true))
+        using (var document = new RdfDocumentWriter(writer, rdfFormat))
         {
-            RdfFormat.NTriples or RdfFormat.Turtle or RdfFormat.RdfXml => rdfFormat,
-            _ => RdfFormat.NTriples
-        };
-        RdfEngine.WriteTriples(writer, format, result.Triples ?? []);
-
-        writer.Flush();
+            foreach (var (s, p, o) in result.Triples ?? [])
+                document.Write(s, p, o, ReadOnlySpan<char>.Empty);
+        }
         return memStream.ToArray();
     }
 

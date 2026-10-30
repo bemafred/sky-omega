@@ -4,6 +4,7 @@
 using System;
 using System.Reflection;
 using System.Threading.Tasks;
+using SkyOmega.Mercury;
 using SkyOmega.Mercury.Abstractions;
 using SkyOmega.Mercury.Sparql.Tool;
 
@@ -100,18 +101,10 @@ internal static class Program
                     break;
 
                 case "--rdf-format":
-                    if (i + 1 >= args.Length) { options.Error = "--rdf-format requires a format (nt, ttl, rdf, nq, trig)"; return options; }
-                    var rdfFormat = args[++i].ToLowerInvariant();
-                    options.RdfOutputFormat = rdfFormat switch
-                    {
-                        "nt" or "ntriples" => RdfFormat.NTriples,
-                        "ttl" or "turtle" => RdfFormat.Turtle,
-                        "rdf" or "rdfxml" or "xml" => RdfFormat.RdfXml,
-                        "nq" or "nquads" => RdfFormat.NQuads,
-                        "trig" => RdfFormat.TriG,
-                        _ => RdfFormat.Unknown
-                    };
-                    if (options.RdfOutputFormat == RdfFormat.Unknown) { options.Error = $"Unknown RDF format: {rdfFormat}. Use nt, ttl, rdf, nq, or trig."; return options; }
+                    if (i + 1 >= args.Length) { options.Error = "--rdf-format requires a format (nt, nq, ttl, trig, rdf, jsonld)"; return options; }
+                    var rdfFormat = args[++i];
+                    options.RdfOutputFormat = RdfEngine.DetermineFormatFromExtension(rdfFormat.AsSpan());
+                    if (options.RdfOutputFormat == RdfFormat.Unknown) { options.Error = $"Unknown RDF format: {rdfFormat}. Use nt, nq, ttl, trig, rdf or jsonld."; return options; }
                     break;
 
                 case "-e":
@@ -154,7 +147,7 @@ internal static class Program
                 -e, --explain <SPARQL>  Show query execution plan
                 -r, --repl              Start interactive REPL mode
                 --format <FORMAT>       Output format for SELECT: json (default), csv, tsv, xml
-                --rdf-format <FORMAT>   Output format for CONSTRUCT: nt (default), ttl, rdf, nq, trig
+                --rdf-format <FORMAT>   Output format for CONSTRUCT: nt (default), nq, ttl, trig, rdf, jsonld
 
             EXAMPLES:
                 # Load data and run query (temp store, auto-deleted)

@@ -265,15 +265,17 @@ public static class SparqlTool
         return ToolResult.Ok();
     }
 
+    /// <summary>
+    /// A CONSTRUCT or DESCRIBE result in <paramref name="rdfFormat"/>, any of the six, its triples in the default
+    /// graph. N-Quads and TriG used to fall back to N-Triples.
+    /// </summary>
     private static ToolResult WriteTripleResult(QueryResult result, RdfFormat rdfFormat, TextWriter output)
     {
-        // CONSTRUCT/DESCRIBE produce triples; fall back to NTriples for quad-only formats
-        var format = rdfFormat switch
+        using (var document = new RdfDocumentWriter(output, rdfFormat))
         {
-            RdfFormat.NTriples or RdfFormat.Turtle or RdfFormat.RdfXml => rdfFormat,
-            _ => RdfFormat.NTriples
-        };
-        RdfEngine.WriteTriples(output, format, result.Triples ?? []);
+            foreach (var (s, p, o) in result.Triples ?? [])
+                document.Write(s, p, o, ReadOnlySpan<char>.Empty);
+        }
         return ToolResult.Ok();
     }
 
@@ -355,23 +357,21 @@ public static class SparqlTool
                 if (string.IsNullOrEmpty(arg))
                 {
                     await output.WriteLineAsync($"Current RDF format: {state.RdfFormat.ToString().ToLowerInvariant()}");
-                    await output.WriteLineAsync("Available: nt, ttl, rdf, nq, trig");
+                    await output.WriteLineAsync("Available: nt, nq, ttl, trig, rdf, jsonld");
                 }
                 else
                 {
-                    state.RdfFormat = arg.ToLowerInvariant() switch
+                    // A format is named as its file extension is
+                    var named = RdfEngine.DetermineFormatFromExtension(arg.AsSpan());
+                    if (named == RdfFormat.Unknown)
                     {
-                        "nt" or "ntriples" => RdfFormat.NTriples,
-                        "ttl" or "turtle" => RdfFormat.Turtle,
-                        "rdf" or "rdfxml" => RdfFormat.RdfXml,
-                        "nq" or "nquads" => RdfFormat.NQuads,
-                        "trig" => RdfFormat.TriG,
-                        _ => state.RdfFormat
-                    };
-                    if (arg.ToLowerInvariant() is not ("nt" or "ntriples" or "ttl" or "turtle" or "rdf" or "rdfxml" or "nq" or "nquads" or "trig"))
-                        await error.WriteLineAsync($"Unknown RDF format: {arg}. Use nt, ttl, rdf, nq, or trig.");
+                        await error.WriteLineAsync($"Unknown RDF format: {arg}. Use nt, nq, ttl, trig, rdf or jsonld.");
+                    }
                     else
+                    {
+                        state.RdfFormat = named;
                         await output.WriteLineAsync($"RDF output format set to: {state.RdfFormat.ToString().ToLowerInvariant()}");
+                    }
                 }
                 break;
 
@@ -420,7 +420,7 @@ public static class SparqlTool
               .quit, .exit, .q       Exit REPL
               .load <file>, .l       Load RDF file into store
               .format [fmt], .f      Get/set SELECT output format (json, csv, tsv, xml)
-              .rdf-format [fmt], .rf Get/set CONSTRUCT output format (nt, ttl, rdf, nq, trig)
+              .rdf-format [fmt], .rf Get/set CONSTRUCT output format (nt, nq, ttl, trig, rdf, jsonld)
               .count, .c             Count triples in store
               .store, .s             Show store path
               .explain <query>, .e   Show query execution plan

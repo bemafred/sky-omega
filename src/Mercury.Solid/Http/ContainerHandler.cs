@@ -253,58 +253,22 @@ public sealed class ContainerHandler
 
             bool hasTriples = false;
 
-            switch (format)
+            // Every format through the one map from a format to its writer (RdfDocumentWriter). Until 2026-10-30
+            // the Turtle branch wrote the type triples with bare IRIs (rdf:type and ldp:Container without angle
+            // brackets), which is not Turtle, and every format but Turtle and N-Triples got N-Triples.
+            using (var document = new RdfDocumentWriter(writer, format))
             {
-                case RdfFormat.Turtle:
-                    {
-                        using var turtleWriter = new TurtleStreamWriter(writer);
-                        turtleWriter.WritePrefixes();
+                // The container's types
+                document.Write($"<{containerUri}>", $"<{RdfType}>", $"<{SolidContainer.Ldp.Container}>", ReadOnlySpan<char>.Empty);
+                document.Write($"<{containerUri}>", $"<{RdfType}>", $"<{SolidContainer.Ldp.BasicContainer}>", ReadOnlySpan<char>.Empty);
 
-                        // Add LDP type triples
-                        turtleWriter.WriteTriple($"<{containerUri}>".AsSpan(), RdfType.AsSpan(), SolidContainer.Ldp.Container.AsSpan());
-                        turtleWriter.WriteTriple($"<{containerUri}>".AsSpan(), RdfType.AsSpan(), SolidContainer.Ldp.BasicContainer.AsSpan());
-
-                        while (results.MoveNext())
-                        {
-                            hasTriples = true;
-                            var current = results.Current;
-                            turtleWriter.WriteTriple(current.Subject, current.Predicate, current.Object);
-                            UpdateHash(hasher, current.Subject, current.Predicate, current.Object);
-                        }
-                    }
-                    break;
-
-                case RdfFormat.NTriples:
-                    {
-                        using var ntWriter = new NTriplesStreamWriter(writer);
-
-                        // Add LDP type triples
-                        ntWriter.WriteTriple($"<{containerUri}>".AsSpan(), $"<{RdfType}>".AsSpan(), $"<{SolidContainer.Ldp.Container}>".AsSpan());
-                        ntWriter.WriteTriple($"<{containerUri}>".AsSpan(), $"<{RdfType}>".AsSpan(), $"<{SolidContainer.Ldp.BasicContainer}>".AsSpan());
-
-                        while (results.MoveNext())
-                        {
-                            hasTriples = true;
-                            var current = results.Current;
-                            ntWriter.WriteTriple(current.Subject, current.Predicate, current.Object);
-                            UpdateHash(hasher, current.Subject, current.Predicate, current.Object);
-                        }
-                    }
-                    break;
-
-                default:
-                    {
-                        using var defaultWriter = new NTriplesStreamWriter(writer);
-
-                        while (results.MoveNext())
-                        {
-                            hasTriples = true;
-                            var current = results.Current;
-                            defaultWriter.WriteTriple(current.Subject, current.Predicate, current.Object);
-                            UpdateHash(hasher, current.Subject, current.Predicate, current.Object);
-                        }
-                    }
-                    break;
+                while (results.MoveNext())
+                {
+                    hasTriples = true;
+                    var current = results.Current;
+                    document.Write(current.Subject, current.Predicate, current.Object, ReadOnlySpan<char>.Empty);
+                    UpdateHash(hasher, current.Subject, current.Predicate, current.Object);
+                }
             }
 
             results.Dispose();

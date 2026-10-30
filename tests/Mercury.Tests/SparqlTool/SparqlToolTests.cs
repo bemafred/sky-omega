@@ -135,6 +135,27 @@ public class SparqlToolTests : IDisposable
     }
 
     [Fact]
+    public async Task SparqlTool_ConstructJsonLd_IsJsonLd()
+    {
+        // CONSTRUCT used to fall back to N-Triples for every format but N-Triples, Turtle and RDF/XML.
+        var output = new StringWriter();
+        var options = new SparqlToolOptions
+        {
+            LoadFile = _testTurtleFile,
+            Query = "CONSTRUCT { ?s <http://xmlns.com/foaf/0.1/name> ?name } WHERE { ?s <http://xmlns.com/foaf/0.1/name> ?name }",
+            RdfOutputFormat = RdfFormat.JsonLd
+        };
+
+        var result = await SparqlToolLib.RunAsync(options, output, new StringWriter());
+
+        Assert.Equal(0, result.ExitCode);
+        var stdout = output.ToString();
+        var json = stdout[stdout.IndexOfAny(['[', '{'])..];
+        using var document = System.Text.Json.JsonDocument.Parse(json);
+        Assert.Contains("Alice", json);
+    }
+
+    [Fact]
     public async Task SparqlTool_OutputFormat_Tsv()
     {
         var output = new StringWriter();

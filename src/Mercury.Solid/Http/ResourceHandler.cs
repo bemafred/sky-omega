@@ -84,55 +84,20 @@ public sealed class ResourceHandler
             var hasher = IncrementalHash.CreateHash(HashAlgorithmName.MD5);
             int tripleCount = 0;
 
-            switch (format)
+            // Every format through the one map from a format to its writer (RdfDocumentWriter): a resource's triples
+            // are its graph, written as the default graph. Until 2026-10-30 every format but Turtle and N-Triples got
+            // N-Triples under its own content type.
+            using (var document = new RdfDocumentWriter(writer, format))
             {
-                case RdfFormat.Turtle:
-                    {
-                        using var turtleWriter = new TurtleStreamWriter(writer);
-                        turtleWriter.WritePrefixes();
-
-                        // Write the first triple we already read
-                        do
-                        {
-                            var current = results.Current;
-                            turtleWriter.WriteTriple(current.Subject, current.Predicate, current.Object);
-                            UpdateHash(hasher, current.Subject, current.Predicate, current.Object);
-                            tripleCount++;
-                        }
-                        while (results.MoveNext());
-                    }
-                    break;
-
-                case RdfFormat.NTriples:
-                    {
-                        using var ntWriter = new NTriplesStreamWriter(writer);
-
-                        do
-                        {
-                            var current = results.Current;
-                            ntWriter.WriteTriple(current.Subject, current.Predicate, current.Object);
-                            UpdateHash(hasher, current.Subject, current.Predicate, current.Object);
-                            tripleCount++;
-                        }
-                        while (results.MoveNext());
-                    }
-                    break;
-
-                default:
-                    // Default to N-Triples for unsupported formats
-                    {
-                        using var defaultWriter = new NTriplesStreamWriter(writer);
-
-                        do
-                        {
-                            var current = results.Current;
-                            defaultWriter.WriteTriple(current.Subject, current.Predicate, current.Object);
-                            UpdateHash(hasher, current.Subject, current.Predicate, current.Object);
-                            tripleCount++;
-                        }
-                        while (results.MoveNext());
-                    }
-                    break;
+                // The first triple was read to find the resource
+                do
+                {
+                    var current = results.Current;
+                    document.Write(current.Subject, current.Predicate, current.Object, ReadOnlySpan<char>.Empty);
+                    UpdateHash(hasher, current.Subject, current.Predicate, current.Object);
+                    tripleCount++;
+                }
+                while (results.MoveNext());
             }
 
             results.Dispose();

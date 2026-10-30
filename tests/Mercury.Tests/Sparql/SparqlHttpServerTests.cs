@@ -816,5 +816,27 @@ public class SparqlHttpServerTests : IDisposable
         Assert.Equal("a \"b\" C:\\new bell\u0007", o.GetProperty("value").GetString());
     }
 
+    [Fact]
+    public async Task QueryEndpoint_ConstructJsonLd_IsJsonLd()
+    {
+        // Until 2026-10-30 every CONSTRUCT format but N-Triples, Turtle and RDF/XML got N-Triples, under the content
+        // type that was asked for: here application/ld+json.
+        await using var server = new SparqlHttpServer(_store, $"http://localhost:{_port}/");
+        server.Start();
+        using var client = new HttpClient();
+        client.DefaultRequestHeaders.Add("Accept", "application/ld+json");
+
+        var query = "CONSTRUCT { <http://example.org/alice> <http://xmlns.com/foaf/0.1/name> ?name } " +
+                    "WHERE { <http://example.org/alice> <http://xmlns.com/foaf/0.1/name> ?name }";
+        var response = await client.GetAsync(
+            $"http://localhost:{_port}/sparql?query={WebUtility.UrlEncode(query)}", TestContext.Current.CancellationToken);
+        var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal("application/ld+json", response.Content.Headers.ContentType?.MediaType);
+        using var document = System.Text.Json.JsonDocument.Parse(body);
+        Assert.Contains("http://example.org/alice", body);
+        Assert.Contains("Alice", body);
+    }
+
     #endregion
 }
