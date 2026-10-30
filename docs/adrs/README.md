@@ -23,11 +23,14 @@ Foundational decisions affecting the entire repository:
 
 - [Mercury ADRs](mercury/README.md) — Knowledge substrate (RDF storage, SPARQL)
 - [Minerva ADRs](minerva/README.md) — Thought substrate (tensor inference)
-- [DrHook ADRs](drhook/README.md) — Runtime observation substrate (EventPipe, DAP)
+- [DrHook ADRs](drhook/README.md) — Runtime observation substrate (ICorDebug, EventPipe)
 
 ## Cognitive Component ADRs
 
-- [James ADRs](James/) — Cognitive orchestration
-- [Lucy ADRs](Lucy/) — Semantic memory
-- [Mira ADRs](Mira/) — Interaction surface
-- [Sky ADRs](Sky/) — Language and LLM interaction
+| Component | ADR | Title | Status |
+|-----------|-----|-------|--------|
+| James — cognitive orchestration | [ADR-001](James/ADR-001-epistemic-state-machine.md) | Epistemic State Machine and the Cognitive Loop | Proposed |
+| James | [ADR-002](James/ADR-002-linguistic-phase-signatures.md) | Linguistic Phase Signatures and Epistemic Lubricants | Proposed |
+| Lucy — semantic memory | [ADR-001](Lucy/ADR-001-semantic-memory-architecture.md) | Semantic Memory Architecture | Proposed |
+| Mira — interaction surface | [ADR-001](Mira/ADR-001-interaction-surface-architecture.md) | Interaction Surface Architecture | Proposed |
+| Sky — language and LLM interaction | [ADR-001](Sky/ADR-001-llm-pool-architecture.md) | LLM Pool Architecture | Proposed |
