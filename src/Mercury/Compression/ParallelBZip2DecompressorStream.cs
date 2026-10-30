@@ -198,6 +198,11 @@ public sealed class ParallelBZip2DecompressorStream : Stream
             {
                 await _inputChannel.Writer.WriteAsync(new WorkItem(ordinal, bytes, startBitOffset, bitLength)).ConfigureAwait(false);
             }
+            // Another 'BZh' header after the trailer: a concatenated file. Ending here would
+            // return the first stream's bytes as if they were the whole input.
+            if (_scanner.HasFollowingStream)
+                throw new InvalidDataException(
+                    "Concatenated bzip2 streams: ParallelBZip2DecompressorStream reads one stream; BZip2DecompressorStream reads concatenated streams.");
         }
         catch (Exception ex)
         {

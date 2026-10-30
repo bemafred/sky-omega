@@ -2,7 +2,9 @@
 
 ## Status
 
-**Status:** Accepted — 2026-04-27. Phase 1 (single-threaded decompressor) Completed 2026-04-27 (validated end-to-end at 1 B Reference, [adr-035-phase7a-1b-2026-04-27.md](../../validations/adr-035-phase7a-1b-2026-04-27.md)). Phase 2 (block-parallel decompressor) Completed 2026-04-30 (commit `a11f873`); measured 2.62× speedup ceiling on 50 MB / 58-block fixture, scanner-bound (commits `b39f186`, `0c3b1ae`).
+**Status:** Completed — 2026-10-30 (Accepted — 2026-04-27; the index has said Completed since 2026-05-09). Closed on 2026-10-30 by the plan's Phase 6 document, [compression.md](../../architecture/technical/compression.md), and the Phase 3 tests that were missing: an empty stream, concatenated streams, truncation at five points, and an allocation check on the read path. For Phase 5's gate, a 1 B load from `.bz2` matching one from the uncompressed source, nothing compared the two stores. In its place: the first 4 GiB of `latest-all.ttl.bz2` decompress to the same SHA-256 through bzip2 1.0.8 and both of Mercury's streams, and every 21.3 B load since 2026-05-03 has read the whole file with every block CRC checked. Writing the tests found that `ParallelBZip2DecompressorStream` returned only the first stream of a concatenated file; it now throws. Not done: the production-path recommendation below to use the parallel stream for `--convert`. No Mercury code path uses it.
+
+Phase 1 (single-threaded decompressor) Completed 2026-04-27 (validated end-to-end at 1 B Reference, [adr-035-phase7a-1b-2026-04-27.md](../../validations/adr-035-phase7a-1b-2026-04-27.md)). Phase 2 (block-parallel decompressor) Completed 2026-04-30 (commit `a11f873`); measured 2.62× speedup ceiling on 50 MB / 58-block fixture, scanner-bound (commits `b39f186`, `0c3b1ae`).
 
 ## Context
 

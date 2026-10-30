@@ -163,4 +163,41 @@ public class ParallelBZip2DecompressorStreamTests
             DecompressParallel(bz2, workerCount: 4);
         });
     }
+
+    [Fact]
+    public void ConcatenatedStreams_AreRejected()
+    {
+        // The parallel stream reads one bzip2 stream only. A second stream after the first
+        // must be an error: returning the first stream's bytes alone would lose the rest.
+        string fixtures = Path.Combine(
+            Path.GetDirectoryName(typeof(ParallelBZip2DecompressorStreamTests).Assembly.Location)!, "Compression", "Fixtures");
+        byte[] hello = File.ReadAllBytes(Path.Combine(fixtures, "hello.txt.bz2"));
+        byte[] pangram = File.ReadAllBytes(Path.Combine(fixtures, "pangram.txt.bz2"));
+        byte[] concatenated = [.. hello, .. pangram];
+
+        using var decompressor = new ParallelBZip2DecompressorStream(new MemoryStream(concatenated), workerCount: 2);
+
+        Assert.Throws<InvalidDataException>(() => decompressor.CopyTo(Stream.Null));
+    }
+
+    [Theory]
+    [InlineData(3)]        // inside the 'BZh9' header
+    [InlineData(100_000)]  // inside the first of the fixture's four blocks
+    [InlineData(300_000)]  // inside a later block
+    [InlineData(410_494)]  // the end-of-stream magic, without the combined CRC
+    [InlineData(410_497)]  // the combined CRC, short one byte
+    public void TruncatedStream_Throws(int keptBytes)
+    {
+        string fixtures = Path.Combine(
+            Path.GetDirectoryName(typeof(ParallelBZip2DecompressorStreamTests).Assembly.Location)!, "Compression", "Fixtures");
+        byte[] whole = File.ReadAllBytes(Path.Combine(fixtures, "multiblock.txt.bz2"));
+        Assert.Equal(410_498, whole.Length);
+        byte[] truncated = whole[..keptBytes];
+
+        using var decompressor = new ParallelBZip2DecompressorStream(new MemoryStream(truncated), workerCount: 4);
+        var error = Record.Exception(() => decompressor.CopyTo(Stream.Null));
+
+        Assert.True(error is InvalidDataException or EndOfStreamException,
+            $"expected InvalidDataException or EndOfStreamException, got {error?.GetType().Name ?? "no exception"}");
+    }
 }

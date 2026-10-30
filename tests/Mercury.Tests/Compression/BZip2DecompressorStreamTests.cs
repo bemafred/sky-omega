@@ -148,4 +148,84 @@ public class BZip2DecompressorStreamTests
         }
         Assert.Equal(original, output.ToArray());
     }
+
+    [Fact]
+    public void EmptyStream_DecompressesToNothing()
+    {
+        // `bzip2 -9 -c < /dev/null` with bzip2 1.0.8: the 'BZh9' header, the end-of-stream magic
+        // 0x177245385090 and a combined CRC of 0, with no block between them.
+        byte[] empty = [0x42, 0x5A, 0x68, 0x39, 0x17, 0x72, 0x45, 0x38, 0x50, 0x90, 0x00, 0x00, 0x00, 0x00];
+
+        using var decompressor = new BZip2DecompressorStream(new MemoryStream(empty));
+        var buffer = new byte[64];
+
+        Assert.Equal(0, decompressor.Read(buffer, 0, buffer.Length));
+    }
+
+    [Fact]
+    public void ConcatenatedStreams_DecompressToBothContents()
+    {
+        // A .bz2 file may hold several streams one after another, as `cat a.bz2 b.bz2` makes.
+        // The reader continues at the next 'BZh' header until the input ends.
+        string fixtures = Path.Combine(
+            Path.GetDirectoryName(typeof(BZip2DecompressorStreamTests).Assembly.Location)!, "Compression", "Fixtures");
+        byte[] hello = File.ReadAllBytes(Path.Combine(fixtures, "hello.txt.bz2"));
+        byte[] pangram = File.ReadAllBytes(Path.Combine(fixtures, "pangram.txt.bz2"));
+        byte[] concatenated = [.. hello, .. pangram];
+        byte[] expected =
+            [.. File.ReadAllBytes(Path.Combine(fixtures, "hello.txt")), .. File.ReadAllBytes(Path.Combine(fixtures, "pangram.txt"))];
+
+        using var decompressor = new BZip2DecompressorStream(new MemoryStream(concatenated));
+        using var output = new MemoryStream();
+        decompressor.CopyTo(output);
+
+        Assert.Equal(expected, output.ToArray());
+    }
+
+    [Theory]
+    [InlineData(3)]        // inside the 'BZh9' header
+    [InlineData(100_000)]  // inside the first of the fixture's four blocks
+    [InlineData(300_000)]  // inside a later block
+    [InlineData(410_494)]  // the end-of-stream magic, without the combined CRC
+    [InlineData(410_497)]  // the combined CRC, short one byte
+    public void TruncatedStream_Throws(int keptBytes)
+    {
+        // A cut-off download must fail, not load a prefix as if it were the whole file.
+        // multiblock.txt.bz2 is 410,498 bytes.
+        string fixtures = Path.Combine(
+            Path.GetDirectoryName(typeof(BZip2DecompressorStreamTests).Assembly.Location)!, "Compression", "Fixtures");
+        byte[] whole = File.ReadAllBytes(Path.Combine(fixtures, "multiblock.txt.bz2"));
+        Assert.Equal(410_498, whole.Length);
+        byte[] truncated = whole[..keptBytes];
+
+        using var decompressor = new BZip2DecompressorStream(new MemoryStream(truncated));
+        var error = Record.Exception(() => decompressor.CopyTo(Stream.Null));
+
+        Assert.True(error is InvalidDataException or EndOfStreamException,
+            $"expected InvalidDataException or EndOfStreamException, got {error?.GetType().Name ?? "no exception"}");
+    }
+
+    [Fact]
+    public void Read_AfterTheFirstBlock_DoesNotAllocate()
+    {
+        // ADR-036 Decision 3: the stream owns every buffer it decodes into, so once it is
+        // constructed and its first block is read, reading allocates nothing. The input is a
+        // MemoryStream, whose Read does not allocate either.
+        string fixtures = Path.Combine(
+            Path.GetDirectoryName(typeof(BZip2DecompressorStreamTests).Assembly.Location)!, "Compression", "Fixtures");
+        byte[] bz2 = File.ReadAllBytes(Path.Combine(fixtures, "multiblock.txt.bz2"));
+        using var decompressor = new BZip2DecompressorStream(new MemoryStream(bz2));
+        var buffer = new byte[64 * 1024];
+        int first = decompressor.Read(buffer, 0, buffer.Length);
+
+        long allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+        long rest = 0;
+        int n;
+        while ((n = decompressor.Read(buffer, 0, buffer.Length)) > 0)
+            rest += n;
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+
+        Assert.Equal(3_145_801, first + rest);
+        Assert.Equal(0, allocated);
+    }
 }

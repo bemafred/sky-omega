@@ -301,6 +301,7 @@ For the vision, methodology (EEE), and broader context, see [docs/architecture/n
 Detailed subsystem documentation — read on demand when working on specific areas:
 
 - **[Mercury Internals](docs/architecture/technical/mercury-internals.md)** — storage layer, durability/WAL design, concurrency, zero-GC patterns, pruning, parsers, writers
+- **[Compression](docs/architecture/technical/compression.md)** — bzip2 decompression: the two streams and their errors, the format, CRC, parallel decoding and its limits, tests and fixtures
 - **[SPARQL Reference](docs/architecture/technical/sparql-reference.md)** — supported features, operator pipeline, EXPLAIN symbols, result formats, content negotiation, temporal extensions, OWL reasoning, HTTP server
 - **[Production Hardening](docs/architecture/technical/production-hardening.md)** — infrastructure abstractions, query optimization, full-text search, benchmarking workflow, NCrunch configuration, cross-process coordination
 
