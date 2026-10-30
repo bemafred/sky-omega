@@ -187,35 +187,67 @@ public class NTriplesStreamWriterTests
     }
 
     [Fact]
-    public void WriteTriple_LiteralWithUnicode_EscapesCorrectly()
+    public void WriteTriple_LiteralWithUnicode_IsWrittenAsItself()
     {
         using var sw = new StringWriter();
         using var writer = new NTriplesStreamWriter(sw);
 
-        // Greek letter alpha (U+03B1)
+        // Greek letter alpha (U+03B1) and U+1F600. Canonical N-Triples writes every character as itself except the
+        // ECHAR and UCHAR ones (until 2026-10-30 this writer escaped all non-ASCII as \uXXXX).
         writer.WriteTriple(
             "<http://example.org/s>".AsSpan(),
             "<http://example.org/p>".AsSpan(),
-            "\"α\"".AsSpan());
+            "\"α 😀\"".AsSpan());
 
         var result = sw.ToString();
-        Assert.Equal("<http://example.org/s> <http://example.org/p> \"\\u03B1\" .\n", result);
+        Assert.Equal("<http://example.org/s> <http://example.org/p> \"α 😀\" .\n", result);
     }
 
     [Fact]
-    public void WriteTriple_LiteralWithEmoji_EscapesCorrectly()
+    public void WriteTriple_ControlAndNonCharacters_AreEscapedCanonically()
     {
         using var sw = new StringWriter();
         using var writer = new NTriplesStreamWriter(sw);
 
-        // Emoji (U+1F600 - grinning face, requires surrogate pair)
+        // ECHAR for BS, HT, LF, FF, CR, '"' and '\'; \uXXXX (uppercase hex) for U+0000, VT, U+001F, DEL and U+FFFF.
+        writer.WriteTriple(
+            "<http://example.org/s>".AsSpan(),
+            "<http://example.org/p>".AsSpan(),
+            "\"\b\t\n\f\r\"\\\u0000\u000B\u001F\u007F￿\"".AsSpan());
+
+        var result = sw.ToString();
+        Assert.Equal("<http://example.org/s> <http://example.org/p> \"\\b\\t\\n\\f\\r\\\"\\\\\\u0000\\u000B\\u001F\\u007F\\uFFFF\" .\n", result);
+    }
+
+    [Fact]
+    public void WriteTriple_LanguageTagAndXsdString_AreWrittenCanonically()
+    {
+        using var sw = new StringWriter();
+        using var writer = new NTriplesStreamWriter(sw);
+
+        // Canonical N-Triples: a language tag in lowercase, an xsd:string literal without its datatype.
+        writer.WriteTriple("<http://e/s>".AsSpan(), "<http://e/p>".AsSpan(), "\"chat\"@EN-GB".AsSpan());
+        writer.WriteTriple("<http://e/s>".AsSpan(), "<http://e/p>".AsSpan(), "\"foo\"^^<http://www.w3.org/2001/XMLSchema#string>".AsSpan());
+
+        var result = sw.ToString();
+        Assert.Equal("<http://e/s> <http://e/p> \"chat\"@en-gb .\n<http://e/s> <http://e/p> \"foo\" .\n", result);
+    }
+
+    [Fact]
+    public void WriteTriple_LiteralWithEmoji_IsWrittenAsItself()
+    {
+        using var sw = new StringWriter();
+        using var writer = new NTriplesStreamWriter(sw);
+
+        // Emoji (U+1F600 - grinning face, a surrogate pair in UTF-16). Canonical N-Triples writes it as itself; until
+        // 2026-10-30 this writer wrote \U0001F600, which canonical form never uses.
         writer.WriteTriple(
             "<http://example.org/s>".AsSpan(),
             "<http://example.org/p>".AsSpan(),
             "\"😀\"".AsSpan());
 
         var result = sw.ToString();
-        Assert.Equal("<http://example.org/s> <http://example.org/p> \"\\U0001F600\" .\n", result);
+        Assert.Equal("<http://example.org/s> <http://example.org/p> \"😀\" .\n", result);
     }
 
     #endregion
@@ -372,13 +404,14 @@ public class NTriplesStreamWriterTests
     [Fact]
     public void WriteTriple_DatatypedLiteralWithInternalQuotes_ReEscapes()
     {
-        var literal = "\"a\"b\"^^<http://www.w3.org/2001/XMLSchema#string>";
+        // A datatype other than xsd:string, which canonical form does not write (2026-10-30).
+        var literal = "\"a\"b\"^^<http://ex/dt>";
 
         using var sw = new StringWriter();
         using var writer = new NTriplesStreamWriter(sw);
         writer.WriteTriple("<http://ex/s>".AsSpan(), "<http://ex/p>".AsSpan(), literal.AsSpan());
 
-        var expected = "<http://ex/s> <http://ex/p> \"a\\\"b\"^^<http://www.w3.org/2001/XMLSchema#string> .\n";
+        var expected = "<http://ex/s> <http://ex/p> \"a\\\"b\"^^<http://ex/dt> .\n";
         Assert.Equal(expected, sw.ToString());
     }
 

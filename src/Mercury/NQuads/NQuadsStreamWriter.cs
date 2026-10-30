@@ -1,6 +1,6 @@
 // NQuadsStreamWriter.cs
-// Zero-GC streaming N-Quads writer
-// Based on W3C RDF 1.1 N-Quads specification
+// Zero-GC streaming N-Quads writer, and through NTriplesStreamWriter the N-Triples writer
+// Writes canonical N-Quads and N-Triples (W3C RDF 1.2 N-Triples, Canonical N-Triples)
 // No external dependencies, only BCL
 // .NET 10 / C# 14
 
@@ -15,8 +15,8 @@ using SkyOmega.Mercury.Runtime.Buffers;
 namespace SkyOmega.Mercury.NQuads;
 
 /// <summary>
-/// Zero-allocation streaming writer for RDF N-Quads format.
-/// Implements W3C RDF 1.1 N-Quads specification.
+/// Zero-allocation streaming writer for RDF N-Quads format, the one writer of N-Quads and of N-Triples, which is N-Quads
+/// in the default graph (<see cref="NTriples.NTriplesStreamWriter"/> writes through this class).
 ///
 /// N-Quads grammar:
 /// [1] statement  ::= subject predicate object graphLabel? '.'
@@ -24,6 +24,11 @@ namespace SkyOmega.Mercury.NQuads;
 /// [3] predicate  ::= IRIREF
 /// [4] object     ::= IRIREF | BLANK_NODE_LABEL | literal
 /// [5] graphLabel ::= IRIREF | BLANK_NODE_LABEL
+///
+/// Literals are written in canonical form (RDF 1.2 N-Triples, Canonical N-Triples): BS, HT, LF, FF, CR, '"' and '\'
+/// as ECHAR; U+0000-U+0007, VT, U+000E-U+001F, DEL and the characters outside XML 1.1's Char (U+FFFE, U+FFFF, lone
+/// surrogates) as \uXXXX with uppercase hex; every other character as itself. A language tag is written in lowercase,
+/// and an xsd:string literal without its datatype.
 ///
 /// Usage:
 ///   await using var writer = new NQuadsStreamWriter(textWriter);
@@ -39,7 +44,9 @@ internal sealed class NQuadsStreamWriter : IDisposable, IAsyncDisposable
     private int _bufferPos;
     private bool _isDisposed;
 
-    private const int DefaultBufferSize = 4096;
+    internal const int DefaultBufferSize = 4096;
+
+    private const string XsdStringSuffix = "^^<http://www.w3.org/2001/XMLSchema#string>";
 
     public NQuadsStreamWriter(TextWriter writer, int bufferSize = DefaultBufferSize, IBufferManager? bufferManager = null)
     {
@@ -52,30 +59,16 @@ internal sealed class NQuadsStreamWriter : IDisposable, IAsyncDisposable
 
     /// <summary>
     /// Write a quad in N-Quads format (synchronous).
-    /// Terms should be in their canonical form:
+    /// Terms are in Mercury's term form:
     /// - IRIs: &lt;http://example.org/foo&gt; (with angle brackets)
     /// - Blank nodes: _:b0
-    /// - Literals: "value", "value"@lang, "value"^^&lt;datatype&gt;
+    /// - Literals: "value", "value"@lang, "value"^^&lt;datatype&gt;, with the value's escapes decoded
     /// Graph is optional; if empty or default, writes a triple.
     /// </summary>
     public void WriteQuad(ReadOnlySpan<char> subject, ReadOnlySpan<char> predicate,
         ReadOnlySpan<char> obj, ReadOnlySpan<char> graph = default)
     {
-        WriteTerm(subject);
-        WriteChar(' ');
-        WriteTerm(predicate);
-        WriteChar(' ');
-        WriteTerm(obj);
-        WriteChar(' ');
-
-        if (!graph.IsEmpty)
-        {
-            WriteTerm(graph);
-            WriteChar(' ');
-        }
-
-        WriteChar('.');
-        WriteChar('\n');
+        WriteStatement(subject, predicate, obj, graph);
         FlushBuffer();
     }
 
@@ -86,21 +79,7 @@ internal sealed class NQuadsStreamWriter : IDisposable, IAsyncDisposable
     public async ValueTask WriteQuadAsync(ReadOnlyMemory<char> subject, ReadOnlyMemory<char> predicate,
         ReadOnlyMemory<char> obj, ReadOnlyMemory<char> graph = default, CancellationToken ct = default)
     {
-        WriteTerm(subject.Span);
-        WriteChar(' ');
-        WriteTerm(predicate.Span);
-        WriteChar(' ');
-        WriteTerm(obj.Span);
-        WriteChar(' ');
-
-        if (!graph.IsEmpty)
-        {
-            WriteTerm(graph.Span);
-            WriteChar(' ');
-        }
-
-        WriteChar('.');
-        WriteChar('\n');
+        WriteStatement(subject.Span, predicate.Span, obj.Span, graph.Span);
         await FlushBufferAsync(ct).ConfigureAwait(false);
     }
 
@@ -154,6 +133,29 @@ internal sealed class NQuadsStreamWriter : IDisposable, IAsyncDisposable
     }
 
     /// <summary>
+    /// subject predicate object graphLabel? '.' and LF, each term followed by a single space (Canonical N-Triples).
+    /// </summary>
+    private void WriteStatement(ReadOnlySpan<char> subject, ReadOnlySpan<char> predicate,
+        ReadOnlySpan<char> obj, ReadOnlySpan<char> graph)
+    {
+        WriteTerm(subject);
+        WriteChar(' ');
+        WriteTerm(predicate);
+        WriteChar(' ');
+        WriteTerm(obj);
+        WriteChar(' ');
+
+        if (!graph.IsEmpty)
+        {
+            WriteTerm(graph);
+            WriteChar(' ');
+        }
+
+        WriteChar('.');
+        WriteChar('\n');
+    }
+
+    /// <summary>
     /// Write a term, applying N-Quads escaping for literals.
     /// IRIs and blank nodes are written as-is.
     /// </summary>
@@ -174,54 +176,108 @@ internal sealed class NQuadsStreamWriter : IDisposable, IAsyncDisposable
     }
 
     /// <summary>
-    /// Write a literal with proper N-Quads escaping.
-    /// Input format: "value", "value"@lang, or "value"^^<datatype>
+    /// Write a literal in canonical form.
+    /// Input format: "value", "value"@lang, or "value"^^&lt;datatype&gt;
     /// </summary>
+    /// <remarks>
+    /// The parsers decode a literal's escapes in memory: the term holds the value, not the wire form. So a forward scan
+    /// with backslash tracking cannot find the closing quote; an internal quote and the closing one look the same.
+    /// Instead, the closing quote is found from the suffix's shape, scanning from the end:
+    ///
+    /// - ends with <c>&gt;</c> → datatype form, find <c>"^^&lt;</c> backward
+    /// - ends with lang-tag chars + <c>@</c> → lang form, find <c>"@</c> backward
+    /// - ends with <c>"</c> → plain form, last char is the close quote
+    ///
+    /// The parsers always write a datatype IRI in <c>&lt;...&gt;</c> form. See
+    /// docs/validations/bulk-load-gradient-2026-04-17.md for the failure mode this replaces (this writer's own forward
+    /// scan kept it until 2026-10-30).
+    /// </remarks>
     private void WriteLiteral(ReadOnlySpan<char> literal)
     {
-        // Find the end of the quoted string
-        int closeQuote = 1;
-        bool inEscape = false;
-        for (int i = 1; i < literal.Length; i++)
+        if (literal.Length < 2)
         {
-            if (inEscape)
+            // Degenerate — write as-is and bail
+            WriteSpan(literal);
+            return;
+        }
+
+        int closeQuote;
+        int suffixStart;
+
+        char last = literal[literal.Length - 1];
+
+        if (last == '>')
+        {
+            // Datatype form: "lexical"^^<iri>
+            // Find the `^^<` marker by scanning backward from the end.
+            var idx = literal.LastIndexOf("^^<".AsSpan());
+            if (idx >= 1 && literal[idx - 1] == '"')
             {
-                inEscape = false;
-                continue;
+                closeQuote = idx - 1;
+                suffixStart = closeQuote + 1;
             }
-            if (literal[i] == '\\')
+            else
             {
-                inEscape = true;
-                continue;
+                // Malformed input — fall back to plain treatment
+                closeQuote = literal.Length - 1;
+                suffixStart = literal.Length;
             }
-            if (literal[i] == '"')
+        }
+        else if (last == '"')
+        {
+            // Plain form: "lexical"
+            closeQuote = literal.Length - 1;
+            suffixStart = literal.Length;
+        }
+        else
+        {
+            // Lang-tag form: "lexical"@lang[-subtags][--dir]
+            // Walk back over valid BCP-47 lang-tag chars, then require '@'
+            // preceded by '"'.
+            int i = literal.Length - 1;
+            while (i > 0 && IsLangChar(literal[i])) i--;
+            if (i >= 2 && literal[i] == '@' && literal[i - 1] == '"')
             {
-                closeQuote = i;
-                break;
+                closeQuote = i - 1;
+                suffixStart = closeQuote + 1;
+            }
+            else
+            {
+                // Malformed input — fall back: use last '"' as close if present.
+                var lastQuote = literal.LastIndexOf('"');
+                closeQuote = lastQuote > 0 ? lastQuote : literal.Length - 1;
+                suffixStart = closeQuote + 1;
             }
         }
 
-        // Write opening quote
+        WriteChar('"');
+        WriteEscapedString(literal.Slice(1, closeQuote - 1));
         WriteChar('"');
 
-        // Write escaped content
-        var content = literal.Slice(1, closeQuote - 1);
-        WriteEscapedString(content);
+        var suffix = literal.Slice(suffixStart);
+        if (suffix.IsEmpty || suffix.SequenceEqual(XsdStringSuffix))
+            return;   // Canonical N-Triples: an xsd:string literal is written without its datatype
 
-        // Write closing quote
-        WriteChar('"');
-
-        // Write suffix (language tag or datatype) as-is
-        if (closeQuote + 1 < literal.Length)
+        if (suffix[0] == '@')
         {
-            var suffix = literal.Slice(closeQuote + 1);
+            // Canonical N-Triples: a language tag in lowercase letters
+            foreach (var c in suffix)
+                WriteChar(c >= 'A' && c <= 'Z' ? (char)(c + ('a' - 'A')) : c);
+        }
+        else
+        {
             WriteSpan(suffix);
         }
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool IsLangChar(char c)
+        => (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-';
+
     /// <summary>
-    /// Write a string with N-Quads escape sequences.
-    /// Escapes: \t \n \r \" \\ and non-ASCII as \uXXXX or \UXXXXXXXX
+    /// Write a literal's value in canonical form: ECHAR for BS, HT, LF, FF, CR, '"' and '\'; \uXXXX for U+0000-U+0007,
+    /// VT, U+000E-U+001F, DEL and characters outside XML 1.1's Char; every other character, a surrogate pair included,
+    /// as itself.
     /// </summary>
     private void WriteEscapedString(ReadOnlySpan<char> str)
     {
@@ -231,47 +287,28 @@ internal sealed class NQuadsStreamWriter : IDisposable, IAsyncDisposable
 
             switch (c)
             {
-                case '\t':
-                    WriteChar('\\');
-                    WriteChar('t');
-                    break;
-                case '\n':
-                    WriteChar('\\');
-                    WriteChar('n');
-                    break;
-                case '\r':
-                    WriteChar('\\');
-                    WriteChar('r');
-                    break;
-                case '"':
-                    WriteChar('\\');
-                    WriteChar('"');
-                    break;
-                case '\\':
-                    WriteChar('\\');
-                    WriteChar('\\');
-                    break;
+                case '\b': WriteChar('\\'); WriteChar('b'); break;
+                case '\t': WriteChar('\\'); WriteChar('t'); break;
+                case '\n': WriteChar('\\'); WriteChar('n'); break;
+                case '\f': WriteChar('\\'); WriteChar('f'); break;
+                case '\r': WriteChar('\\'); WriteChar('r'); break;
+                case '"': WriteChar('\\'); WriteChar('"'); break;
+                case '\\': WriteChar('\\'); WriteChar('\\'); break;
                 default:
-                    if (c < 0x20)
+                    if (c < 0x20 || c == 0x7F || c == '￾' || c == '￿')
                     {
-                        // Control character - escape as \uXXXX
                         WriteUnicodeEscape(c);
-                    }
-                    else if (c <= 0x7E)
-                    {
-                        // Printable ASCII - write directly
-                        WriteChar(c);
                     }
                     else if (char.IsHighSurrogate(c) && i + 1 < str.Length && char.IsLowSurrogate(str[i + 1]))
                     {
-                        // Surrogate pair - escape as \UXXXXXXXX
-                        int codePoint = char.ConvertToUtf32(c, str[i + 1]);
-                        WriteUnicodeEscape32(codePoint);
-                        i++; // Skip low surrogate
+                        // A supplementary character, written as itself
+                        WriteChar(c);
+                        WriteChar(str[i + 1]);
+                        i++;
                     }
-                    else if (c > 0x7E)
+                    else if (char.IsSurrogate(c))
                     {
-                        // Non-ASCII BMP character - escape as \uXXXX
+                        // A lone surrogate is not a character (XML 1.1 Char excludes it)
                         WriteUnicodeEscape(c);
                     }
                     else
@@ -284,7 +321,7 @@ internal sealed class NQuadsStreamWriter : IDisposable, IAsyncDisposable
     }
 
     /// <summary>
-    /// Write \uXXXX escape for BMP characters.
+    /// Write \uXXXX: a lowercase u and four uppercase hex digits (Canonical N-Triples).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void WriteUnicodeEscape(char c)
@@ -295,24 +332,6 @@ internal sealed class NQuadsStreamWriter : IDisposable, IAsyncDisposable
         WriteHexDigit((c >> 8) & 0xF);
         WriteHexDigit((c >> 4) & 0xF);
         WriteHexDigit(c & 0xF);
-    }
-
-    /// <summary>
-    /// Write \UXXXXXXXX escape for supplementary characters.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void WriteUnicodeEscape32(int codePoint)
-    {
-        WriteChar('\\');
-        WriteChar('U');
-        WriteHexDigit((codePoint >> 28) & 0xF);
-        WriteHexDigit((codePoint >> 24) & 0xF);
-        WriteHexDigit((codePoint >> 20) & 0xF);
-        WriteHexDigit((codePoint >> 16) & 0xF);
-        WriteHexDigit((codePoint >> 12) & 0xF);
-        WriteHexDigit((codePoint >> 8) & 0xF);
-        WriteHexDigit((codePoint >> 4) & 0xF);
-        WriteHexDigit(codePoint & 0xF);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

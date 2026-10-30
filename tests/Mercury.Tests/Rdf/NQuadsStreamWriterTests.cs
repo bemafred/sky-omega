@@ -206,6 +206,20 @@ public class NQuadsStreamWriterTests
     }
 
     [Fact]
+    public void WriteQuad_DecodedQuoteAndBackslash_AreEscaped()
+    {
+        using var sw = new StringWriter();
+        using var writer = new NQuadsStreamWriter(sw);
+
+        // The parsers hand the writer a literal's value decoded: the N-Quads text "x\"y\\z" is the term "x"y\z".
+        // Until 2026-10-30 this writer found the closing quote by a forward scan and wrote "x"y\z" back unescaped,
+        // which is not N-Quads.
+        writer.WriteQuad("<http://ex.org/s>", "<http://ex.org/p>", "\"x\"y\\z\"", "<http://ex.org/g>");
+
+        Assert.Equal("<http://ex.org/s> <http://ex.org/p> \"x\\\"y\\\\z\" <http://ex.org/g> .\n", sw.ToString());
+    }
+
+    [Fact]
     public void WriteQuad_LiteralWithBackslash_EscapesCorrectly()
     {
         using var sw = new StringWriter();
