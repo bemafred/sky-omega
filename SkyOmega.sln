@@ -5,6 +5,10 @@ VisualStudioVersion = 18.1.11312.151
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "2 Substrates", "2 Substrates", "{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "3 Cognition", "3 Cognition", "{B2C3D4E5-F6A7-8901-BCDE-F23456789012}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "4 Surfaces", "4 Surfaces", "{C3D4E5F6-A7B8-9012-CDEF-345678901234}"
+EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "1 Meta", "1 Meta", "{D4E5F6A7-B8C9-0123-DEF1-456789012345}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Mercury", "Mercury", "{ADF68131-EC39-4648-B640-E4F2C09EE3D2}"
@@ -101,6 +105,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "ADRs", "ADRs", "{1E5C8B91-3
 		docs\adrs\ADR-006-mcp-surface-discipline.md = docs\adrs\ADR-006-mcp-surface-discipline.md
 		docs\adrs\ADR-007-sealed-substrate-immutability.md = docs\adrs\ADR-007-sealed-substrate-immutability.md
 		docs\adrs\ADR-008-workload-profiles-and-validation-attribution.md = docs\adrs\ADR-008-workload-profiles-and-validation-attribution.md
+		docs\adrs\ADR-009-substrate-dependency-policy.md = docs\adrs\ADR-009-substrate-dependency-policy.md
 		docs\adrs\README.md = docs\adrs\README.md
 	EndProjectSection
 EndProject
@@ -177,6 +182,22 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "ADRs", "ADRs", "{F3A4B5C6-D
 		docs\adrs\mercury\ADR-041-cleanup-on-finalize-exception.md = docs\adrs\mercury\ADR-041-cleanup-on-finalize-exception.md
 		docs\adrs\mercury\ADR-042-mphf-construction-memory-adaptive-sizing.md = docs\adrs\mercury\ADR-042-mphf-construction-memory-adaptive-sizing.md
 		docs\adrs\mercury\ADR-043-metric-emission-decoupling.md = docs\adrs\mercury\ADR-043-metric-emission-decoupling.md
+		docs\adrs\mercury\ADR-044-sparql-update-literal-canonicalization.md = docs\adrs\mercury\ADR-044-sparql-update-literal-canonicalization.md
+		docs\adrs\mercury\ADR-045-graph-clause-feature-parity.md = docs\adrs\mercury\ADR-045-graph-clause-feature-parity.md
+		docs\adrs\mercury\ADR-046-multi-operation-update-facade.md = docs\adrs\mercury\ADR-046-multi-operation-update-facade.md
+		docs\adrs\mercury\ADR-047-default-path-cutover.md = docs\adrs\mercury\ADR-047-default-path-cutover.md
+		docs\adrs\mercury\ADR-048-service-federation-efficiency.md = docs\adrs\mercury\ADR-048-service-federation-efficiency.md
+		docs\adrs\mercury\ADR-049-unified-expression-evaluator.md = docs\adrs\mercury\ADR-049-unified-expression-evaluator.md
+		docs\adrs\mercury\ADR-050-growable-result-binding-buffer.md = docs\adrs\mercury\ADR-050-growable-result-binding-buffer.md
+		docs\adrs\mercury\ADR-051-trigram-index-over-iris.md = docs\adrs\mercury\ADR-051-trigram-index-over-iris.md
+		docs\adrs\mercury\ADR-052-update-where-one-pattern-path.md = docs\adrs\mercury\ADR-052-update-where-one-pattern-path.md
+		docs\adrs\mercury\ADR-053-one-rdf-term-one-atom.md = docs\adrs\mercury\ADR-053-one-rdf-term-one-atom.md
+		docs\adrs\mercury\ADR-054-delete-ends-valid-time.md = docs\adrs\mercury\ADR-054-delete-ends-valid-time.md
+		docs\adrs\mercury\ADR-055-query-where-one-parse.md = docs\adrs\mercury\ADR-055-query-where-one-parse.md
+		docs\adrs\mercury\ADR-056-expression-value-is-the-term.md = docs\adrs\mercury\ADR-056-expression-value-is-the-term.md
+		docs\adrs\mercury\ADR-057-expression-read-once.md = docs\adrs\mercury\ADR-057-expression-read-once.md
+		docs\adrs\mercury\ADR-058-wal-replay-restores-consistent-store.md = docs\adrs\mercury\ADR-058-wal-replay-restores-consistent-store.md
+		docs\adrs\mercury\ADR-059-every-w3c-test-runs.md = docs\adrs\mercury\ADR-059-every-w3c-test-runs.md
 		docs\adrs\mercury\README.md = docs\adrs\mercury\README.md
 	EndProjectSection
 EndProject
@@ -233,6 +254,16 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "ADRs", "ADRs", "{1E5C8B91-3
 		docs\adrs\drhook\ADR-004-step-run.md = docs\adrs\drhook\ADR-004-step-run.md
 		docs\adrs\drhook\ADR-005-expression-evaluation-diagnosis-correction.md = docs\adrs\drhook\ADR-005-expression-evaluation-diagnosis-correction.md
 		docs\adrs\drhook\ADR-006-drhook-engine.md = docs\adrs\drhook\ADR-006-drhook-engine.md
+		docs\adrs\drhook\ADR-007-teardown-concurrency-test-debug.md = docs\adrs\drhook\ADR-007-teardown-concurrency-test-debug.md
+		docs\adrs\drhook\ADR-008-process-lifecycle-discipline.md = docs\adrs\drhook\ADR-008-process-lifecycle-discipline.md
+		docs\adrs\drhook\ADR-009-test-debugging-mcp-surface.md = docs\adrs\drhook\ADR-009-test-debugging-mcp-surface.md
+		docs\adrs\drhook\ADR-010-mcp-tool-surface-redesign.md = docs\adrs\drhook\ADR-010-mcp-tool-surface-redesign.md
+		docs\adrs\drhook\ADR-011-lifecycle-console-dashboard.md = docs\adrs\drhook\ADR-011-lifecycle-console-dashboard.md
+		docs\adrs\drhook\ADR-012-debug-state-surfaces.md = docs\adrs\drhook\ADR-012-debug-state-surfaces.md
+		docs\adrs\drhook\ADR-013-value-type-refstruct-inspection.md = docs\adrs\drhook\ADR-013-value-type-refstruct-inspection.md
+		docs\adrs\drhook\ADR-014-inspection-fault-containment.md = docs\adrs\drhook\ADR-014-inspection-fault-containment.md
+		docs\adrs\drhook\ADR-015-run-until-anomaly.md = docs\adrs\drhook\ADR-015-run-until-anomaly.md
+		docs\adrs\drhook\ADR-016-deterministic-teardown-across-platforms.md = docs\adrs\drhook\ADR-016-deterministic-teardown-across-platforms.md
 		docs\adrs\drhook\README.md = docs\adrs\drhook\README.md
 	EndProjectSection
 EndProject
@@ -271,6 +302,35 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DrHook.Capture.Tests", "tests\DrHook.Capture.Tests\DrHook.Capture.Tests.csproj", "{92BE527A-312B-4225-B0F5-A765F09EB7A6}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DrHook.Viz.Tui", "src\DrHook.Viz.Tui\DrHook.Viz.Tui.csproj", "{5775732A-3186-4993-806A-CF06C74E5E5C}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Sky", "Sky", "{A17D4B1E-D7B2-4702-9C06-AE1EEAA5F7FC}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "James", "James", "{1BC3D075-06C6-4ACC-9190-F582692C11EF}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "ADRs", "ADRs", "{604486E2-C075-4789-B5C6-E2DAA9880766}"
+	ProjectSection(SolutionItems) = preProject
+		docs\adrs\James\ADR-001-epistemic-state-machine.md = docs\adrs\James\ADR-001-epistemic-state-machine.md
+		docs\adrs\James\ADR-002-linguistic-phase-signatures.md = docs\adrs\James\ADR-002-linguistic-phase-signatures.md
+	EndProjectSection
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Lucy", "Lucy", "{AB6D2997-5345-49B5-9C0D-43EAB07A5AD9}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "ADRs", "ADRs", "{B2AD2D16-A46B-4BEB-8993-3785D74F490E}"
+	ProjectSection(SolutionItems) = preProject
+		docs\adrs\Lucy\ADR-001-semantic-memory-architecture.md = docs\adrs\Lucy\ADR-001-semantic-memory-architecture.md
+	EndProjectSection
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Mira", "Mira", "{105FD4AB-E9FF-4681-9024-900E882868E2}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "ADRs", "ADRs", "{21CED3E0-43E6-4555-9ABE-7A117ED0F5A5}"
+	ProjectSection(SolutionItems) = preProject
+		docs\adrs\Mira\ADR-001-interaction-surface-architecture.md = docs\adrs\Mira\ADR-001-interaction-surface-architecture.md
+	EndProjectSection
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "ADRs", "ADRs", "{29FBAB18-16FE-4190-8B95-41C830218A0C}"
+	ProjectSection(SolutionItems) = preProject
+		docs\adrs\Sky\ADR-001-llm-pool-architecture.md = docs\adrs\Sky\ADR-001-llm-pool-architecture.md
+	EndProjectSection
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -721,6 +781,14 @@ Global
 		{4726B9AD-0BE3-4F43-8832-7105FB8DA0AE} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{92BE527A-312B-4225-B0F5-A765F09EB7A6} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{5775732A-3186-4993-806A-CF06C74E5E5C} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+		{A17D4B1E-D7B2-4702-9C06-AE1EEAA5F7FC} = {A1B2C3D4-E5F6-7890-ABCD-EF1234567890}
+		{1BC3D075-06C6-4ACC-9190-F582692C11EF} = {B2C3D4E5-F6A7-8901-BCDE-F23456789012}
+		{604486E2-C075-4789-B5C6-E2DAA9880766} = {1BC3D075-06C6-4ACC-9190-F582692C11EF}
+		{AB6D2997-5345-49B5-9C0D-43EAB07A5AD9} = {B2C3D4E5-F6A7-8901-BCDE-F23456789012}
+		{B2AD2D16-A46B-4BEB-8993-3785D74F490E} = {AB6D2997-5345-49B5-9C0D-43EAB07A5AD9}
+		{105FD4AB-E9FF-4681-9024-900E882868E2} = {C3D4E5F6-A7B8-9012-CDEF-345678901234}
+		{21CED3E0-43E6-4555-9ABE-7A117ED0F5A5} = {105FD4AB-E9FF-4681-9024-900E882868E2}
+		{29FBAB18-16FE-4190-8B95-41C830218A0C} = {A17D4B1E-D7B2-4702-9C06-AE1EEAA5F7FC}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {F44A55EF-8B8C-4287-96E0-5C14B3983CB3}
