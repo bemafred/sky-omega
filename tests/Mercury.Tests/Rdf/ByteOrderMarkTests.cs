@@ -12,9 +12,9 @@ namespace SkyOmega.Mercury.Tests.Rdf;
 
 /// <summary>
 /// A document may begin with a UTF-8 byte order mark (EF BB BF), which each reader skips (Utf8ByteOrderMark). The
-/// N-Triples, N-Quads and Turtle parsers read through SlowReadStream at one byte per read, so the byte order mark
-/// arrives over three reads. The TriG and RDF/XML parsers read a stream whose reads return less than they asked for
-/// wrongly with or without a byte order mark, so here they read whole buffers.
+/// N-Triples, N-Quads, Turtle and TriG parsers read through SlowReadStream at one byte per read, so the byte order
+/// mark arrives over three reads. The RDF/XML parser read such a stream wrongly with or without a byte order mark, so
+/// here it reads whole buffers.
 /// </summary>
 public class ByteOrderMarkTests
 {
@@ -76,7 +76,7 @@ public class ByteOrderMarkTests
     public async Task TriG_DocumentStartingWithAByteOrderMark_IsTheDocumentAfterIt()
     {
         var document = "\uFEFF@prefix e: <http://e/> .\ne:g { e:s e:p \"x\" . }\n";
-        await using var stream = new MemoryStream(Encoding.UTF8.GetBytes(document));
+        await using var stream = new SlowReadStream(new MemoryStream(Encoding.UTF8.GetBytes(document)), 1);
         var parser = new TriGStreamParser(stream);
 
         var statements = new List<string>();

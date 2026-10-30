@@ -614,4 +614,42 @@ public class TriGStreamParserTests
     }
 
     #endregion
+
+    #region Reads Shorter Than Asked
+
+    [Theory]
+    [InlineData(16, 1)]
+    [InlineData(16, 3)]
+    [InlineData(64, 7)]
+    public async Task ParseAsync_SmallReadsAndASmallBuffer_GiveTheSameQuads(int bufferSize, int bytesPerRead)
+    {
+        // A stream may return fewer bytes than asked for: a network body, a pipe. Until 2026-10-30 the parser's
+        // lookahead stopped at the end of its buffer, so such a stream failed with "Unknown directive" or misread.
+        var ct = TestContext.Current.CancellationToken;
+        var trig = "@prefix e: <http://example.org/> .\n" +
+                   "PREFIX f: <http://example.org/f#>\n" +
+                   "e:g1 { e:s e:p \"café € 😀\" ; e:q \"" + new string('x', 100) + "\"@en . }\n" +
+                   "GRAPH e:g2 { _:b f:r ( 1 2.5 \"three\" ) . }\n" +
+                   "e:s e:p e:o .\n";
+
+        var expected = new List<string>();
+        await using (var whole = new MemoryStream(Encoding.UTF8.GetBytes(trig)))
+        {
+            using var reference = new TriGStreamParser(whole);
+            await reference.ParseAsync((s, p, o, g) => expected.Add($"{s} {p} {o} {g}"), ct);
+        }
+
+        var actual = new List<string>();
+        await using (var slow = new SlowReadStream(new MemoryStream(Encoding.UTF8.GetBytes(trig)), bytesPerRead))
+        {
+            using var parser = new TriGStreamParser(slow, bufferSize: bufferSize);
+            await parser.ParseAsync((s, p, o, g) => actual.Add($"{s} {p} {o} {g}"), ct);
+        }
+
+        // Two in e:g1, the collection's seven in e:g2, one in the default graph.
+        Assert.Equal(10, expected.Count);
+        Assert.Equal(expected, actual);
+    }
+
+    #endregion
 }

@@ -40,14 +40,11 @@ namespace SkyOmega.Mercury.TriG;
 /// </remarks>
 internal sealed class TriGStreamParser : IDisposable, IAsyncDisposable
 {
-    private readonly Stream _stream;
     private readonly IBufferManager _bufferManager;
 
-    private byte[] _inputBuffer;
+    // The document, read as code points with lookahead that refills itself
+    private readonly Utf8DocumentReader _input;
     private char[] _outputBuffer;
-    private int _bufferPosition;
-    private int _bufferLength;
-    private bool _endOfStream;
     private bool _isDisposed;
 
     private int _outputOffset;
@@ -61,9 +58,6 @@ internal sealed class TriGStreamParser : IDisposable, IAsyncDisposable
     // Current graph context
     private int _currentGraphStart;
     private int _currentGraphLength;
-
-    private int _line;
-    private int _column;
 
     private const int DefaultBufferSize = 8192;
 
@@ -85,18 +79,15 @@ internal sealed class TriGStreamParser : IDisposable, IAsyncDisposable
     /// <param name="bufferManager">Optional buffer manager for pooling.</param>
     public TriGStreamParser(Stream stream, string? documentBaseUri, int bufferSize = DefaultBufferSize, IBufferManager? bufferManager = null)
     {
-        _stream = stream ?? throw new ArgumentNullException(nameof(stream));
+        ArgumentNullException.ThrowIfNull(stream);
         _bufferManager = bufferManager ?? PooledBufferManager.Shared;
 
-        _inputBuffer = _bufferManager.Rent<byte>(bufferSize).Array!;
+        _input = new Utf8DocumentReader(stream, bufferSize, _bufferManager, "TriG");
         _outputBuffer = _bufferManager.Rent<char>(OutputBufferSize).Array!;
 
         _namespaces = new Dictionary<string, string>();
         _baseUri = documentBaseUri ?? string.Empty;
         _blankNodeCounter = 0;
-
-        _line = 1;
-        _column = 1;
 
         InitializeStandardPrefixes();
     }
@@ -117,7 +108,7 @@ internal sealed class TriGStreamParser : IDisposable, IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(handler);
 
-        await FillDocumentStartAsync(cancellationToken);
+        await _input.StartAsync(cancellationToken);
 
         while (!IsEndOfInput())
         {
@@ -126,12 +117,8 @@ internal sealed class TriGStreamParser : IDisposable, IAsyncDisposable
             if (IsEndOfInput())
                 break;
 
-            var remaining = _bufferLength - _bufferPosition;
-            if (remaining < _inputBuffer.Length / 4 && !_endOfStream)
-            {
-                await FillBufferAsync(cancellationToken);
-                SkipWhitespaceAndComments();
-            }
+            await _input.TopUpAsync(cancellationToken);
+            SkipWhitespaceAndComments();
 
             if (IsEndOfInput())
                 break;
@@ -1540,115 +1527,13 @@ internal sealed class TriGStreamParser : IDisposable, IAsyncDisposable
     #region Buffer Management
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private int Peek()
-    {
-        if (_bufferPosition >= _bufferLength)
-            return _endOfStream ? -1 : -1;
-
-        // Decode UTF-8 to get Unicode code point
-        return PeekUtf8CodePoint(out _);
-    }
-
-    /// <summary>
-    /// Peek the current UTF-8 code point and return its byte length.
-    /// Returns -1 if at end of input.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private int PeekUtf8CodePoint(out int byteLength)
-    {
-        if (_bufferPosition >= _bufferLength)
-        {
-            byteLength = 0;
-            return -1;
-        }
-
-        var b0 = _inputBuffer[_bufferPosition];
-
-        // ASCII (0x00-0x7F): single byte
-        if (b0 < 0x80)
-        {
-            byteLength = 1;
-            return b0;
-        }
-
-        // 2-byte sequence (0xC0-0xDF)
-        if ((b0 & 0xE0) == 0xC0)
-        {
-            if (_bufferPosition + 1 >= _bufferLength)
-            {
-                byteLength = 1;
-                return b0; // Incomplete sequence, return first byte
-            }
-            var b1 = _inputBuffer[_bufferPosition + 1];
-            byteLength = 2;
-            return ((b0 & 0x1F) << 6) | (b1 & 0x3F);
-        }
-
-        // 3-byte sequence (0xE0-0xEF)
-        if ((b0 & 0xF0) == 0xE0)
-        {
-            if (_bufferPosition + 2 >= _bufferLength)
-            {
-                byteLength = 1;
-                return b0; // Incomplete sequence
-            }
-            var b1 = _inputBuffer[_bufferPosition + 1];
-            var b2 = _inputBuffer[_bufferPosition + 2];
-            byteLength = 3;
-            return ((b0 & 0x0F) << 12) | ((b1 & 0x3F) << 6) | (b2 & 0x3F);
-        }
-
-        // 4-byte sequence (0xF0-0xF7)
-        if ((b0 & 0xF8) == 0xF0)
-        {
-            if (_bufferPosition + 3 >= _bufferLength)
-            {
-                byteLength = 1;
-                return b0; // Incomplete sequence
-            }
-            var b1 = _inputBuffer[_bufferPosition + 1];
-            var b2 = _inputBuffer[_bufferPosition + 2];
-            var b3 = _inputBuffer[_bufferPosition + 3];
-            byteLength = 4;
-            return ((b0 & 0x07) << 18) | ((b1 & 0x3F) << 12) | ((b2 & 0x3F) << 6) | (b3 & 0x3F);
-        }
-
-        // Invalid UTF-8 lead byte, return as-is
-        byteLength = 1;
-        return b0;
-    }
+    private int Peek() => _input.Peek();
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private int PeekAhead(int offset)
-    {
-        var pos = _bufferPosition + offset;
-        if (pos >= _bufferLength)
-            return -1;
-        return _inputBuffer[pos];
-    }
+    private int PeekAhead(int offset) => _input.PeekAhead(offset);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void Consume()
-    {
-        if (_bufferPosition >= _bufferLength)
-            return;
-
-        // Get the byte length of the current UTF-8 code point
-        PeekUtf8CodePoint(out var byteLength);
-
-        var ch = _inputBuffer[_bufferPosition];
-        _bufferPosition += byteLength;
-
-        if (ch == '\n')
-        {
-            _line++;
-            _column = 1;
-        }
-        else
-        {
-            _column++;
-        }
-    }
+    private void Consume() => _input.Consume();
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private bool TryConsume(char expected)
@@ -1688,48 +1573,8 @@ internal sealed class TriGStreamParser : IDisposable, IAsyncDisposable
         return true;
     }
 
-    /// <summary>
-    /// The first fill: reads at least <see cref="Utf8ByteOrderMark.Length"/> bytes, or the whole input if it is
-    /// shorter, and skips a byte order mark at the start of the document.
-    /// </summary>
-    private async ValueTask FillDocumentStartAsync(CancellationToken ct)
-    {
-        do
-            await FillBufferAsync(ct);
-        while (_bufferLength - _bufferPosition < Utf8ByteOrderMark.Length && !_endOfStream && _bufferLength < _inputBuffer.Length);
-
-        _bufferPosition += Utf8ByteOrderMark.LengthAt(_inputBuffer.AsSpan(_bufferPosition, _bufferLength - _bufferPosition));
-    }
-
-    private async ValueTask FillBufferAsync(CancellationToken ct)
-    {
-        if (_endOfStream)
-            return;
-
-        if (_bufferPosition > 0 && _bufferPosition < _bufferLength)
-        {
-            var remaining = _bufferLength - _bufferPosition;
-            Array.Copy(_inputBuffer, _bufferPosition, _inputBuffer, 0, remaining);
-            _bufferLength = remaining;
-            _bufferPosition = 0;
-        }
-        else if (_bufferPosition >= _bufferLength)
-        {
-            _bufferPosition = 0;
-            _bufferLength = 0;
-        }
-
-        var bytesRead = await _stream.ReadAsync(
-            _inputBuffer.AsMemory(_bufferLength, _inputBuffer.Length - _bufferLength), ct);
-
-        if (bytesRead == 0)
-            _endOfStream = true;
-        else
-            _bufferLength += bytesRead;
-    }
-
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private bool IsEndOfInput() => _endOfStream && _bufferPosition >= _bufferLength;
+    private bool IsEndOfInput() => _input.AtEnd;
 
     private void SkipWhitespaceAndComments()
     {
@@ -1874,8 +1719,7 @@ internal sealed class TriGStreamParser : IDisposable, IAsyncDisposable
 
     #region Error Handling
 
-    private Exception ParserException(string message) =>
-        new InvalidDataException($"TriG parse error at line {_line}, column {_column}: {message}");
+    private Exception ParserException(string message) => _input.Error(message);
 
     #endregion
 
@@ -1886,7 +1730,7 @@ internal sealed class TriGStreamParser : IDisposable, IAsyncDisposable
         if (_isDisposed)
             return;
 
-        _bufferManager.Return(_inputBuffer);
+        _input.Dispose();
         _bufferManager.Return(_outputBuffer);
         _isDisposed = true;
     }
