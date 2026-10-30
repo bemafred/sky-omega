@@ -21,6 +21,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -44,8 +45,16 @@ public sealed class PauseDisposeTest
             get { lock (_lock) { return _anomalies.ToArray(); } }
         }
 
-        public void OnEvent(string name) => Interlocked.Increment(ref _eventCount);
-        public void OnAnomaly(EngineAnomaly a) { lock (_lock) { _anomalies.Add(a); } }
+        public void OnEvent(string name)
+        {
+            Interlocked.Increment(ref _eventCount);
+            Console.WriteLine($"{DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)}  event {name}");
+        }
+        public void OnAnomaly(EngineAnomaly a)
+        {
+            lock (_lock) { _anomalies.Add(a); }
+            Console.WriteLine($"{DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)}  anomaly {a.Kind} in {a.Operation}: {a.Observed}");
+        }
     }
 
     [TestMethod]
@@ -107,11 +116,16 @@ public sealed class PauseDisposeTest
 
         TimeSpan naturalExitTimeout = TimeSpan.FromMilliseconds(1000);
 
+        // The timeline: one line per step and per debuggee event (the sink's), in UTC to line up with the CI log, printed
+        // with the test's output when it fails or times out. On the GitHub macOS runners this test has hit the 120 s
+        // limit with nothing to show where the time went (2026-10-30).
         using VstestRun run = TargetSpawn.Vstest(targetProject, methodFilter: "RunBriefObservableWork");
         Process dotnetTest = run.Shell;
+        Console.WriteLine($"{DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)}  dotnet test started, process group {run.ProcessGroup}");
         try
         {
             int testHostPid = TargetSpawn.ExtractPid(dotnetTest, TimeSpan.FromSeconds(60));
+            Console.WriteLine($"{DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)}  testhost pid {testHostPid}");
             var sink = new CollectingSink();
 
             string source = IntegrationTargetPaths.VstestTargetSource();
@@ -120,14 +134,17 @@ public sealed class PauseDisposeTest
 
             using (DebugSession session = DebugSession.AttachAndOwn(testHostPid, sink, naturalExitTimeout))
             {
+                Console.WriteLine($"{DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)}  attached");
                 // FINDING 94 — sync on the target's progress, never on the clock. This test used to sleep 500 ms
                 // before its Pause; on elite (4 cores) that left the testhost mid-handshake with vstest.console, and
                 // Dispose's kill there leaves vstest.console waiting out its 90 s connection timeout. Run to a
                 // breakpoint on the [Fact]'s first statement first: its hit proves the handshake is over.
                 session.Pause();
                 StopInfo? stop = session.WaitForStop(TimeSpan.FromSeconds(5));
+                Console.WriteLine($"{DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)}  first stop: {stop?.Reason.ToString() ?? "none"}");
                 Assert.IsNotNull(stop, "No stop within 5s of the first Pause.");
                 int breakpointId = session.SetBreakpointAtLine("IdleFact.cs", markerLine);
+                Console.WriteLine($"{DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)}  breakpoint {breakpointId} at IdleFact.cs:{markerLine}");
                 Assert.AreNotEqual(0, breakpointId, $"Failed to set a breakpoint at IdleFact.cs:{markerLine}.");
 
                 // Finding 91: the VSTEST_HOST_DEBUG hold's Break and the Pause can both queue ahead of the
@@ -137,19 +154,24 @@ public sealed class PauseDisposeTest
                 {
                     session.Resume();
                     stop = session.WaitForStop(TimeSpan.FromSeconds(30));
+                    Console.WriteLine($"{DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)}  resumed; stop: {stop?.Reason.ToString() ?? "none"}");
                     Assert.IsNotNull(stop, "The [Fact] breakpoint was not hit within 30s.");
                 }
                 while (stop!.Reason is StopReason.Break or StopReason.Pause);
                 Assert.AreEqual(StopReason.Breakpoint, stop.Reason);
                 Assert.IsTrue(session.RemoveBreakpoint(breakpointId), "Could not remove the [Fact] breakpoint.");
+                Console.WriteLine($"{DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)}  breakpoint removed");
 
                 // The Pause this test is about, while the [Fact] runs — then Dispose without resuming it.
                 session.Resume();
                 session.Pause();
                 stop = session.WaitForStop(TimeSpan.FromSeconds(3));
+                Console.WriteLine($"{DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)}  resumed and paused; stop: {stop?.Reason.ToString() ?? "none"}");
                 Assert.IsNotNull(stop, "Pause stop did not arrive within 3s.");
                 Assert.AreEqual(StopReason.Pause, stop!.Reason);
+                Console.WriteLine($"{DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)}  disposing");
             }
+            Console.WriteLine($"{DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)}  disposed; anomalies: [{string.Join(", ", sink.Anomalies.Select(a => a.Kind.ToString()))}]");
 
             EngineAnomaly[] workerSilentBreaks = sink.Anomalies.Where(a => a.Kind == AnomalyKind.WorkerSilentBreak).ToArray();
             Assert.AreEqual(1, workerSilentBreaks.Length,
@@ -160,12 +182,14 @@ public sealed class PauseDisposeTest
                 $"Expected 0 WorkerException; got {workerExceptions.Length}.");
 
             bool exitedNaturally = dotnetTest.WaitForExit(10000);
+            Console.WriteLine($"{DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)}  dotnet test exited: {exitedNaturally}");
             Assert.IsTrue(exitedNaturally,
                 "VSTest dotnet-test bootstrap did not exit within 10s after Dispose — Layer 1 discipline violation.");
         }
         finally
         {
             run.KillGroup(); // finding 90: the group kill also reaches a testhost orphaned while waiting for a debugger
+            Console.WriteLine($"{DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)}  process group killed");
         }
     }
 }

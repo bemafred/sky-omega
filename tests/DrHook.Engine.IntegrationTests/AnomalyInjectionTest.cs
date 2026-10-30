@@ -20,6 +20,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -107,15 +108,21 @@ public sealed class AnomalyInjectionTest
         string targetProject = IntegrationTargetPaths.VstestTargetProjectPath();
         Assert.IsTrue(File.Exists(targetProject), $"VSTest target csproj not found at {targetProject}.");
 
+        // The timeline: one line per step, in UTC to line up with the CI log, printed with the test's output when it
+        // fails or times out. Two sibling tests have hit the 120 s limit on the GitHub macOS runners with nothing to
+        // show where the time went (2026-10-30).
         using VstestRun run = TargetSpawn.Vstest(targetProject, methodFilter: "RunBriefObservableWork");
         Process dotnetTest = run.Shell;
+        Console.WriteLine($"{DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)}  dotnet test started, process group {run.ProcessGroup}");
         try
         {
             int testHostPid = TargetSpawn.ExtractPid(dotnetTest, TimeSpan.FromSeconds(60));
+            Console.WriteLine($"{DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)}  testhost pid {testHostPid}");
             var sink = new CollectingSink();
 
             using (DebugSession session = DebugSession.AttachAndOwn(testHostPid, sink))
             {
+                Console.WriteLine($"{DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)}  attached");
                 // FINDING 91 — do not wait for VSTEST_HOST_DEBUG's Break: vstest.console prints the testhost pid as
                 // soon as it LAUNCHES the testhost, so this attach can complete before the testhost reaches
                 // DebuggerBreakpoint.WaitForDebugger — which then sees Debugger.IsAttached, returns at once and never
@@ -125,14 +132,18 @@ public sealed class AnomalyInjectionTest
                 // held, its Break may queue ahead of the Pause — either is a valid stop for the GetLocals injection.
                 session.Pause();
                 StopInfo? stop = session.WaitForStop(TimeSpan.FromSeconds(5));
+                Console.WriteLine($"{DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)}  first stop: {stop?.Reason.ToString() ?? "none"}");
                 Assert.IsNotNull(stop, "No stop within 5s of Pause.");
                 Assert.IsTrue(stop!.Reason == StopReason.Pause || stop.Reason == StopReason.Break,
                     $"Expected Pause (or the held testhost's Break); got {stop.Reason}.");
 
                 _ = session.GetLocals(depth: 999);
+                Console.WriteLine($"{DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)}  GetLocals returned");
 
                 session.Resume();
+                Console.WriteLine($"{DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)}  resumed; disposing");
             }
+            Console.WriteLine($"{DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)}  disposed; anomalies: [{string.Join(", ", sink.Anomalies.Select(a => a.Kind.ToString()))}]");
 
             EngineAnomaly[] depthClamped = sink.Anomalies.Where(a => a.Kind == AnomalyKind.DepthClamped).ToArray();
             Assert.AreEqual(1, depthClamped.Length,
@@ -142,12 +153,14 @@ public sealed class AnomalyInjectionTest
             Assert.AreEqual("999", depthClamped[0].Context!["requested"]);
 
             bool exitedNaturally = dotnetTest.WaitForExit(10000);
+            Console.WriteLine($"{DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)}  dotnet test exited: {exitedNaturally}");
             Assert.IsTrue(exitedNaturally,
                 "VSTest dotnet-test bootstrap did not exit naturally within 10s.");
         }
         finally
         {
             run.KillGroup(); // finding 90: the group kill also reaches a testhost orphaned while waiting for a debugger
+            Console.WriteLine($"{DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)}  process group killed");
         }
     }
 }

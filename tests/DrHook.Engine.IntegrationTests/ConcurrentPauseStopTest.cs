@@ -17,6 +17,7 @@
 
 using System;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Threading;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
@@ -115,26 +116,36 @@ public sealed class ConcurrentPauseStopTest
         string targetProject = IntegrationTargetPaths.VstestTargetProjectPath();
         Assert.IsTrue(File.Exists(targetProject), $"VSTest target csproj not found at {targetProject}.");
 
+        // The timeline: one line per step, in UTC to line up with the CI log, printed with the test's output when it
+        // fails or times out. Two sibling tests have hit the 120 s limit on the GitHub macOS runners with nothing to
+        // show where the time went (2026-10-30).
         using VstestRun run = TargetSpawn.Vstest(targetProject, methodFilter: "RunThrowCatchLoop");
         Process dotnetTest = run.Shell;
+        Console.WriteLine($"{DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)}  dotnet test started, process group {run.ProcessGroup}");
         try
         {
             int testHostPid = TargetSpawn.ExtractPid(dotnetTest, TimeSpan.FromSeconds(60));
+            Console.WriteLine($"{DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)}  testhost pid {testHostPid}");
 
             using (DebugSession session = DebugSession.AttachAndOwn(testHostPid, new NullSink()))
             {
+                Console.WriteLine($"{DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)}  attached");
                 AssertPauseStopSurfacesUnderStoppingFlood(session, IntegrationTargetPaths.VstestTargetSource());
+                Console.WriteLine($"{DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)}  Pause stop surfaced; disposing");
             }
+            Console.WriteLine($"{DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)}  disposed");
 
             // 10s budget matching other VSTest tests: the [Fact] is past the handshake (its loop's breakpoint
             // was hit), so the bootstrap's exit does not wait on vstest.console's connection timeout.
             bool exitedNaturally = dotnetTest.WaitForExit(10000);
+            Console.WriteLine($"{DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)}  dotnet test exited: {exitedNaturally}");
             Assert.IsTrue(exitedNaturally,
                 "VSTest dotnet-test bootstrap did not exit naturally within 10s.");
         }
         finally
         {
             run.KillGroup(); // finding 90: the group kill also reaches a testhost orphaned while waiting for a debugger
+            Console.WriteLine($"{DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)}  process group killed");
         }
     }
 }

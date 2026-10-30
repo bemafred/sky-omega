@@ -41,11 +41,16 @@ public sealed class VstestAttachDisposeTest
         string targetProject = IntegrationTargetPaths.VstestTargetProjectPath();
         Assert.IsTrue(File.Exists(targetProject), $"Legacy VSTest integration target csproj not found at {targetProject}.");
 
+        // The timeline: one line per step, in UTC to line up with the CI log, printed with the test's output when it
+        // fails or times out. Two sibling tests have hit the 120 s limit on the GitHub macOS runners with nothing to
+        // show where the time went (2026-10-30).
         using VstestRun run = TargetSpawn.Vstest(targetProject, methodFilter: "RunBriefObservableWork");
         Process dotnetTest = run.Shell;
+        Console.WriteLine($"{DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)}  dotnet test started, process group {run.ProcessGroup}");
         try
         {
             int testHostPid = TargetSpawn.ExtractPid(dotnetTest, TimeSpan.FromSeconds(60));
+            Console.WriteLine($"{DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)}  testhost pid {testHostPid}");
 
             string source = IntegrationTargetPaths.VstestTargetSource();
             int markerLine = Array.FindIndex(File.ReadAllLines(source), l => l.Contains("TEST_RUNNING_HERE", StringComparison.Ordinal)) + 1;
@@ -53,6 +58,7 @@ public sealed class VstestAttachDisposeTest
 
             using (DebugSession session = DebugSession.AttachAndOwn(testHostPid, new NullSink()))
             {
+                Console.WriteLine($"{DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)}  attached");
                 // FINDING 94 — sync on the target's progress, never on the clock. This test used to sleep 500 ms
                 // and Dispose, assuming the [Fact] was done by then. It was not: the testhost was still in its
                 // vstest.console handshake (or parked at the VSTEST_HOST_DEBUG hold's Break, which nobody
@@ -64,8 +70,10 @@ public sealed class VstestAttachDisposeTest
                 // proves the handshake is over and the [Fact] is running.
                 session.Pause();
                 StopInfo? stop = session.WaitForStop(TimeSpan.FromSeconds(5));
+                Console.WriteLine($"{DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)}  first stop: {stop?.Reason.ToString() ?? "none"}");
                 Assert.IsNotNull(stop, "No stop within 5s of Pause.");
                 int breakpointId = session.SetBreakpointAtLine("IdleFact.cs", markerLine);
+                Console.WriteLine($"{DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)}  breakpoint {breakpointId} at IdleFact.cs:{markerLine}");
                 Assert.AreNotEqual(0, breakpointId, $"Failed to set a breakpoint at IdleFact.cs:{markerLine}.");
 
                 // Run to the breakpoint. The hold's Break and the Pause can both queue ahead of it (finding 91's
@@ -74,6 +82,7 @@ public sealed class VstestAttachDisposeTest
                 {
                     session.Resume();
                     stop = session.WaitForStop(TimeSpan.FromSeconds(30));
+                    Console.WriteLine($"{DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)}  resumed; stop: {stop?.Reason.ToString() ?? "none"}");
                     Assert.IsNotNull(stop, "The [Fact] breakpoint was not hit within 30s.");
                 }
                 while (stop!.Reason is StopReason.Break or StopReason.Pause);
@@ -83,16 +92,20 @@ public sealed class VstestAttachDisposeTest
                 // vstest.console, and the testhost exits by itself while still attached.
                 session.Resume();
                 stop = session.WaitForStop(TimeSpan.FromSeconds(30));
+                Console.WriteLine($"{DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)}  resumed past the breakpoint; stop: {stop?.Reason.ToString() ?? "none"}");
                 Assert.IsNotNull(stop, "The testhost did not exit within 30s of finishing at the breakpoint.");
                 Assert.AreEqual(StopReason.ProcessExited, stop!.Reason);
 
                 // session.Dispose() at end of using: the target is already gone, so neither Stage 1 SIGTERM nor
                 // Stage 2 SIGKILL has anything to do. No TargetStuckAtDispose anomaly expected.
+                Console.WriteLine($"{DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)}  disposing");
             }
+            Console.WriteLine($"{DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)}  disposed");
 
             // Increment 3 discipline assertion: with the testhost gone after reporting its result, the dotnet-test
             // bootstrap exits naturally — and successfully, because the [Fact] passed.
             bool exitedNaturally = dotnetTest.WaitForExit(10000);
+            Console.WriteLine($"{DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)}  dotnet test exited: {exitedNaturally}");
             Assert.IsTrue(exitedNaturally,
                 "VSTest dotnet-test bootstrap did not exit naturally within 10s after Dispose — Layer 1 " +
                 "discipline violation (testhost may be stuck, or vstest reporting may be hanging).");
@@ -101,6 +114,7 @@ public sealed class VstestAttachDisposeTest
         finally
         {
             run.KillGroup(); // finding 90: the group kill also reaches a testhost orphaned while waiting for a debugger
+            Console.WriteLine($"{DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)}  process group killed");
         }
     }
 }
