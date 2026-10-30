@@ -39,7 +39,12 @@ public class AttachPipeTests
     [Fact]
     public async Task PipeClient_Command_IsTheFirstBytesOnThePipe()
     {
-        var ct = TestContext.Current.CancellationToken;
+        // A Windows named pipe with no buffer completes a write only when the other end has read all of it, so the
+        // server side reads the whole command line (CRLF on Windows) before it answers; reading part of it and writing
+        // back deadlocked there. Every wait is under one 30-second limit, so a regression fails instead of hanging.
+        using var limit = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        limit.CancelAfter(TimeSpan.FromSeconds(30));
+        var ct = limit.Token;
         var pipeName = $"mt-{Guid.NewGuid():N}"[..16];
         await using var server = new NamedPipeServerStream(
             pipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
@@ -48,10 +53,14 @@ public class AttachPipeTests
         await client.ConnectAsync(5000, ct);
         await connecting;
 
-        // SendCommandAsync reads the response up to the next prompt; the server side sends one after reading.
+        // SendCommandAsync reads the response up to the next prompt, which the server side sends after the command.
         var sending = client.SendCommandAsync(":stats", ct);
         var first = new byte[6];
         await server.ReadExactlyAsync(first, ct);
+        var next = new byte[1];
+        do
+            await server.ReadExactlyAsync(next, ct);
+        while (next[0] != (byte)'\n');
         await server.WriteAsync("mcp> \n"u8.ToArray(), ct);
         await sending;
 
