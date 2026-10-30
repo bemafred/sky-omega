@@ -14,6 +14,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using SkyOmega.Mercury.NQuads;
+using SkyOmega.Mercury.Rdf;
 using SkyOmega.Mercury.Runtime.Buffers;
 
 namespace SkyOmega.Mercury.JsonLd;
@@ -242,7 +243,8 @@ internal sealed partial class JsonLdStreamParser : IDisposable, IAsyncDisposable
         await _stream.CopyToAsync(ms, cancellationToken).ConfigureAwait(false);
         var jsonBytes = ms.ToArray();
 
-        var reader = new Utf8JsonReader(jsonBytes, new JsonReaderOptions
+        // RFC 8259 §8.1: a reader may ignore a byte order mark; Utf8JsonReader does not.
+        var reader = new Utf8JsonReader(jsonBytes.AsSpan(Utf8ByteOrderMark.LengthAt(jsonBytes)), new JsonReaderOptions
         {
             AllowTrailingCommas = true,
             CommentHandling = JsonCommentHandling.Skip

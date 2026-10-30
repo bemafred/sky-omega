@@ -134,7 +134,7 @@ internal sealed class NQuadsStreamParser : IDisposable, IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(handler);
 
-        await FillBufferAsync(cancellationToken);
+        await FillDocumentStartAsync(cancellationToken);
 
         while (!IsEndOfInput())
         {
@@ -164,7 +164,7 @@ internal sealed class NQuadsStreamParser : IDisposable, IAsyncDisposable
     public async IAsyncEnumerable<RdfQuad> ParseAsync(
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        await FillBufferAsync(cancellationToken);
+        await FillDocumentStartAsync(cancellationToken);
 
         while (!IsEndOfInput())
         {
@@ -792,6 +792,19 @@ internal sealed class NQuadsStreamParser : IDisposable, IAsyncDisposable
         {
             _column++;
         }
+    }
+
+    /// <summary>
+    /// The first fill: reads at least <see cref="Utf8ByteOrderMark.Length"/> bytes, or the whole input if it is
+    /// shorter, and skips a byte order mark at the start of the document.
+    /// </summary>
+    private async ValueTask FillDocumentStartAsync(CancellationToken cancellationToken)
+    {
+        do
+            await FillBufferAsync(cancellationToken);
+        while (_bufferLength - _bufferPosition < Utf8ByteOrderMark.Length && !_endOfStream && _bufferLength < _inputBuffer.Length);
+
+        _bufferPosition += Utf8ByteOrderMark.LengthAt(_inputBuffer.AsSpan(_bufferPosition, _bufferLength - _bufferPosition));
     }
 
     private async ValueTask FillBufferAsync(CancellationToken cancellationToken)

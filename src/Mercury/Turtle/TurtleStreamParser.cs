@@ -116,7 +116,7 @@ internal sealed partial class TurtleStreamParser : IDisposable
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         // [1] turtleDoc ::= statement*
-        await FillBufferAsync(cancellationToken);
+        await FillDocumentStartAsync(cancellationToken);
 
         while (!_endOfStream || _bufferPosition < _bufferLength)
         {
@@ -432,7 +432,7 @@ internal sealed partial class TurtleStreamParser : IDisposable
         // Store handler for use by ParseReifiedTripleSpan
         _zeroGcHandler = handler;
 
-        await FillBufferAsync(cancellationToken);
+        await FillDocumentStartAsync(cancellationToken);
 
         while (!_endOfStream || _bufferPosition < _bufferLength)
         {

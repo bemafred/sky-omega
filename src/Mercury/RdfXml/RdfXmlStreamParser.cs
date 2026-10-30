@@ -127,7 +127,7 @@ internal sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(handler);
 
-        await FillBufferAsync(cancellationToken);
+        await FillDocumentStartAsync(cancellationToken);
 
         // Skip XML declaration and whitespace
         SkipXmlDeclaration();

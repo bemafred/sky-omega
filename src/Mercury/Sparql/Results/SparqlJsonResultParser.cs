@@ -13,6 +13,7 @@ using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using SkyOmega.Mercury.Rdf;
 using SkyOmega.Mercury.Sparql.Types;
 
 namespace SkyOmega.Mercury.Sparql.Results;
@@ -283,13 +284,8 @@ internal sealed class SparqlJsonResultParser : IDisposable, IAsyncDisposable
 
     private void ParseJson(byte[] bytes)
     {
-        var reader = new Utf8JsonReader(bytes, new JsonReaderOptions
-        {
-            AllowTrailingCommas = true,
-            CommentHandling = JsonCommentHandling.Skip
-        });
-
-        using var doc = JsonDocument.Parse(bytes);
+        // RFC 8259 §8.1: a reader may ignore a byte order mark.
+        using var doc = JsonDocument.Parse(bytes.AsMemory(Utf8ByteOrderMark.LengthAt(bytes)));
         var root = doc.RootElement;
 
         // Parse head

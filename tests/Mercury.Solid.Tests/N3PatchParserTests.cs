@@ -10,6 +10,23 @@ namespace SkyOmega.Mercury.Solid.Tests;
 public class N3PatchParserTests
 {
     [Fact]
+    public async Task ParseAsync_PatchStartingWithAByteOrderMark_IsThePatchAfterIt()
+    {
+        // A document may begin with a UTF-8 byte order mark, which the parser skips.
+        var patch = "\uFEFF@prefix solid: <http://www.w3.org/ns/solid/terms#>.\n" +
+                    "_:patch <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> solid:InsertDeletePatch;\n" +
+                    "  solid:inserts { <http://e/s> <http://e/p> <http://e/o>. }.\n";
+
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(patch));
+        using var parser = new N3PatchParser(stream);
+        var result = await parser.ParseAsync(TestContext.Current.CancellationToken);
+
+        Assert.NotNull(result.Inserts);
+        Assert.Single(result.Inserts.Patterns);
+        Assert.Equal("http://e/s", result.Inserts.Patterns[0].Subject.Value);
+    }
+
+    [Fact]
     public async Task ParseAsync_EmptyPatch_ReturnsEmptyResult()
     {
         // Arrange - a patch without where/deletes/inserts
