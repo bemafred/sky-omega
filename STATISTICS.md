@@ -127,21 +127,23 @@ platform:
 
 ### GitHub Actions
 
-The same `dotnet test` for the push of 1.8.37 (`a57e1f8`), on the six GitHub-hosted runners of
-`.github/workflows/test.yml` (run 41025785461), with .NET 10.0.14:
+The same `dotnet test` for the push of 1.8.39 (`232afce`), on the six GitHub-hosted runners of
+`.github/workflows/test.yml` (run 41052511778), with .NET 10.0.14:
 
 | Runner | OS, architecture | Tests | Failed | Skipped | Mercury.Tests |
 |--------|------------------|------:|-------:|--------:|--------------:|
-| `macos-latest` | macOS 26.6, arm64 | 6,605 | 0 | 168 | 4 m 50 s |
-| `macos-26-intel` | macOS 26.6, x64 | 6,605 | 1 | 168 | 14 m 47 s |
-| `ubuntu-24.04` | Ubuntu 24.04, x64 | 6,605 | 0 | 168 | 4 m 10 s |
-| `ubuntu-24.04-arm` | Ubuntu 24.04, arm64 | 6,605 | 0 | 168 | 4 m 24 s |
-| `windows-latest` | Windows Server 2025 (10.0.26100), x64 | 6,605 | 0 | 176 | 28 m 55 s |
-| `windows-11-arm` | Windows 11 (10.0.26200), arm64 | 6,605 | 0 | 176 | 26 m 56 s |
+| `macos-latest` | macOS 26.6.2, arm64 | 6,660 | 1 | 168 | 3 m 38 s |
+| `macos-26-intel` | macOS 26.6.1, x64 | 6,660 | 0 | 168 | 11 m 36 s |
+| `ubuntu-24.04` | Ubuntu 24.04.5, x64 | 6,660 | 0 | 168 | 4 m 45 s |
+| `ubuntu-24.04-arm` | Ubuntu 24.04.5, arm64 | 6,660 | 0 | 168 | 4 m 40 s |
+| `windows-latest` | Windows Server 2025 (10.0.26100), x64 | 6,660 | 0 | 176 | 41 m 51 s |
+| `windows-11-arm` | Windows 11 (10.0.26200), arm64 | 6,660 | 0 | 176 | 33 m 25 s |
 
-The failure on macOS x64 is `ParallelBZip2ThroughputMeasurement`, which asserts that 14 parallel workers decompress
-faster than one thread: 322 ms against 291 ms there. It measures the machine, not the code, and passed on the same
-runner the run before ([ADR-059](docs/adrs/mercury/ADR-059-every-w3c-test-runs.md) phase 7). The macOS runners run the
+The failure on macOS arm64 is the DrHook integration test
+`AttachAndOwn_VstestTestHost_PauseThenDisposeWithoutResume_WorkerSilentBreakOnly`, which hit the suite's 120 s limit.
+At 1.8.38 a sibling test, `AttachAndOwn_VstestTestHost_DisposeDuringFlood_NoWorkerExceptionOrSilentBreak`, timed out
+the same way on macOS x64; both pass on omega in about a second. Under investigation
+([ADR-007](docs/adrs/drhook/ADR-007-teardown-concurrency-test-debug.md), Phase 8 note). The macOS runners run the
 sparse-file test, which omega skips.
 
 ## W3C Conformance
@@ -300,13 +302,13 @@ Write performance is fsync-dominated — measures SSD controller behavior, not C
 
 ### Scale-validation runs
 
-Profile attribution per [ADR-008 — Workload Profiles and Validation Attribution](docs/adrs/ADR-008-workload-profiles-and-validation-attribution.md). All runs from 2026-04-19 onward exercise the Reference profile; Cognitive validation drought is documented in [docs/limits/cognitive-profile-validation-drought.md](docs/limits/cognitive-profile-validation-drought.md).
+Profile attribution per [ADR-008 — Workload Profiles and Validation Attribution](docs/adrs/ADR-008-workload-profiles-and-validation-attribution.md). After the ADR-031 Dispose gate (2026-04-21), every run is Reference except the Cognitive gradient of 2026-05-09 (1.7.50). Mercury's semantic memory runs on Cognitive, and a Reference run is not evidence of Cognitive durability, temporal behavior or query latency: what validates Cognitive at 1.8.39, and what does not, is in [docs/limits/cognitive-profile-validation-drought.md](docs/limits/cognitive-profile-validation-drought.md#evidence-at-1839-2026-10-30).
 
 | Date | Profile | Subject | Scope | Key measurement |
 |------|---------|---------|-------|-----------------|
 | 2026-04-17 | Parser-only | [Turtle parser at Wikidata scale](docs/validations/parser-at-wikidata-scale-2026-04-17.md) | Parser + NT writer only; no store | 21.3B triples at 2.7M/sec sustained, flat throughput over 2h 11m |
 | 2026-04-17 | Cognitive | [Bulk-load gradient](docs/validations/bulk-load-gradient-2026-04-17.md) | NT bulk-load 1M → 100M Cognitive | 5 bug classes caught and fixed across the 1.7.13 → 1.7.22 arc |
-| 2026-04-19 | Cognitive | [Full-pipeline gradient](docs/validations/full-pipeline-gradient-2026-04-19.md) | Bulk + rebuild through 1 B Cognitive | 1 B rebuild 3 h 7 m, 14.8 M predicate-bound rows in 49 s, 3 rebuild-path bugs fixed. **Most recent Cognitive measurement** — see [cognitive-profile-validation-drought.md](docs/limits/cognitive-profile-validation-drought.md). |
+| 2026-04-19 | Cognitive | [Full-pipeline gradient](docs/validations/full-pipeline-gradient-2026-04-19.md) | Bulk + rebuild through 1 B Cognitive | 1 B rebuild 3 h 7 m, 14.8 M predicate-bound rows in 49 s, 3 rebuild-path bugs fixed. The most recent Cognitive measurement at 1 B. |
 | 2026-04-20 | Cognitive | [Turtle at Wikidata scale](docs/validations/turtle-at-wikidata-scale-2026-04-20.md) | Turtle bulk-load at 100 M | 292 K triples/sec, ~12 % slower than NT at source-triple level, zero parser errors |
 | 2026-04-20 | Cognitive | [Dispose profile](docs/validations/dispose-profile-2026-04-20.md) | 1 B read-only Dispose | 14 min attributed to `CollectPredicateStatistics` from `CheckpointInternal`, not msync — ADR-031 Piece 2 mechanism rewritten |
 | 2026-04-20 | Cognitive | [ADR-028 rehash gradient](docs/validations/adr-028-rehash-gradient-2026-04-20.md) | 1 M / 10 M / 100 M with forced 16 K initial hash | 8 / 11 / 14 rehashes per scale, exact-match query rows to baseline, 100 M past the 58 M Bug-5 ceiling cleanly |
@@ -326,6 +328,7 @@ Profile attribution per [ADR-008 — Workload Profiles and Validation Attributio
 | 2026-04-29 | Reference | WDBench 1.7.47 cold baseline | Hardened-substrate WDBench against `wiki-21b-ref` (full Wikidata, 21.3 B triples) | 1,199 queries (660 paths + 539 c2rpqs). 11h 30m total wall. **0 parser failures**, **655/655 timeouts honored 60 s cap** (max 63.62 s, min 60.00 s — contract honored at scale). p25=4ms, p50=45ms, p75=1.39s, p90=12.82s, p95=29.85s, p99=49.50s, max=59.82s. Disclosure-marked baseline for Phase 7c optimization rounds; running on full Wikidata is intentional (substrate-capability claim, not the truthy subset that QLever/Virtuoso WDBench numbers use — see [memos/2026-04-30-latent-assumptions-from-qlever-comparison.md](memos/2026-04-30-latent-assumptions-from-qlever-comparison.md)). Sealed: `docs/validations/wdbench-paths-21b-2026-04-29-1747.jsonl` + `docs/validations/wdbench-c2rpqs-21b-2026-04-29-1747.jsonl` |
 | 2026-05-06 | Reference | [Cleanup-hook 1M/10M/100M smoke](docs/validations/intermediate-cleanup-gradient-2026-05-06.md) | 1.7.49 phase-transition cleanup hook | All scales: `chunks_deleted == chunk_count` (1, 2, 18); `chunk_bytes_reclaimed` 164 MB / 1.6 GB / 16.4 GB; filesystem confirms `occurrences/` empty post-merge. Reframed as smoke + observability check (not perf gradient — change is `File.Delete` in a `finally`, off the hot path). Production claim deferred to cycle 9 |
 | 2026-05-06 | Reference | [ADR-037 pipelined-spill gradient](docs/validations/adr-037-pipelined-spill-gradient-2026-05-06.md) | 1.7.49 sequential vs 1.7.50 pipelined A/B at 1 M / 10 M / 100 M | **100 M parser_blocked 95.0 s → 0.44 ms (216,000× reduction)**; end-to-end 285 s → 212 s (−25.6 %); queue_depth_at_handoff = 0 across all 18 handoffs (bound-1 sufficient); merge phase 30,149 → 31,057 ms (+3 %, within ±5 %). Per-spill sort+write costs rose 43–60 % under cross-thread contention but stay hidden behind parser-fill — net wall-clock drops. Memory cost ~2.5× working set (3.1 → 7.7 GB) from holding worker's snapshot concurrent with parser's accumulator. Hypothesis confirmed at every gradient scale; production validation = cycle 9 |
+| 2026-05-09 | Cognitive | [Cycle 10 Phase 0 Cognitive gradient](docs/validations/cycle10-phase0-cognitive-gradient-2026-05-09.md) | Bulk-load 1 M / 10 M / 100 M from `latest-all.ttl.bz2` on 1.7.50 | 5.5 s / 51 s / 6 m 30 s; **256 K triples/sec at 100 M** from bzip2 Turtle; atom-store max probe distance 4 at 25 M atoms; smoke queries only (bounded SELECT 18 ms, subject lookup 1 ms). **Most recent Cognitive measurement**; it predates the current SPARQL engine (ADR-047) |
 | 2026-05-09 | Reference | [Cycle 9 21.3 B production validation](docs/validations/adr-037-cycle9-21b-2026-05-09.md) | 1.7.50 (pipelined spill + cleanup hook) full Wikidata Reference + Sorted | **Completed** 2026-05-08 06:54 UTC at **35 h 35 m end-to-end** (vs cycle 8's 46 h with intervention, −22.6 %). Parser 9 h 18 m (vs 14 h 15 m, −4 h 57 m measured = ADR-037 production validation); merge 15 h 21 m (wash); drain ~1 h 40 m; Phase B (GPOS + trigram rebuild) 9 h 15 m. `parser_blocked_on_spill_ms = 78.9 / 0.000236 %` at production scale — falsifiable hypothesis confirmed. Cleanup hook reclaimed 3.96 TB at end-of-merge (vs cycle 8's manual `rm -rf` requirement, eliminated). Substrate identity vs cycle 8: byte-identical (4,005,235,528 atoms, 17,029,283,265 GPOS entries, 7,472,855,623 trigram entries; total ~2.13 TB). [ADR-037](docs/adrs/mercury/ADR-037-pipelined-spill-bulk-builder.md) advanced to **Completed**. Limits [`spill-blocks-parser`](docs/limits/spill-blocks-parser.md) and [`intermediate-cleanup-deferred-to-run-end`](docs/limits/intermediate-cleanup-deferred-to-run-end.md) Resolved at production scale |
 | 2026-05-09 | Reference | [WDBench cycle 9 cold baseline](docs/validations/wdbench-paths-21b-2026-05-08-cycle9.jsonl) + [c2rpqs](docs/validations/wdbench-c2rpqs-21b-2026-05-08-cycle9.jsonl) | 1.7.50 cold-cache run against `wiki-21b-ref-r2` | 1,199 queries (660 paths + 539 c2rpqs), 60 s timeout. **588 completed (vs cycle 8's 544 — 44 hard queries that timed out in cycle 8 completed under 60 s in cycle 9)**. **10 h 44 m total wall-clock (vs cycle 8's 11 h 30 m, −7 %)**. Aggregated completed-only: p25=2.69 ms, p50=65 ms, p75=966 ms, p90=8.68 s, p95=23.13 s, p99=48.24 s, max=58.57 s. p50 shift +44 % is sample-composition (44 newly-completed slow queries); p75–p99 all dropped 23–32 %. 0 query failures, 0 parser failures across 2,398 queries (cycle 8 + cycle 9). Substrate `wiki-21b-ref-r2` deleted post-baseline to free disk for cycle 10 |
 | 2026-05-13 | Reference | [Cycle 10 Phase 3 r4 21.3 B production validation](docs/validations/cycle10-phase3-r4-21b-2026-05-12.md) | 1.7.57 (ADR-038 + ADR-039 + MPHF instrumentation) full Wikidata Reference + Sorted | **Completed** 2026-05-12 18:49 UTC at **23 h 56 m 50 s end-to-end** (vs cycle 9's 35 h 35 m on 1.7.50, **−11 h 38 m / −32.7 %**). Phase breakdown: parse 9 h 17 m (cycle 9 parity), merge 2 h 41 m, MPHF construction **54 m 29 s** (first production-scale instrumented measurement on 4.005 B atoms — 25 levels, 0 dense fallback, placement_ratio 0.6065 = BBHash theoretical for γ=2.0), GSPO drain ~1 h 38 m, GPOS rebuild 55 m 27 s, Trigram rebuild 8 h 30 m 30 s. Substrate output identical to cycle 9 (4,005,235,528 atoms, 17,029,283,265 GPOS entries, 7,472,855,623 trigram entries) plus new MPHF surface (1.75 GB `atoms.mphf` blob + 16.0 GB `atoms.idx` translation table). [ADR-038](docs/adrs/mercury/ADR-038-merge-phase-read-side.md) and [ADR-039](docs/adrs/mercury/ADR-039-mphf-on-sealed-atom-set.md) both advanced to **Completed**. Three open follow-ups for cycle 11: `ExternalSorter` FD pool integration (trigram rebuild held 8,192 chunks at 17 % headroom to the ~10K launchd ceiling), ADR-041 cleanup-on-exception (third orphaning occurrence), ADR-040 readahead memory adaptive sizing. Cycle 10 retrospective: three abort/retry attempts (1.7.53 int32 / 1.7.54 BBHash non-convergence / 1.7.55 Claude-induced deploy-during-run crash) before clean r4 — discipline-rule memorialized as `feedback_no_deploy_during_long_running_process.md` |

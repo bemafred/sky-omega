@@ -65,7 +65,7 @@ Sky Omega is what becomes possible when you stop building better travelers and s
 > - **ADR-037** Pipelined spill in `SortedAtomBulkBuilder` — *Completed* (1.7, production-validated cycle 9)
 > - **ADR-038** Merge-phase read-side optimization — *Completed* (1.7, production-validated cycle 10 r4)
 > - **ADR-039** MPHF over sealed atom set — *Completed* (1.7, production-validated cycle 10 r4)
-> - *Reference-profile measurements per [ADR-008](docs/adrs/ADR-008-workload-profiles-and-validation-attribution.md). Cognitive-profile validation drought persists — see [docs/limits/cognitive-profile-validation-drought.md](docs/limits/cognitive-profile-validation-drought.md).*
+> - *Reference-profile measurements per [ADR-008](docs/adrs/ADR-008-workload-profiles-and-validation-attribution.md). They do not measure the Cognitive profile that Mercury's semantic memory runs on: its durability, temporal queries and query latency. What validates Cognitive, and what does not, is in [docs/limits/cognitive-profile-validation-drought.md](docs/limits/cognitive-profile-validation-drought.md#evidence-at-1839-2026-10-30).*
 >
 > **Read more**
 > - [21.3 Billion Triples on a Laptop, in .NET](docs/articles/2026-04-26-21b-wikidata-on-a-laptop.md) — the Phase 6 article
@@ -105,13 +105,27 @@ Want to give Claude persistent memory? See **[Mercury MCP tutorial](docs/tutoria
 
 ## Platforms
 
-Sky Omega is built and tested on macOS, Linux and Windows, on arm64 and x64 processors. At 1.8.37 (2026-10-30) the
-whole test suite passes on four of the five machines below, 6,605 tests on each, none failed; elite went off the
-network during its run. The tests include the DrHook integration tests, which launch and debug real .NET processes.
+Sky Omega supports six platforms: macOS, Linux and Windows, each on arm64 and x64. GitHub Actions runs the whole test
+suite on all six on every push (`.github/workflows/test.yml`), including the DrHook integration tests, which launch and
+debug real .NET processes. Four of the platforms also run on our own machines; Windows x64 and macOS x64 are tested
+only in CI.
 
-GitHub Actions also runs the whole suite on every push, on macOS, Linux and Windows on both arm64 and x64. At 1.8.37
-five of the six runners pass; on macOS x64 one timing measurement failed, which asserts the machine's speed rather
-than the code's behavior.
+| Platform | GitHub Actions runner | Our machines |
+|----------|-----------------------|--------------|
+| macOS arm64 | `macos-latest` | omega |
+| macOS x64 | `macos-26-intel` | — |
+| Linux x64 | `ubuntu-24.04` | zbook, elite |
+| Linux arm64 | `ubuntu-24.04-arm` | omega-ubuntu |
+| Windows x64 | `windows-latest` | — |
+| Windows arm64 | `windows-11-arm` | omega-windows |
+
+At 1.8.39 (2026-10-30) five of the six runners pass all 6,660 tests. On macOS arm64 one DrHook integration test timed
+out: on the GitHub macOS runners, a DrHook test that debugs a VSTest test host has timed out in two of the last four
+runs, on arm64 and on x64. It is under investigation
+([ADR-007](docs/adrs/drhook/ADR-007-teardown-concurrency-test-debug.md), Phase 8 note).
+
+At 1.8.37 (2026-10-30) the whole suite passed on four of our five machines, 6,605 tests on each, none failed; elite
+went off the network during its run.
 
 | Machine | OS | Architecture | Hardware |
 |---------|----|--------------|----------|
@@ -121,9 +135,9 @@ than the code's behavior.
 | omega-ubuntu | Ubuntu 26.04 | arm64 | Virtual machine on omega, 4 cores, 7.2 GB |
 | omega-windows | Windows 11 | arm64 | Virtual machine on omega, 4 cores, 8 GB |
 
-Each machine skips the tests of other platforms' features. The skips and their reasons, the .NET versions and each
-run's time are in [STATISTICS.md](STATISTICS.md#test-runs-by-platform). Windows on x64 and macOS on Intel run only in
-CI. Not tested yet: Linux distributions other than Ubuntu.
+Each platform skips the tests of other platforms' features. The skips and their reasons, the .NET versions and each
+run's time are in [STATISTICS.md](STATISTICS.md#test-runs-by-platform). Not tested yet: Linux distributions other
+than Ubuntu.
 
 Mercury's core has no package dependencies, and DrHook loads Microsoft's debugging shim (`libdbgshim`) for the
 platform it runs on. The stores are in each platform's data directory:
@@ -242,7 +256,7 @@ two terms and a pattern constant matches a language tag by case
 | SPARQL HTTP endpoint             | `mercury` CLI         | `mercury -m` then visit `http://localhost:3031/sparql` |
 | Zero external runtime deps       | Mercury.csproj        | `grep PackageReference src/Mercury/*.csproj` |
 | 6,145 Mercury tests passing      | 167 skipped on macOS: the 160 W3C known failures, the 6 JSON-LD tests that do not apply, and 1 test that needs a disk with less than 1 TB free | `dotnet test --project tests/Mercury.Tests` |
-| Six platforms                    | 6,605 tests, 0 failed, on macOS arm64, Linux x64 and arm64, and Windows arm64 and x64; on macOS x64, 1 timing measurement failed ([Platforms](#platforms)) | `dotnet test` on each, and the GitHub Actions workflow |
+| Six platforms                    | 6,660 tests on each GitHub Actions runner at 1.8.39, 0 failed on macOS x64, Linux x64 and arm64, and Windows x64 and arm64; on macOS arm64, 1 DrHook test timed out ([Platforms](#platforms)) | `dotnet test` on each, and the GitHub Actions workflow |
 | AI-assisted development          | Git history           | `git log --oneline \| grep "Co-Authored-By"` |
 | Development velocity             | ~255K lines           | See [STATISTICS.md](STATISTICS.md)           |
 
