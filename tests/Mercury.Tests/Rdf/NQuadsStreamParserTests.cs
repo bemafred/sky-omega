@@ -440,4 +440,59 @@ public class NQuadsStreamParserTests
     }
 
     #endregion
+
+    #region Buffering, UTF-8 and statement boundaries
+
+    [Fact]
+    public async Task ParseAsync_LiteralLongerThanTheBuffer_IsRead()
+    {
+        // The buffer is refilled mid-statement. Until 2026-10-30 this parser refilled only between statements, so a
+        // literal longer than about three quarters of the buffer was "Unterminated".
+        var content = new string('x', 20_000);
+        var nquads = Encoding.UTF8.GetBytes($"<http://e/s> <http://e/p> \"{content}\" <http://e/g> .\n");
+
+        await using var stream = new MemoryStream(nquads);
+        var parser = new NQuadsStreamParser(stream, bufferSize: 16);
+
+        string? literal = null;
+        string? graph = null;
+        await parser.ParseAsync((s, p, o, g) => { literal = o.ToString(); graph = g.ToString(); }, TestContext.Current.CancellationToken);
+
+        Assert.Equal($"\"{content}\"", literal);
+        Assert.Equal("<http://e/g>", graph);
+    }
+
+    [Fact]
+    public async Task ParseAsync_NonAsciiLiteralAndBlankNodeLabel_AreDecodedFromUtf8()
+    {
+        // A blank node label may use the supplementary planes (PN_CHARS_BASE includes U+10000-U+EFFFF): U+10400.
+        var nquads = "_:b𐐀 <http://e/p> \"café € 😀\" <http://e/g> .\n"u8.ToArray();
+
+        await using var stream = new MemoryStream(nquads);
+        var parser = new NQuadsStreamParser(stream);
+
+        string? subject = null;
+        string? literal = null;
+        await parser.ParseAsync((s, p, o, g) => { subject = s.ToString(); literal = o.ToString(); }, TestContext.Current.CancellationToken);
+
+        Assert.Equal("_:b𐐀", subject);
+        Assert.Equal("\"café € 😀\"", literal);
+    }
+
+    [Fact]
+    public async Task ParseAsync_TwoStatementsOnOneLine_AreRejected()
+    {
+        // [1] nquadsDoc ::= statement? (EOL statement)* EOL? : one statement per line.
+        var nquads = "<http://e/s> <http://e/p> <http://e/o> . <http://e/s> <http://e/p> <http://e/o2> .\n"u8.ToArray();
+
+        await using var stream = new MemoryStream(nquads);
+        var parser = new NQuadsStreamParser(stream);
+
+        var error = await Assert.ThrowsAsync<InvalidDataException>(async () =>
+            await parser.ParseAsync((s, p, o, g) => { }, TestContext.Current.CancellationToken));
+
+        Assert.Contains("Unexpected character after '.'", error.Message);
+    }
+
+    #endregion
 }

@@ -1,6 +1,6 @@
 // NQuadsStreamParser.cs
-// Zero-GC streaming N-Quads parser
-// Based on W3C RDF 1.1 N-Quads specification
+// Zero-GC streaming N-Quads parser, and through NTriplesStreamParser the N-Triples parser
+// Based on W3C RDF 1.1 N-Quads and N-Triples specifications
 // No external dependencies, only BCL
 // .NET 10 / C# 14
 
@@ -9,6 +9,7 @@ using System.Buffers;
 using System.Collections.Generic;
 using System.IO;
 using System.Runtime.CompilerServices;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using SkyOmega.Mercury.Runtime.Buffers;
@@ -59,19 +60,20 @@ internal readonly record struct RdfQuad(string Subject, string Predicate, string
 }
 
 /// <summary>
-/// Zero-allocation streaming parser for RDF N-Quads format.
-/// Implements W3C RDF 1.1 N-Quads specification.
+/// Zero-allocation streaming parser for RDF N-Quads format, the one reader of the N-Quads grammar and of N-Triples,
+/// which is N-Quads without graph labels (<see cref="NTriples.NTriplesStreamParser"/> reads through this class).
 ///
 /// N-Quads grammar (simplified):
-/// [1] nquadsDoc    ::= (statement | comment | EOL)*
+/// [1] nquadsDoc    ::= statement? (EOL statement)* EOL?
 /// [2] statement    ::= subject predicate object graphLabel? '.'
 /// [3] subject      ::= IRIREF | BLANK_NODE_LABEL
 /// [4] predicate    ::= IRIREF
 /// [5] object       ::= IRIREF | BLANK_NODE_LABEL | literal
 /// [6] graphLabel   ::= IRIREF | BLANK_NODE_LABEL
 ///
-/// For zero-GC parsing, use ParseAsync(QuadHandler).
-/// The IAsyncEnumerable overload allocates strings for compatibility.
+/// The input is UTF-8, decoded and validated per code point; a term may be longer than the input buffer, which is
+/// refilled mid-statement. For zero-GC parsing, use ParseAsync(QuadHandler). The IAsyncEnumerable overload allocates
+/// strings for compatibility.
 /// </summary>
 /// <remarks>
 /// <para><b>Thread Safety:</b> This class is NOT thread-safe. Each instance
@@ -84,6 +86,9 @@ internal sealed class NQuadsStreamParser : IDisposable, IAsyncDisposable
 {
     private readonly Stream _stream;
     private readonly IBufferManager _bufferManager;
+
+    // The format named in error messages: "N-Quads", or "N-Triples" when NTriplesStreamParser reads through this class.
+    private readonly string _documentFormat;
 
     // Reusable buffers - rented from pool
     private byte[] _inputBuffer;
@@ -101,12 +106,18 @@ internal sealed class NQuadsStreamParser : IDisposable, IAsyncDisposable
     private int _line;
     private int _column;
 
-    private const int DefaultBufferSize = 8192;
+    internal const int DefaultBufferSize = 8192;
 
     public NQuadsStreamParser(Stream stream, int bufferSize = DefaultBufferSize, IBufferManager? bufferManager = null)
+        : this(stream, bufferSize, bufferManager, "N-Quads")
+    {
+    }
+
+    internal NQuadsStreamParser(Stream stream, int bufferSize, IBufferManager? bufferManager, string documentFormat)
     {
         _stream = stream ?? throw new ArgumentNullException(nameof(stream));
         _bufferManager = bufferManager ?? PooledBufferManager.Shared;
+        _documentFormat = documentFormat;
 
         _inputBuffer = _bufferManager.Rent<byte>(bufferSize).Array!;
         _outputBuffer = _bufferManager.Rent<char>(OutputBufferSize).Array!;
@@ -143,8 +154,7 @@ internal sealed class NQuadsStreamParser : IDisposable, IAsyncDisposable
             if (IsEndOfInput())
                 break;
 
-            // Parse a quad - N-Quads must be strictly valid
-            ParseQuadZeroGC(handler);
+            ReadAndEmitStatement(handler);
         }
     }
 
@@ -173,25 +183,41 @@ internal sealed class NQuadsStreamParser : IDisposable, IAsyncDisposable
             if (IsEndOfInput())
                 break;
 
-            // Parse quad - throws on invalid input per W3C N-Quads spec
-            yield return ParseQuadAllocating();
+            yield return ReadStatementAllocating();
         }
     }
 
+    private void ReadAndEmitStatement(QuadHandler handler)
+    {
+        ReadStatement(out var subject, out var predicate, out var obj, out var graph);
+        handler(subject, predicate, obj, graph);
+    }
+
+    private RdfQuad ReadStatementAllocating()
+    {
+        ReadStatement(out var subject, out var predicate, out var obj, out var graph);
+        return new RdfQuad(subject.ToString(), predicate.ToString(), obj.ToString(), graph.IsEmpty ? null : graph.ToString());
+    }
+
     /// <summary>
-    /// Parse a single quad with zero allocations.
-    /// Strict W3C N-Quads validation - throws on invalid input.
+    /// [2] statement ::= subject predicate object graphLabel? '.', then only spaces or tabs before the end of the line,
+    /// a comment or the end of the input ([1]: one statement per line). Strict: throws on invalid input. The spans
+    /// point into the output buffer and are valid until the next statement is read.
     /// </summary>
-    private void ParseQuadZeroGC(QuadHandler handler)
+    private void ReadStatement(
+        out ReadOnlySpan<char> subject,
+        out ReadOnlySpan<char> predicate,
+        out ReadOnlySpan<char> obj,
+        out ReadOnlySpan<char> graph)
     {
         ResetOutputBuffer();
 
         // Parse subject (must be IRIREF or BLANK_NODE_LABEL)
         var ch = Peek();
         if (ch != '<' && ch != '_')
-            throw ParserException($"Expected '<' or '_:' at start of subject, got '{(char)ch}'");
+            throw ParserException($"Expected '<' or '_:' at start of subject, got {Display(ch)}");
 
-        var subject = ParseSubjectSpan();
+        subject = ParseSubjectSpan();
         if (subject.IsEmpty)
             throw ParserException("Failed to parse subject");
 
@@ -199,9 +225,9 @@ internal sealed class NQuadsStreamParser : IDisposable, IAsyncDisposable
 
         // Parse predicate (must be IRIREF)
         if (Peek() != '<')
-            throw ParserException($"Expected '<' at start of predicate, got '{(char)Peek()}'");
+            throw ParserException($"Expected '<' at start of predicate, got {Display(Peek())}");
 
-        var predicate = ParsePredicateSpan();
+        predicate = ParsePredicateSpan();
         if (predicate.IsEmpty)
             throw ParserException("Failed to parse predicate");
 
@@ -210,21 +236,21 @@ internal sealed class NQuadsStreamParser : IDisposable, IAsyncDisposable
         // Parse object (must be IRIREF, BLANK_NODE_LABEL, or literal)
         ch = Peek();
         if (ch != '<' && ch != '_' && ch != '"')
-            throw ParserException($"Expected '<', '_:', or '\"' at start of object, got '{(char)ch}'");
+            throw ParserException($"Expected '<', '_:', or '\"' at start of object, got {Display(ch)}");
 
-        var obj = ParseObjectSpan();
+        obj = ParseObjectSpan();
         if (obj.IsEmpty)
             throw ParserException("Failed to parse object");
 
         SkipWhitespace();
 
         // Parse optional graph label
-        ReadOnlySpan<char> graph = ReadOnlySpan<char>.Empty;
+        graph = ReadOnlySpan<char>.Empty;
         ch = Peek();
         if (ch != '.' && ch != '\n' && ch != -1)
         {
             if (ch != '<' && ch != '_')
-                throw ParserException($"Expected graph label '<' or '_:', got '{(char)ch}'");
+                throw ParserException($"Expected graph label '<' or '_:', got {Display(ch)}");
             graph = ParseGraphLabelSpan();
             if (graph.IsEmpty)
                 throw ParserException("Failed to parse graph label");
@@ -233,83 +259,15 @@ internal sealed class NQuadsStreamParser : IDisposable, IAsyncDisposable
 
         // Expect '.'
         if (Peek() != '.')
-            throw ParserException($"Expected '.' to terminate quad, got '{(char)Peek()}'");
+            throw ParserException($"Expected '.' to terminate the statement, got {Display(Peek())}");
         Consume();
 
-        // Check for trailing characters (only whitespace and comments allowed)
+        // Only spaces or tabs, then the end of the line, a comment or the end of the input
+        while (Peek() is ' ' or '\t')
+            Consume();
         ch = Peek();
-        if (ch != -1 && ch != '\n' && ch != '\r' && ch != ' ' && ch != '\t' && ch != '#')
-            throw ParserException($"Unexpected character after '.': '{(char)ch}'");
-
-        // Emit quad
-        handler(subject, predicate, obj, graph);
-    }
-
-    /// <summary>
-    /// Parse a single quad (allocating strings).
-    /// Strict W3C N-Quads validation - throws on invalid input.
-    /// </summary>
-    private RdfQuad ParseQuadAllocating()
-    {
-        ResetOutputBuffer();
-
-        // Parse subject (must be IRIREF or BLANK_NODE_LABEL)
-        var ch = Peek();
-        if (ch != '<' && ch != '_')
-            throw ParserException($"Expected '<' or '_:' at start of subject, got '{(char)ch}'");
-
-        var subject = ParseSubjectSpan();
-        if (subject.IsEmpty)
-            throw ParserException("Failed to parse subject");
-
-        SkipWhitespace();
-
-        // Parse predicate (must be IRIREF)
-        if (Peek() != '<')
-            throw ParserException($"Expected '<' at start of predicate, got '{(char)Peek()}'");
-
-        var predicate = ParsePredicateSpan();
-        if (predicate.IsEmpty)
-            throw ParserException("Failed to parse predicate");
-
-        SkipWhitespace();
-
-        // Parse object (must be IRIREF, BLANK_NODE_LABEL, or literal)
-        ch = Peek();
-        if (ch != '<' && ch != '_' && ch != '"')
-            throw ParserException($"Expected '<', '_:', or '\"' at start of object, got '{(char)ch}'");
-
-        var obj = ParseObjectSpan();
-        if (obj.IsEmpty)
-            throw ParserException("Failed to parse object");
-
-        SkipWhitespace();
-
-        // Parse optional graph label
-        string? graph = null;
-        ch = Peek();
-        if (ch != '.' && ch != '\n' && ch != -1)
-        {
-            if (ch != '<' && ch != '_')
-                throw ParserException($"Expected graph label '<' or '_:', got '{(char)ch}'");
-            var graphSpan = ParseGraphLabelSpan();
-            if (graphSpan.IsEmpty)
-                throw ParserException("Failed to parse graph label");
-            graph = graphSpan.ToString();
-            SkipWhitespace();
-        }
-
-        // Expect '.'
-        if (Peek() != '.')
-            throw ParserException($"Expected '.' to terminate quad, got '{(char)Peek()}'");
-        Consume();
-
-        // Check for trailing characters (only whitespace and comments allowed)
-        ch = Peek();
-        if (ch != -1 && ch != '\n' && ch != '\r' && ch != ' ' && ch != '\t' && ch != '#')
-            throw ParserException($"Unexpected character after '.': '{(char)ch}'");
-
-        return new RdfQuad(subject.ToString(), predicate.ToString(), obj.ToString(), graph);
+        if (ch != -1 && ch != '\n' && ch != '\r' && ch != '#')
+            throw ParserException($"Unexpected character after '.': {Display(ch)}");
     }
 
     #region Terminal Parsing
@@ -434,7 +392,7 @@ internal sealed class NQuadsStreamParser : IDisposable, IAsyncDisposable
                 }
                 else
                 {
-                    throw ParserException($"Invalid escape in IRI: \\{(char)next}");
+                    throw ParserException($"Invalid escape in IRI: \\{Display(next)}");
                 }
             }
             else
@@ -469,9 +427,9 @@ internal sealed class NQuadsStreamParser : IDisposable, IAsyncDisposable
             }
         }
 
-        // N-Quads requires absolute IRIs (relative IRIs not allowed)
+        // N-Quads and N-Triples require absolute IRIs (relative IRIs not allowed)
         if (!hasScheme)
-            throw ParserException("N-Quads requires absolute IRIs (relative IRI not allowed)");
+            throw ParserException($"{_documentFormat} requires absolute IRIs (relative IRI not allowed)");
 
         return GetOutputSpan(start);
     }
@@ -493,10 +451,10 @@ internal sealed class NQuadsStreamParser : IDisposable, IAsyncDisposable
 
         // First character after _:
         var ch = Peek();
-        if (!IsPnCharsU(ch) && !char.IsDigit((char)ch))
+        if (!RdfNameChars.IsPnCharsU(ch) && !(ch >= '0' && ch <= '9'))
             throw ParserException("Invalid blank node label");
 
-        AppendToOutput((char)ch);
+        AppendCodePoint(ch);
         Consume();
 
         // Rest of label: ((PN_CHARS | '.')* PN_CHARS)?
@@ -508,19 +466,19 @@ internal sealed class NQuadsStreamParser : IDisposable, IAsyncDisposable
             if (ch == -1)
                 break;
 
-            if (IsPnChars(ch))
+            if (RdfNameChars.IsPnChars(ch))
             {
-                AppendToOutput((char)ch);
+                AppendCodePoint(ch);
                 Consume();
             }
             else if (ch == '.')
             {
                 // Look ahead: is '.' followed by valid PN_CHARS?
-                var next = PeekAhead(1);
-                if (next != -1 && IsPnChars(next))
+                var next = PeekAheadCodePoint(1);
+                if (next != -1 && RdfNameChars.IsPnChars(next))
                 {
                     // '.' is part of the label
-                    AppendToOutput((char)ch);
+                    AppendToOutput('.');
                     Consume();
                 }
                 else
@@ -540,6 +498,9 @@ internal sealed class NQuadsStreamParser : IDisposable, IAsyncDisposable
 
     /// <summary>
     /// literal ::= STRING_LITERAL_QUOTE ('^^' IRIREF | LANGTAG)?
+    /// The three are separate terminals, so whitespace may come between the string and its language tag or '^^', and
+    /// between '^^' and the datatype IRI. The literal is returned in Mercury's term form: quoted, with its escapes
+    /// decoded.
     /// </summary>
     private ReadOnlySpan<char> ParseLiteralSpan()
     {
@@ -578,6 +539,7 @@ internal sealed class NQuadsStreamParser : IDisposable, IAsyncDisposable
         }
 
         // Check for language tag or datatype
+        SkipWhitespace();
         var next = Peek();
         if (next == '@')
         {
@@ -600,7 +562,7 @@ internal sealed class NQuadsStreamParser : IDisposable, IAsyncDisposable
 
                 if (ch == '-')
                 {
-                    AppendToOutput((char)ch);
+                    AppendToOutput('-');
                     Consume();
                     afterHyphen = true;
                 }
@@ -627,7 +589,7 @@ internal sealed class NQuadsStreamParser : IDisposable, IAsyncDisposable
                 }
                 else
                 {
-                    throw ParserException($"Invalid character in language tag: '{(char)ch}'");
+                    throw ParserException($"Invalid character in language tag: {Display(ch)}");
                 }
             }
         }
@@ -638,6 +600,7 @@ internal sealed class NQuadsStreamParser : IDisposable, IAsyncDisposable
             Consume();
             AppendToOutput('^');
             Consume();
+            SkipWhitespace();
 
             // Parse datatype IRI
             var datatypeIri = ParseIriRefSpan();
@@ -683,7 +646,7 @@ internal sealed class NQuadsStreamParser : IDisposable, IAsyncDisposable
             AppendCodePoint(ParseUnicodeEscape(8));
             return;
         }
-        throw ParserException($"Invalid escape sequence: \\{(char)ch}");
+        throw ParserException($"Invalid escape sequence: \\{Display(ch)}");
     }
 
     /// <summary>
@@ -698,6 +661,8 @@ internal sealed class NQuadsStreamParser : IDisposable, IAsyncDisposable
             var ch = Peek();
             if (ch == -1)
                 throw ParserException("Unexpected end of input in unicode escape");
+            if (ch > 0x7F)
+                throw ParserException($"Invalid unicode escape: {Display(ch)} is not a hexadecimal digit");
             hex[i] = (char)ch;
             Consume();
         }
@@ -714,108 +679,111 @@ internal sealed class NQuadsStreamParser : IDisposable, IAsyncDisposable
 
     #region Buffer Management
 
+    /// <summary>
+    /// The code point at the read position, decoded from UTF-8, or -1 at the end of the input. ASCII, nearly every
+    /// byte of a typical document, is read inline; the rest goes through <see cref="PeekNonAscii"/>.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private int Peek()
     {
-        if (_bufferPosition >= _bufferLength)
-            return _endOfStream ? -1 : -1;
-
-        // Decode UTF-8 to get Unicode code point
-        return PeekUtf8CodePoint(out _);
+        if (_bufferPosition < _bufferLength)
+        {
+            byte b = _inputBuffer[_bufferPosition];
+            if (b < 0x80)
+                return b;
+        }
+        return PeekNonAscii();
     }
 
     /// <summary>
-    /// Peek the current UTF-8 code point and return its byte length.
-    /// Returns -1 if at end of input.
+    /// Refills the buffer when it is exhausted mid-statement, so a term may be longer than the buffer, and when it holds
+    /// only the first bytes of a multi-byte sequence. Invalid UTF-8 is an error: N-Quads and N-Triples are UTF-8.
     /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private int PeekUtf8CodePoint(out int byteLength)
+    private int PeekNonAscii()
     {
-        if (_bufferPosition >= _bufferLength)
+        while (true)
         {
-            byteLength = 0;
-            return -1;
-        }
-
-        var b0 = _inputBuffer[_bufferPosition];
-
-        // ASCII (0x00-0x7F): single byte
-        if (b0 < 0x80)
-        {
-            byteLength = 1;
-            return b0;
-        }
-
-        // 2-byte sequence (0xC0-0xDF)
-        if ((b0 & 0xE0) == 0xC0)
-        {
-            if (_bufferPosition + 1 >= _bufferLength)
+            if (_bufferPosition >= _bufferLength)
             {
-                byteLength = 1;
-                return b0;
+                if (_endOfStream)
+                    return -1;
+                FillBufferSync();
+                continue;
             }
-            var b1 = _inputBuffer[_bufferPosition + 1];
-            byteLength = 2;
-            return ((b0 & 0x1F) << 6) | (b1 & 0x3F);
-        }
 
-        // 3-byte sequence (0xE0-0xEF)
-        if ((b0 & 0xF0) == 0xE0)
-        {
-            if (_bufferPosition + 2 >= _bufferLength)
+            byte b = _inputBuffer[_bufferPosition];
+            if (b < 0x80)
+                return b;
+
+            var status = Rune.DecodeFromUtf8(
+                _inputBuffer.AsSpan(_bufferPosition, _bufferLength - _bufferPosition), out var rune, out _);
+            if (status == OperationStatus.Done)
+                return rune.Value;
+            if (status == OperationStatus.NeedMoreData && !_endOfStream)
             {
-                byteLength = 1;
-                return b0;
+                RefillOrThrow();
+                continue;
             }
-            var b1 = _inputBuffer[_bufferPosition + 1];
-            var b2 = _inputBuffer[_bufferPosition + 2];
-            byteLength = 3;
-            return ((b0 & 0x0F) << 12) | ((b1 & 0x3F) << 6) | (b2 & 0x3F);
+            throw ParserException($"Invalid UTF-8: byte 0x{b:X2}");
         }
-
-        // 4-byte sequence (0xF0-0xF7)
-        if ((b0 & 0xF8) == 0xF0)
-        {
-            if (_bufferPosition + 3 >= _bufferLength)
-            {
-                byteLength = 1;
-                return b0;
-            }
-            var b1 = _inputBuffer[_bufferPosition + 1];
-            var b2 = _inputBuffer[_bufferPosition + 2];
-            var b3 = _inputBuffer[_bufferPosition + 3];
-            byteLength = 4;
-            return ((b0 & 0x07) << 18) | ((b1 & 0x3F) << 12) | ((b2 & 0x3F) << 6) | (b3 & 0x3F);
-        }
-
-        // Invalid UTF-8 lead byte, return as-is
-        byteLength = 1;
-        return b0;
     }
 
+    /// <summary>
+    /// The byte <paramref name="offset"/> bytes after the read position, or -1 past the end of the input. For ASCII
+    /// lookahead ('_:' and '^^').
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private int PeekAhead(int offset)
     {
-        var pos = _bufferPosition + offset;
-        if (pos >= _bufferLength)
-            return -1;
-
-        return _inputBuffer[pos];
+        while (_bufferPosition + offset >= _bufferLength)
+        {
+            if (_endOfStream)
+                return -1;
+            RefillOrThrow();
+        }
+        return _inputBuffer[_bufferPosition + offset];
     }
 
+    /// <summary>
+    /// The code point that starts <paramref name="byteOffset"/> bytes after the read position, or -1 past the end of the
+    /// input or at invalid UTF-8 (which the next <see cref="Peek"/> there reports).
+    /// </summary>
+    private int PeekAheadCodePoint(int byteOffset)
+    {
+        int b = PeekAhead(byteOffset);
+        if (b < 0x80)
+            return b;
+        while (true)
+        {
+            int from = _bufferPosition + byteOffset;
+            var status = Rune.DecodeFromUtf8(_inputBuffer.AsSpan(from, _bufferLength - from), out var rune, out _);
+            if (status == OperationStatus.Done)
+                return rune.Value;
+            if (status == OperationStatus.NeedMoreData && !_endOfStream)
+            {
+                RefillOrThrow();
+                continue;
+            }
+            return -1;
+        }
+    }
+
+    /// <summary>
+    /// Moves past the code point <see cref="Peek"/> returned: one byte for ASCII, its sequence length otherwise.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void Consume()
     {
         if (_bufferPosition >= _bufferLength)
             return;
 
-        // Get the byte length of the current UTF-8 code point
-        PeekUtf8CodePoint(out var byteLength);
+        byte b = _inputBuffer[_bufferPosition];
+        int length = 1;
+        if (b >= 0x80)
+            Rune.DecodeFromUtf8(_inputBuffer.AsSpan(_bufferPosition, _bufferLength - _bufferPosition), out _, out length);
+        _bufferPosition += length;
 
-        var ch = _inputBuffer[_bufferPosition];
-        _bufferPosition += byteLength;
-
-        if (ch == '\n')
+        if (b == '\n')
         {
             _line++;
             _column = 1;
@@ -826,34 +794,14 @@ internal sealed class NQuadsStreamParser : IDisposable, IAsyncDisposable
         }
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private bool TryConsume(char expected)
-    {
-        if (Peek() != expected)
-            return false;
-
-        Consume();
-        return true;
-    }
-
     private async ValueTask FillBufferAsync(CancellationToken cancellationToken)
     {
         if (_endOfStream)
             return;
 
-        // Shift remaining data to beginning
-        if (_bufferPosition > 0 && _bufferPosition < _bufferLength)
-        {
-            var remaining = _bufferLength - _bufferPosition;
-            Array.Copy(_inputBuffer, _bufferPosition, _inputBuffer, 0, remaining);
-            _bufferLength = remaining;
-            _bufferPosition = 0;
-        }
-        else if (_bufferPosition >= _bufferLength)
-        {
-            _bufferPosition = 0;
-            _bufferLength = 0;
-        }
+        ShiftUnreadToStart();
+        if (_bufferLength == _inputBuffer.Length)
+            return;
 
         // Fill remaining space
         var bytesRead = await _stream.ReadAsync(
@@ -867,6 +815,60 @@ internal sealed class NQuadsStreamParser : IDisposable, IAsyncDisposable
         else
         {
             _bufferLength += bytesRead;
+        }
+    }
+
+    /// <summary>
+    /// Synchronous buffer refill, for <see cref="Peek"/> and <see cref="PeekAhead"/> when the buffer runs out
+    /// mid-statement (the statement reader is synchronous). Mirrors <see cref="FillBufferAsync"/>.
+    /// </summary>
+    private void FillBufferSync()
+    {
+        if (_endOfStream)
+            return;
+
+        ShiftUnreadToStart();
+        if (_bufferLength == _inputBuffer.Length)
+            return;
+
+        var bytesRead = _stream.Read(_inputBuffer, _bufferLength, _inputBuffer.Length - _bufferLength);
+
+        if (bytesRead == 0)
+        {
+            _endOfStream = true;
+        }
+        else
+        {
+            _bufferLength += bytesRead;
+        }
+    }
+
+    /// <summary>
+    /// A synchronous refill that must add input: when the buffer is already full of unread bytes, a lookahead that
+    /// still needs more cannot be served, and looping would never end.
+    /// </summary>
+    private void RefillOrThrow()
+    {
+        int unread = _bufferLength - _bufferPosition;
+        FillBufferSync();
+        if (!_endOfStream && _bufferLength - _bufferPosition == unread)
+            throw ParserException($"Lookahead past the {_inputBuffer.Length}-byte input buffer");
+    }
+
+    /// <summary>Moves the unread bytes to the start of the input buffer, making room after them.</summary>
+    private void ShiftUnreadToStart()
+    {
+        if (_bufferPosition > 0 && _bufferPosition < _bufferLength)
+        {
+            var remaining = _bufferLength - _bufferPosition;
+            Array.Copy(_inputBuffer, _bufferPosition, _inputBuffer, 0, remaining);
+            _bufferLength = remaining;
+            _bufferPosition = 0;
+        }
+        else if (_bufferPosition >= _bufferLength)
+        {
+            _bufferPosition = 0;
+            _bufferLength = 0;
         }
     }
 
@@ -953,6 +955,11 @@ internal sealed class NQuadsStreamParser : IDisposable, IAsyncDisposable
     /// </summary>
     private void AppendCodePoint(int codePoint)
     {
+        if (codePoint < 0x80)
+        {
+            AppendToOutput((char)codePoint);
+            return;
+        }
         // UTF-16 encoding shared with every RDF-family parser via RdfEscape (docs/divergence S1d).
         Span<char> chars = stackalloc char[2];
         int n = RdfEscape.EncodeUtf16(codePoint, chars);
@@ -974,55 +981,24 @@ internal sealed class NQuadsStreamParser : IDisposable, IAsyncDisposable
 
     #endregion
 
-    #region Character Classification
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static bool IsPnCharsBase(int ch)
-    {
-        if (ch == -1) return false;
-        var c = (char)ch;
-        return (c >= 'A' && c <= 'Z') ||
-               (c >= 'a' && c <= 'z') ||
-               (c >= '\u00C0' && c <= '\u00D6') ||
-               (c >= '\u00D8' && c <= '\u00F6') ||
-               (c >= '\u00F8' && c <= '\u02FF') ||
-               (c >= '\u0370' && c <= '\u037D') ||
-               (c >= '\u037F' && c <= '\u1FFF') ||
-               (c >= '\u200C' && c <= '\u200D') ||
-               (c >= '\u2070' && c <= '\u218F') ||
-               (c >= '\u2C00' && c <= '\u2FEF') ||
-               (c >= '\u3001' && c <= '\uD7FF') ||
-               (c >= '\uF900' && c <= '\uFDCF') ||
-               (c >= '\uFDF0' && c <= '\uFFFD');
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static bool IsPnCharsU(int ch)
-    {
-        return IsPnCharsBase(ch) || ch == '_';
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static bool IsPnChars(int ch)
-    {
-        if (ch == -1) return false;
-        var c = (char)ch;
-        return IsPnCharsU(ch) ||
-               c == '-' ||
-               char.IsDigit(c) ||
-               c == '\u00B7' ||
-               (c >= '\u0300' && c <= '\u036F') ||
-               (c >= '\u203F' && c <= '\u2040');
-    }
-
-    #endregion
-
     #region Error Handling
 
-    private Exception ParserException(string message)
+    /// <summary>
+    /// An error at the current line and column, named for the document's format. Internal so that
+    /// <see cref="NTriples.NTriplesStreamParser"/> reports a graph label at its position.
+    /// </summary>
+    internal Exception ParserException(string message)
     {
-        return new InvalidDataException($"N-Quads parse error at line {_line}, column {_column}: {message}");
+        return new InvalidDataException($"{_documentFormat} parse error at line {_line}, column {_column}: {message}");
     }
+
+    /// <summary>A code point as an error message shows it: quoted when printable ASCII, U+XXXX otherwise.</summary>
+    private static string Display(int codePoint) => codePoint switch
+    {
+        -1 => "end of input",
+        >= 0x21 and <= 0x7E => $"'{(char)codePoint}'",
+        _ => $"U+{codePoint:X4}",
+    };
 
     #endregion
 

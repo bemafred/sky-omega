@@ -498,4 +498,88 @@ public class NTriplesStreamParserTests
     }
 
     #endregion
+
+    #region UTF-8 and the N-Quads grammar it shares
+
+    [Fact]
+    public async Task ParseAsync_NonAsciiLiteral_IsDecodedFromUtf8()
+    {
+        // Until 2026-10-30 this parser turned each UTF-8 byte into a character: "café" became "cafÃ©".
+        var ntriples = "<http://e/s> <http://e/p> \"café € 😀\" .\n"u8.ToArray();
+
+        await using var stream = new MemoryStream(ntriples);
+        var parser = new NTriplesStreamParser(stream);
+
+        string? literal = null;
+        await parser.ParseAsync((s, p, o) => literal = o.ToString(), TestContext.Current.CancellationToken);
+
+        Assert.Equal("\"café € 😀\"", literal);
+    }
+
+    [Fact]
+    public async Task ParseAsync_FourByteCharacterAcrossTheBufferBoundary_IsDecoded()
+    {
+        // With a 16-byte buffer, one of these alignments puts the four bytes of U+1F600 on both sides of a refill.
+        for (int padding = 0; padding < 40; padding++)
+        {
+            var text = $"<http://e/s> <http://e/p> \"{new string('a', padding)}😀\" .\n";
+
+            await using var stream = new MemoryStream(Encoding.UTF8.GetBytes(text));
+            var parser = new NTriplesStreamParser(stream, bufferSize: 16);
+
+            string? literal = null;
+            await parser.ParseAsync((s, p, o) => literal = o.ToString(), TestContext.Current.CancellationToken);
+
+            Assert.Equal($"\"{new string('a', padding)}😀\"", literal);
+        }
+    }
+
+    [Fact]
+    public async Task ParseAsync_InvalidUtf8_IsRejected()
+    {
+        // 0xFF never occurs in UTF-8.
+        byte[] ntriples = [.. "<http://e/s> <http://e/p> \"x"u8, 0xFF, .. "\" .\n"u8];
+
+        await using var stream = new MemoryStream(ntriples);
+        var parser = new NTriplesStreamParser(stream);
+
+        var error = await Assert.ThrowsAsync<InvalidDataException>(async () =>
+            await parser.ParseAsync((s, p, o) => { }, TestContext.Current.CancellationToken));
+
+        Assert.Contains("Invalid UTF-8", error.Message);
+    }
+
+    [Fact]
+    public async Task ParseAsync_GraphLabel_IsRejected()
+    {
+        // A graph label is N-Quads; in N-Triples it is an error, at its line.
+        var ntriples = "<http://e/s> <http://e/p> <http://e/o> .\n<http://e/s> <http://e/p> <http://e/o> <http://e/g> .\n"u8.ToArray();
+
+        await using var stream = new MemoryStream(ntriples);
+        var parser = new NTriplesStreamParser(stream);
+
+        var error = await Assert.ThrowsAsync<InvalidDataException>(async () =>
+            await parser.ParseAsync((s, p, o) => { }, TestContext.Current.CancellationToken));
+
+        Assert.Contains("N-Triples parse error at line 2", error.Message);
+        Assert.Contains("no graph label", error.Message);
+    }
+
+    [Fact]
+    public async Task ParseAsync_WhitespaceBeforeLanguageTagAndDatatype_IsAccepted()
+    {
+        // The string, '@en' and '^^' are separate terminals, so whitespace may separate them (canonical-form tests
+        // extra_whitespace-03 and -04).
+        var ntriples = "<http://e/s> <http://e/p> \"Alice\"  @en  .\n<http://e/s> <http://e/p> \"1\"  ^^  <http://www.w3.org/2001/XMLSchema#integer> .\n"u8.ToArray();
+
+        await using var stream = new MemoryStream(ntriples);
+        var parser = new NTriplesStreamParser(stream);
+
+        var objects = new List<string>();
+        await parser.ParseAsync((s, p, o) => objects.Add(o.ToString()), TestContext.Current.CancellationToken);
+
+        Assert.Equal(["\"Alice\"@en", "\"1\"^^<http://www.w3.org/2001/XMLSchema#integer>"], objects);
+    }
+
+    #endregion
 }
