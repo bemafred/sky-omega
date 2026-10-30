@@ -13,6 +13,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using SkyOmega.Mercury.Runtime.Buffers;
 using SkyOmega.Mercury.Sparql.Types;
+using SkyOmega.Mercury.Rdf;
 
 namespace SkyOmega.Mercury.Sparql.Results;
 
@@ -137,6 +138,33 @@ internal sealed class SparqlCsvResultWriter : IDisposable, IAsyncDisposable
     }
 
     /// <summary>
+    /// Write a result row of terms as the store holds them (an IRI in angle brackets, <c>_:label</c> or a stored
+    /// literal), keyed by variable name without '?'. A head variable with no term is an empty field.
+    /// </summary>
+    public void WriteResult(IReadOnlyDictionary<string, string> row)
+    {
+        if (!_headWritten)
+            throw new InvalidOperationException("Must call WriteHead first");
+        if (_variables == null)
+            throw new InvalidOperationException("No variables defined");
+
+        for (int i = 0; i < _variables.Length; i++)
+        {
+            if (i > 0) WriteChar(_separator);
+
+            if (row.TryGetValue(VariableName.WithoutSigil(_variables[i].AsSpan()).ToString(), out var term))
+            {
+                if (_useTsv)
+                    WriteTsvTerm(term);
+                else
+                    WriteCsvTerm(term);
+            }
+        }
+
+        WriteChar('\n');
+    }
+
+    /// <summary>
     /// Flush buffered content (call after WriteResult if using async pattern).
     /// </summary>
     public async ValueTask FlushResultsAsync(CancellationToken ct = default)
@@ -192,25 +220,7 @@ internal sealed class SparqlCsvResultWriter : IDisposable, IAsyncDisposable
                 break;
 
             case BindingValueType.String:
-                if (value.Length > 0 && value[0] == '<')
-                {
-                    // URI - strip brackets
-                    WriteCsvField(value.Slice(1, value.Length - 2));
-                }
-                else if (value.Length > 1 && value[0] == '_' && value[1] == ':')
-                {
-                    // Blank node
-                    WriteCsvField(value);
-                }
-                else if (value.Length > 0 && value[0] == '"')
-                {
-                    // Literal - extract value
-                    WriteCsvLiteral(value);
-                }
-                else
-                {
-                    WriteCsvField(value);
-                }
+                WriteCsvTerm(value);
                 break;
 
             default:
@@ -238,28 +248,7 @@ internal sealed class SparqlCsvResultWriter : IDisposable, IAsyncDisposable
                 break;
 
             case BindingValueType.String:
-                if (value.Length > 0 && value[0] == '<')
-                {
-                    // URI with brackets
-                    WriteTsvField(value);
-                }
-                else if (value.Length > 1 && value[0] == '_' && value[1] == ':')
-                {
-                    // Blank node
-                    WriteTsvField(value);
-                }
-                else if (value.Length > 0 && value[0] == '"')
-                {
-                    // Literal - keep as-is for TSV
-                    WriteTsvField(value);
-                }
-                else
-                {
-                    // Plain value - quote it
-                    WriteChar('"');
-                    WriteTsvField(value);
-                    WriteChar('"');
-                }
+                WriteTsvTerm(value);
                 break;
 
             case BindingValueType.Integer:
@@ -275,35 +264,55 @@ internal sealed class SparqlCsvResultWriter : IDisposable, IAsyncDisposable
         }
     }
 
-    private void WriteCsvLiteral(ReadOnlySpan<char> literal)
+    /// <summary>
+    /// A term as the store holds it, as a CSV field (SPARQL 1.1 CSV §3.2): an IRI without its angle brackets, a blank
+    /// node as <c>_:label</c>, a literal as its lexical form alone, decoded (<see cref="StoredLiteral"/>).
+    /// </summary>
+    private void WriteCsvTerm(ReadOnlySpan<char> term)
     {
-        // Parse: "value"@lang or "value"^^<datatype> or "value"
-        if (literal.Length < 2 || literal[0] != '"')
+        if (term.Length >= 2 && term[0] == '<' && term[^1] == '>')
+            WriteCsvField(term.Slice(1, term.Length - 2));
+        else if (StoredLiteral.TrySplit(term, out var lexical, out _))
+            WriteCsvField(lexical);
+        else
+            WriteCsvField(term);
+    }
+
+    /// <summary>
+    /// A term as the store holds it, as a TSV field (SPARQL 1.1 TSV §4): in Turtle syntax, so a literal's lexical form
+    /// escapes '\', '"', tab, line feed and carriage return; a bare value is written as a simple literal.
+    /// </summary>
+    private void WriteTsvTerm(ReadOnlySpan<char> term)
+    {
+        if ((term.Length >= 2 && term[0] == '<' && term[^1] == '>') || (term.Length > 1 && term[0] == '_' && term[1] == ':'))
         {
-            WriteCsvField(literal);
+            WriteTsvField(term);
             return;
         }
 
-        // Find closing quote
-        int closeQuote = -1;
-        for (int i = 1; i < literal.Length; i++)
+        var lexical = term;
+        ReadOnlySpan<char> suffix = default;
+        if (StoredLiteral.TrySplit(term, out var splitLexical, out var splitSuffix))
         {
-            if (literal[i] == '"' && (i == 1 || literal[i - 1] != '\\'))
+            lexical = splitLexical;
+            suffix = splitSuffix;
+        }
+
+        WriteChar('"');
+        foreach (var c in lexical)
+        {
+            switch (c)
             {
-                closeQuote = i;
-                break;
+                case '\\': WriteString("\\\\"); break;
+                case '"': WriteString("\\\""); break;
+                case '\t': WriteString("\\t"); break;
+                case '\n': WriteString("\\n"); break;
+                case '\r': WriteString("\\r"); break;
+                default: WriteChar(c); break;
             }
         }
-
-        if (closeQuote < 0)
-        {
-            WriteCsvField(literal);
-            return;
-        }
-
-        var value = literal.Slice(1, closeQuote - 1);
-        // For CSV, we just output the plain value (losing lang/datatype)
-        WriteCsvFieldLiteral(value);
+        WriteChar('"');
+        WriteSpan(suffix);
     }
 
     private void WriteCsvField(ReadOnlySpan<char> field)
@@ -327,69 +336,6 @@ internal sealed class SparqlCsvResultWriter : IDisposable, IAsyncDisposable
                 if (c == '"')
                 {
                     WriteString("\"\""); // Escape quotes by doubling
-                }
-                else
-                {
-                    WriteChar(c);
-                }
-            }
-            WriteChar('"');
-        }
-        else
-        {
-            WriteSpan(field);
-        }
-    }
-
-    private void WriteCsvFieldLiteral(ReadOnlySpan<char> field)
-    {
-        // Handle escape sequences and check if quoting is needed
-        bool needsQuoting = false;
-        foreach (var c in field)
-        {
-            if (c == ',' || c == '"' || c == '\n' || c == '\r' || c == '\\')
-            {
-                needsQuoting = true;
-                break;
-            }
-        }
-
-        if (needsQuoting)
-        {
-            WriteChar('"');
-            for (int i = 0; i < field.Length; i++)
-            {
-                var c = field[i];
-                if (c == '\\' && i + 1 < field.Length)
-                {
-                    var next = field[i + 1];
-                    switch (next)
-                    {
-                        case 'n':
-                            WriteChar('\n');
-                            i++;
-                            continue;
-                        case 't':
-                            WriteChar('\t');
-                            i++;
-                            continue;
-                        case 'r':
-                            WriteChar('\r');
-                            i++;
-                            continue;
-                        case '\\':
-                            WriteChar('\\');
-                            i++;
-                            continue;
-                        case '"':
-                            WriteString("\"\"");
-                            i++;
-                            continue;
-                    }
-                }
-                if (c == '"')
-                {
-                    WriteString("\"\"");
                 }
                 else
                 {

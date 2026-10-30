@@ -299,61 +299,76 @@ public sealed class SparqlHttpServer : IDisposable, IAsyncDisposable
 
     #region Result Formatting
 
+    /// <summary>
+    /// A SELECT result in <paramref name="format"/>, through the one writer of each SPARQL results format.
+    /// </summary>
     private static byte[] FormatSelectResult(QueryResult result, SparqlResultFormat format)
     {
         using var memStream = new MemoryStream();
-        using var writer = new StreamWriter(memStream, leaveOpen: true);
-
-        var variables = result.Variables ?? [];
-        var rows = result.Rows ?? [];
-
-        switch (format)
+        using (var writer = new StreamWriter(memStream, leaveOpen: true))
         {
-            case SparqlResultFormat.Json:
-                WriteSelectJson(writer, variables, rows);
-                break;
-            case SparqlResultFormat.Xml:
-                WriteSelectXml(writer, variables, rows);
-                break;
-            case SparqlResultFormat.Csv:
-                WriteSelectDelimited(writer, variables, rows, ',');
-                break;
-            case SparqlResultFormat.Tsv:
-                WriteSelectDelimited(writer, variables, rows, '\t');
-                break;
-            default:
-                WriteSelectJson(writer, variables, rows);
-                break;
-        }
+            var variables = result.Variables ?? [];
+            var rows = result.Rows ?? [];
 
-        writer.Flush();
+            switch (format)
+            {
+                case SparqlResultFormat.Xml:
+                    using (var xml = new SparqlXmlResultWriter(writer))
+                    {
+                        xml.WriteHead(variables);
+                        foreach (var row in rows)
+                            xml.WriteResult(row);
+                        xml.WriteEnd();
+                    }
+                    break;
+                case SparqlResultFormat.Csv:
+                case SparqlResultFormat.Tsv:
+                    using (var delimited = new SparqlCsvResultWriter(writer, useTsv: format == SparqlResultFormat.Tsv))
+                    {
+                        delimited.WriteHead(variables);
+                        foreach (var row in rows)
+                            delimited.WriteResult(row);
+                        delimited.WriteEnd();
+                    }
+                    break;
+                default:
+                    using (var json = new SparqlJsonResultWriter(writer))
+                    {
+                        json.WriteHead(variables);
+                        foreach (var row in rows)
+                            json.WriteResult(row);
+                        json.WriteEnd();
+                    }
+                    break;
+            }
+        }
         return memStream.ToArray();
     }
 
+    /// <summary>
+    /// An ASK result: the JSON or XML results document, or for CSV and TSV, which define no boolean form, the word.
+    /// </summary>
     private static byte[] FormatAskResult(QueryResult result, SparqlResultFormat format)
     {
         using var memStream = new MemoryStream();
-        using var writer = new StreamWriter(memStream, leaveOpen: true);
-
-        var boolStr = result.AskResult == true ? "true" : "false";
-
-        switch (format)
+        using (var writer = new StreamWriter(memStream, leaveOpen: true))
         {
-            case SparqlResultFormat.Json:
-                writer.Write($"{{\"boolean\":{boolStr}}}");
-                break;
-            case SparqlResultFormat.Xml:
-                writer.Write("<?xml version=\"1.0\"?>");
-                writer.Write("<sparql xmlns=\"http://www.w3.org/2005/sparql-results#\">");
-                writer.Write($"<boolean>{boolStr}</boolean>");
-                writer.Write("</sparql>");
-                break;
-            default:
-                writer.Write(boolStr);
-                break;
+            var answer = result.AskResult == true;
+            switch (format)
+            {
+                case SparqlResultFormat.Json:
+                    using (var json = new SparqlJsonResultWriter(writer))
+                        json.WriteBooleanResult(answer);
+                    break;
+                case SparqlResultFormat.Xml:
+                    using (var xml = new SparqlXmlResultWriter(writer))
+                        xml.WriteBooleanResult(answer);
+                    break;
+                default:
+                    writer.Write(answer ? "true" : "false");
+                    break;
+            }
         }
-
-        writer.Flush();
         return memStream.ToArray();
     }
 
@@ -372,162 +387,6 @@ public sealed class SparqlHttpServer : IDisposable, IAsyncDisposable
 
         writer.Flush();
         return memStream.ToArray();
-    }
-
-    private static void WriteSelectJson(StreamWriter writer, string[] variables, List<Dictionary<string, string>> rows)
-    {
-        writer.Write("{\"head\":{\"vars\":[");
-        for (int i = 0; i < variables.Length; i++)
-        {
-            if (i > 0) writer.Write(',');
-            writer.Write($"\"{EscapeJson(variables[i])}\"");
-        }
-        writer.Write("]},\"results\":{\"bindings\":[");
-
-        for (int r = 0; r < rows.Count; r++)
-        {
-            if (r > 0) writer.Write(',');
-            writer.Write('{');
-
-            var row = rows[r];
-            bool firstVar = true;
-            foreach (var variable in variables)
-            {
-                if (row.TryGetValue(variable, out var valueStr))
-                {
-                    if (!firstVar) writer.Write(',');
-                    firstVar = false;
-
-                    var (type, val, extra) = ClassifyRdfTerm(valueStr);
-                    writer.Write($"\"{EscapeJson(variable)}\":{{\"type\":\"{type}\",\"value\":\"{EscapeJson(val)}\"");
-                    if (extra != null)
-                    {
-                        if (type == "literal" && extra.StartsWith("@"))
-                            writer.Write($",\"xml:lang\":\"{extra.Substring(1)}\"");
-                        else if (type == "literal" && extra.StartsWith("^^"))
-                            writer.Write($",\"datatype\":\"{extra.Substring(2)}\"");
-                    }
-                    writer.Write('}');
-                }
-            }
-
-            writer.Write('}');
-        }
-
-        writer.Write("]}}");
-    }
-
-    private static void WriteSelectXml(StreamWriter writer, string[] variables, List<Dictionary<string, string>> rows)
-    {
-        writer.Write("<?xml version=\"1.0\"?>");
-        writer.Write("<sparql xmlns=\"http://www.w3.org/2005/sparql-results#\">");
-        writer.Write("<head>");
-        foreach (var v in variables)
-            writer.Write($"<variable name=\"{EscapeXml(v)}\"/>");
-        writer.Write("</head>");
-        writer.Write("<results>");
-
-        foreach (var row in rows)
-        {
-            writer.Write("<result>");
-            foreach (var variable in variables)
-            {
-                if (row.TryGetValue(variable, out var valueStr))
-                {
-                    var (type, val, extra) = ClassifyRdfTerm(valueStr);
-                    writer.Write($"<binding name=\"{EscapeXml(variable)}\">");
-
-                    if (type == "uri")
-                        writer.Write($"<uri>{EscapeXml(val)}</uri>");
-                    else if (type == "bnode")
-                        writer.Write($"<bnode>{EscapeXml(val)}</bnode>");
-                    else
-                    {
-                        writer.Write("<literal");
-                        if (extra != null && extra.StartsWith("@"))
-                            writer.Write($" xml:lang=\"{extra.Substring(1)}\"");
-                        else if (extra != null && extra.StartsWith("^^"))
-                            writer.Write($" datatype=\"{extra.Substring(2)}\"");
-                        writer.Write($">{EscapeXml(val)}</literal>");
-                    }
-
-                    writer.Write("</binding>");
-                }
-            }
-            writer.Write("</result>");
-        }
-
-        writer.Write("</results>");
-        writer.Write("</sparql>");
-    }
-
-    private static void WriteSelectDelimited(StreamWriter writer, string[] variables, List<Dictionary<string, string>> rows, char delimiter)
-    {
-        writer.WriteLine(string.Join(delimiter, variables));
-
-        foreach (var row in rows)
-        {
-            var values = new string[variables.Length];
-            for (int i = 0; i < variables.Length; i++)
-            {
-                values[i] = row.TryGetValue(variables[i], out var v) ? v : "";
-
-                if (delimiter == ',' && (values[i].Contains(',') || values[i].Contains('"') || values[i].Contains('\n')))
-                {
-                    values[i] = "\"" + values[i].Replace("\"", "\"\"") + "\"";
-                }
-            }
-            writer.WriteLine(string.Join(delimiter, values));
-        }
-    }
-
-    private static (string type, string value, string? extra) ClassifyRdfTerm(string term)
-    {
-        if (term.StartsWith("<") && term.EndsWith(">"))
-            return ("uri", term.Substring(1, term.Length - 2), null);
-
-        if (term.StartsWith("_:"))
-            return ("bnode", term.Substring(2), null);
-
-        if (term.StartsWith("\""))
-        {
-            int closeQuote = term.LastIndexOf('"');
-            if (closeQuote > 0)
-            {
-                var value = term.Substring(1, closeQuote - 1);
-                var suffix = term.Substring(closeQuote + 1);
-                return ("literal", value, suffix.Length > 0 ? suffix : null);
-            }
-        }
-
-        return ("literal", term, null);
-    }
-
-    private static string EscapeJson(string s)
-    {
-        var sb = new StringBuilder(s.Length);
-        foreach (var c in s)
-        {
-            switch (c)
-            {
-                case '"': sb.Append("\\\""); break;
-                case '\\': sb.Append("\\\\"); break;
-                case '\n': sb.Append("\\n"); break;
-                case '\r': sb.Append("\\r"); break;
-                case '\t': sb.Append("\\t"); break;
-                default: sb.Append(c); break;
-            }
-        }
-        return sb.ToString();
-    }
-
-    private static string EscapeXml(string s)
-    {
-        return s.Replace("&", "&amp;")
-                .Replace("<", "&lt;")
-                .Replace(">", "&gt;")
-                .Replace("\"", "&quot;")
-                .Replace("'", "&apos;");
     }
 
     #endregion

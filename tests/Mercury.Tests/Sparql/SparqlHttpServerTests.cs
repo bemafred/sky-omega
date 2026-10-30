@@ -710,7 +710,7 @@ public class SparqlHttpServerTests : IDisposable
     }
 
     [Fact]
-    public async Task QueryEndpoint_AskJson_IsTheJsonObjectAlone()
+    public async Task QueryEndpoint_AskJson_IsTheResultsDocumentAlone()
     {
         await using var server = new SparqlHttpServer(_store, $"http://localhost:{_port}/");
         server.Start();
@@ -720,7 +720,8 @@ public class SparqlHttpServerTests : IDisposable
         var body = await client.GetByteArrayAsync(
             $"http://localhost:{_port}/sparql?query={WebUtility.UrlEncode(query)}", TestContext.Current.CancellationToken);
 
-        Assert.Equal("{\"boolean\":true}"u8.ToArray(), body);
+        // The document SparqlJsonResultWriter writes, the one JSON results writer, with no byte order mark before it.
+        Assert.Equal("{\n  \"head\": { },\n  \"boolean\": true\n}\n"u8.ToArray(), body);
     }
 
     [Fact]
@@ -737,6 +738,82 @@ public class SparqlHttpServerTests : IDisposable
             $"http://localhost:{_port}/sparql?query={WebUtility.UrlEncode(query)}", TestContext.Current.CancellationToken);
 
         Assert.Equal("<http://example.org/alice> <http://xmlns.com/foaf/0.1/name> \"Alice\" .\n"u8.ToArray(), body);
+    }
+
+    #endregion
+
+    #region Result Formats
+
+    // Each SELECT format through the one writer of each SPARQL results format. The literal is stored decoded: a quote,
+    // a comma, '<', '&' and a backslash followed by 'n'. Until 2026-10-30 the endpoint had its own writers: CSV wrote the
+    // literal with its quotes ("""x""" for x), TSV left its quotes unescaped, and JSON left most control characters
+    // raw, which is not JSON.
+
+    [Fact]
+    public async Task QueryEndpoint_SelectCsv_IsTheLexicalForm()
+    {
+        _store.AddCurrent("<http://example.org/q>", "<http://example.org/says>", "\"a \"b\", <c> & C:\\new\"");
+        await using var server = new SparqlHttpServer(_store, $"http://localhost:{_port}/");
+        server.Start();
+        using var client = new HttpClient();
+        client.DefaultRequestHeaders.Add("Accept", "text/csv");
+
+        var query = "SELECT ?o WHERE { <http://example.org/q> <http://example.org/says> ?o }";
+        var body = await client.GetStringAsync(
+            $"http://localhost:{_port}/sparql?query={WebUtility.UrlEncode(query)}", TestContext.Current.CancellationToken);
+
+        Assert.Equal("o\n\"a \"\"b\"\", <c> & C:\\new\"\n", body);
+    }
+
+    [Fact]
+    public async Task QueryEndpoint_SelectTsv_IsTheTermInTurtleSyntax()
+    {
+        _store.AddCurrent("<http://example.org/q>", "<http://example.org/says>", "\"a \"b\", <c> & C:\\new\"");
+        await using var server = new SparqlHttpServer(_store, $"http://localhost:{_port}/");
+        server.Start();
+        using var client = new HttpClient();
+        client.DefaultRequestHeaders.Add("Accept", "text/tab-separated-values");
+
+        var query = "SELECT ?o WHERE { <http://example.org/q> <http://example.org/says> ?o }";
+        var body = await client.GetStringAsync(
+            $"http://localhost:{_port}/sparql?query={WebUtility.UrlEncode(query)}", TestContext.Current.CancellationToken);
+
+        Assert.Equal("?o\n\"a \\\"b\\\", <c> & C:\\\\new\"\n", body);
+    }
+
+    [Fact]
+    public async Task QueryEndpoint_SelectXml_IsTheLexicalForm()
+    {
+        _store.AddCurrent("<http://example.org/q>", "<http://example.org/says>", "\"a \"b\", <c> & C:\\new\"");
+        await using var server = new SparqlHttpServer(_store, $"http://localhost:{_port}/");
+        server.Start();
+        using var client = new HttpClient();
+        client.DefaultRequestHeaders.Add("Accept", "application/sparql-results+xml");
+
+        var query = "SELECT ?o WHERE { <http://example.org/q> <http://example.org/says> ?o }";
+        var body = await client.GetStringAsync(
+            $"http://localhost:{_port}/sparql?query={WebUtility.UrlEncode(query)}", TestContext.Current.CancellationToken);
+
+        var results = System.Xml.Linq.XDocument.Parse(body);
+        System.Xml.Linq.XNamespace sr = "http://www.w3.org/2005/sparql-results#";
+        Assert.Equal("a \"b\", <c> & C:\\new", results.Descendants(sr + "literal").Single().Value);
+    }
+
+    [Fact]
+    public async Task QueryEndpoint_SelectJson_EscapesControlCharacters()
+    {
+        _store.AddCurrent("<http://example.org/q>", "<http://example.org/says>", "\"a \"b\" C:\\new bell\u0007\"");
+        await using var server = new SparqlHttpServer(_store, $"http://localhost:{_port}/");
+        server.Start();
+        using var client = new HttpClient();
+
+        var query = "SELECT ?o WHERE { <http://example.org/q> <http://example.org/says> ?o }";
+        var body = await client.GetStringAsync(
+            $"http://localhost:{_port}/sparql?query={WebUtility.UrlEncode(query)}", TestContext.Current.CancellationToken);
+
+        using var results = System.Text.Json.JsonDocument.Parse(body);
+        var o = results.RootElement.GetProperty("results").GetProperty("bindings")[0].GetProperty("o");
+        Assert.Equal("a \"b\" C:\\new bell\u0007", o.GetProperty("value").GetString());
     }
 
     #endregion

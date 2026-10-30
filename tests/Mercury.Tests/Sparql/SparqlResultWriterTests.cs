@@ -120,6 +120,25 @@ public class SparqlResultWriterTests
     }
 
     [Fact]
+    public void JsonWriter_LiteralWithAQuoteAndABackslash_IsItsValue()
+    {
+        // A stored literal's lexical form is decoded. The writer found the closing quote by a forward scan and read
+        // "\\n" as an escape until 2026-10-30, so this value was cut at the quote and its backslash became a line break.
+        using var sw = new StringWriter();
+        using var writer = new SparqlJsonResultWriter(sw);
+        writer.WriteHead(["o"]);
+
+        Span<Binding> bindingStorage = stackalloc Binding[8];
+        Span<char> stringBuffer = stackalloc char[256];
+        var bindings = new BindingTable(bindingStorage, stringBuffer);
+        bindings.Bind("?o".AsSpan(), "\"say \"hi\" at C:\\new\"@en".AsSpan());
+        writer.WriteResult(ref bindings);
+        writer.WriteEnd();
+
+        Assert.Contains("\"type\":\"literal\",\"value\":\"say \\\"hi\\\" at C:\\\\new\",\"xml:lang\":\"en\"", sw.ToString());
+    }
+
+    [Fact]
     public void JsonWriter_WriteBlankNode_OutputsBnode()
     {
         using var sw = new StringWriter();

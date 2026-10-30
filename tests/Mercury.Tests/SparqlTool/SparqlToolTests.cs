@@ -114,6 +114,27 @@ public class SparqlToolTests : IDisposable
     }
 
     [Fact]
+    public async Task SparqlTool_OutputFormat_Csv_IsTheLexicalForm()
+    {
+        // The tool writes results through the endpoint's writers. Its own CSV writer wrote a literal with its quotes.
+        var turtle = Path.Combine(_tempDir, "says.ttl");
+        File.WriteAllText(turtle, "<http://example.org/q> <http://example.org/says> \"a \\\"b\\\", C:\\\\new\" .\n");
+        var output = new StringWriter();
+        var options = new SparqlToolOptions
+        {
+            LoadFile = turtle,
+            Query = "SELECT ?o WHERE { <http://example.org/q> <http://example.org/says> ?o }",
+            Format = OutputFormat.Csv
+        };
+
+        var result = await SparqlToolLib.RunAsync(options, output, new StringWriter());
+
+        Assert.Equal(0, result.ExitCode);
+        // The load line comes first, then the CSV document.
+        Assert.EndsWith("\no\n\"a \"\"b\"\", C:\\new\"\n", output.ToString());
+    }
+
+    [Fact]
     public async Task SparqlTool_OutputFormat_Tsv()
     {
         var output = new StringWriter();

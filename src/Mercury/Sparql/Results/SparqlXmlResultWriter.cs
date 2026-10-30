@@ -13,6 +13,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using SkyOmega.Mercury.Runtime.Buffers;
 using SkyOmega.Mercury.Sparql.Types;
+using SkyOmega.Mercury.Rdf;
 
 namespace SkyOmega.Mercury.Sparql.Results;
 
@@ -135,6 +136,43 @@ internal sealed class SparqlXmlResultWriter : IDisposable, IAsyncDisposable
     }
 
     /// <summary>
+    /// Write a result row of terms as the store holds them (an IRI in angle brackets, <c>_:label</c> or a stored
+    /// literal), keyed by variable name without '?'. A head variable with no term is unbound.
+    /// </summary>
+    public void WriteResult(IReadOnlyDictionary<string, string> row)
+    {
+        if (!_headWritten)
+            throw new InvalidOperationException("Must call WriteHead first");
+        if (_variables == null)
+            throw new InvalidOperationException("No variables defined");
+
+        if (!_resultsStarted)
+        {
+            WriteString("  <results>\n");
+            _resultsStarted = true;
+        }
+
+        WriteString("    <result>\n");
+
+        foreach (var varName in _variables)
+        {
+            var name = VariableName.WithoutSigil(varName.AsSpan()).ToString();
+            if (!row.TryGetValue(name, out var term))
+                continue; // Unbound variable
+
+            WriteString("      <binding name=\"");
+            WriteXmlEscaped(name);
+            WriteString("\">\n");
+
+            WriteTerm(term);
+
+            WriteString("      </binding>\n");
+        }
+
+        WriteString("    </result>\n");
+    }
+
+    /// <summary>
     /// Flush buffered content (call after WriteResult if using async pattern).
     /// </summary>
     public async ValueTask FlushResultsAsync(CancellationToken ct = default)
@@ -217,33 +255,7 @@ internal sealed class SparqlXmlResultWriter : IDisposable, IAsyncDisposable
                 break;
 
             case BindingValueType.String:
-                // Check if it's a literal, URI, or blank node
-                if (value.Length > 0 && value[0] == '<')
-                {
-                    // URI
-                    WriteString("        <uri>");
-                    WriteXmlEscaped(value.Slice(1, value.Length - 2));
-                    WriteString("</uri>\n");
-                }
-                else if (value.Length > 1 && value[0] == '_' && value[1] == ':')
-                {
-                    // Blank node
-                    WriteString("        <bnode>");
-                    WriteXmlEscaped(value.Slice(2));
-                    WriteString("</bnode>\n");
-                }
-                else if (value.Length > 0 && value[0] == '"')
-                {
-                    // Literal - parse it
-                    WriteLiteralBinding(value);
-                }
-                else
-                {
-                    // Plain string value
-                    WriteString("        <literal>");
-                    WriteXmlEscaped(value);
-                    WriteString("</literal>\n");
-                }
+                WriteTerm(value);
                 break;
 
             case BindingValueType.Integer:
@@ -272,47 +284,42 @@ internal sealed class SparqlXmlResultWriter : IDisposable, IAsyncDisposable
         }
     }
 
-    private void WriteLiteralBinding(ReadOnlySpan<char> literal)
+    /// <summary>
+    /// A term as the store holds it, as a binding's element: an IRI in angle brackets, <c>_:label</c>, a stored literal
+    /// (its lexical form decoded, <see cref="StoredLiteral"/>), or a bare value, written as a simple literal.
+    /// </summary>
+    private void WriteTerm(ReadOnlySpan<char> term)
     {
-        // Parse: "value"@lang or "value"^^<datatype> or "value"
-        if (literal.Length < 2 || literal[0] != '"')
+        if (term.Length >= 2 && term[0] == '<' && term[^1] == '>')
         {
-            WriteString("        <literal>");
-            WriteXmlEscaped(literal);
-            WriteString("</literal>\n");
+            WriteString("        <uri>");
+            WriteXmlEscaped(term.Slice(1, term.Length - 2));
+            WriteString("</uri>\n");
             return;
         }
 
-        // Find closing quote
-        int closeQuote = -1;
-        for (int i = 1; i < literal.Length; i++)
+        if (term.Length > 1 && term[0] == '_' && term[1] == ':')
         {
-            if (literal[i] == '"' && (i == 1 || literal[i - 1] != '\\'))
-            {
-                closeQuote = i;
-                break;
-            }
-        }
-
-        if (closeQuote < 0)
-        {
-            WriteString("        <literal>");
-            WriteXmlEscaped(literal);
-            WriteString("</literal>\n");
+            WriteString("        <bnode>");
+            WriteXmlEscaped(term.Slice(2));
+            WriteString("</bnode>\n");
             return;
         }
 
-        var value = literal.Slice(1, closeQuote - 1);
-        var suffix = literal.Slice(closeQuote + 1);
+        if (!StoredLiteral.TrySplit(term, out var lexical, out var suffix))
+        {
+            WriteString("        <literal>");
+            WriteXmlEscaped(term);
+            WriteString("</literal>\n");
+            return;
+        }
 
         if (suffix.StartsWith("@".AsSpan()))
         {
             // Language tag
             WriteString("        <literal xml:lang=\"");
-            WriteSpan(suffix.Slice(1));
+            WriteXmlEscaped(suffix.Slice(1));
             WriteString("\">");
-            WriteXmlEscapedLiteral(value);
-            WriteString("</literal>\n");
         }
         else if (suffix.StartsWith("^^".AsSpan()))
         {
@@ -325,16 +332,13 @@ internal sealed class SparqlXmlResultWriter : IDisposable, IAsyncDisposable
             WriteString("        <literal datatype=\"");
             WriteXmlEscaped(datatype);
             WriteString("\">");
-            WriteXmlEscapedLiteral(value);
-            WriteString("</literal>\n");
         }
         else
         {
-            // Plain literal
             WriteString("        <literal>");
-            WriteXmlEscapedLiteral(value);
-            WriteString("</literal>\n");
         }
+        WriteXmlEscaped(lexical);
+        WriteString("</literal>\n");
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -379,58 +383,9 @@ internal sealed class SparqlXmlResultWriter : IDisposable, IAsyncDisposable
                 case '\'':
                     WriteString("&apos;");
                     break;
-                default:
-                    WriteChar(c);
-                    break;
-            }
-        }
-    }
-
-    private void WriteXmlEscapedLiteral(ReadOnlySpan<char> text)
-    {
-        // Handle escape sequences in literal values
-        for (int i = 0; i < text.Length; i++)
-        {
-            var c = text[i];
-
-            if (c == '\\' && i + 1 < text.Length)
-            {
-                var next = text[i + 1];
-                switch (next)
-                {
-                    case 'n':
-                        WriteChar('\n');
-                        i++;
-                        continue;
-                    case 't':
-                        WriteChar('\t');
-                        i++;
-                        continue;
-                    case 'r':
-                        WriteChar('\r');
-                        i++;
-                        continue;
-                    case '\\':
-                        WriteChar('\\');
-                        i++;
-                        continue;
-                    case '"':
-                        WriteChar('"');
-                        i++;
-                        continue;
-                }
-            }
-
-            switch (c)
-            {
-                case '<':
-                    WriteString("&lt;");
-                    break;
-                case '>':
-                    WriteString("&gt;");
-                    break;
-                case '&':
-                    WriteString("&amp;");
+                case '\r':
+                    // A raw CR is read back as LF (XML 1.0 §2.11)
+                    WriteString("&#xD;");
                     break;
                 default:
                     WriteChar(c);
