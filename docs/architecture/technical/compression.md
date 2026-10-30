@@ -169,5 +169,16 @@ tests. The empty stream is written out in its test: the 14 bytes of `bzip2 -9 -c
 
 Three measurement classes (`LargeFixtureMeasurement`, `ConvertPathThroughputMeasurement`,
 `ParallelBZip2ContentionTrace`) read `/tmp/multiblock-large.txt.bz2`, made by `bzip2 -9` from a 50 MB text file and
-not committed. Without it they return without measuring and report as passed. `ParallelBZip2ThroughputMeasurement`
-uses the committed multi-block fixture.
+not committed. Without it they return without measuring and report as passed.
+
+The single-threaded and parallel streams are compared in `benchmarks/Mercury.Benchmarks/BZip2DecompressionBenchmarks`
+on the committed multi-block fixture, which the benchmark assembly embeds:
+
+```bash
+dotnet run --project benchmarks/Mercury.Benchmarks -c Release -- --filter '*BZip2Decompression*'
+```
+
+On omega (2026-10-30, `--job short`) the single-threaded stream takes 42 ms; the parallel stream takes 44 ms with one
+worker, 29 ms with two and about 18 ms with four or more, the fixture having about four blocks. This was a test that
+asserted 14 workers are faster than one thread; within the test suite, which runs in parallel, the single-threaded
+stream took 291 ms on a CI runner and the assertion failed there.

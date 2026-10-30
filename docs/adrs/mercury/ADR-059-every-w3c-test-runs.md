@@ -116,8 +116,9 @@ STATISTICS.md and the README count every loaded test: passed, known failures and
    formats, service description and protocol (against `SparqlHttpServer`), Graph Store protocol, entailment.
 5. **RDF semantics** entailment tests.
 6. **JSON-LD**: fromRdf, then the API manifests per Q1.
-7. **The measurement classes** report skipped without their fixture (D3), or move to `benchmarks/`; so does
-   `ParallelBZip2ThroughputMeasurement`, whose assertion is about the machine.
+7. **The measurement classes** report skipped without their fixture (D3), or move to `benchmarks/`.
+   `ParallelBZip2ThroughputMeasurement`, whose assertion was about the machine, is
+   `benchmarks/Mercury.Benchmarks/BZip2DecompressionBenchmarks` since 2026-10-30 (Martin: "benchmarks").
 8. **The guard** (D4), once every manifest is loaded.
 
 ## Open questions

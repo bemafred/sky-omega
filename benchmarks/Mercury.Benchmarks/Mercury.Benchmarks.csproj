@@ -25,4 +25,9 @@
     <ProjectReference Include="..\..\src\Mercury.Runtime\Mercury.Runtime.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- The test fixture, embedded: BenchmarkDotNet runs each benchmark in a process of its own build. -->
+    <EmbeddedResource Include="..\..\tests\Mercury.Tests\Compression\Fixtures\multiblock.txt.bz2" LogicalName="multiblock.txt.bz2" />
+  </ItemGroup>
+
 </Project>
