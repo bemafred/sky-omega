@@ -69,6 +69,18 @@ public class TrigramIndexTests : IDisposable
     }
 
     [Fact]
+    public void IndexAtom_LiteralHoldingAQuote_IndexesTheTextAfterIt()
+    {
+        // A stored literal's lexical form is decoded, so it may hold '"'. The index found the closing quote by a forward
+        // scan until 2026-10-30, stopped at the first internal quote, and did not index the text after it.
+        using var index = new TrigramIndex(GetIndexPath());
+
+        index.IndexAtom(1, Encoding.UTF8.GetBytes("\"she said \"hello\" to the world\"@en"));
+
+        Assert.Contains(1L, index.QueryCandidates("world").ToList());
+    }
+
+    [Fact]
     public void IndexAtom_CaseFolding_LowercasesAscii()
     {
         using var index = new TrigramIndex(GetIndexPath());

@@ -9,6 +9,7 @@ using System.Text;
 using System.Threading;
 using SkyOmega.Mercury.Runtime;
 using SkyOmega.Mercury.Runtime.Buffers;
+using SkyOmega.Mercury.Rdf;
 
 namespace SkyOmega.Mercury.Storage;
 
@@ -487,26 +488,8 @@ internal sealed unsafe class TrigramIndex : IDisposable
         if (utf8Text.IsEmpty)
             return utf8Text;
 
-        // Check for quoted string
-        if (utf8Text[0] != '"')
-            return utf8Text; // Not a literal, return as-is
-
-        // Find closing quote (handle escaped quotes)
-        int endQuote = -1;
-        for (int i = 1; i < utf8Text.Length; i++)
-        {
-            if (utf8Text[i] == '"' && (i == 1 || utf8Text[i - 1] != '\\'))
-            {
-                endQuote = i;
-                break;
-            }
-        }
-
-        if (endQuote <= 0)
-            return utf8Text; // Malformed, return as-is
-
-        // Return content between quotes
-        return utf8Text.Slice(1, endQuote - 1);
+        // The lexical form, decoded, so it may hold '"' (StoredLiteral). Not a literal: returned as it is.
+        return StoredLiteral.TrySplit(utf8Text, out var lexical, out _) ? lexical : utf8Text;
     }
 
     /// <summary>

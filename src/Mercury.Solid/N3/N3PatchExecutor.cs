@@ -6,6 +6,7 @@
 // .NET 10 / C# 14
 
 using SkyOmega.Mercury.Storage;
+using SkyOmega.Mercury.Rdf;
 
 namespace SkyOmega.Mercury.Solid.N3;
 
@@ -210,12 +211,11 @@ public sealed class N3PatchExecutor
         // Literal with language tag or datatype
         if (storeValue.StartsWith("\""))
         {
-            var lastQuote = storeValue.LastIndexOf('"');
-            if (lastQuote <= 0)
+            if (!StoredLiteral.TrySplit(storeValue, out var lexical, out var suffixSpan))
                 return N3Term.Literal(storeValue);
 
-            var value = storeValue.Substring(1, lastQuote - 1);
-            var suffix = storeValue.Substring(lastQuote + 1);
+            var value = lexical.ToString();
+            var suffix = suffixSpan.ToString();
 
             if (suffix.StartsWith("@"))
             {

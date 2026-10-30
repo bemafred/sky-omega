@@ -10,6 +10,7 @@ using SkyOmega.Mercury.Storage;
 using SkyOmega.Mercury.Sparql.Execution.Expressions;
 using SkyOmega.Mercury.Sparql.Execution.Operators;
 using ValueType = SkyOmega.Mercury.Sparql.Execution.Expressions.ValueType;
+using SkyOmega.Mercury.Rdf;
 
 namespace SkyOmega.Mercury.Sparql.Execution;
 
@@ -666,11 +667,8 @@ internal sealed class GroupedRow
     {
         if (term.Length >= 2 && term[0] == '<' && term[^1] == '>')
             return term.Substring(1, term.Length - 2);
-        if (term.Length >= 2 && term[0] == '"')
-        {
-            int close = term.LastIndexOf('"');
-            if (close > 0) return term.Substring(1, close - 1);
-        }
+        if (StoredLiteral.TrySplit(term, out var lexical, out _))
+            return lexical.ToString();
         return term;
     }
 

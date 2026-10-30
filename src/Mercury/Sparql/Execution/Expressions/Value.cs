@@ -170,25 +170,19 @@ internal ref struct Value
             return FromIri(term);
         if (term.Length > 2 && term[0] == '_' && term[1] == ':')
             return FromBlankNode(term);
-        if (term.Length >= 2 && term[0] == '"')
+        if (StoredLiteral.TrySplit(term, out var lexical, out var suffix))
         {
-            int close = term.LastIndexOf('"');
-            if (close > 0)
+            if (suffix.IsEmpty)
+                return FromString(lexical);
+            if (suffix[0] == '@')
+                return FromLangString(lexical, suffix[1..]);
+            if (suffix.Length >= 2 && suffix[0] == '^' && suffix[1] == '^')
             {
-                var lexical = term[1..close];
-                var suffix = term[(close + 1)..];
-                if (suffix.IsEmpty)
-                    return FromString(lexical);
-                if (suffix[0] == '@')
-                    return FromLangString(lexical, suffix[1..]);
-                if (suffix.Length >= 2 && suffix[0] == '^' && suffix[1] == '^')
-                {
-                    var datatype = suffix[2..];
-                    if (!datatype.IsEmpty && datatype[0] == '<')
-                        return Literal(lexical, default, datatype);
-                    var stored = XsdDatatype.FromStoredPrefixedName(datatype);
-                    return stored != null ? Literal(lexical, default, stored) : FromTyped(lexical, datatype);
-                }
+                var datatype = suffix[2..];
+                if (!datatype.IsEmpty && datatype[0] == '<')
+                    return Literal(lexical, default, datatype);
+                var stored = XsdDatatype.FromStoredPrefixedName(datatype);
+                return stored != null ? Literal(lexical, default, stored) : FromTyped(lexical, datatype);
             }
         }
         if (term is "true" or "false")

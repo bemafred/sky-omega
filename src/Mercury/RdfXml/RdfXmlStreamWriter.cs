@@ -11,6 +11,7 @@ using System.IO;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
+using SkyOmega.Mercury.Rdf;
 using SkyOmega.Mercury.Runtime.Buffers;
 
 namespace SkyOmega.Mercury.RdfXml;
@@ -394,18 +395,8 @@ internal sealed class RdfXmlStreamWriter : IDisposable, IAsyncDisposable
             return;
         }
 
-        // Find closing quote (handle escaped quotes)
-        int closeQuote = -1;
-        for (int i = 1; i < literal.Length; i++)
-        {
-            if (literal[i] == '"' && (i == 1 || literal[i - 1] != '\\'))
-            {
-                closeQuote = i;
-                break;
-            }
-        }
-
-        if (closeQuote < 0)
+        // The lexical form is decoded and may hold '"' (StoredLiteral)
+        if (!StoredLiteral.TrySplit(literal, out var value, out var suffix))
         {
             // Malformed - output as-is
             WriteChar('>');
@@ -416,9 +407,6 @@ internal sealed class RdfXmlStreamWriter : IDisposable, IAsyncDisposable
             return;
         }
 
-        var value = literal.Slice(1, closeQuote - 1);
-        var suffix = literal.Slice(closeQuote + 1);
-
         if (suffix.StartsWith("@".AsSpan(), StringComparison.Ordinal))
         {
             // Language tag
@@ -426,7 +414,7 @@ internal sealed class RdfXmlStreamWriter : IDisposable, IAsyncDisposable
             WriteString(" xml:lang=\"");
             WriteSpan(lang);
             WriteString("\">");
-            WriteXmlEscapedLiteral(value);
+            WriteXmlEscaped(value);
             WriteString("</");
             WriteSpan(predicateElement);
             WriteString(">\n");
@@ -443,7 +431,7 @@ internal sealed class RdfXmlStreamWriter : IDisposable, IAsyncDisposable
             WriteString(" rdf:datatype=\"");
             WriteXmlEscaped(datatype);
             WriteString("\">");
-            WriteXmlEscapedLiteral(value);
+            WriteXmlEscaped(value);
             WriteString("</");
             WriteSpan(predicateElement);
             WriteString(">\n");
@@ -452,7 +440,7 @@ internal sealed class RdfXmlStreamWriter : IDisposable, IAsyncDisposable
         {
             // Plain literal
             WriteChar('>');
-            WriteXmlEscapedLiteral(value);
+            WriteXmlEscaped(value);
             WriteString("</");
             WriteSpan(predicateElement);
             WriteString(">\n");
@@ -530,58 +518,9 @@ internal sealed class RdfXmlStreamWriter : IDisposable, IAsyncDisposable
                 case '"':
                     WriteString("&quot;");
                     break;
-                default:
-                    WriteChar(c);
-                    break;
-            }
-        }
-    }
-
-    private void WriteXmlEscapedLiteral(ReadOnlySpan<char> text)
-    {
-        // Handle escape sequences in literal values
-        for (int i = 0; i < text.Length; i++)
-        {
-            var c = text[i];
-
-            if (c == '\\' && i + 1 < text.Length)
-            {
-                var next = text[i + 1];
-                switch (next)
-                {
-                    case 'n':
-                        WriteChar('\n');
-                        i++;
-                        continue;
-                    case 't':
-                        WriteChar('\t');
-                        i++;
-                        continue;
-                    case 'r':
-                        WriteChar('\r');
-                        i++;
-                        continue;
-                    case '\\':
-                        WriteChar('\\');
-                        i++;
-                        continue;
-                    case '"':
-                        WriteChar('"');
-                        i++;
-                        continue;
-                }
-            }
-
-            switch (c)
-            {
-                case '<':
-                    WriteString("&lt;");
-                    break;
-                case '>':
-                    WriteString("&gt;");
-                    break;
-                case '&':
-                    WriteString("&amp;");
+                case '\r':
+                    // A raw CR is read back as LF (XML 1.0 §2.11)
+                    WriteString("&#xD;");
                     break;
                 default:
                     WriteChar(c);

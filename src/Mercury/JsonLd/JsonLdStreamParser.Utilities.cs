@@ -7,6 +7,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using SkyOmega.Mercury.NQuads;
+using SkyOmega.Mercury.Rdf;
 
 namespace SkyOmega.Mercury.JsonLd;
 
@@ -79,16 +80,10 @@ internal sealed partial class JsonLdStreamParser
         if (obj.Contains("@") && obj.StartsWith('"'))
         {
             // Check for language-tagged literal: "value"@lang
-            var lastQuote = obj.LastIndexOf('"');
-            if (lastQuote > 0 && lastQuote < obj.Length - 1)
+            if (StoredLiteral.TrySplit(obj, out _, out var suffix) && suffix.StartsWith("@") && !suffix.Contains("^^", StringComparison.Ordinal))
             {
-                var suffix = obj.Substring(lastQuote + 1);
-                if (suffix.StartsWith("@") && !suffix.Contains("^^"))
-                {
-                    var langTag = suffix.Substring(1);
-                    if (!IsWellFormedLanguageTag(langTag))
-                        return;
-                }
+                if (!IsWellFormedLanguageTag(suffix[1..].ToString()))
+                    return;
             }
         }
 

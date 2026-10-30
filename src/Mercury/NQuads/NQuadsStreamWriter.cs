@@ -11,6 +11,7 @@ using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using SkyOmega.Mercury.Runtime.Buffers;
+using SkyOmega.Mercury.Rdf;
 
 namespace SkyOmega.Mercury.NQuads;
 
@@ -180,17 +181,9 @@ internal sealed class NQuadsStreamWriter : IDisposable, IAsyncDisposable
     /// Input format: "value", "value"@lang, or "value"^^&lt;datatype&gt;
     /// </summary>
     /// <remarks>
-    /// The parsers decode a literal's escapes in memory: the term holds the value, not the wire form. So a forward scan
-    /// with backslash tracking cannot find the closing quote; an internal quote and the closing one look the same.
-    /// Instead, the closing quote is found from the suffix's shape, scanning from the end:
-    ///
-    /// - ends with <c>&gt;</c> → datatype form, find <c>"^^&lt;</c> backward
-    /// - ends with lang-tag chars + <c>@</c> → lang form, find <c>"@</c> backward
-    /// - ends with <c>"</c> → plain form, last char is the close quote
-    ///
-    /// The parsers always write a datatype IRI in <c>&lt;...&gt;</c> form. See
-    /// docs/validations/bulk-load-gradient-2026-04-17.md for the failure mode this replaces (this writer's own forward
-    /// scan kept it until 2026-10-30).
+    /// The parsers decode a literal's escapes in memory: the term holds the value, not the wire form, so the closing
+    /// quote is the last one (<see cref="StoredLiteral"/>). This writer found it by a forward scan with backslash
+    /// tracking until 2026-10-30; see docs/validations/bulk-load-gradient-2026-04-17.md for that failure mode.
     /// </remarks>
     private void WriteLiteral(ReadOnlySpan<char> literal)
     {
@@ -201,60 +194,17 @@ internal sealed class NQuadsStreamWriter : IDisposable, IAsyncDisposable
             return;
         }
 
-        int closeQuote;
-        int suffixStart;
-
-        char last = literal[literal.Length - 1];
-
-        if (last == '>')
+        if (!StoredLiteral.TrySplit(literal, out var lexical, out var suffix))
         {
-            // Datatype form: "lexical"^^<iri>
-            // Find the `^^<` marker by scanning backward from the end.
-            var idx = literal.LastIndexOf("^^<".AsSpan());
-            if (idx >= 1 && literal[idx - 1] == '"')
-            {
-                closeQuote = idx - 1;
-                suffixStart = closeQuote + 1;
-            }
-            else
-            {
-                // Malformed input — fall back to plain treatment
-                closeQuote = literal.Length - 1;
-                suffixStart = literal.Length;
-            }
-        }
-        else if (last == '"')
-        {
-            // Plain form: "lexical"
-            closeQuote = literal.Length - 1;
-            suffixStart = literal.Length;
-        }
-        else
-        {
-            // Lang-tag form: "lexical"@lang[-subtags][--dir]
-            // Walk back over valid BCP-47 lang-tag chars, then require '@'
-            // preceded by '"'.
-            int i = literal.Length - 1;
-            while (i > 0 && IsLangChar(literal[i])) i--;
-            if (i >= 2 && literal[i] == '@' && literal[i - 1] == '"')
-            {
-                closeQuote = i - 1;
-                suffixStart = closeQuote + 1;
-            }
-            else
-            {
-                // Malformed input — fall back: use last '"' as close if present.
-                var lastQuote = literal.LastIndexOf('"');
-                closeQuote = lastQuote > 0 ? lastQuote : literal.Length - 1;
-                suffixStart = closeQuote + 1;
-            }
+            // Not a literal: write as-is
+            WriteSpan(literal);
+            return;
         }
 
         WriteChar('"');
-        WriteEscapedString(literal.Slice(1, closeQuote - 1));
+        WriteEscapedString(lexical);
         WriteChar('"');
 
-        var suffix = literal.Slice(suffixStart);
         if (suffix.IsEmpty || suffix.SequenceEqual(XsdStringSuffix))
             return;   // Canonical N-Triples: an xsd:string literal is written without its datatype
 
@@ -269,10 +219,6 @@ internal sealed class NQuadsStreamWriter : IDisposable, IAsyncDisposable
             WriteSpan(suffix);
         }
     }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static bool IsLangChar(char c)
-        => (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-';
 
     /// <summary>
     /// Write a literal's value in canonical form: ECHAR for BS, HT, LF, FF, CR, '"' and '\'; \uXXXX for U+0000-U+0007,

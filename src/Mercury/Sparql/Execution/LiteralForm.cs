@@ -70,10 +70,8 @@ internal static class LiteralForm
             return false;
         if (term.Length >= 3 && term[1] == '"' && term[2] == '"')
             return false; // a long string: three quotes open it
-        int close = term.LastIndexOf('"');
-        if (close == 0)
+        if (!StoredLiteral.TrySplit(term, out _, out var suffix))
             return false;
-        var suffix = term[(close + 1)..];
         return suffix.IsEmpty || suffix[0] == '@' || suffix.StartsWith("^^<");
     }
 

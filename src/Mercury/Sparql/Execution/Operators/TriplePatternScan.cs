@@ -5,6 +5,7 @@ using System.Runtime.CompilerServices;
 using SkyOmega.Mercury.Sparql.Patterns;
 using SkyOmega.Mercury.Storage;
 using SkyOmega.Mercury.Sparql.Types;
+using SkyOmega.Mercury.Rdf;
 
 namespace SkyOmega.Mercury.Sparql.Execution.Operators;
 
@@ -1686,11 +1687,9 @@ internal ref struct TriplePatternScan
             // while the matched term is the full typed literal ("2"^^xsd:integer). Compare value-aware — the typed
             // literal's lexical part against the bare existing value — so BIND(?o+1 AS ?z) … ?p ?z joins (W3C bind03).
             if (bindings.GetType(existingIndex) is BindingValueType.Integer or BindingValueType.Double or BindingValueType.Boolean
-                && value.Length > 1 && value[0] == '"')
+                && StoredLiteral.TrySplit(value, out var lexical, out _))
             {
-                int closeQuote = value.LastIndexOf('"');
-                if (closeQuote > 0)
-                    return value.Slice(1, closeQuote - 1).SequenceEqual(existingValue);
+                return lexical.SequenceEqual(existingValue);
             }
             return false;
         }

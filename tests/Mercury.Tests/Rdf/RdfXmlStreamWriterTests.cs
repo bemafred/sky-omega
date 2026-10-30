@@ -378,4 +378,31 @@ public class RdfXmlStreamWriterTests
 
         Assert.Equal([("<http://e/s>", "<http://e/p>", "\"v\"")], triples);
     }
+
+    [Fact]
+    public async Task WriteTriple_LiteralWithAQuoteABackslashAndACarriageReturn_RoundTrips()
+    {
+        // A stored literal's lexical form is decoded: here a quote, a backslash followed by 'n', and a carriage
+        // return. The writer found the closing quote by a forward scan and read "\n" as an escape until 2026-10-30, so
+        // it cut the literal at the quote and wrote a line break for the backslash. A carriage return is written as a
+        // character reference: a raw one is read back as a line feed.
+        var literal = "\"say \"hi\" at C:\\new\rnext\"@en";
+        using var sw = new StringWriter();
+        using (var writer = new RdfXmlStreamWriter(sw))
+        {
+            writer.WriteStartDocument();
+            writer.WriteTriple("<http://e/s>".AsSpan(), "<http://e/p>".AsSpan(), literal.AsSpan());
+            writer.WriteEndDocument();
+        }
+        var xml = sw.ToString();
+
+        Assert.Contains(">say &quot;hi&quot; at C:\\new&#xD;next<", xml);
+
+        var triples = new System.Collections.Generic.List<(string, string, string)>();
+        await using var input = new MemoryStream(Encoding.UTF8.GetBytes(xml));
+        using var parser = new RdfXmlStreamParser(input);
+        await parser.ParseAsync((s, p, o) => triples.Add((s.ToString(), p.ToString(), o.ToString())), TestContext.Current.CancellationToken);
+
+        Assert.Equal([("<http://e/s>", "<http://e/p>", literal)], triples);
+    }
 }
