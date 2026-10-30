@@ -2,7 +2,16 @@
 
 ## Status
 
-**Status:** Proposed — 2026-03-22
+**Status:** Completed — 2026-03-23 (Proposed — 2026-03-22; this line said Proposed until 2026-10-30)
+
+Implemented as written in [1.5.0](../../CHANGELOG.md), 2026-03-23: both layers, netcoredbg as the DAP backend, the 13
+tools below. Since then the mechanism has followed this ADR's own Sovereignty Path: DrHook.Engine (ICorDebug through
+`libdbgshim`) replaced netcoredbg and `src/DrHook/` at 1.8.2
+([drhook ADR-006](drhook/ADR-006-drhook-engine.md)), and the 13 tools became the 25 of
+[drhook ADR-010](drhook/ADR-010-mcp-tool-surface-redesign.md). The architecture, project structure, tool table and
+dependency table below describe 1.5.0. The decision itself stands: DrHook is a peer MCP substrate, and neither
+DrHook.Engine nor DrHook.Mcp references Mercury. DrHook.Capture, which saves a session to a Mercury store, is a
+separate client: the client concern described under Relationship to Other Substrates.
 
 ## Context
 

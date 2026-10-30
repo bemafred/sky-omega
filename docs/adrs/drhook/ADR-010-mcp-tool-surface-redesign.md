@@ -2,6 +2,12 @@
 
 **Status:** Accepted — 2026-05-31 (Proposed — 2026-05-27 → Accepted after all ten Open Questions resolved 2026-05-30/31).
 
+**Shipped surface, 2026-10-30:** `src/DrHook.Mcp` registers 25 tools. 19 of them are in the catalog below. 6 shipped
+outside it: `drhook_stop`, `drhook_expand`, `drhook_snapshot_image`, `drhook_capture_visual`, `drhook_drain_console`
+and `drhook_drain_log`. The catalog's other 5 are its unbuilt Tier 2 and Tier 3: `drhook_run_to_cursor`,
+`drhook_frames`, `drhook_set_next_statement`, `drhook_break_data` and `drhook_watch`. The catalog tables list 24
+tools, although their total says 25.
+
 **Supersedes:** [ADR-009 (DrHook)](ADR-009-test-debugging-mcp-surface.md) — that ADR's test-debugging-specific scope is subsumed by the broader surface redesign captured here. Test-debugging is one input shape to a unified `drhook_launch` tool; it does not require its own MCP-tool family.
 
 ## Epistemic note — read first

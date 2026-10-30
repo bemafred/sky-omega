@@ -15,6 +15,13 @@ Accepted with Q1–Q3 resolved. Parts of D1 (the recorded WHERE start) and D2 (t
 SELECT, ASK and CONSTRUCT) shipped first, in 1.8.25. The stack probes for validation step 4 are in
 [`tools/probes/stack/`](../../../tools/probes/stack/README.md).
 
+Built (reviewed 2026-10-30): D1, D2, D4, D5 and D6 in [1.8.26](../../releases/1.8.26.md); D1's `$x`, D3 and D7 in
+[1.8.27](../../releases/1.8.27.md); the GraphPattern sweep in [1.8.29](../../releases/1.8.29.md) (`7521a6f`).
+Validation steps 1, 2, 4 and 6 are recorded in the 1.8.26 and 1.8.27 notes. Step 7 passed on 2026-10-30 through the
+1.8.36 MCP: against the memory store, a `{ … } UNION { GRAPH ?g { … } }` query and a `DESCRIBE <iri>` each returned
+the subject's three triples. **Remaining before Completed:** step 3 (the differential against 1.8.25) and step 5 (parse
+cost), which have no recorded result.
+
 ## Context
 
 ### The defects (probe on 1.8.23)

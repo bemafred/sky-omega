@@ -2,7 +2,12 @@
 
 ## Status
 
-**Status:** Accepted — 2026-01-31
+**Status:** Completed — 2026-01-31 (Accepted — 2026-01-31; this line said Accepted until 2026-10-30)
+
+Completed by the [1.0.0 release](../../CHANGELOG.md), 2026-01-31. The Implementation Summary below says SPARQL 1.1
+Update was at 84/94; the 1.0.0 entry in the CHANGELOG records 94/94, and all 94 pass today. The cognitive components
+this ADR deferred to 2.0.0 moved to the 1.8 line under the amended version-line model
+([production-hardening-1.8.md](../roadmap/production-hardening-1.8.md), 2026-04-26).
 
 ## Implementation Summary
 

@@ -2,7 +2,9 @@
 
 ## Status
 
-**Status:** Accepted — 2026-04-26 · Phase 1 Completed 2026-05-01 (commits `d832702` Phase 1B-5d, `7660bb4` production wiring, `3b49ce2` session-scoped lifecycle, `ba90595` Phase 1B-5e streaming input, `bd2f9c1` int64 InputIdx widening, `870d31b` Round 2 prefix compression). Validated end-to-end at 1B Wikidata Reference (1:00:36 wall-clock; 213M atoms; 991M triples stored). Phase 2 (BBHash MPHF) and bit-packed atom IDs both remain deferred per evidence-first ([1B trace memo](../../../memos/2026-05-01-1b-flushtodisk-trace-analysis.md)): GSPO write is 0.45% of FlushToDisk; resolver drain is 0.92%. The architectural cost is dominated by sequential file I/O, not algorithm.
+**Status:** Completed — 2026-05-06 (Accepted — 2026-04-26). The completion gate, Phase 3's 21.3 B run, is [adr-034-21b-2026-05-06.md](../../validations/adr-034-21b-2026-05-06.md): 46 h end-to-end under SortedAtomStore against the 85 h HashAtomStore baseline. Phase 2 (BBHash MPHF) shipped as [ADR-039](ADR-039-mphf-on-sealed-atom-set.md), Completed 2026-05-13; bit-packed atom IDs stay a separate follow-on ([limits entry](../../limits/bit-packed-atom-ids.md)). The index has said Completed since 2026-05-09; this line said Accepted until 2026-10-30.
+
+Phase 1 Completed 2026-05-01 (commits `d832702` Phase 1B-5d, `7660bb4` production wiring, `3b49ce2` session-scoped lifecycle, `ba90595` Phase 1B-5e streaming input, `bd2f9c1` int64 InputIdx widening, `870d31b` Round 2 prefix compression). Validated end-to-end at 1B Wikidata Reference (1:00:36 wall-clock; 213M atoms; 991M triples stored). At that point Phase 2 (BBHash MPHF) and bit-packed atom IDs were both deferred per evidence-first ([1B trace memo](../../../memos/2026-05-01-1b-flushtodisk-trace-analysis.md)): GSPO write is 0.45% of FlushToDisk; resolver drain is 0.92%. The architectural cost is dominated by sequential file I/O, not algorithm.
 
 ## Context
 

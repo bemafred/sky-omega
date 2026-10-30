@@ -9,10 +9,10 @@ Foundational decisions affecting the entire repository:
 | ADR | Title | Status |
 |-----|-------|--------|
 | [ADR-000](ADR-000-repository-restructure.md) | Repository Restructure for Multi-Substrate Architecture | Completed |
-| [ADR-001](ADR-001-sky-omega-1.0-operational-scope.md) | Sky Omega 1.0.0 Operational Scope | Accepted |
+| [ADR-001](ADR-001-sky-omega-1.0-operational-scope.md) | Sky Omega 1.0.0 Operational Scope | Completed |
 | [ADR-002](ADR-002-documentation-and-tutorial-strategy.md) | Documentation and Tutorial Strategy | Completed |
 | [ADR-003](ADR-003-mercury-encapsulation-and-api-surface.md) | Mercury Encapsulation and API Surface | Completed |
-| [ADR-004](ADR-004-drhook-runtime-observation-substrate.md) | DrHook: Runtime Observation Substrate | Proposed |
+| [ADR-004](ADR-004-drhook-runtime-observation-substrate.md) | DrHook: Runtime Observation Substrate | Completed |
 | [ADR-005](ADR-005-cognitive-component-libraries.md) | Cognitive Component Libraries — Lucy, James, Sky, Minerva | Proposed |
 | [ADR-006](ADR-006-mcp-surface-discipline.md) | MCP Surface Discipline — Destructive Operations Excluded | Completed |
 | [ADR-007](ADR-007-sealed-substrate-immutability.md) | Sealed Substrate Immutability — Re-create, Don't Modify | Completed |
