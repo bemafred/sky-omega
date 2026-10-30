@@ -3,17 +3,31 @@
 **Date:** 2026-10-30
 **Status:** Mechanism **PROVEN**: located from stacks of the hung process on a GitHub macOS runner and the runtime
 source (`release/10.0`), then reproduced on omega by probe 100. **Not fixed.** A defect in mscordbi's design that
-DrHook's owned teardown runs into.
+DrHook's owned teardown runs into. **What made it frequent on CI is not established** (Symptom).
 
 ## Symptom
 
-On the GitHub macOS runners, DrHook integration tests hit the suite's 120 s limit: in 1.8.38 (macOS x64) and
-1.8.39 (macOS arm64) one test each, and from 4b9812a on both runners, where every test after the first timed out
-too (8 timeouts, about 16 minutes). They pass on omega in about a second.
+On the GitHub macOS runners the DrHook integration tests failed in two different ways. Linux and Windows passed
+every run, and DrHook's own code did not change in this period.
 
-The timeline added in 4b9812a showed where: each VSTest-target test printed `testhost pid N`, then nothing. The
-call that did not return was `DebugSession.AttachAndOwn`. The first test to hang always ran right after its MTP
-sibling, which disposes a session mid-flood (InformationalFloodTest) or while paused (PauseDisposeTest).
+- **A single timeout, then recovery.** In 1.8.38 (macOS x64, the VSTest flood test) and 1.8.39 (macOS arm64, the
+  VSTest PauseThenDispose test), one test hit the suite's 120 s limit and every later test passed normally. A
+  process left in this finding's state cannot attach again, so these two were something else. Their cause is
+  unknown: the tests printed nothing then.
+- **A cascade.** From 4b9812a on, the VSTest flood test hung and every later test timed out too (8 timeouts, about
+  16 minutes): in 4 of the 8 macOS jobs from 4b9812a to 02917df, against none of the 8 before. Each began right
+  after the MTP flood test. 4b9812a was the only DrHook change in the period. To diagnose the single timeouts, it
+  made the flood tests' shared sink print a line for every debugger event, on the event pump's thread, before the
+  test shuts the session down. So it changed the timing of the MTP flood test, whose session is the one left
+  holding the lock. That makes it the prime suspect for the cascades starting, not a proven cause: 0 of 8 against 4
+  of 8 happens by luck about 4% of the time.
+
+The tests pass on omega in about a second.
+
+The timeline added in 4b9812a showed where the cascade hangs: each VSTest-target test printed `testhost pid N`,
+then nothing. The call that did not return was `DebugSession.AttachAndOwn`.
+
+The CI runs cited here were deleted from GitHub on 2026-10-30; the stacks quoted below are their record.
 
 ## Where it hung
 
@@ -89,9 +103,9 @@ when the target dies, is refuted by the kill mode.
 it runs and raises callbacks, which mscordbi's Win32 event thread dispatches, reading target memory; then
 `RequestExit` sends SIGTERM and, after the natural-exit timeout, `TryKillTargetAndSettle` kills it. A target that
 dies, by either signal, while the Win32 event thread has a read outstanding orphans that read. The faster the
-machine, the smaller the window:
-it hit 5 of the 12 macOS jobs CI has run since it began (653f1b0), and none of 23 runs on omega under CPU load (20 of the
-flood pair, 3 of the whole solution).
+machine, the smaller the window: none of 23 runs on omega under CPU load hit it (20 of the flood pair, 3 of the
+whole solution). On the GitHub macOS runners it hit 4 of the 8 jobs after 4b9812a changed the MTP flood test's
+timing, and none of the 8 before (Symptom).
 
 ## Consequence
 
