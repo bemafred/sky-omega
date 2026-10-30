@@ -19,3 +19,4 @@ Intent and rationale: [ADR-004 — DrHook: Runtime Observation Substrate](../ADR
 | [ADR-013](ADR-013-value-type-refstruct-inspection.md)            | Inspection of Value Types and Ref Structs — VALUETYPE + BYREF Field Expansion, Span-Aware Expression Evaluation | Completed |
 | [ADR-014](ADR-014-inspection-fault-containment.md)              | DrHook Inspection Robustness — Value-Type Read Safety and Fault Containment (a frame's shape must never crash the engine) | Completed |
 | [ADR-015](ADR-015-run-until-anomaly.md)                          | Run-Until-Anomaly — Repeat-Until-Failure Driving with Freeze-on-Catch for Intermittent Runtime Bugs | Proposed |
+| [ADR-016](ADR-016-deterministic-teardown-across-platforms.md)     | Deterministic Target Teardown Across Platforms — Characterize mscordbi on Each Platform, Natively, Before Changing DrHook | Proposed |
