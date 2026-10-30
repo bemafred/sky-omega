@@ -161,7 +161,7 @@ to [1.8.21](docs/releases/1.8.21.md).
 
 ## 💠 Project Purpose
 
-**Mercury** is a complete SPARQL 1.1 engine with zero external runtime dependencies (BCL-only core), zero-GC hot paths, and 100% W3C conformance across all core specifications. It gives AI assistants persistent, queryable memory on your machine — what your AI learns today, it knows tomorrow.
+**Mercury** is a complete SPARQL 1.1 engine with zero external runtime dependencies (BCL-only core) and zero-GC hot paths. It passes all 993 tests of the W3C RDF 1.1 format suites, all 510 SPARQL 1.1 tests it runs, and the 461 JSON-LD 1.1 toRdf tests that apply to it; 6 of the 487 SPARQL 1.0 tests are known failures ([Standards Coverage](#-standards-coverage)). It gives AI assistants persistent, queryable memory on your machine — what your AI learns today, it knows tomorrow.
 
 > *Scope of "BCL-only": Mercury core (`src/Mercury/`) and its 28-public-type embeddable surface have no `PackageReference` entries. Adjacent surfaces — `Mercury.Mcp` (depends on `ModelContextProtocol`), `DrHook.Engine` (admitted: `Microsoft.Diagnostics.NETCore.Client` managed + `Microsoft.Diagnostics.DbgShim.<rid>` native per-RID + `Microsoft.Diagnostics.Tracing.TraceEvent` for EventPipe parsing, all per ADR-009; **netcoredbg retired at 1.8.2**) — package the substrate for tooling and runtime observation. The substrate-independence claim applies to the core; the tooling layer is honest about its dependencies.*
 
@@ -180,23 +180,33 @@ Mercury is a full SPARQL 1.1 + RDF stack. Every standard listed below is impleme
 
 ### RDF formats (parse + write, streaming, zero-GC)
 
-| Format | W3C Conformance | Use |
+| Format | W3C tests passing | Use |
 |---|---|---|
-| **Turtle 1.2** | 309/309 (100%) | Human-friendly, prefix support, the de-facto interchange format |
-| **TriG 1.2** | 352/352 (100%) | Turtle with named graphs |
-| **N-Triples 1.2** | 70/70 (100%) | Line-oriented, the Wikidata dump format |
-| **N-Quads 1.2** | 87/87 (100%) | N-Triples with named graphs |
-| **RDF/XML 1.1** | 166/166 (100%) | Legacy interop, still required by many vocabularies |
-| **JSON-LD 1.1** | 461/467 (99%, 6 intentional skips) | JSON-native RDF for web/API surfaces |
+| **Turtle** | 313/313 (100%) | Human-friendly, prefix support, the de-facto interchange format |
+| **TriG** | 357/357 (100%) | Turtle with named graphs |
+| **N-Triples** | 70/70 (100%) | Line-oriented, the Wikidata dump format |
+| **N-Quads** | 87/87 (100%) | N-Triples with named graphs |
+| **RDF/XML** | 166/166 (100%) | Legacy interop, still required by many vocabularies |
+| **JSON-LD 1.1** | 461/467 (6 do not apply) | JSON-native RDF for web/API surfaces |
 
-### SPARQL 1.1
+The counts for the five RDF formats are of the W3C RDF 1.1 test suites. The Turtle parser also reads RDF 1.2 triple
+terms; the RDF 1.2 test suites (343 tests) are in the test data but not yet run. Of the JSON-LD tests, 5 are for
+JSON-LD 1.0 processors (their 1.1 versions run) and 1 needs generalized RDF, an optional feature.
 
-| Spec | W3C Conformance |
+### SPARQL
+
+| Spec | W3C tests passing |
 |---|---|
-| **SPARQL 1.1 Query** (SELECT, ASK, CONSTRUCT, DESCRIBE, all aggregates, property paths, federated SERVICE) | 421/421 (100%) |
-| **SPARQL 1.1 Update** (INSERT, DELETE, LOAD, CLEAR, CREATE, DROP, COPY, MOVE, ADD) | 94/94 (100%) |
-| **SPARQL 1.1 Syntax** | 103/103 (100%) |
-| **SPARQL 1.1 Federated Query** (SERVICE clause, remote endpoints) | included in Query 421 |
+| **SPARQL 1.1 Query** (SELECT, ASK, CONSTRUCT, DESCRIBE, all aggregates, property paths) | evaluation 247/247, syntax 106/106 (100%) |
+| **SPARQL 1.1 Update** (INSERT, DELETE, LOAD, CLEAR, CREATE, DROP, COPY, MOVE, ADD) | evaluation 94/94, syntax 63/63 (100%) |
+| **SPARQL 1.0 Query** | evaluation 285/288, syntax 196/199 (6 known failures) |
+| **SPARQL 1.1 Federated Query** (SERVICE clause, remote endpoints) | implemented; the W3C SERVICE tests need network access and are not run |
+
+The 6 SPARQL 1.0 known failures: 3 of term identity, where a simple literal and its `xsd:string` form are stored as
+two terms and a pattern constant matches a language tag by case
+([ADR-053](docs/adrs/mercury/ADR-053-one-rdf-term-one-atom.md)), and 3 malformed expressions the parser accepts
+([ADR-057](docs/adrs/mercury/ADR-057-expression-read-once.md)). Each is listed with its cause in
+[STATISTICS.md](STATISTICS.md#w3c-conformance).
 
 ### Protocols & surfaces
 
@@ -217,16 +227,17 @@ Mercury is a full SPARQL 1.1 + RDF stack. Every standard listed below is impleme
 
 | Claim                            | Evidence              | Command to Verify                            |
 |----------------------------------|-----------------------|----------------------------------------------|
-| 100% W3C SPARQL 1.1 Query        | 225 passing evaluation tests (every test in the 1.1 query manifest) | `dotnet test --project tests/Mercury.Tests --filter "FullyQualifiedName~Sparql11_QueryEval"` |
+| 100% W3C SPARQL 1.1 query evaluation | 532 passing of 535: the 247 SPARQL 1.1 tests and 285 of the 288 SPARQL 1.0 tests; the 3 skipped are SPARQL 1.0 known failures | `dotnet test --project tests/Mercury.Tests --filter "FullyQualifiedName~Sparql11_QueryEval"` |
 | 100% W3C SPARQL 1.1 Update       | 94 passing tests      | `dotnet test --project tests/Mercury.Tests --filter "FullyQualifiedName~Sparql11_UpdateEval"` |
-| 100% W3C SPARQL 1.1 Syntax       | 103 passing tests     | `dotnet test --project tests/Mercury.Tests --filter "FullyQualifiedName~Sparql11_PositiveSyntax\|FullyQualifiedName~Sparql11_NegativeSyntax"` |
-| 100% W3C Turtle / TriG / N-Triples / N-Quads / RDF-XML | 984 passing tests | `dotnet test --project tests/Mercury.Tests --filter "FullyQualifiedName~TurtleConformanceTests\|FullyQualifiedName~TriGConformanceTests\|FullyQualifiedName~NTriplesConformanceTests\|FullyQualifiedName~NQuadsConformanceTests\|FullyQualifiedName~RdfXmlConformanceTests"` |
-| 100% W3C JSON-LD 1.1             | 461 passing tests (6 intentional skips: legacy 1.0, generalized RDF) | `dotnet test --project tests/Mercury.Tests --filter "FullyQualifiedName~JsonLdConformanceTests"` |
+| 100% W3C SPARQL 1.1 query syntax | 302 passing of 305: the 106 SPARQL 1.1 tests and 196 of the 199 SPARQL 1.0 tests; the 3 skipped are SPARQL 1.0 known failures | `dotnet test --project tests/Mercury.Tests --filter "FullyQualifiedName~Sparql11_PositiveSyntax\|FullyQualifiedName~Sparql11_NegativeSyntax"` |
+| 100% W3C Turtle / TriG / N-Triples / N-Quads / RDF-XML (RDF 1.1 suites) | 993 passing tests | `dotnet test --project tests/Mercury.Tests --filter "FullyQualifiedName~TurtleConformanceTests\|FullyQualifiedName~TriGConformanceTests\|FullyQualifiedName~NTriplesConformanceTests\|FullyQualifiedName~NQuadsConformanceTests\|FullyQualifiedName~RdfXmlConformanceTests"` |
+| 100% W3C JSON-LD 1.1 toRdf, of the tests that apply | 461 passing; the 6 skipped do not apply (JSON-LD 1.0 processors, generalized RDF) | `dotnet test --project tests/Mercury.Tests --filter "FullyQualifiedName~JsonLdConformanceTests"` |
 | SPARQL HTTP endpoint             | `mercury` CLI         | `mercury -m` then visit `http://localhost:3031/sparql` |
 | Zero external runtime deps       | Mercury.csproj        | `grep PackageReference src/Mercury/*.csproj` |
-| 4,722 Mercury tests passing      | Test suite (6 intentional skips) | `dotnet test --project tests/Mercury.Tests` |
+| 5,928 Mercury tests passing      | 13 skipped on macOS: the 6 W3C known failures, the 6 JSON-LD tests that do not apply, and 1 test that needs a disk with less than 1 TB free | `dotnet test --project tests/Mercury.Tests` |
+| Five platforms                   | 6,234 tests, 0 failed, on macOS arm64, Linux x64 and arm64, and Windows arm64 ([Platforms](#platforms)) | `dotnet test` on each |
 | AI-assisted development          | Git history           | `git log --oneline \| grep "Co-Authored-By"` |
-| Development velocity             | ~197K lines           | See [STATISTICS.md](STATISTICS.md)           |
+| Development velocity             | ~255K lines           | See [STATISTICS.md](STATISTICS.md)           |
 
 ---
 
@@ -238,18 +249,20 @@ Mercury is a full SPARQL 1.1 + RDF stack. Every standard listed below is impleme
 
 ## 🧠 What's Built
 
-Everything below has code in `src/`, tests, and benchmarks.
+Everything below has code in `src/` and tests; Mercury also has benchmarks. Line counts are from
+[STATISTICS.md](STATISTICS.md), measured at 1.8.36.
 
 | Component              | Description                                                                                |
 |------------------------|--------------------------------------------------------------------------------------------|
-| **Mercury**            | Temporal RDF substrate — 88,534 lines, BCL-only. SPARQL 1.1 Query + Update + Syntax (100% W3C). RDF parsing/writing for Turtle, TriG, N-Triples, N-Quads, RDF/XML, JSON-LD. Built-in SPARQL HTTP endpoint (`http://localhost:3031/sparql`) with standard content negotiation. Four storage profiles per the no-behavior-flags rule (ADR-029, closed 1.7): Cognitive (bitemporal, versioned), Graph (versioned with soft-delete + un-delete-on-add), Reference (immutable, Wikidata-shaped), Minimal (single P→S→T sort order). Bitemporal extensions for time-travel queries. Zero-GC hot paths. |
+| **Mercury**            | Temporal RDF substrate — 67,925 lines in the core library, BCL-only. SPARQL 1.1 Query + Update + Syntax (every W3C SPARQL 1.1 test it runs passes). RDF parsing/writing for Turtle, TriG, N-Triples, N-Quads, RDF/XML, JSON-LD. Built-in SPARQL HTTP endpoint (`http://localhost:3031/sparql`) with standard content negotiation. Four storage profiles per the no-behavior-flags rule (ADR-029, closed 1.7): Cognitive (bitemporal, versioned), Graph (versioned with soft-delete + un-delete-on-add), Reference (immutable, Wikidata-shaped), Minimal (single P→S→T sort order). Bitemporal extensions for time-travel queries. Zero-GC hot paths. |
 | **Mercury.Solid**      | W3C Solid Protocol server — WAC + ACP access control, N3 Patch updates, full HTTP surface |
 | **Mercury.Pruning**    | Dual-instance pruning with copy-and-switch pattern                                         |
 | **Mercury MCP**        | Claude integration with persistent semantic memory                                         |
 | **Mercury CLI**        | Interactive REPL with persistent store, global tool install                                 |
-| **DrHook.Engine**      | Runtime observation substrate — BCL + P/Invoke + source-gen COM, 7,747 lines. ICorDebug via per-RID `libdbgshim`; EventPipe for process listing + thread/stack snapshots; `Transport/` publishes the unified debug-state model over a Unix-domain socket (ADR-012 Phase 2). Substrate-independence reached at 1.8.2 (netcoredbg retired). PoC probes through 63 with 81 dated findings validating each capability on macOS/arm64; it has run on Linux since 1.8.13 and on Windows since 1.8.19 ([Platforms](#platforms)). Production-suitability sequenced under [ADR-007](docs/adrs/drhook/ADR-007-teardown-concurrency-test-debug.md) (Accepted). |
-| **DrHook MCP**         | MCP server for .NET runtime inspection (peer to Mercury MCP) — 22 tools backed by DrHook.Engine: session lifecycle (launch / attach / stop / detach / kill), execution control (continue / pause / step over / into / out), breakpoints (source / function / exception with subclass filtering + condition / hit-count / logpoint, list / remove / clear), `locals` (field + array inspection), `processes`, `snapshot`, and console / log / anomaly drains. Tool names follow IDE-debugger convention ([ADR-010](docs/adrs/drhook/ADR-010-mcp-tool-surface-redesign.md)); every state-changing or state-reading tool takes a `hypothesis`. |
-| **DrHook Viz**         | Debug-state **visualization** ([ADR-012](docs/adrs/drhook/ADR-012-debug-state-surfaces.md) Phases 1–2) — a surface-agnostic model the engine publishes over a Unix-domain socket to human-launched views, layered like Mercury's `Abstractions ← Tool ← Cli`: **DrHook.Wire** (89 lines, zero-dependency NDJSON protocol contract), **DrHook.Viz** (176 lines, BCL-only client library — `DebugStateClient` + model + `IDebugStateView`), **DrHook.Viz.Console** (100 lines, `drhook-viz-console` — the first console view, and the first proper DrHook debuggee). A view connects mid-session and renders live (snapshot-on-connect + delta stream); killing it never affects the LLM-owned debug session. |
+| **DrHook.Engine**      | Runtime observation substrate — BCL + P/Invoke + source-gen COM, 10,233 lines. ICorDebug via per-RID `libdbgshim`; EventPipe for process listing + thread/stack snapshots; `Transport/` publishes the unified debug-state model over a Unix-domain socket (ADR-012 Phase 2). Substrate-independence reached at 1.8.2 (netcoredbg retired). PoC probes 02–66 and 99 dated findings validate each capability, first on macOS/arm64; it has run on Linux since 1.8.13 and on Windows since 1.8.19 ([Platforms](#platforms)). Production-suitability sequenced under [ADR-007](docs/adrs/drhook/ADR-007-teardown-concurrency-test-debug.md) (Accepted). |
+| **DrHook MCP**         | MCP server for .NET runtime inspection (peer to Mercury MCP) — 25 tools backed by DrHook.Engine: session lifecycle (launch / attach / stop / detach / kill), execution control (continue / pause / step over / into / out), breakpoints (source / function / exception with subclass filtering + condition / hit-count / logpoint, list / remove / clear), `locals` and `expand` (one level of an object or array at a time), `processes`, `snapshot`, `snapshot_image` (the debug state as a PNG), `capture_visual` (a GUI debuggee's own window as a PNG, with nothing added to the target), and console / log / anomaly drains. Tool names follow IDE-debugger convention ([ADR-010](docs/adrs/drhook/ADR-010-mcp-tool-surface-redesign.md)); every state-changing or state-reading tool takes a `hypothesis`. |
+| **DrHook Viz**         | Debug-state **visualization** ([ADR-012](docs/adrs/drhook/ADR-012-debug-state-surfaces.md) Phases 1–4) — a surface-agnostic model the engine publishes over a Unix-domain socket to human-launched views, layered like Mercury's `Abstractions ← Tool ← Cli`: **DrHook.Wire** (108 lines, zero-dependency NDJSON protocol contract), **DrHook.Viz** (770 lines, BCL-only client library — `DebugStateClient` + model + `IDebugStateView`), **DrHook.Viz.Console** (71 lines, `drhook-viz-console` — the first console view, and the first proper DrHook debuggee), **DrHook.Viz.Tui** (399 lines, `drhook-viz-tui` — the full-screen dashboard: stack, source, locals, breakpoints, braid, console, anomalies). A view connects mid-session and renders live (snapshot-on-connect + delta stream); killing it never affects the LLM-owned debug session. |
+| **DrHook.Capture**     | Saves a debug session's state stream, the `(hypothesis, observation)` braid included, to a Mercury store — 199 lines |
 
 ## 🔭 Architectural Vision
 
