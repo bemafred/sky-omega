@@ -14,44 +14,15 @@ internal sealed partial class RdfXmlStreamParser
 {
     #region Buffer Peek/Consume
 
+    // The next code point, the byte at an offset, and the move past the next code point (Utf8DocumentReader).
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private int Peek()
-    {
-        if (_bufferPosition >= _bufferLength)
-            return _endOfStream ? -1 : -1;
-
-        return _inputBuffer[_bufferPosition];
-    }
+    private int Peek() => _input.Peek();
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private int PeekAhead(int offset)
-    {
-        var pos = _bufferPosition + offset;
-        if (pos >= _bufferLength)
-            return -1;
-
-        return _inputBuffer[pos];
-    }
+    private int PeekAhead(int offset) => _input.PeekAhead(offset);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void Consume()
-    {
-        if (_bufferPosition >= _bufferLength)
-            return;
-
-        var ch = _inputBuffer[_bufferPosition];
-        _bufferPosition++;
-
-        if (ch == '\n')
-        {
-            _line++;
-            _column = 1;
-        }
-        else
-        {
-            _column++;
-        }
-    }
+    private void Consume() => _input.Consume();
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private bool TryConsume(char expected)
@@ -63,120 +34,18 @@ internal sealed partial class RdfXmlStreamParser
         return true;
     }
 
-    /// <summary>
-    /// The first fill: reads at least <see cref="Utf8ByteOrderMark.Length"/> bytes, or the whole input if it is
-    /// shorter, and skips a byte order mark at the start of the document.
-    /// </summary>
-    private async ValueTask FillDocumentStartAsync(CancellationToken cancellationToken)
-    {
-        do
-            await FillBufferAsync(cancellationToken);
-        while (_bufferLength - _bufferPosition < Utf8ByteOrderMark.Length && !_endOfStream && _bufferLength < _inputBuffer.Length);
-
-        _bufferPosition += Utf8ByteOrderMark.LengthAt(_inputBuffer.AsSpan(_bufferPosition, _bufferLength - _bufferPosition));
-    }
-
-    private async ValueTask FillBufferAsync(CancellationToken cancellationToken)
-    {
-        if (_endOfStream)
-            return;
-
-        // Shift remaining data to beginning
-        if (_bufferPosition > 0 && _bufferPosition < _bufferLength)
-        {
-            var remaining = _bufferLength - _bufferPosition;
-            Array.Copy(_inputBuffer, _bufferPosition, _inputBuffer, 0, remaining);
-            _bufferLength = remaining;
-            _bufferPosition = 0;
-        }
-        else if (_bufferPosition >= _bufferLength)
-        {
-            _bufferPosition = 0;
-            _bufferLength = 0;
-        }
-
-        // Fill remaining space
-        var bytesRead = await _stream.ReadAsync(
-            _inputBuffer.AsMemory(_bufferLength, _inputBuffer.Length - _bufferLength),
-            cancellationToken);
-
-        if (bytesRead == 0)
-        {
-            _endOfStream = true;
-        }
-        else
-        {
-            _bufferLength += bytesRead;
-        }
-    }
-
-    private async ValueTask RefillIfNeededAsync(CancellationToken cancellationToken)
-    {
-        var remaining = _bufferLength - _bufferPosition;
-        if (remaining < _inputBuffer.Length / 4 && !_endOfStream)
-        {
-            await FillBufferAsync(cancellationToken);
-        }
-    }
+    private ValueTask RefillIfNeededAsync(CancellationToken cancellationToken) => _input.TopUpAsync(cancellationToken);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private bool IsEndOfInput()
-    {
-        return _endOfStream && _bufferPosition >= _bufferLength;
-    }
+    private bool IsEndOfInput() => _input.AtEnd;
 
-    /// <summary>
-    /// Read and decode a UTF-8 character, which may be 1-4 bytes.
-    /// Returns the Unicode code point, or -1 for end of input.
-    /// </summary>
+    /// <summary>The next code point, read past; -1 at the end of the document.</summary>
     private int ReadUtf8Char()
     {
-        var b1 = Peek();
-        if (b1 == -1) return -1;
-        Consume();
-
-        // Single byte (ASCII): 0xxxxxxx
-        if ((b1 & 0x80) == 0)
-            return b1;
-
-        // Two bytes: 110xxxxx 10xxxxxx
-        if ((b1 & 0xE0) == 0xC0)
-        {
-            var b2 = Peek();
-            if (b2 == -1) return b1; // Incomplete sequence
+        var codePoint = Peek();
+        if (codePoint != -1)
             Consume();
-            return ((b1 & 0x1F) << 6) | (b2 & 0x3F);
-        }
-
-        // Three bytes: 1110xxxx 10xxxxxx 10xxxxxx
-        if ((b1 & 0xF0) == 0xE0)
-        {
-            var b2 = Peek();
-            if (b2 == -1) return b1;
-            Consume();
-            var b3 = Peek();
-            if (b3 == -1) return ((b1 & 0x0F) << 6) | (b2 & 0x3F);
-            Consume();
-            return ((b1 & 0x0F) << 12) | ((b2 & 0x3F) << 6) | (b3 & 0x3F);
-        }
-
-        // Four bytes: 11110xxx 10xxxxxx 10xxxxxx 10xxxxxx
-        if ((b1 & 0xF8) == 0xF0)
-        {
-            var b2 = Peek();
-            if (b2 == -1) return b1;
-            Consume();
-            var b3 = Peek();
-            if (b3 == -1) return ((b1 & 0x07) << 6) | (b2 & 0x3F);
-            Consume();
-            var b4 = Peek();
-            if (b4 == -1) return ((b1 & 0x07) << 12) | ((b2 & 0x3F) << 6) | (b3 & 0x3F);
-            Consume();
-            return ((b1 & 0x07) << 18) | ((b2 & 0x3F) << 12) | ((b3 & 0x3F) << 6) | (b4 & 0x3F);
-        }
-
-        // Invalid UTF-8 start byte - return as-is
-        return b1;
+        return codePoint;
     }
 
     /// <summary>
@@ -415,7 +284,7 @@ internal sealed partial class RdfXmlStreamParser
         if (!IsNameStartChar(ch))
             return ReadOnlySpan<char>.Empty;
 
-        AppendToOutput((char)ch);
+        AppendCodePoint(ch);
         Consume();
 
         // Rest of name
@@ -425,7 +294,7 @@ internal sealed partial class RdfXmlStreamParser
             if (!IsNameChar(ch))
                 break;
 
-            AppendToOutput((char)ch);
+            AppendCodePoint(ch);
             Consume();
         }
 
@@ -445,7 +314,7 @@ internal sealed partial class RdfXmlStreamParser
         if (!IsNameStartChar(ch))
             return string.Empty;
 
-        AppendToOutput((char)ch);
+        AppendCodePoint(ch);
         Consume();
 
         while (true)
@@ -454,7 +323,7 @@ internal sealed partial class RdfXmlStreamParser
             if (!IsNameChar(ch))
                 break;
 
-            AppendToOutput((char)ch);
+            AppendCodePoint(ch);
             Consume();
         }
 
@@ -961,7 +830,7 @@ internal sealed partial class RdfXmlStreamParser
             int nameStart = _outputOffset;
             while (Peek() != ';' && !IsEndOfInput())
             {
-                AppendToOutput((char)Peek());
+                AppendCodePoint(Peek());
                 Consume();
             }
             TryConsume(';');
@@ -1022,7 +891,7 @@ internal sealed partial class RdfXmlStreamParser
 
     private Exception ParserException(string message)
     {
-        return new InvalidDataException($"RDF/XML parse error at line {_line}, column {_column}: {message}");
+        return _input.Error(message);
     }
 
     #endregion

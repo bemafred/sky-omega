@@ -564,4 +564,76 @@ public class RdfXmlStreamParserTests
     }
 
     #endregion
+
+    #region Non-ASCII Names
+
+    [Fact]
+    public async Task ParseAsync_NonAsciiElementNames_AreDecoded()
+    {
+        // Until 2026-10-30 the name reader appended each byte as a character, so e:éléphant was read as the predicate
+        // <http://example.org/Ã>, with the rest of its start tag as a literal.
+        var rdfXml = "<rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\" xmlns:e=\"http://example.org/\">" +
+                     "<rdf:Description rdf:about=\"http://example.org/s\"><e:éléphant rdf:resource=\"http://example.org/r\"/></rdf:Description>" +
+                     "<e:Café rdf:about=\"http://example.org/t\"/>" +
+                     "</rdf:RDF>";
+        await using var stream = new MemoryStream(Encoding.UTF8.GetBytes(rdfXml));
+        using var parser = new RdfXmlStreamParser(stream);
+
+        var triples = new List<string>();
+        await parser.ParseAsync((s, p, o) => triples.Add($"{s} {p} {o}"), TestContext.Current.CancellationToken);
+
+        Assert.Equal(new[]
+        {
+            "<http://example.org/s> <http://example.org/éléphant> <http://example.org/r>",
+            "<http://example.org/t> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://example.org/Café>",
+        }, triples);
+    }
+
+    #endregion
+
+    #region Reads Shorter Than Asked
+
+    [Theory]
+    [InlineData(16, 1)]
+    [InlineData(16, 3)]
+    [InlineData(64, 7)]
+    public async Task ParseAsync_SmallReadsAndASmallBuffer_GiveTheSameTriples(int bufferSize, int bytesPerRead)
+    {
+        // A stream may return fewer bytes than asked for: a network body, a pipe. Until 2026-10-30 the parser's
+        // lookahead stopped at the end of its buffer, and on one-byte reads it looped forever.
+        var ct = TestContext.Current.CancellationToken;
+        var rdfXml = "<?xml version=\"1.0\"?>\n" +
+                     "<rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\" xmlns:e=\"http://example.org/\">\n" +
+                     "  <!-- a comment -->\n" +
+                     "  <rdf:Description rdf:about=\"http://example.org/s\">\n" +
+                     "    <e:name xml:lang=\"fr\">café € 😀</e:name>\n" +
+                     "    <e:long>" + new string('x', 100) + " &amp; &lt;</e:long>\n" +
+                     "    <e:knows><rdf:Description rdf:about=\"http://example.org/o\" e:p=\"v\"/></e:knows>\n" +
+                     "    <e:éléphant rdf:resource=\"http://example.org/r\"/>\n" +
+                     "  </rdf:Description>\n" +
+                     "</rdf:RDF>\n";
+
+        var expected = new List<string>();
+        await using (var whole = new MemoryStream(Encoding.UTF8.GetBytes(rdfXml)))
+        {
+            using var reference = new RdfXmlStreamParser(whole);
+            await reference.ParseAsync((s, p, o) => expected.Add($"{s} {p} {o}"), ct);
+        }
+
+        var actual = new List<string>();
+        await using (var slow = new SlowReadStream(new MemoryStream(Encoding.UTF8.GetBytes(rdfXml)), bytesPerRead))
+        {
+            using var parser = new RdfXmlStreamParser(slow, bufferSize: bufferSize);
+            var parse = Task.Run(() => parser.ParseAsync((s, p, o) => actual.Add($"{s} {p} {o}"), ct), ct);
+            // A regression to the old loop is a failure here, not a hung run.
+            await parse.WaitAsync(TimeSpan.FromSeconds(30), ct);
+        }
+
+        // name, long, knows, the nested description's e:p, and éléphant.
+        Assert.Equal(5, expected.Count);
+        Assert.Contains("<http://example.org/s> <http://example.org/éléphant> <http://example.org/r>", expected);
+        Assert.Equal(expected, actual);
+    }
+
+    #endregion
 }

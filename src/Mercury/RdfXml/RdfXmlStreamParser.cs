@@ -57,14 +57,10 @@ internal enum ElementKind
 /// </remarks>
 internal sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
 {
-    private readonly Stream _stream;
     private readonly IBufferManager _bufferManager;
 
-    // Input buffer
-    private byte[] _inputBuffer;
-    private int _bufferPosition;
-    private int _bufferLength;
-    private bool _endOfStream;
+    // The document, read as code points with lookahead that refills itself
+    private readonly Utf8DocumentReader _input;
     private bool _isDisposed;
 
     // Output buffer for zero-GC string building
@@ -80,8 +76,6 @@ internal sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
     private int _blankNodeCounter;
 
     // Current parse state
-    private int _line;
-    private int _column;
     private bool _insideRdfRoot; // Track if we're inside rdf:RDF for validation
     private readonly HashSet<string> _usedIds = new(StringComparer.Ordinal); // Track rdf:ID values for uniqueness
 
@@ -97,17 +91,14 @@ internal sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
 
     public RdfXmlStreamParser(Stream stream, string? baseUri = null, int bufferSize = DefaultBufferSize, IBufferManager? bufferManager = null)
     {
-        _stream = stream ?? throw new ArgumentNullException(nameof(stream));
+        ArgumentNullException.ThrowIfNull(stream);
         _bufferManager = bufferManager ?? PooledBufferManager.Shared;
         _baseUri = baseUri ?? string.Empty;
 
-        _inputBuffer = _bufferManager.Rent<byte>(bufferSize).Array!;
+        _input = new Utf8DocumentReader(stream, bufferSize, _bufferManager, "RDF/XML");
         _outputBuffer = _bufferManager.Rent<char>(OutputBufferSize).Array!;
 
         _namespaces = new Dictionary<string, string>(16);
-
-        _line = 1;
-        _column = 1;
 
         InitializeStandardNamespaces();
     }
@@ -127,7 +118,7 @@ internal sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(handler);
 
-        await FillDocumentStartAsync(cancellationToken);
+        await _input.StartAsync(cancellationToken);
 
         // Skip XML declaration and whitespace
         SkipXmlDeclaration();
@@ -141,12 +132,8 @@ internal sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
                 break;
 
             // Refill buffer if running low
-            var remaining = _bufferLength - _bufferPosition;
-            if (remaining < _inputBuffer.Length / 4 && !_endOfStream)
-            {
-                await FillBufferAsync(cancellationToken);
-                SkipWhitespace();
-            }
+            await _input.TopUpAsync(cancellationToken);
+            SkipWhitespace();
 
             if (IsEndOfInput())
                 break;
@@ -1441,7 +1428,7 @@ internal sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
         if (_isDisposed)
             return;
 
-        _bufferManager.Return(_inputBuffer);
+        _input.Dispose();
         _bufferManager.Return(_outputBuffer);
         _isDisposed = true;
     }
