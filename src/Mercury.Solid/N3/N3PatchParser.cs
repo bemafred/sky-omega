@@ -6,7 +6,7 @@
 // .NET 10 / C# 14
 
 using SkyOmega.Mercury.Rdf;
-using System.Buffers;
+using SkyOmega.Mercury.Runtime.Buffers;
 using System.Runtime.CompilerServices;
 using System.Text;
 
@@ -31,63 +31,45 @@ public sealed class N3PatchParser : IDisposable
     private const string SolidWhere = SolidNs + "where";
     private const string SolidDeletes = SolidNs + "deletes";
     private const string SolidInserts = SolidNs + "inserts";
+    private const string RdfType = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
 
-    private readonly Stream _stream;
     private readonly string? _baseUri;
-    private byte[] _buffer;
-    private char[] _charBuffer;
-    private int _bufferPosition;
-    private int _bufferLength;
-    private bool _endOfStream;
+
+    // The patch, read as code points with lookahead that refills itself
+    private readonly Utf8DocumentReader _input;
     private bool _disposed;
 
     private Dictionary<string, string> _prefixes = new();
-    private int _line = 1;
-#pragma warning disable CS0414 // Field is assigned but its value is never used
-    private int _column = 1;
-#pragma warning restore CS0414
 
     private const int DefaultBufferSize = 8192;
 
     public N3PatchParser(Stream stream, string? baseUri = null)
     {
-        _stream = stream ?? throw new ArgumentNullException(nameof(stream));
+        ArgumentNullException.ThrowIfNull(stream);
         _baseUri = baseUri;
-        _buffer = ArrayPool<byte>.Shared.Rent(DefaultBufferSize);
-        _charBuffer = ArrayPool<char>.Shared.Rent(DefaultBufferSize);
+        _input = new Utf8DocumentReader(stream, DefaultBufferSize, PooledBufferManager.Shared, "N3 Patch");
     }
 
     /// <summary>
-    /// Parses the N3 Patch document and returns the patch operations.
+    /// Parses the N3 Patch document.
     /// </summary>
     public async Task<N3Patch> ParseAsync(CancellationToken ct = default)
     {
-        await FillDocumentStartAsync(ct);
+        await _input.StartAsync(ct);
 
         var patchNode = (string?)null;
         var whereFormula = (N3Formula?)null;
         var deletesFormula = (N3Formula?)null;
         var insertsFormula = (N3Formula?)null;
 
-        // Parse prefixes and find the patch
-        SkipWhitespaceAndComments();
-
-        while (!_endOfStream || _bufferPosition < _bufferLength)
+        while (true)
         {
-            if (_bufferPosition >= _bufferLength && !_endOfStream)
-            {
-                await FillBufferAsync(ct);
-            }
-
-            if (_bufferPosition >= _bufferLength)
-                break;
-
+            await _input.TopUpAsync(ct);
             SkipWhitespaceAndComments();
 
-            if (_bufferPosition >= _bufferLength)
+            var c = Peek();
+            if (c == -1)
                 break;
-
-            var c = (char)_buffer[_bufferPosition];
 
             // Parse @prefix or @base directives
             if (c == '@')
@@ -97,11 +79,8 @@ public sealed class N3PatchParser : IDisposable
             }
 
             // Parse PREFIX or BASE (SPARQL style)
-            if (c == 'P' || c == 'p' || c == 'B' || c == 'b')
-            {
-                if (TryParseSparqlDirective())
-                    continue;
-            }
+            if (TryParseSparqlDirective())
+                continue;
 
             // Parse a statement
             var subject = ParseTerm();
@@ -120,7 +99,7 @@ public sealed class N3PatchParser : IDisposable
                 var predicateIri = ResolveTerm(predicate);
                 var objResolved = obj as string ?? (obj as N3Formula != null ? null : obj?.ToString());
 
-                if (predicateIri == "http://www.w3.org/1999/02/22-rdf-syntax-ns#type" &&
+                if (predicateIri == RdfType &&
                     objResolved != null && ResolveTerm(objResolved) == SolidInsertDeletePatch)
                 {
                     patchNode = subject;
@@ -141,27 +120,17 @@ public sealed class N3PatchParser : IDisposable
                     }
                 }
 
-                if (_bufferPosition >= _bufferLength)
-                    break;
-
-                c = (char)_buffer[_bufferPosition];
+                c = Peek();
                 if (c == ';')
                 {
-                    _bufferPosition++;
+                    Consume();
                     SkipWhitespaceAndComments();
                     continue;
                 }
-                if (c == '.' || c == '}')
-                {
-                    if (c == '.')
-                        _bufferPosition++;
-                    break;
-                }
-
+                if (c == '.')
+                    Consume();
                 break;
             }
-
-            SkipWhitespaceAndComments();
         }
 
         return new N3Patch(whereFormula, deletesFormula, insertsFormula);
@@ -169,7 +138,7 @@ public sealed class N3PatchParser : IDisposable
 
     private void ParseDirective()
     {
-        _bufferPosition++; // Skip @
+        Consume(); // @
         var keyword = ReadWord();
 
         if (keyword.Equals("prefix", StringComparison.OrdinalIgnoreCase))
@@ -186,19 +155,19 @@ public sealed class N3PatchParser : IDisposable
         else if (keyword.Equals("base", StringComparison.OrdinalIgnoreCase))
         {
             SkipWhitespace();
-            var iri = ReadIri();
+            ReadIri();
             SkipWhitespace();
             ExpectChar('.');
             // Base URI handling would go here
         }
     }
 
+    /// <summary>
+    /// A SPARQL-style PREFIX or BASE directive, recognized by lookahead so nothing is read when there is none.
+    /// </summary>
     private bool TryParseSparqlDirective()
     {
-        var start = _bufferPosition;
-        var keyword = ReadWord();
-
-        if (keyword.Equals("PREFIX", StringComparison.OrdinalIgnoreCase))
+        if (MatchKeyword("PREFIX"))
         {
             SkipWhitespace();
             var prefix = ReadPrefix();
@@ -207,26 +176,42 @@ public sealed class N3PatchParser : IDisposable
             _prefixes[prefix] = iri;
             return true;
         }
-        else if (keyword.Equals("BASE", StringComparison.OrdinalIgnoreCase))
+        if (MatchKeyword("BASE"))
         {
             SkipWhitespace();
-            var iri = ReadIri();
+            ReadIri();
             return true;
         }
-
-        // Rewind if not a directive
-        _bufferPosition = start;
         return false;
+    }
+
+    /// <summary>
+    /// Reads past <paramref name="keyword"/>, in any case, when it is next and not the start of a longer word.
+    /// </summary>
+    private bool MatchKeyword(string keyword)
+    {
+        for (int i = 0; i < keyword.Length; i++)
+        {
+            int b = _input.PeekAhead(i);
+            if (b == -1 || char.ToUpperInvariant((char)b) != keyword[i])
+                return false;
+        }
+        int next = _input.PeekAhead(keyword.Length);
+        if (next != -1 && (char.IsLetterOrDigit((char)next) || next == '_' || next == ':'))
+            return false;
+
+        for (int i = 0; i < keyword.Length; i++)
+            Consume();
+        return true;
     }
 
     private string ParseTerm()
     {
         SkipWhitespaceAndComments();
 
-        if (_bufferPosition >= _bufferLength)
+        var c = Peek();
+        if (c == -1)
             throw ParserException("Unexpected end of input");
-
-        var c = (char)_buffer[_bufferPosition];
 
         // IRI
         if (c == '<')
@@ -237,22 +222,23 @@ public sealed class N3PatchParser : IDisposable
         // Variable
         if (c == '?')
         {
-            _bufferPosition++;
+            Consume();
             return "?" + ReadWord();
         }
 
         // Blank node
-        if (c == '_' && _bufferPosition + 1 < _bufferLength && _buffer[_bufferPosition + 1] == ':')
+        if (c == '_' && _input.PeekAhead(1) == ':')
         {
-            _bufferPosition += 2;
+            Consume();
+            Consume();
             return "_:" + ReadWord();
         }
 
         // 'a' for rdf:type, before the prefixed-name rule, which would read it as a name
-        if (c == 'a' && (_bufferPosition + 1 >= _bufferLength || !char.IsLetterOrDigit((char)_buffer[_bufferPosition + 1])))
+        if (c == 'a' && !IsWordChar(_input.PeekAheadCodePoint(1)))
         {
-            _bufferPosition++;
-            return "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
+            Consume();
+            return RdfType;
         }
 
         // Literal
@@ -269,10 +255,9 @@ public sealed class N3PatchParser : IDisposable
     {
         SkipWhitespaceAndComments();
 
-        if (_bufferPosition >= _bufferLength)
+        var c = Peek();
+        if (c == -1)
             throw ParserException("Unexpected end of input");
-
-        var c = (char)_buffer[_bufferPosition];
 
         // Formula
         if (c == '{')
@@ -290,7 +275,7 @@ public sealed class N3PatchParser : IDisposable
 
         var patterns = new List<N3TriplePattern>();
 
-        while (_bufferPosition < _bufferLength && (char)_buffer[_bufferPosition] != '}')
+        while (Peek() != -1 && Peek() != '}')
         {
             // Parse triple pattern
             var subject = ParseN3Term();
@@ -303,35 +288,32 @@ public sealed class N3PatchParser : IDisposable
             patterns.Add(new N3TriplePattern(subject, predicate, obj));
 
             // Expect . or ; or }
-            if (_bufferPosition < _bufferLength)
+            var c = Peek();
+            if (c == '.')
             {
-                var c = (char)_buffer[_bufferPosition];
-                if (c == '.')
+                Consume();
+                SkipWhitespaceAndComments();
+            }
+            else if (c == ';')
+            {
+                // Predicate-object list within formula
+                while (Peek() == ';')
                 {
-                    _bufferPosition++;
+                    Consume();
                     SkipWhitespaceAndComments();
+                    if (Peek() != -1 && Peek() != '}')
+                    {
+                        predicate = ParseN3Term();
+                        SkipWhitespaceAndComments();
+                        obj = ParseN3Term();
+                        SkipWhitespaceAndComments();
+                        patterns.Add(new N3TriplePattern(subject, predicate, obj));
+                    }
                 }
-                else if (c == ';')
+                if (Peek() == '.')
                 {
-                    // Predicate-object list within formula
-                    while (_bufferPosition < _bufferLength && (char)_buffer[_bufferPosition] == ';')
-                    {
-                        _bufferPosition++;
-                        SkipWhitespaceAndComments();
-                        if (_bufferPosition < _bufferLength && (char)_buffer[_bufferPosition] != '}')
-                        {
-                            predicate = ParseN3Term();
-                            SkipWhitespaceAndComments();
-                            obj = ParseN3Term();
-                            SkipWhitespaceAndComments();
-                            patterns.Add(new N3TriplePattern(subject, predicate, obj));
-                        }
-                    }
-                    if (_bufferPosition < _bufferLength && (char)_buffer[_bufferPosition] == '.')
-                    {
-                        _bufferPosition++;
-                        SkipWhitespaceAndComments();
-                    }
+                    Consume();
+                    SkipWhitespaceAndComments();
                 }
             }
         }
@@ -344,15 +326,14 @@ public sealed class N3PatchParser : IDisposable
     {
         SkipWhitespaceAndComments();
 
-        if (_bufferPosition >= _bufferLength)
+        var c = Peek();
+        if (c == -1)
             throw ParserException("Unexpected end of input");
-
-        var c = (char)_buffer[_bufferPosition];
 
         // Variable
         if (c == '?')
         {
-            _bufferPosition++;
+            Consume();
             var name = ReadWord();
             return N3Term.Variable(name);
         }
@@ -368,9 +349,10 @@ public sealed class N3PatchParser : IDisposable
         }
 
         // Blank node
-        if (c == '_' && _bufferPosition + 1 < _bufferLength && _buffer[_bufferPosition + 1] == ':')
+        if (c == '_' && _input.PeekAhead(1) == ':')
         {
-            _bufferPosition += 2;
+            Consume();
+            Consume();
             var id = ReadWord();
             return N3Term.BlankNode(id);
         }
@@ -383,10 +365,10 @@ public sealed class N3PatchParser : IDisposable
         }
 
         // 'a' shorthand
-        if (c == 'a' && (_bufferPosition + 1 >= _bufferLength || !char.IsLetterOrDigit((char)_buffer[_bufferPosition + 1])))
+        if (c == 'a' && !IsWordChar(_input.PeekAheadCodePoint(1)))
         {
-            _bufferPosition++;
-            return N3Term.Iri("http://www.w3.org/1999/02/22-rdf-syntax-ns#type");
+            Consume();
+            return N3Term.Iri(RdfType);
         }
 
         // Prefixed name
@@ -423,21 +405,17 @@ public sealed class N3PatchParser : IDisposable
         return N3Term.Literal(value);
     }
 
+    /// <summary>A letter, digit, '_' or '-': the characters of a variable, blank node label or keyword.</summary>
+    private static bool IsWordChar(int c)
+        => c == '_' || c == '-' || (c >= 0 && Rune.IsValid(c) && Rune.IsLetterOrDigit(new Rune(c)));
+
     private string ReadWord()
     {
         var sb = new StringBuilder();
-        while (_bufferPosition < _bufferLength)
+        while (IsWordChar(Peek()))
         {
-            var c = (char)_buffer[_bufferPosition];
-            if (char.IsLetterOrDigit(c) || c == '_' || c == '-')
-            {
-                sb.Append(c);
-                _bufferPosition++;
-            }
-            else
-            {
-                break;
-            }
+            RdfEscape.AppendUtf16(sb, Peek());
+            Consume();
         }
         return sb.ToString();
     }
@@ -445,51 +423,41 @@ public sealed class N3PatchParser : IDisposable
     private string ReadPrefix()
     {
         var sb = new StringBuilder();
-        while (_bufferPosition < _bufferLength)
+        while (true)
         {
-            var c = (char)_buffer[_bufferPosition];
+            var c = Peek();
             if (c == ':')
             {
-                _bufferPosition++;
+                Consume();
                 break;
             }
-            if (char.IsLetterOrDigit(c) || c == '_' || c == '-')
-            {
-                sb.Append(c);
-                _bufferPosition++;
-            }
-            else
-            {
+            if (!IsWordChar(c))
                 break;
-            }
+            RdfEscape.AppendUtf16(sb, c);
+            Consume();
         }
         return sb.ToString();
     }
 
     private string ReadIri()
     {
-        if ((char)_buffer[_bufferPosition] != '<')
+        if (Peek() != '<')
             throw ParserException("Expected '<'");
 
-        _bufferPosition++;
+        Consume();
         var sb = new StringBuilder();
         sb.Append('<');
 
-        while (_bufferPosition < _bufferLength)
+        while (true)
         {
-            var c = (char)_buffer[_bufferPosition];
-            _bufferPosition++;
-
+            var c = Peek();
+            if (c == -1)
+                throw ParserException("Unterminated IRI");
+            Consume();
+            RdfEscape.AppendUtf16(sb, c);
             if (c == '>')
-            {
-                sb.Append(c);
                 return sb.ToString();
-            }
-
-            sb.Append(c);
         }
-
-        throw ParserException("Unterminated IRI");
     }
 
     private string ReadPrefixedName()
@@ -497,48 +465,39 @@ public sealed class N3PatchParser : IDisposable
         var sb = new StringBuilder();
 
         // Read prefix part
-        while (_bufferPosition < _bufferLength)
+        while (true)
         {
-            var c = (char)_buffer[_bufferPosition];
+            var c = Peek();
             if (c == ':')
             {
-                sb.Append(c);
-                _bufferPosition++;
+                sb.Append(':');
+                Consume();
                 break;
             }
-            if (char.IsLetterOrDigit(c) || c == '_' || c == '-')
-            {
-                sb.Append(c);
-                _bufferPosition++;
-            }
-            else
-            {
+            if (!IsWordChar(c))
                 break;
-            }
+            RdfEscape.AppendUtf16(sb, c);
+            Consume();
         }
 
         // Read local part
-        while (_bufferPosition < _bufferLength)
+        while (true)
         {
-            var c = (char)_buffer[_bufferPosition];
-            if (char.IsLetterOrDigit(c) || c == '_' || c == '-' || c == '.' || c == '/')
-            {
-                sb.Append(c);
-                _bufferPosition++;
-            }
-            else
-            {
+            var c = Peek();
+            if (!IsWordChar(c) && c != '.' && c != '/')
                 break;
-            }
+            RdfEscape.AppendUtf16(sb, c);
+            Consume();
         }
 
         // Nothing read: the character starts no term. Returning an empty name here made the statement loop retry
         // the same character forever.
         if (sb.Length == 0)
         {
-            if (_bufferPosition >= _bufferLength)
+            var c = Peek();
+            if (c == -1)
                 throw ParserException("Unexpected end of input");
-            throw ParserException($"Unexpected character U+{_buffer[_bufferPosition]:X4}");
+            throw ParserException($"Unexpected character U+{c:X4}");
         }
 
         return sb.ToString();
@@ -546,19 +505,21 @@ public sealed class N3PatchParser : IDisposable
 
     private string ReadLiteral()
     {
-        var quote = (char)_buffer[_bufferPosition];
-        _bufferPosition++;
+        var quote = Peek();
+        Consume();
 
         var sb = new StringBuilder();
-        sb.Append(quote);
+        sb.Append((char)quote);
 
         bool escaped = false;
         bool terminated = false;
-        while (_bufferPosition < _bufferLength)
+        while (true)
         {
-            var c = (char)_buffer[_bufferPosition];
-            _bufferPosition++;
-            sb.Append(c);
+            var c = Peek();
+            if (c == -1)
+                break;
+            Consume();
+            RdfEscape.AppendUtf16(sb, c);
 
             if (escaped)
             {
@@ -583,42 +544,34 @@ public sealed class N3PatchParser : IDisposable
             throw ParserException("Unterminated literal");
 
         // Check for language tag or datatype
-        if (_bufferPosition < _bufferLength)
+        if (Peek() == '@')
         {
-            var c = (char)_buffer[_bufferPosition];
-            if (c == '@')
+            sb.Append('@');
+            Consume();
+            // Read language tag
+            while (true)
             {
-                sb.Append(c);
-                _bufferPosition++;
-                // Read language tag
-                while (_bufferPosition < _bufferLength)
-                {
-                    c = (char)_buffer[_bufferPosition];
-                    if (char.IsLetterOrDigit(c) || c == '-')
-                    {
-                        sb.Append(c);
-                        _bufferPosition++;
-                    }
-                    else
-                    {
-                        break;
-                    }
-                }
+                var c = Peek();
+                if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-'))
+                    break;
+                sb.Append((char)c);
+                Consume();
             }
-            else if (c == '^' && _bufferPosition + 1 < _bufferLength && _buffer[_bufferPosition + 1] == '^')
+        }
+        else if (Peek() == '^' && _input.PeekAhead(1) == '^')
+        {
+            sb.Append("^^");
+            Consume();
+            Consume();
+            SkipWhitespace();
+            // Read datatype IRI
+            if (Peek() == '<')
             {
-                sb.Append("^^");
-                _bufferPosition += 2;
-                SkipWhitespace();
-                // Read datatype IRI
-                if (_bufferPosition < _bufferLength && (char)_buffer[_bufferPosition] == '<')
-                {
-                    sb.Append(ReadIri());
-                }
-                else
-                {
-                    sb.Append(ReadPrefixedName());
-                }
+                sb.Append(ReadIri());
+            }
+            else
+            {
+                sb.Append(ReadPrefixedName());
             }
         }
 
@@ -652,48 +605,24 @@ public sealed class N3PatchParser : IDisposable
 
     private void SkipWhitespace()
     {
-        while (_bufferPosition < _bufferLength)
-        {
-            var c = (char)_buffer[_bufferPosition];
-            if (c == ' ' || c == '\t' || c == '\r')
-            {
-                _bufferPosition++;
-            }
-            else if (c == '\n')
-            {
-                _bufferPosition++;
-                _line++;
-                _column = 1;
-            }
-            else
-            {
-                break;
-            }
-        }
+        while (Peek() is ' ' or '\t' or '\r' or '\n')
+            Consume();
     }
 
     private void SkipWhitespaceAndComments()
     {
-        while (_bufferPosition < _bufferLength)
+        while (true)
         {
-            var c = (char)_buffer[_bufferPosition];
-            if (c == ' ' || c == '\t' || c == '\r')
+            var c = Peek();
+            if (c is ' ' or '\t' or '\r' or '\n')
             {
-                _bufferPosition++;
-            }
-            else if (c == '\n')
-            {
-                _bufferPosition++;
-                _line++;
-                _column = 1;
+                Consume();
             }
             else if (c == '#')
             {
                 // Skip comment
-                while (_bufferPosition < _bufferLength && (char)_buffer[_bufferPosition] != '\n')
-                {
-                    _bufferPosition++;
-                }
+                while (Peek() != -1 && Peek() != '\n')
+                    Consume();
             }
             else
             {
@@ -704,71 +633,25 @@ public sealed class N3PatchParser : IDisposable
 
     private void ExpectChar(char expected)
     {
-        if (_bufferPosition >= _bufferLength || (char)_buffer[_bufferPosition] != expected)
-        {
+        if (Peek() != expected)
             throw ParserException($"Expected '{expected}'");
-        }
-        _bufferPosition++;
+        Consume();
     }
 
-    /// <summary>
-    /// The first fill: reads at least <see cref="Utf8ByteOrderMark.Length"/> bytes, or the whole input if it is
-    /// shorter, and skips a byte order mark at the start of the document.
-    /// </summary>
-    private async Task FillDocumentStartAsync(CancellationToken ct)
-    {
-        do
-            await FillBufferAsync(ct);
-        while (_bufferLength - _bufferPosition < Utf8ByteOrderMark.Length && !_endOfStream && _bufferLength < _buffer.Length);
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private int Peek() => _input.Peek();
 
-        _bufferPosition += Utf8ByteOrderMark.LengthAt(_buffer.AsSpan(_bufferPosition, _bufferLength - _bufferPosition));
-    }
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void Consume() => _input.Consume();
 
-    private async Task FillBufferAsync(CancellationToken ct)
-    {
-        if (_endOfStream)
-            return;
-
-        // Shift remaining data to start
-        if (_bufferPosition > 0 && _bufferPosition < _bufferLength)
-        {
-            var remaining = _bufferLength - _bufferPosition;
-            Buffer.BlockCopy(_buffer, _bufferPosition, _buffer, 0, remaining);
-            _bufferLength = remaining;
-            _bufferPosition = 0;
-        }
-        else if (_bufferPosition >= _bufferLength)
-        {
-            _bufferPosition = 0;
-            _bufferLength = 0;
-        }
-
-        // Read more data
-        var spaceAvailable = _buffer.Length - _bufferLength;
-        var bytesRead = await _stream.ReadAsync(_buffer.AsMemory(_bufferLength, spaceAvailable), ct);
-
-        if (bytesRead == 0)
-        {
-            _endOfStream = true;
-        }
-        else
-        {
-            _bufferLength += bytesRead;
-        }
-    }
-
-    private Exception ParserException(string message)
-    {
-        return new InvalidDataException($"N3 Patch parse error at line {_line}: {message}");
-    }
+    private Exception ParserException(string message) => _input.Error(message);
 
     public void Dispose()
     {
         if (_disposed)
             return;
 
-        ArrayPool<byte>.Shared.Return(_buffer);
-        ArrayPool<char>.Shared.Return(_charBuffer);
+        _input.Dispose();
         _disposed = true;
     }
 }

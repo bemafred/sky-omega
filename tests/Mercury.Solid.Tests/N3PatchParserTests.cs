@@ -3,6 +3,7 @@
 
 using System.Text;
 using SkyOmega.Mercury.Solid.N3;
+using SkyOmega.Mercury.Tests.Rdf;
 using Xunit;
 
 namespace SkyOmega.Mercury.Solid.Tests;
@@ -45,6 +46,50 @@ public class N3PatchParserTests
         Assert.Equal("http://www.example.org/terms#familyName", Assert.Single(result.Where!.Patterns).Predicate.Value);
         Assert.Equal("Alex", Assert.Single(result.Inserts!.Patterns).Object.Value);
         Assert.Equal("Claudia", Assert.Single(result.Deletes!.Patterns).Object.Value);
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(3)]
+    public async Task ParseAsync_SmallReads_GiveTheSamePatch(int bytesPerRead)
+    {
+        // A request body may arrive in reads shorter than asked for. Until 2026-10-30 the parser read its buffer
+        // directly and refilled only between statements, so a term split by a read was cut short.
+        var ct = TestContext.Current.CancellationToken;
+        var patch = "@prefix solid: <http://www.w3.org/ns/solid/terms#>.\n" +
+                    "PREFIX ex: <http://www.example.org/terms#>\n" +
+                    "_:rename a solid:InsertDeletePatch;\n" +
+                    "  solid:where   { ?person ex:familyName \"García\". };\n" +
+                    "  solid:inserts { ?person ex:givenName \"Alex 😀\"@es; ex:knows <http://e/b>. };\n" +
+                    "  solid:deletes { ?person ex:givenName \"Claudia\". }.\n";
+
+        using var whole = new N3PatchParser(new MemoryStream(Encoding.UTF8.GetBytes(patch)));
+        var expected = await whole.ParseAsync(ct);
+        using var slow = new N3PatchParser(new SlowReadStream(new MemoryStream(Encoding.UTF8.GetBytes(patch)), bytesPerRead));
+        var actual = await slow.ParseAsync(ct);
+
+        Assert.Equal("García", Assert.Single(expected.Where!.Patterns).Object.Value);
+        Assert.Equal(new[] { "Alex 😀", "http://e/b" }, expected.Inserts!.Patterns.Select(t => t.Object.Value));
+        Assert.Equal("Claudia", Assert.Single(expected.Deletes!.Patterns).Object.Value);
+        // The patterns are value types, compared term by term: value, type, datatype and language.
+        Assert.Equal(expected.Where.Patterns, actual.Where!.Patterns);
+        Assert.Equal(expected.Inserts.Patterns, actual.Inserts!.Patterns);
+        Assert.Equal(expected.Deletes.Patterns, actual.Deletes!.Patterns);
+    }
+
+    [Fact]
+    public async Task ParseAsync_NonAsciiText_IsDecodedFromUtf8()
+    {
+        // The parser read each byte as a character, so "café" was "cafÃ©".
+        var patch = "@prefix solid: <http://www.w3.org/ns/solid/terms#>.\n" +
+                    "@prefix ex: <http://www.example.org/>.\n" +
+                    "_:p a solid:InsertDeletePatch; solid:inserts { <http://e/s> ex:éléphant \"café\". }.\n";
+
+        using var parser = new N3PatchParser(new MemoryStream(Encoding.UTF8.GetBytes(patch)));
+        var inserted = Assert.Single((await parser.ParseAsync(TestContext.Current.CancellationToken)).Inserts!.Patterns);
+
+        Assert.Equal("http://www.example.org/éléphant", inserted.Predicate.Value);
+        Assert.Equal("café", inserted.Object.Value);
     }
 
     [Theory]

@@ -20,4 +20,9 @@
         <ProjectReference Include="..\..\src\Mercury.Runtime\Mercury.Runtime.csproj" />
     </ItemGroup>
 
+    <ItemGroup>
+        <!-- The stream that returns fewer bytes than asked, from Mercury.Tests: one source for both test projects. -->
+        <Compile Include="..\Mercury.Tests\Rdf\SlowReadStream.cs" Link="SlowReadStream.cs" />
+    </ItemGroup>
+
 </Project>
