@@ -20,8 +20,8 @@ public class RdfXmlConformanceTests
     }
 
     [Theory]
-    [MemberData(nameof(GetRdfXml11NegativeSyntaxTests))]
-    public async Task RdfXml11_NegativeSyntax(W3CTestCase test)
+    [MemberData(nameof(GetRdfXmlNegativeSyntaxTests))]
+    public async Task RdfXml_NegativeSyntax(W3CTestCase test)
     {
         Assert.SkipUnless(W3CTestContext.IsAvailable, "W3C test suite not available");
         if (W3CTestContext.IsKnownFailure(test.Id, out var cause))
@@ -44,8 +44,8 @@ public class RdfXmlConformanceTests
     }
 
     [Theory]
-    [MemberData(nameof(GetRdfXml11EvalTests))]
-    public async Task RdfXml11_Eval(W3CTestCase test)
+    [MemberData(nameof(GetRdfXmlEvalTests))]
+    public async Task RdfXml_Eval(W3CTestCase test)
     {
         Assert.SkipUnless(W3CTestContext.IsAvailable, "W3C test suite not available");
         if (W3CTestContext.IsKnownFailure(test.Id, out var cause))
@@ -199,7 +199,7 @@ public class RdfXmlConformanceTests
         return w3cBase + relativePath;
     }
 
-    public static IEnumerable<object[]> GetRdfXml11NegativeSyntaxTests()
+    public static IEnumerable<object[]> GetRdfXmlNegativeSyntaxTests()
     {
         if (!W3CTestContext.IsAvailable)
             throw new InvalidOperationException(
@@ -208,7 +208,7 @@ public class RdfXmlConformanceTests
                 "Run ./tools/update-submodules.sh (or .\\tools\\update-submodules.ps1) to initialize.");
 
         var parser = new W3CManifestParser();
-        var manifestPath = W3CTestContext.GetManifestPath(W3CTestSuite.RdfXml11);
+        var manifestPath = W3CTestContext.GetManifestPath(W3CTestSuite.RdfXml12);
 
         if (!File.Exists(manifestPath))
             yield break;
@@ -221,7 +221,7 @@ public class RdfXmlConformanceTests
         }
     }
 
-    public static IEnumerable<object[]> GetRdfXml11EvalTests()
+    public static IEnumerable<object[]> GetRdfXmlEvalTests()
     {
         if (!W3CTestContext.IsAvailable)
             throw new InvalidOperationException(
@@ -230,7 +230,7 @@ public class RdfXmlConformanceTests
                 "Run ./tools/update-submodules.sh (or .\\tools\\update-submodules.ps1) to initialize.");
 
         var parser = new W3CManifestParser();
-        var manifestPath = W3CTestContext.GetManifestPath(W3CTestSuite.RdfXml11);
+        var manifestPath = W3CTestContext.GetManifestPath(W3CTestSuite.RdfXml12);
 
         if (!File.Exists(manifestPath))
             yield break;

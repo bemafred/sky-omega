@@ -20,8 +20,8 @@ public class TriGConformanceTests
     }
 
     [Theory]
-    [MemberData(nameof(GetTriG11PositiveSyntaxTests))]
-    public async Task TriG11_PositiveSyntax(W3CTestCase test)
+    [MemberData(nameof(GetTriGPositiveSyntaxTests))]
+    public async Task TriG_PositiveSyntax(W3CTestCase test)
     {
         Assert.SkipUnless(W3CTestContext.IsAvailable, "W3C test suite not available");
         if (W3CTestContext.IsKnownFailure(test.Id, out var cause))
@@ -49,8 +49,8 @@ public class TriGConformanceTests
     }
 
     [Theory]
-    [MemberData(nameof(GetTriG11NegativeSyntaxTests))]
-    public async Task TriG11_NegativeSyntax(W3CTestCase test)
+    [MemberData(nameof(GetTriGNegativeSyntaxTests))]
+    public async Task TriG_NegativeSyntax(W3CTestCase test)
     {
         Assert.SkipUnless(W3CTestContext.IsAvailable, "W3C test suite not available");
         if (W3CTestContext.IsKnownFailure(test.Id, out var cause))
@@ -76,8 +76,8 @@ public class TriGConformanceTests
     }
 
     [Theory]
-    [MemberData(nameof(GetTriG11EvalTests))]
-    public async Task TriG11_Eval(W3CTestCase test)
+    [MemberData(nameof(GetTriGEvalTests))]
+    public async Task TriG_Eval(W3CTestCase test)
     {
         Assert.SkipUnless(W3CTestContext.IsAvailable, "W3C test suite not available");
         if (W3CTestContext.IsKnownFailure(test.Id, out var cause))
@@ -233,7 +233,7 @@ public class TriGConformanceTests
         return $"https://w3c.github.io/rdf-tests/rdf/rdf11/rdf-trig/{fileName}";
     }
 
-    public static IEnumerable<object[]> GetTriG11PositiveSyntaxTests()
+    public static IEnumerable<object[]> GetTriGPositiveSyntaxTests()
     {
         if (!W3CTestContext.IsAvailable)
             throw new InvalidOperationException(
@@ -242,7 +242,7 @@ public class TriGConformanceTests
                 "Run ./tools/update-submodules.sh (or .\\tools\\update-submodules.ps1) to initialize.");
 
         var parser = new W3CManifestParser();
-        var manifestPath = W3CTestContext.GetManifestPath(W3CTestSuite.TriG11);
+        var manifestPath = W3CTestContext.GetManifestPath(W3CTestSuite.TriG12);
 
         var tests = parser.ParseAsync(manifestPath).GetAwaiter().GetResult();
 
@@ -252,7 +252,7 @@ public class TriGConformanceTests
         }
     }
 
-    public static IEnumerable<object[]> GetTriG11NegativeSyntaxTests()
+    public static IEnumerable<object[]> GetTriGNegativeSyntaxTests()
     {
         if (!W3CTestContext.IsAvailable)
             throw new InvalidOperationException(
@@ -261,7 +261,7 @@ public class TriGConformanceTests
                 "Run ./tools/update-submodules.sh (or .\\tools\\update-submodules.ps1) to initialize.");
 
         var parser = new W3CManifestParser();
-        var manifestPath = W3CTestContext.GetManifestPath(W3CTestSuite.TriG11);
+        var manifestPath = W3CTestContext.GetManifestPath(W3CTestSuite.TriG12);
 
         var tests = parser.ParseAsync(manifestPath).GetAwaiter().GetResult();
 
@@ -271,7 +271,7 @@ public class TriGConformanceTests
         }
     }
 
-    public static IEnumerable<object[]> GetTriG11EvalTests()
+    public static IEnumerable<object[]> GetTriGEvalTests()
     {
         if (!W3CTestContext.IsAvailable)
             throw new InvalidOperationException(
@@ -280,7 +280,7 @@ public class TriGConformanceTests
                 "Run ./tools/update-submodules.sh (or .\\tools\\update-submodules.ps1) to initialize.");
 
         var parser = new W3CManifestParser();
-        var manifestPath = W3CTestContext.GetManifestPath(W3CTestSuite.TriG11);
+        var manifestPath = W3CTestContext.GetManifestPath(W3CTestSuite.TriG12);
 
         var tests = parser.ParseAsync(manifestPath).GetAwaiter().GetResult();
 

@@ -48,11 +48,13 @@ public sealed class W3CManifestParser
         [$"<{RDFT}TestNTriplesPositiveSyntax>"] = W3CTestType.PositiveSyntax,
         [$"<{RDFT}TestNTriplesNegativeSyntax>"] = W3CTestType.NegativeSyntax,
         [$"<{RDFT}TestNTriplesEval>"] = W3CTestType.PositiveEval,
+        [$"<{RDFT}TestNTriplesPositiveC14N>"] = W3CTestType.CanonicalForm,
 
         // RDF parser tests (N-Quads)
         [$"<{RDFT}TestNQuadsPositiveSyntax>"] = W3CTestType.PositiveSyntax,
         [$"<{RDFT}TestNQuadsNegativeSyntax>"] = W3CTestType.NegativeSyntax,
         [$"<{RDFT}TestNQuadsEval>"] = W3CTestType.PositiveEval,
+        [$"<{RDFT}TestNQuadsPositiveC14N>"] = W3CTestType.CanonicalForm,
 
         // RDF parser tests (Turtle)
         [$"<{RDFT}TestTurtlePositiveSyntax>"] = W3CTestType.PositiveSyntax,

@@ -95,6 +95,9 @@ public enum W3CTestType
     /// <summary>SPARQL update must execute and produce expected graph state.</summary>
     UpdateEval,
 
+    /// <summary>The input, parsed and written back by Mercury's writer, must equal the result file character for character.</summary>
+    CanonicalForm,
+
     /// <summary>Unknown or unsupported test type.</summary>
     Unknown
 }

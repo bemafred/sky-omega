@@ -19,8 +19,8 @@ public class NTriplesConformanceTests
     }
 
     [Theory]
-    [MemberData(nameof(GetNTriples11PositiveSyntaxTests))]
-    public async Task NTriples11_PositiveSyntax(W3CTestCase test)
+    [MemberData(nameof(GetNTriplesPositiveSyntaxTests))]
+    public async Task NTriples_PositiveSyntax(W3CTestCase test)
     {
         Assert.SkipUnless(W3CTestContext.IsAvailable, "W3C test suite not available");
         if (W3CTestContext.IsKnownFailure(test.Id, out var cause))
@@ -45,8 +45,8 @@ public class NTriplesConformanceTests
     }
 
     [Theory]
-    [MemberData(nameof(GetNTriples11NegativeSyntaxTests))]
-    public async Task NTriples11_NegativeSyntax(W3CTestCase test)
+    [MemberData(nameof(GetNTriplesNegativeSyntaxTests))]
+    public async Task NTriples_NegativeSyntax(W3CTestCase test)
     {
         Assert.SkipUnless(W3CTestContext.IsAvailable, "W3C test suite not available");
         if (W3CTestContext.IsKnownFailure(test.Id, out var cause))
@@ -68,7 +68,34 @@ public class NTriplesConformanceTests
         _output.WriteLine($"Expected error: {exception.Message}");
     }
 
-    public static IEnumerable<object[]> GetNTriples11PositiveSyntaxTests()
+    [Theory]
+    [MemberData(nameof(GetNTriplesCanonicalFormTests))]
+    public async Task NTriples_CanonicalForm(W3CTestCase test)
+    {
+        Assert.SkipUnless(W3CTestContext.IsAvailable, "W3C test suite not available");
+        if (W3CTestContext.IsKnownFailure(test.Id, out var cause))
+            Assert.SkipWhen(true, cause);
+        Assert.SkipUnless(File.Exists(test.ActionPath), $"Test file not found: {test.ActionPath}");
+        Assert.SkipWhen(test.ResultPath == null, "No expected result file");
+
+        _output.WriteLine($"Test: {test.Name}");
+        _output.WriteLine($"File: {test.ActionPath}");
+
+        // Canonical-form test (RDF 1.2): the input, parsed and written back by Mercury's writer, is the
+        // expected file character for character.
+        var output = new StringWriter();
+        using (var writer = new NTriplesStreamWriter(output))
+        {
+            await using var stream = File.OpenRead(test.ActionPath);
+            using var parser = new NTriplesStreamParser(stream);
+            await parser.ParseAsync((s, p, o) => writer.WriteTriple(s, p, o), TestContext.Current.CancellationToken);
+        }
+        string expected = await File.ReadAllTextAsync(test.ResultPath!, TestContext.Current.CancellationToken);
+
+        Assert.Equal(expected, output.ToString());
+    }
+
+    public static IEnumerable<object[]> GetNTriplesCanonicalFormTests()
     {
         if (!W3CTestContext.IsAvailable)
             throw new InvalidOperationException(
@@ -77,7 +104,26 @@ public class NTriplesConformanceTests
                 "Run ./tools/update-submodules.sh (or .\\tools\\update-submodules.ps1) to initialize.");
 
         var parser = new W3CManifestParser();
-        var manifestPath = W3CTestContext.GetManifestPath(W3CTestSuite.NTriples11);
+        var manifestPath = W3CTestContext.GetManifestPath(W3CTestSuite.NTriples12);
+
+        var tests = parser.ParseAsync(manifestPath).GetAwaiter().GetResult();
+
+        foreach (var test in tests.Where(t => t.Type == W3CTestType.CanonicalForm))
+        {
+            yield return new object[] { test };
+        }
+    }
+
+    public static IEnumerable<object[]> GetNTriplesPositiveSyntaxTests()
+    {
+        if (!W3CTestContext.IsAvailable)
+            throw new InvalidOperationException(
+                $"W3C RDF test suite not found at '{W3CTestContext.TestsRoot}'. " +
+                $"Directory exists: {Directory.Exists(W3CTestContext.TestsRoot)}. " +
+                "Run ./tools/update-submodules.sh (or .\\tools\\update-submodules.ps1) to initialize.");
+
+        var parser = new W3CManifestParser();
+        var manifestPath = W3CTestContext.GetManifestPath(W3CTestSuite.NTriples12);
 
         var tests = parser.ParseAsync(manifestPath).GetAwaiter().GetResult();
 
@@ -87,7 +133,7 @@ public class NTriplesConformanceTests
         }
     }
 
-    public static IEnumerable<object[]> GetNTriples11NegativeSyntaxTests()
+    public static IEnumerable<object[]> GetNTriplesNegativeSyntaxTests()
     {
         if (!W3CTestContext.IsAvailable)
             throw new InvalidOperationException(
@@ -96,7 +142,7 @@ public class NTriplesConformanceTests
                 "Run ./tools/update-submodules.sh (or .\\tools\\update-submodules.ps1) to initialize.");
 
         var parser = new W3CManifestParser();
-        var manifestPath = W3CTestContext.GetManifestPath(W3CTestSuite.NTriples11);
+        var manifestPath = W3CTestContext.GetManifestPath(W3CTestSuite.NTriples12);
 
         var tests = parser.ParseAsync(manifestPath).GetAwaiter().GetResult();
 

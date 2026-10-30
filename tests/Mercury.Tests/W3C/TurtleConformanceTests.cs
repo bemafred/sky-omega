@@ -20,8 +20,8 @@ public class TurtleConformanceTests
     }
 
     [Theory]
-    [MemberData(nameof(GetTurtle11PositiveSyntaxTests))]
-    public async Task Turtle11_PositiveSyntax(W3CTestCase test)
+    [MemberData(nameof(GetTurtlePositiveSyntaxTests))]
+    public async Task Turtle_PositiveSyntax(W3CTestCase test)
     {
         Assert.SkipUnless(W3CTestContext.IsAvailable, "W3C test suite not available");
         if (W3CTestContext.IsKnownFailure(test.Id, out var cause))
@@ -46,8 +46,8 @@ public class TurtleConformanceTests
     }
 
     [Theory]
-    [MemberData(nameof(GetTurtle11NegativeSyntaxTests))]
-    public async Task Turtle11_NegativeSyntax(W3CTestCase test)
+    [MemberData(nameof(GetTurtleNegativeSyntaxTests))]
+    public async Task Turtle_NegativeSyntax(W3CTestCase test)
     {
         Assert.SkipUnless(W3CTestContext.IsAvailable, "W3C test suite not available");
         if (W3CTestContext.IsKnownFailure(test.Id, out var cause))
@@ -70,8 +70,8 @@ public class TurtleConformanceTests
     }
 
     [Theory]
-    [MemberData(nameof(GetTurtle11EvalTests))]
-    public async Task Turtle11_Eval(W3CTestCase test)
+    [MemberData(nameof(GetTurtleEvalTests))]
+    public async Task Turtle_Eval(W3CTestCase test)
     {
         Assert.SkipUnless(W3CTestContext.IsAvailable, "W3C test suite not available");
         if (W3CTestContext.IsKnownFailure(test.Id, out var cause))
@@ -225,7 +225,7 @@ public class TurtleConformanceTests
         )).ToList();
     }
 
-    public static IEnumerable<object[]> GetTurtle11PositiveSyntaxTests()
+    public static IEnumerable<object[]> GetTurtlePositiveSyntaxTests()
     {
         if (!W3CTestContext.IsAvailable)
             throw new InvalidOperationException(
@@ -234,7 +234,7 @@ public class TurtleConformanceTests
                 "Run ./tools/update-submodules.sh (or .\\tools\\update-submodules.ps1) to initialize.");
 
         var parser = new W3CManifestParser();
-        var manifestPath = W3CTestContext.GetManifestPath(W3CTestSuite.Turtle11);
+        var manifestPath = W3CTestContext.GetManifestPath(W3CTestSuite.Turtle12);
 
         var tests = parser.ParseAsync(manifestPath).GetAwaiter().GetResult();
 
@@ -244,7 +244,7 @@ public class TurtleConformanceTests
         }
     }
 
-    public static IEnumerable<object[]> GetTurtle11NegativeSyntaxTests()
+    public static IEnumerable<object[]> GetTurtleNegativeSyntaxTests()
     {
         if (!W3CTestContext.IsAvailable)
             throw new InvalidOperationException(
@@ -253,7 +253,7 @@ public class TurtleConformanceTests
                 "Run ./tools/update-submodules.sh (or .\\tools\\update-submodules.ps1) to initialize.");
 
         var parser = new W3CManifestParser();
-        var manifestPath = W3CTestContext.GetManifestPath(W3CTestSuite.Turtle11);
+        var manifestPath = W3CTestContext.GetManifestPath(W3CTestSuite.Turtle12);
 
         var tests = parser.ParseAsync(manifestPath).GetAwaiter().GetResult();
 
@@ -263,7 +263,7 @@ public class TurtleConformanceTests
         }
     }
 
-    public static IEnumerable<object[]> GetTurtle11EvalTests()
+    public static IEnumerable<object[]> GetTurtleEvalTests()
     {
         if (!W3CTestContext.IsAvailable)
             throw new InvalidOperationException(
@@ -272,7 +272,7 @@ public class TurtleConformanceTests
                 "Run ./tools/update-submodules.sh (or .\\tools\\update-submodules.ps1) to initialize.");
 
         var parser = new W3CManifestParser();
-        var manifestPath = W3CTestContext.GetManifestPath(W3CTestSuite.Turtle11);
+        var manifestPath = W3CTestContext.GetManifestPath(W3CTestSuite.Turtle12);
 
         var tests = parser.ParseAsync(manifestPath).GetAwaiter().GetResult();
 
