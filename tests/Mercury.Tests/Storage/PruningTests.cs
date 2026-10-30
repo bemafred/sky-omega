@@ -121,6 +121,33 @@ public class PruningTests : IDisposable
     }
 
     [Fact]
+    public void AuditLog_IsTheExcludedQuadsAsNQuads()
+    {
+        CreateStores();
+
+        // The kept quad, and an excluded one with a blank node subject and a literal holding a line break, as the
+        // store holds them: terms in N-Quads form, the literal's escapes decoded.
+        _source!.AddCurrent("<http://example.org/s1>", "<http://example.org/p>", "<http://example.org/o1>",
+            "<http://example.org/graph1>");
+        _source.AddCurrent("_:b1", "<http://example.org/p>", "\"line one\nline two\"",
+            "<http://example.org/graph2>");
+
+        var auditPath = Path.Combine(_sourceDir, "audit.nq");
+        var options = new TransferOptions
+        {
+            Filter = GraphFilter.Include("<http://example.org/graph1>"),
+            AuditLogPath = auditPath
+        };
+        var result = new PruningTransfer(_source, _target!, options).Execute();
+
+        Assert.True(result.Success);
+        // Decoded as UTF-8, a byte order mark would be a U+FEFF at the start.
+        Assert.Equal(
+            "_:b1 <http://example.org/p> \"line one\\nline two\" <http://example.org/graph2> .\n",
+            System.Text.Encoding.UTF8.GetString(File.ReadAllBytes(auditPath)));
+    }
+
+    [Fact]
     public void PredicateFilter_ExcludesSystemPredicates()
     {
         CreateStores();

@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text;
 using SkyOmega.Mercury.Abstractions;
 using SkyOmega.Mercury.Diagnostics;
+using SkyOmega.Mercury.NQuads;
 using SkyOmega.Mercury.Storage;
 
 namespace SkyOmega.Mercury.Pruning;
@@ -39,7 +40,8 @@ internal sealed class PruningTransfer
         var stopwatch = Stopwatch.StartNew();
         var stats = new TransferStats();
         Fnv1aHasher? hasher = _options.ComputeChecksum ? new Fnv1aHasher() : null;
-        StreamWriter? auditWriter = null;
+        StreamWriter? auditFile = null;
+        NQuadsStreamWriter? auditWriter = null;
 
         _options.Logger.Info("Starting pruning transfer".AsSpan());
         if (_options.DryRun)
@@ -50,7 +52,8 @@ internal sealed class PruningTransfer
             // Open audit log if configured
             if (!string.IsNullOrEmpty(_options.AuditLogPath) && !_options.DryRun)
             {
-                auditWriter = new StreamWriter(_options.AuditLogPath, append: false, Encoding.UTF8);
+                auditFile = new StreamWriter(_options.AuditLogPath, append: false);
+                auditWriter = new NQuadsStreamWriter(auditFile);
             }
 
             // Get source statistics for logging
@@ -160,6 +163,7 @@ internal sealed class PruningTransfer
         finally
         {
             auditWriter?.Dispose();
+            auditFile?.Dispose();
         }
     }
 
@@ -167,7 +171,7 @@ internal sealed class PruningTransfer
         ref TransferStats stats,
         TransferProgressCallback? progress,
         Fnv1aHasher? hasher,
-        StreamWriter? auditWriter)
+        NQuadsStreamWriter? auditWriter)
     {
         var stopwatch = Stopwatch.StartNew();
         var filter = _options.Filter;
@@ -256,7 +260,7 @@ internal sealed class PruningTransfer
         ref int batchCount,
         IPruningFilter filter,
         Fnv1aHasher? hasher,
-        StreamWriter? auditWriter,
+        NQuadsStreamWriter? auditWriter,
         int batchSize,
         int progressInterval,
         TransferProgressCallback? progress,
@@ -269,7 +273,7 @@ internal sealed class PruningTransfer
             quad.Graph, quad.Subject, quad.Predicate, quad.Object,
             quad.ValidFrom, quad.ValidTo))
         {
-            WriteToAuditLog(auditWriter, quad);
+            auditWriter?.WriteQuad(quad.Subject, quad.Predicate, quad.Object, quad.Graph);
             return;
         }
 
@@ -316,7 +320,7 @@ internal sealed class PruningTransfer
         ref TransferStats stats,
         TransferProgressCallback? progress,
         Fnv1aHasher? hasher,
-        StreamWriter? auditWriter,
+        NQuadsStreamWriter? auditWriter,
         bool includeDeleted)
     {
         var stopwatch = Stopwatch.StartNew();
@@ -406,7 +410,7 @@ internal sealed class PruningTransfer
         ref int batchCount,
         IPruningFilter filter,
         Fnv1aHasher? hasher,
-        StreamWriter? auditWriter,
+        NQuadsStreamWriter? auditWriter,
         int batchSize,
         int progressInterval,
         TransferProgressCallback? progress,
@@ -424,7 +428,7 @@ internal sealed class PruningTransfer
             quad.Graph, quad.Subject, quad.Predicate, quad.Object,
             quad.ValidFrom, quad.ValidTo))
         {
-            WriteToAuditLog(auditWriter, quad);
+            auditWriter?.WriteQuad(quad.Subject, quad.Predicate, quad.Object, quad.Graph);
             return;
         }
 
@@ -576,39 +580,6 @@ internal sealed class PruningTransfer
             var bytes = Encoding.UTF8.GetBytes(span.ToString());
             hasher.Append(bytes);
         }
-    }
-
-    private static void WriteToAuditLog(StreamWriter? writer, in ResolvedTemporalQuad quad)
-    {
-        if (writer == null) return;
-
-        // Write in N-Quads format: <s> <p> <o> <g> .
-        writer.Write('<');
-        writer.Write(quad.Subject);
-        writer.Write("> <");
-        writer.Write(quad.Predicate);
-        writer.Write("> ");
-
-        // Object could be literal or IRI
-        if (quad.Object.Length > 0 && quad.Object[0] == '"')
-        {
-            writer.Write(quad.Object);
-        }
-        else
-        {
-            writer.Write('<');
-            writer.Write(quad.Object);
-            writer.Write('>');
-        }
-
-        if (!quad.Graph.IsEmpty)
-        {
-            writer.Write(" <");
-            writer.Write(quad.Graph);
-            writer.Write('>');
-        }
-
-        writer.WriteLine(" .");
     }
 
     private struct TransferStats
