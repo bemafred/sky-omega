@@ -248,10 +248,11 @@ public sealed class N3PatchParser : IDisposable
             return "_:" + ReadWord();
         }
 
-        // Prefixed name
-        if (char.IsLetter(c) || c == ':')
+        // 'a' for rdf:type, before the prefixed-name rule, which would read it as a name
+        if (c == 'a' && (_bufferPosition + 1 >= _bufferLength || !char.IsLetterOrDigit((char)_buffer[_bufferPosition + 1])))
         {
-            return ReadPrefixedName();
+            _bufferPosition++;
+            return "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
         }
 
         // Literal
@@ -260,14 +261,7 @@ public sealed class N3PatchParser : IDisposable
             return ReadLiteral();
         }
 
-        // 'a' shorthand for rdf:type
-        if (c == 'a' && (_bufferPosition + 1 >= _bufferLength || !char.IsLetterOrDigit((char)_buffer[_bufferPosition + 1])))
-        {
-            _bufferPosition++;
-            return "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
-        }
-
-        // Keyword or prefixed name starting with letter
+        // Prefixed name; anything else is an error there
         return ReadPrefixedName();
     }
 
@@ -320,7 +314,7 @@ public sealed class N3PatchParser : IDisposable
                 else if (c == ';')
                 {
                     // Predicate-object list within formula
-                    while ((char)_buffer[_bufferPosition] == ';')
+                    while (_bufferPosition < _bufferLength && (char)_buffer[_bufferPosition] == ';')
                     {
                         _bufferPosition++;
                         SkipWhitespaceAndComments();
@@ -489,13 +483,13 @@ public sealed class N3PatchParser : IDisposable
             if (c == '>')
             {
                 sb.Append(c);
-                break;
+                return sb.ToString();
             }
 
             sb.Append(c);
         }
 
-        return sb.ToString();
+        throw ParserException("Unterminated IRI");
     }
 
     private string ReadPrefixedName()
@@ -538,6 +532,15 @@ public sealed class N3PatchParser : IDisposable
             }
         }
 
+        // Nothing read: the character starts no term. Returning an empty name here made the statement loop retry
+        // the same character forever.
+        if (sb.Length == 0)
+        {
+            if (_bufferPosition >= _bufferLength)
+                throw ParserException("Unexpected end of input");
+            throw ParserException($"Unexpected character U+{_buffer[_bufferPosition]:X4}");
+        }
+
         return sb.ToString();
     }
 
@@ -550,6 +553,7 @@ public sealed class N3PatchParser : IDisposable
         sb.Append(quote);
 
         bool escaped = false;
+        bool terminated = false;
         while (_bufferPosition < _bufferLength)
         {
             var c = (char)_buffer[_bufferPosition];
@@ -570,9 +574,13 @@ public sealed class N3PatchParser : IDisposable
 
             if (c == quote)
             {
+                terminated = true;
                 break;
             }
         }
+
+        if (!terminated)
+            throw ParserException("Unterminated literal");
 
         // Check for language tag or datatype
         if (_bufferPosition < _bufferLength)

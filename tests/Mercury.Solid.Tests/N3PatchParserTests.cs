@@ -27,6 +27,60 @@ public class N3PatchParserTests
     }
 
     [Fact]
+    public async Task ParseAsync_PatchWrittenWithA_ReadsItsClauses()
+    {
+        // The form of the Solid N3 Patch specification's examples. 'a' was read as a prefixed name, so the patch
+        // resource was never found and every clause was dropped.
+        var patch = "@prefix solid: <http://www.w3.org/ns/solid/terms#>.\n" +
+                    "@prefix ex: <http://www.example.org/terms#>.\n" +
+                    "_:rename a solid:InsertDeletePatch;\n" +
+                    "  solid:where   { ?person ex:familyName \"Garcia\". };\n" +
+                    "  solid:inserts { ?person ex:givenName \"Alex\". };\n" +
+                    "  solid:deletes { ?person ex:givenName \"Claudia\". }.\n";
+
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(patch));
+        using var parser = new N3PatchParser(stream);
+        var result = await parser.ParseAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal("http://www.example.org/terms#familyName", Assert.Single(result.Where!.Patterns).Predicate.Value);
+        Assert.Equal("Alex", Assert.Single(result.Inserts!.Patterns).Object.Value);
+        Assert.Equal("Claudia", Assert.Single(result.Deletes!.Patterns).Object.Value);
+    }
+
+    [Theory]
+    [InlineData("%\n")]
+    [InlineData(" @prefix solid: <http://www.w3.org/ns/solid/terms#>.\n")]
+    public async Task ParseAsync_CharacterThatStartsNoTerm_IsAParseError(string patch)
+    {
+        // Before 2026-10-30 such a body made the parser loop forever, so one PATCH request held a server thread. The
+        // time limit makes a regression a failure rather than a hung run.
+        var ct = TestContext.Current.CancellationToken;
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(patch));
+        using var parser = new N3PatchParser(stream);
+
+        var parse = Task.Run(() => parser.ParseAsync(ct), ct);
+        var error = await Assert.ThrowsAsync<InvalidDataException>(() => parse.WaitAsync(TimeSpan.FromSeconds(10), ct));
+
+        Assert.Contains("Unexpected character", error.Message);
+    }
+
+    [Theory]
+    [InlineData("_:p <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/ns/solid/terms#InsertDeletePatch", "Unterminated IRI")]
+    [InlineData("_:p <http://e/p> \"no closing quote", "Unterminated literal")]
+    [InlineData("_:p <http://e/p> \"ends with an escaped quote\\\"", "Unterminated literal")]
+    public async Task ParseAsync_TermCutOffByTheEndOfInput_IsAParseError(string patch, string expected)
+    {
+        // An IRI or a literal that reaches the end of the input was returned as read so far.
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(patch));
+        using var parser = new N3PatchParser(stream);
+
+        var error = await Assert.ThrowsAsync<InvalidDataException>(() =>
+            parser.ParseAsync(TestContext.Current.CancellationToken));
+
+        Assert.Contains(expected, error.Message);
+    }
+
+    [Fact]
     public async Task ParseAsync_EmptyPatch_ReturnsEmptyResult()
     {
         // Arrange - a patch without where/deletes/inserts
