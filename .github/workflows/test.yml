@@ -57,4 +57,40 @@ jobs:
       # No report switch: xunit projects take --report-xunit-trx and the MSTest projects --report-trx,
       # and a project given the other one runs nothing and exits with code 5.
       - name: Test
+        if: runner.os != 'macOS'
         run: dotnet test
+
+      # macOS only, temporary: on the macOS runners a DrHook integration test hangs inside an attach, and every
+      # attach and launch after it hangs too (ADR-007, Phase 8 note, 2026-10-30). The watcher records the stacks
+      # of the integration-test host and its debug targets once the host has run 90 s, and 3 minutes later.
+      - name: Install dotnet-stack
+        if: runner.os == 'macOS'
+        run: dotnet tool install --global dotnet-stack
+
+      - name: Test, with the DrHook hang watcher
+        if: runner.os == 'macOS'
+        run: |
+          tools/watch-drhook-hang.sh "$RUNNER_TEMP/drhook-hang" 90 "$HOME/.dotnet/tools/dotnet-stack" > "$RUNNER_TEMP/drhook-hang.log" 2>&1 &
+          watcher=$!
+          status=0
+          dotnet test || status=$?
+          kill "$watcher" 2> /dev/null || true
+          exit "$status"
+
+      - name: Show the hang watcher's managed stacks
+        if: always() && runner.os == 'macOS'
+        run: |
+          cat "$RUNNER_TEMP/drhook-hang.log" 2> /dev/null || true
+          for f in "$RUNNER_TEMP"/drhook-hang/*-stack-*.txt; do
+            [ -e "$f" ] || { echo "No stacks recorded: no DrHook integration-test host ran 90 s."; break; }
+            echo "=== $(basename "$f")"
+            cat "$f"
+          done
+
+      - name: Upload the hang watcher's stacks
+        if: always() && runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: drhook-hang-${{ matrix.runner }}
+          path: ${{ runner.temp }}/drhook-hang
+          if-no-files-found: ignore
