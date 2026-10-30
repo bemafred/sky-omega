@@ -1,0 +1,60 @@
+# Builds the solution and runs every test project on each platform Sky Omega supports.
+# The five machines in STATISTICS.md cover macOS arm64, Linux x64 and arm64, and Windows arm64;
+# these runners add Windows x64 and macOS x64, and a second Linux distribution version.
+name: Build and test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macOS arm64
+            runner: macos-latest
+          - platform: macOS x64
+            runner: macos-26-intel
+          - platform: Linux x64
+            runner: ubuntu-24.04
+          - platform: Linux arm64
+            runner: ubuntu-24.04-arm
+          - platform: Windows x64
+            runner: windows-latest
+          - platform: Windows arm64
+            runner: windows-11-arm
+    steps:
+      - name: Check out, with the W3C test suites
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # Microsoft's build of .NET on every platform. On Linux the distribution's package links
+      # the system libunwind and crashes intermittently (docs/operations/runbook-linux-dotnet-runtime.md).
+      - name: Install .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Show .NET
+        run: dotnet --info
+
+      # global.json selects Microsoft.Testing.Platform, so this runs every test project in the solution.
+      # No report switch: xunit projects take --report-xunit-trx and the MSTest projects --report-trx,
+      # and a project given the other one runs nothing and exits with code 5.
+      - name: Test
+        run: dotnet test
