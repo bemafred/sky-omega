@@ -1,6 +1,7 @@
 # Builds the solution and runs every test project on each platform Sky Omega supports.
 # The five machines in STATISTICS.md cover macOS arm64, Linux x64 and arm64, and Windows arm64;
 # these runners add Windows x64 and macOS x64, and a second Linux distribution version.
+# A separate job checks that SkyOmega.sln lists every ADR in docs/adrs.
 name: Build and test
 
 on:
@@ -17,6 +18,24 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The solution's ADR folders are kept by hand. This fails when an ADR in docs/adrs is missing from SkyOmega.sln, sits
+  # in the wrong folder, or is listed but no longer exists (tools/check-solution-adrs.cs).
+  solution-adrs:
+    name: Solution lists every ADR
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Install .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Check SkyOmega.sln against docs/adrs
+        run: dotnet run tools/check-solution-adrs.cs
+
   test:
     name: ${{ matrix.platform }}
     runs-on: ${{ matrix.runner }}
