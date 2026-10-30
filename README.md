@@ -6,7 +6,7 @@
 
 *A home for AI & Shared Knowledge*
 
-**Current release: [Sky Omega 1.8.36](CHANGELOG.md)** · **[Five platforms](#platforms)** — macOS, Linux and Windows, on arm64 and x64, the whole test suite passing on each · **Mercury convergence** — one SPARQL execution path ([ADR-047](docs/adrs/mercury/ADR-047-default-path-cutover.md)) and one `[110]` expression evaluator ([ADR-049](docs/adrs/mercury/ADR-049-unified-expression-evaluator.md), `BindExpressionEvaluator` deleted; divergence S2 closed) · Mercury substrate production-validated across the 1.7 line · DrHook substrate-independence reached at 1.8.2 (netcoredbg retired), with the lifecycle triad + console-I/O isolation + 22-tool MCP surface landing at 1.8.3, then **debug-state visualization** — a surface-agnostic model published over a Unix-domain socket to human-launched views ([ADR-012](docs/adrs/drhook/ADR-012-debug-state-surfaces.md) Phases 1–2, dogfooded end-to-end) at 1.8.9 · **three paired Mercury measurements** on the same substrate generation:
+**Current release: [Sky Omega 1.8.37](CHANGELOG.md)** · **[Six platforms](#platforms)** — macOS, Linux and Windows, on arm64 and x64, the whole test suite run on each in CI · **Mercury convergence** — one SPARQL execution path ([ADR-047](docs/adrs/mercury/ADR-047-default-path-cutover.md)) and one `[110]` expression evaluator ([ADR-049](docs/adrs/mercury/ADR-049-unified-expression-evaluator.md), `BindExpressionEvaluator` deleted; divergence S2 closed) · Mercury substrate production-validated across the 1.7 line · DrHook substrate-independence reached at 1.8.2 (netcoredbg retired), with the lifecycle triad + console-I/O isolation + 22-tool MCP surface landing at 1.8.3, then **debug-state visualization** — a surface-agnostic model published over a Unix-domain socket to human-launched views ([ADR-012](docs/adrs/drhook/ADR-012-debug-state-surfaces.md) Phases 1–2, dogfooded end-to-end) at 1.8.9 · **three paired Mercury measurements** on the same substrate generation:
 - [cycle 10 Phase 3 r4](docs/validations/cycle10-phase3-r4-21b-2026-05-12.md) — **21.3 B full** Wikidata, 23 h 57 m end-to-end (2026-05-13)
 - [truthy r1](docs/validations/truthy-r1-2026-05-14.md) — **8.17 B truthy** Wikidata, 14 h 13 m end-to-end (2026-05-14)
 - [WGPB step C](docs/validations/wgpb-step-c-2026-05-16.md) — **~150 M 2018 reduced-truthy** Wikidata, 4 m 30 s end-to-end + **849/850 WGPB queries in 4 m 43 s** (2026-05-16)
@@ -105,9 +105,13 @@ Want to give Claude persistent memory? See **[Mercury MCP tutorial](docs/tutoria
 
 ## Platforms
 
-Sky Omega is built and tested on macOS, Linux and Windows, on arm64 and x64 processors. At 1.8.36 (2026-10-29) the
-whole test suite passes on five machines: 6,234 tests on each, none failed. They include the DrHook integration
-tests, which launch and debug real .NET processes.
+Sky Omega is built and tested on macOS, Linux and Windows, on arm64 and x64 processors. At 1.8.37 (2026-10-30) the
+whole test suite passes on four of the five machines below, 6,605 tests on each, none failed; elite went off the
+network during its run. The tests include the DrHook integration tests, which launch and debug real .NET processes.
+
+GitHub Actions also runs the whole suite on every push, on macOS, Linux and Windows on both arm64 and x64. At 1.8.37
+five of the six runners pass; on macOS x64 one timing measurement failed, which asserts the machine's speed rather
+than the code's behavior.
 
 | Machine | OS | Architecture | Hardware |
 |---------|----|--------------|----------|
@@ -118,8 +122,8 @@ tests, which launch and debug real .NET processes.
 | omega-windows | Windows 11 | arm64 | Virtual machine on omega, 4 cores, 8 GB |
 
 Each machine skips the tests of other platforms' features. The skips and their reasons, the .NET versions and each
-run's time are in [STATISTICS.md](STATISTICS.md#test-runs-by-platform). Not tested yet: Windows on x64, macOS on
-Intel, and Linux distributions other than Ubuntu.
+run's time are in [STATISTICS.md](STATISTICS.md#test-runs-by-platform). Windows on x64 and macOS on Intel run only in
+CI. Not tested yet: Linux distributions other than Ubuntu.
 
 Mercury's core has no package dependencies, and DrHook loads Microsoft's debugging shim (`libdbgshim`) for the
 platform it runs on. The stores are in each platform's data directory:
@@ -161,7 +165,7 @@ to [1.8.21](docs/releases/1.8.21.md).
 
 ## 💠 Project Purpose
 
-**Mercury** is a complete SPARQL 1.1 engine with zero external runtime dependencies (BCL-only core) and zero-GC hot paths. It passes all 993 tests of the W3C RDF 1.1 format suites, all 510 SPARQL 1.1 tests it runs, and the 461 JSON-LD 1.1 toRdf tests that apply to it; 6 of the 487 SPARQL 1.0 tests are known failures ([Standards Coverage](#-standards-coverage)). It gives AI assistants persistent, queryable memory on your machine — what your AI learns today, it knows tomorrow.
+**Mercury** is a complete SPARQL 1.1 engine with zero external runtime dependencies (BCL-only core) and zero-GC hot paths. It passes all 993 tests of the W3C RDF 1.1 format suites and 187 of the 341 RDF 1.2 format tests (the other 154 test RDF 1.2 features it does not read yet), all 510 SPARQL 1.1 tests it runs, and the 461 JSON-LD 1.1 toRdf tests that apply to it; 6 of the 487 SPARQL 1.0 tests are known failures ([Standards Coverage](#-standards-coverage)). It gives AI assistants persistent, queryable memory on your machine — what your AI learns today, it knows tomorrow.
 
 > *Scope of "BCL-only": Mercury core (`src/Mercury/`) and its 28-public-type embeddable surface have no `PackageReference` entries. Adjacent surfaces — `Mercury.Mcp` (depends on `ModelContextProtocol`), `DrHook.Engine` (admitted: `Microsoft.Diagnostics.NETCore.Client` managed + `Microsoft.Diagnostics.DbgShim.<rid>` native per-RID + `Microsoft.Diagnostics.Tracing.TraceEvent` for EventPipe parsing + `Microsoft.CodeAnalysis.CSharp` (Roslyn) for breakpoint-condition and logpoint expressions, all per ADR-009; **netcoredbg retired at 1.8.2**) — package the substrate for tooling and runtime observation. The substrate-independence claim applies to the core; the tooling layer is honest about its dependencies.*
 
@@ -182,15 +186,18 @@ Mercury is a full SPARQL 1.1 + RDF stack. Every standard listed below is impleme
 
 | Format | W3C tests passing | Use |
 |---|---|---|
-| **Turtle** | 313/313 (100%) | Human-friendly, prefix support, the de-facto interchange format |
-| **TriG** | 357/357 (100%) | Turtle with named graphs |
-| **N-Triples** | 70/70 (100%) | Line-oriented, the Wikidata dump format |
-| **N-Quads** | 87/87 (100%) | N-Triples with named graphs |
-| **RDF/XML** | 166/166 (100%) | Legacy interop, still required by many vocabularies |
+| **Turtle** | 371/419 (48 RDF 1.2 known failures) | Human-friendly, prefix support, the de-facto interchange format |
+| **TriG** | 368/418 (50 RDF 1.2 known failures) | Turtle with named graphs |
+| **N-Triples** | 130/145 (15 RDF 1.2 known failures) | Line-oriented, the Wikidata dump format |
+| **N-Quads** | 144/155 (11 RDF 1.2 known failures) | N-Triples with named graphs |
+| **RDF/XML** | 167/197 (30 RDF 1.2 known failures) | Legacy interop, still required by many vocabularies |
 | **JSON-LD 1.1** | 461/467 (6 do not apply) | JSON-native RDF for web/API surfaces |
 
-The counts for the five RDF formats are of the W3C RDF 1.1 test suites. The Turtle parser also reads RDF 1.2 triple
-terms; the RDF 1.2 test suites (343 tests) are in the test data but not yet run. Of the JSON-LD tests, 5 are for
+The counts for the five RDF formats are of the W3C RDF 1.2 test suites, which include the RDF 1.1 ones; every RDF 1.1
+test passes (993). The 154 known failures test RDF 1.2 features Mercury does not read yet: triple terms outside
+Turtle, reified triples, annotations, base direction and `VERSION`
+([ADR-059](docs/adrs/mercury/ADR-059-every-w3c-test-runs.md)). The N-Triples and N-Quads counts include the
+canonical-form tests, which check the writers' output. Of the JSON-LD tests, 5 are for
 JSON-LD 1.0 processors (their 1.1 versions run) and 1 needs generalized RDF, an optional feature.
 
 ### SPARQL
@@ -230,12 +237,12 @@ two terms and a pattern constant matches a language tag by case
 | 100% W3C SPARQL 1.1 query evaluation | 532 passing of 535: the 247 SPARQL 1.1 tests and 285 of the 288 SPARQL 1.0 tests; the 3 skipped are SPARQL 1.0 known failures | `dotnet test --project tests/Mercury.Tests --filter "FullyQualifiedName~Sparql11_QueryEval"` |
 | 100% W3C SPARQL 1.1 Update       | 94 passing tests      | `dotnet test --project tests/Mercury.Tests --filter "FullyQualifiedName~Sparql11_UpdateEval"` |
 | 100% W3C SPARQL 1.1 query syntax | 302 passing of 305: the 106 SPARQL 1.1 tests and 196 of the 199 SPARQL 1.0 tests; the 3 skipped are SPARQL 1.0 known failures | `dotnet test --project tests/Mercury.Tests --filter "FullyQualifiedName~Sparql11_PositiveSyntax\|FullyQualifiedName~Sparql11_NegativeSyntax"` |
-| 100% W3C Turtle / TriG / N-Triples / N-Quads / RDF-XML (RDF 1.1 suites) | 993 passing tests | `dotnet test --project tests/Mercury.Tests --filter "FullyQualifiedName~TurtleConformanceTests\|FullyQualifiedName~TriGConformanceTests\|FullyQualifiedName~NTriplesConformanceTests\|FullyQualifiedName~NQuadsConformanceTests\|FullyQualifiedName~RdfXmlConformanceTests"` |
+| 100% W3C Turtle / TriG / N-Triples / N-Quads / RDF-XML, RDF 1.1 tests | 1,180 passing of 1,334 in the RDF 1.2 suites, every RDF 1.1 test among them; the 154 skipped are RDF 1.2 known failures | `dotnet test --project tests/Mercury.Tests --filter "FullyQualifiedName~TurtleConformanceTests\|FullyQualifiedName~TriGConformanceTests\|FullyQualifiedName~NTriplesConformanceTests\|FullyQualifiedName~NQuadsConformanceTests\|FullyQualifiedName~RdfXmlConformanceTests"` |
 | 100% W3C JSON-LD 1.1 toRdf, of the tests that apply | 461 passing; the 6 skipped do not apply (JSON-LD 1.0 processors, generalized RDF) | `dotnet test --project tests/Mercury.Tests --filter "FullyQualifiedName~JsonLdConformanceTests"` |
 | SPARQL HTTP endpoint             | `mercury` CLI         | `mercury -m` then visit `http://localhost:3031/sparql` |
 | Zero external runtime deps       | Mercury.csproj        | `grep PackageReference src/Mercury/*.csproj` |
-| 5,928 Mercury tests passing      | 13 skipped on macOS: the 6 W3C known failures, the 6 JSON-LD tests that do not apply, and 1 test that needs a disk with less than 1 TB free | `dotnet test --project tests/Mercury.Tests` |
-| Five platforms                   | 6,234 tests, 0 failed, on macOS arm64, Linux x64 and arm64, and Windows arm64 ([Platforms](#platforms)) | `dotnet test` on each |
+| 6,145 Mercury tests passing      | 167 skipped on macOS: the 160 W3C known failures, the 6 JSON-LD tests that do not apply, and 1 test that needs a disk with less than 1 TB free | `dotnet test --project tests/Mercury.Tests` |
+| Six platforms                    | 6,605 tests, 0 failed, on macOS arm64, Linux x64 and arm64, and Windows arm64 and x64; on macOS x64, 1 timing measurement failed ([Platforms](#platforms)) | `dotnet test` on each, and the GitHub Actions workflow |
 | AI-assisted development          | Git history           | `git log --oneline \| grep "Co-Authored-By"` |
 | Development velocity             | ~255K lines           | See [STATISTICS.md](STATISTICS.md)           |
 
@@ -250,11 +257,11 @@ two terms and a pattern constant matches a language tag by case
 ## 🧠 What's Built
 
 Everything below has code in `src/` and tests; Mercury also has benchmarks. Line counts are from
-[STATISTICS.md](STATISTICS.md), measured at 1.8.36.
+[STATISTICS.md](STATISTICS.md), measured at 1.8.37.
 
 | Component              | Description                                                                                |
 |------------------------|--------------------------------------------------------------------------------------------|
-| **Mercury**            | Temporal RDF substrate — 67,925 lines in the core library, BCL-only. SPARQL 1.1 Query + Update + Syntax (every W3C SPARQL 1.1 test it runs passes). RDF parsing/writing for Turtle, TriG, N-Triples, N-Quads, RDF/XML, JSON-LD. Built-in SPARQL HTTP endpoint (`http://localhost:3031/sparql`) with standard content negotiation. Four storage profiles per the no-behavior-flags rule (ADR-029, closed 1.7): Cognitive (bitemporal, versioned), Graph (versioned with soft-delete + un-delete-on-add), Reference (immutable, Wikidata-shaped), Minimal (single P→S→T sort order). Bitemporal extensions for time-travel queries. Zero-GC hot paths. |
+| **Mercury**            | Temporal RDF substrate — 66,873 lines in the core library, BCL-only. SPARQL 1.1 Query + Update + Syntax (every W3C SPARQL 1.1 test it runs passes). RDF parsing/writing for Turtle, TriG, N-Triples, N-Quads, RDF/XML, JSON-LD. Built-in SPARQL HTTP endpoint (`http://localhost:3031/sparql`) with standard content negotiation. Four storage profiles per the no-behavior-flags rule (ADR-029, closed 1.7): Cognitive (bitemporal, versioned), Graph (versioned with soft-delete + un-delete-on-add), Reference (immutable, Wikidata-shaped), Minimal (single P→S→T sort order). Bitemporal extensions for time-travel queries. Zero-GC hot paths. |
 | **Mercury.Solid**      | W3C Solid Protocol server — WAC + ACP access control, N3 Patch updates, full HTTP surface |
 | **Mercury.Pruning**    | Dual-instance pruning with copy-and-switch pattern                                         |
 | **Mercury MCP**        | Claude integration with persistent semantic memory                                         |

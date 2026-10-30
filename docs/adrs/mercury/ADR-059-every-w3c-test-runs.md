@@ -46,6 +46,9 @@ Two more ways a test does not count:
   `tests/Mercury.Tests/Compression/` (`LargeFixtureMeasurement`, `ConvertPathThroughputMeasurement`,
   `ParallelBZip2ContentionTrace`) return when `/tmp/multiblock-large.txt.bz2` is missing, which it is everywhere but
   on the machine that made it.
+- **A test that measures the machine** fails or passes by the hardware it runs on. `ParallelBZip2ThroughputMeasurement`
+  asserts that 14 parallel workers decompress faster than one thread. On the macOS x64 CI runner on 2026-10-30 it
+  measured 322 ms against 291 ms and failed; it had passed on the same runner the run before.
 
 ### The RDF 1.2 manifests include the RDF 1.1 ones
 
@@ -113,7 +116,8 @@ STATISTICS.md and the README count every loaded test: passed, known failures and
    formats, service description and protocol (against `SparqlHttpServer`), Graph Store protocol, entailment.
 5. **RDF semantics** entailment tests.
 6. **JSON-LD**: fromRdf, then the API manifests per Q1.
-7. **The measurement classes** report skipped without their fixture (D3), or move to `benchmarks/`.
+7. **The measurement classes** report skipped without their fixture (D3), or move to `benchmarks/`; so does
+   `ParallelBZip2ThroughputMeasurement`, whose assertion is about the machine.
 8. **The guard** (D4), once every manifest is loaded.
 
 ## Open questions
@@ -129,7 +133,8 @@ STATISTICS.md and the README count every loaded test: passed, known failures and
 
 ## Consequences
 
-- Known failures go from 6 to 186 at phase 1, and rise as each phase loads more; each is a listed, countable gap.
+- Known failures went from 6 to 186 at phase 1, and to 160 when the bugs phase 1 found were fixed. They rise as each
+  phase loads more; each is a listed, countable gap.
 - The conformance counts grow to the whole test data and stop changing meaning when a submodule updates.
 - The suite takes longer to run.
 

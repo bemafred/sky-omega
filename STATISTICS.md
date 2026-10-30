@@ -4,7 +4,7 @@ Codebase metrics: line counts, test counts, W3C conformance and benchmark measur
 is in [CHANGELOG.md](CHANGELOG.md) and [docs/releases/](docs/releases/); scale-validation runs are in
 [docs/validations/](docs/validations/).
 
-**Last measured:** 2026-10-29, Sky Omega 1.8.36 (`cf6d320`). Line counts are of `.cs` files with `bin/` and `obj/`
+**Last measured:** 2026-10-30, Sky Omega 1.8.37 (`a57e1f8`). Line counts are of `.cs` files with `bin/` and `obj/`
 left out; test counts are from one `dotnet test` run on omega (macOS arm64), read from its TRX reports.
 
 ## Line Counts
@@ -13,26 +13,26 @@ left out; test counts are from one `dotnet test` run on omega (macOS arm64), rea
 
 | Component | Lines | Description |
 |-----------|------:|-------------|
-| **Mercury (total)** | **67,925** | Knowledge substrate: RDF storage and SPARQL, BCL only |
+| **Mercury (total)** | **66,873** | Knowledge substrate: RDF storage and SPARQL, BCL only |
 | ├─ Sparql | 24,434 | SPARQL parser, query and update execution, protocol |
 | ├─ Storage | 16,097 | B+Tree indexes, atom stores, WAL, bulk load and index rebuild, external sort, MPHF |
 | ├─ JsonLd | 6,979 | JSON-LD parser and writer |
 | ├─ Turtle | 3,962 | Turtle parser and writer |
 | ├─ Diagnostics | 3,184 | Metrics and observability events |
-| ├─ RdfXml | 3,126 | RDF/XML parser and writer |
+| ├─ RdfXml | 3,148 | RDF/XML parser and writer |
 | ├─ TriG | 2,448 | TriG parser and writer |
-| ├─ Compression | 2,255 | bzip2 streaming decompressor, single and parallel block |
-| ├─ NQuads | 1,459 | N-Quads parser and writer |
-| ├─ NTriples | 1,333 | N-Triples parser and writer |
-| ├─ Rdf | 1,095 | Core RDF types and the shared escape, IRI, numeric and literal-form rules |
+| ├─ Compression | 2,260 | bzip2 streaming decompressor, single and parallel block |
+| ├─ NQuads | 1,454 | The N-Quads parser and writer, which N-Triples also reads and writes through |
+| ├─ Rdf | 1,145 | Core RDF types and the shared escape, IRI, numeric, literal-form and name-character rules |
 | ├─ Owl | 566 | OWL/RDFS reasoner |
-| └─ (top-level files) | 987 | `RdfEngine` and `SparqlEngine` facades |
+| ├─ NTriples | 178 | N-Triples parser and writer, over the N-Quads ones |
+| └─ (top-level files) | 1,018 | `RdfEngine` and `SparqlEngine` facades, `RdfDocumentWriter` |
 | **Mercury.Abstractions** | **1,486** | Store profiles and schema, `IAtomStore`, metric event types, exceptions |
 | **Mercury.Runtime** | **4,229** | `BTreeFile`, `PageCache`, buffers, cross-process gate, disk-space guard, memory probe, temp paths, sparse files |
 | **Mercury.Solid** | **4,401** | W3C Solid Protocol: WAC/ACP, N3 Patch, HTTP handlers |
 | **Mercury.Pruning** | **1,238** | Copy-and-switch pruning |
 | **Mercury.Mcp** | **481** | MCP server, 6 tools (query, update, stats, graphs, store, version) |
-| **Mercury tool libraries** | **1,315** | `Mercury.Sparql.Tool` 727, `Mercury.Turtle.Tool` 588 |
+| **Mercury tool libraries** | **1,287** | `Mercury.Sparql.Tool` 727, `Mercury.Turtle.Tool` 560 |
 | **Mercury CLIs** | **1,187** | `mercury` 764, `mercury-sparql` 220, `mercury-turtle` 203 |
 | **DrHook.Engine** | **10,233** | Runtime observation: ICorDebug through per-RID `libdbgshim`, EventPipe, BCL + P/Invoke + source-generated COM |
 | **DrHook.Mcp** | **1,968** | MCP server, 25 tools |
@@ -48,7 +48,7 @@ left out; test counts are from one `dotnet test` run on omega (macOS arm64), rea
 
 | Project | Lines | Tests | Skipped on omega |
 |---------|------:|------:|-----------------:|
-| Mercury.Tests | 70,038 | 5,941 | 13 |
+| Mercury.Tests | 70,749 | 6,312 | 167 |
 | Mercury.Solid.Tests | 407 | 25 | — |
 | SkyOmega.Bcl.Tests | 140 | 12 | — |
 | DrHook.Engine.Tests | 2,468 | 187 | 1 |
@@ -57,12 +57,12 @@ left out; test counts are from one `dotnet test` run on omega (macOS arm64), rea
 | DrHook.Viz.Tests | 852 | 42 | — |
 | DrHook.Wire.Tests | 107 | 5 | — |
 | DrHook.Capture.Tests | 85 | 1 | — |
-| **Total** | **76,650** | **6,234** | **15** |
+| **Total** | **77,361** | **6,605** | **169** |
 
 The integration targets are debuggees for the DrHook integration tests; only the Mtp target has tests of its own. On
-omega the 15 skips are 6 W3C known failures, 6 JSON-LD tests that do not apply to a JSON-LD 1.1 processor, 2
-Windows-only DrHook tests, and 1 storage test that needs a disk with less than 1 TB free. Other platforms skip a
-different set: see [Test Runs by Platform](#test-runs-by-platform).
+omega the 169 skips are 160 W3C known failures (154 RDF 1.2, 6 SPARQL 1.0), 6 JSON-LD tests that do not apply to a
+JSON-LD 1.1 processor, 2 Windows-only DrHook tests, and 1 storage test that needs a disk with less than 1 TB free.
+Other platforms skip a different set: see [Test Runs by Platform](#test-runs-by-platform).
 
 ### Benchmarks
 
@@ -83,37 +83,41 @@ different set: see [Test Runs by Platform](#test-runs-by-platform).
 
 | Category | Lines |
 |----------|------:|
-| `docs/` (360 `.md` and `.ttl` files) | 54,545 |
-| Root documents (README, CLAUDE, AI, MERCURY, DRHOOK, CONTRIBUTING, CHANGELOG) | 4,195 |
+| `docs/` (363 `.md` and `.ttl` files) | 55,090 |
+| Root documents (README, CLAUDE, AI, MERCURY, DRHOOK, CONTRIBUTING, CHANGELOG) | 4,277 |
 
 ## Totals
 
 | Category | Lines |
 |----------|------:|
-| Source code | 96,463 |
-| Tests | 76,650 |
+| Source code | 95,383 |
+| Tests | 77,361 |
 | Benchmarks | 3,588 |
 | Examples | 972 |
 | Probes | 18,775 |
-| Documentation | 58,740 |
-| **Grand total** | **255,188** |
+| Documentation | 59,367 |
+| **Grand total** | **255,446** |
 
 ## Test Runs by Platform
 
-The whole solution's `dotnet test` at 1.8.36 (`cf6d320`), 2026-10-29, on each of the five machines Sky Omega is
-tested on. omega-ubuntu and omega-windows are virtual machines on omega.
+The whole solution's `dotnet test` at 1.8.37 (`a57e1f8`), 2026-10-30, on the machines Sky Omega is tested on.
+omega-ubuntu and omega-windows are virtual machines on omega; they ran at the same time, after omega's run.
 
 | Machine | OS, architecture | Hardware | .NET runtime | Tests | Failed | Skipped | Mercury.Tests |
 |---------|------------------|----------|--------------|------:|-------:|--------:|--------------:|
-| omega | macOS 27.0.1, arm64 | Apple M5 Max, 18 cores, 128 GB | 10.0.9 | 6,234 | 0 | 15 | 2 m 29 s |
-| zbook | Ubuntu 26.04.1, x64 | Intel Core i7-6700HQ, 8 threads, 60 GB | 10.0.14 | 6,234 | 0 | 14 | 1 m 47 s |
-| elite | Ubuntu 26.04.1, x64 | AMD Athlon II X4 640, 4 cores, 15 GB | 10.0.13 | 6,234 | 0 | 14 | 15 m 38 s |
-| omega-ubuntu | Ubuntu 26.04.1, arm64 | Parallels VM, 4 vCPU, 7.2 GB | 10.0.13 | 6,234 | 0 | 14 | 59 s |
-| omega-windows | Windows 11 Pro 26100, arm64 | Parallels VM, 4 vCPU, 8 GB | 10.0.14 | 6,234 | 0 | 22 | 2 m 32 s |
+| omega | macOS 27.0.1, arm64 | Apple M5 Max, 18 cores, 128 GB | 10.0.9 | 6,605 | 0 | 169 | 2 m 34 s |
+| zbook | Ubuntu 26.04.1, x64 | Intel Core i7-6700HQ, 8 threads, 60 GB | 10.0.14 | 6,605 | 0 | 168 | 1 m 48 s |
+| elite | Ubuntu 26.04.1, x64 | AMD Athlon II X4 640, 4 cores, 15 GB | — | — | — | — | — |
+| omega-ubuntu | Ubuntu 26.04.1, arm64 | Parallels VM, 4 vCPU, 7.2 GB | 10.0.13 | 6,605 | 0 | 168 | 56 s |
+| omega-windows | Windows 11 Pro 26100, arm64 | Parallels VM, 4 vCPU, 8 GB | 10.0.14 | 6,605 | 0 | 176 | 2 m 36 s |
 
-Every test project passes on every machine, the DrHook integration tests included. The skips differ by platform:
+elite went off the network during its run and is not measured at 1.8.37. At 1.8.36 (`cf6d320`) it ran 6,234 tests
+with 0 failed and 14 skipped; its Mercury.Tests took 15 m 38 s.
 
-- **All five:** the 6 W3C known failures and the 6 JSON-LD tests that do not apply.
+Every test project passes on every machine that ran, the DrHook integration tests included. The skips differ by
+platform:
+
+- **Every machine:** the 160 W3C known failures and the 6 JSON-LD tests that do not apply.
 - **macOS and Linux:** the 2 Windows-only DrHook tests (the Windows launch primitive and the Job Object).
 - **macOS only:** the sparse-file test, which needs a disk with less than 1 TB free.
 - **Windows only:** 10 DrHook tests of POSIX or Linux-and-macOS behavior. 8 cover features Windows does not have
@@ -121,27 +125,44 @@ Every test project passes on every machine, the DrHook integration tests include
   fixtures and are not yet written for Windows ([ADR-007](docs/adrs/drhook/ADR-007-teardown-concurrency-test-debug.md)
   Phase 9).
 
-Windows x64 has not been run.
+### GitHub Actions
 
+The same `dotnet test` for the push of 1.8.37 (`a57e1f8`), on the six GitHub-hosted runners of
+`.github/workflows/test.yml` (run 41025785461), with .NET 10.0.14:
+
+| Runner | OS, architecture | Tests | Failed | Skipped | Mercury.Tests |
+|--------|------------------|------:|-------:|--------:|--------------:|
+| `macos-latest` | macOS 26.6, arm64 | 6,605 | 0 | 168 | 4 m 50 s |
+| `macos-26-intel` | macOS 26.6, x64 | 6,605 | 1 | 168 | 14 m 47 s |
+| `ubuntu-24.04` | Ubuntu 24.04, x64 | 6,605 | 0 | 168 | 4 m 10 s |
+| `ubuntu-24.04-arm` | Ubuntu 24.04, arm64 | 6,605 | 0 | 168 | 4 m 24 s |
+| `windows-latest` | Windows Server 2025 (10.0.26100), x64 | 6,605 | 0 | 176 | 28 m 55 s |
+| `windows-11-arm` | Windows 11 (10.0.26200), arm64 | 6,605 | 0 | 176 | 26 m 56 s |
+
+The failure on macOS x64 is `ParallelBZip2ThroughputMeasurement`, which asserts that 14 parallel workers decompress
+faster than one thread: 322 ms against 291 ms there. It measures the machine, not the code, and passed on the same
+runner the run before ([ADR-059](docs/adrs/mercury/ADR-059-every-w3c-test-runs.md) phase 7). The macOS runners run the
+sparse-file test, which omega skips.
 
 ## W3C Conformance
 
 Each row counts the tests of the W3C manifests the suite runs. See
 [ADR-010](docs/adrs/mercury/ADR-010-w3c-test-suite-integration.md) for the integration.
 
-### RDF formats (RDF 1.1 test suites, `rdf/rdf11`)
+### RDF formats (RDF 1.2 test suites, `rdf/rdf12`, which include the RDF 1.1 suites)
 
-| Format | Passing | Total |
-|--------|--------:|------:|
-| Turtle | 313 | 313 |
-| TriG | 357 | 357 |
-| N-Triples | 70 | 70 |
-| N-Quads | 87 | 87 |
-| RDF/XML | 166 | 166 |
-| **RDF formats total** | **993** | **993** |
+| Format | Passing | Total | Known failures |
+|--------|--------:|------:|---------------:|
+| Turtle | 371 | 419 | 48 |
+| TriG | 368 | 418 | 50 |
+| N-Triples | 130 | 145 | 15 |
+| N-Quads | 144 | 155 | 11 |
+| RDF/XML | 167 | 197 | 30 |
+| **RDF formats total** | **1,180** | **1,334** | **154** |
 
-The RDF 1.2 test suites (`rdf/rdf12`: Turtle 106, TriG 61, N-Triples 76, N-Quads 69, RDF/XML 31 test entries) are
-in the test data but are not run.
+The N-Triples and N-Quads rows each include 41 canonical-form tests. Every RDF 1.1 test passes (993). Each RDF 1.2
+manifest includes its RDF 1.1 manifest, so each test runs once
+([ADR-059](docs/adrs/mercury/ADR-059-every-w3c-test-runs.md)).
 
 ### SPARQL
 
@@ -165,6 +186,7 @@ in the test data but are not run.
 
 | Tests | Count | Reason |
 |-------|------:|--------|
+| RDF 1.2 tests in the five format suites | 154 | RDF 1.2 features not read yet: triple terms outside Turtle, reified triples, annotations, base direction, `VERSION`, and RDF/XML's `rdf:annotation` and `rdf:dir` ([ADR-059](docs/adrs/mercury/ADR-059-every-w3c-test-runs.md) phase 2) |
 | SPARQL 1.0 `distinct-2`, `distinct-9`, `dawg-lang-3` | 3 | Term identity: a simple literal and its `xsd:string` form are two terms; a pattern constant matches a language tag by case ([ADR-053](docs/adrs/mercury/ADR-053-one-rdf-term-one-atom.md)) |
 | SPARQL 1.0 `syn-bad-26`, `syn-bad-29`, `syn-bad-30` | 3 | Malformed expressions accepted ([ADR-057](docs/adrs/mercury/ADR-057-expression-read-once.md)) |
 | JSON-LD `te014`, `te026`, `te038`, `te071`, `t0118` | 5 | `specVersion` json-ld-1.0: for JSON-LD 1.0 processors; the 1.1 versions run |
@@ -172,14 +194,19 @@ in the test data but are not run.
 
 Each known failure is listed with its cause in `W3CTestContext.KnownFailures` and is skipped, not failed.
 
+The test data holds W3C tests that are not loaded yet: SPARQL 1.2, the rest of SPARQL 1.1 (federation, result
+formats, entailment, protocol, Graph Store), the RDF semantics tests and the JSON-LD API manifests. ADR-059 phases 3
+to 6 load them.
+
 ### Summary
 
 | Metric | Value |
 |--------|-------|
-| RDF formats (RDF 1.1 suites) | 100% (993/993) |
+| RDF formats, RDF 1.1 tests | 100% (993/993) |
+| RDF formats, RDF 1.2 suites with RDF 1.1 | 88.5% (1,180/1,334) |
 | SPARQL 1.0 and 1.1 | 99.4% (991/997) |
 | JSON-LD 1.1 toRdf, applicable tests | 100% (461/461) |
-| **All W3C tests run** | **2,445 passing of 2,457** (6 known failures, 6 not applicable) |
+| **All W3C tests run** | **2,632 passing of 2,798** (160 known failures, 6 not applicable) |
 
 ## NCrunch (Windows) Compatibility
 
@@ -330,5 +357,5 @@ dotnet test --report-trx --results-directory /tmp/trx
 ```
 
 Each TRX file names its test assembly in the `storage` attribute of every `UnitTest`. The W3C counts are the
-results of each conformance test method (`Turtle11_Eval`, `Sparql11_QueryEval`, …); a SPARQL test whose id
-contains `data-r2` is from the SPARQL 1.0 suite.
+results of each conformance test method (`Turtle_Eval`, `NTriples_CanonicalForm`, `Sparql11_QueryEval`, …); a SPARQL
+test whose id contains `data-r2` is from the SPARQL 1.0 suite.
