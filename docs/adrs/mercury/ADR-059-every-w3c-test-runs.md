@@ -101,6 +101,11 @@ STATISTICS.md and the README count every loaded test: passed, known failures and
 
    The other canonical-form failures are rules the writers do not follow (`\b` and `\f`, non-ASCII written as
    `\uXXXX`), term identity that ADR-053 decides (language-tag case, `^^xsd:string`), and RDF 1.2 triple terms.
+
+   **Fixed the same day (2026-10-30):** the N-Triples and N-Quads parsers are one (`8e8e6b1`) and so are the writers
+   (`20bd6e6`), which write canonical form; `ConvertAsync` writes every format. 26 canonical-form known failures
+   pass and are removed; the 8 triple-term tests remain. The format suites run 1,334 tests: 1,180 pass and 154 are
+   known failures, all RDF 1.2 features.
 2. **RDF 1.2 features**, to fix phase 1's known failures. Its own ADR: the parsers, the writers, and how the store
    holds triple terms and directional language strings.
 3. **SPARQL 1.2**: load, triage, list.
