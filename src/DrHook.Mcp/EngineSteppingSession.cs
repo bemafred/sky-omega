@@ -1,5 +1,5 @@
 // EngineSteppingSession — the BCL-only replacement for SteppingSessionManager (the netcoredbg-
-// DAP-backed one in src/DrHook/Stepping/). Same async surface; consumers (DrHookTools
+// DAP-backed one in src/DrHook/Stepping/, retired at 1.8.2). Same async surface; consumers (DrHookTools
 // and through it the MCP wire) see the same JSON-shaped responses. Backed entirely by
 // SkyOmega.DrHook.Engine.DebugSession.
 //
@@ -13,9 +13,9 @@
 // (the EventPipe-based gathering used by the old session manager is a separate concern that the
 // snapshot tool already serves directly).
 //
-// Phase 3 close (finding 51): retires the netcoredbg dependency from the stepping path. Snapshot
-// + processes tools still use DrHook (EventPipe — independent of netcoredbg DAP); retiring that
-// project entirely is a follow-on cleanup.
+// Phase 3 close (finding 51): retires the netcoredbg dependency from the stepping path. The snapshot
+// and processes tools' EventPipe code moved into DrHook.Engine (finding 52), and src/DrHook/ was
+// retired at 1.8.2.
 
 using System.Diagnostics;
 using System.Globalization;
