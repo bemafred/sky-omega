@@ -1,6 +1,6 @@
 # ADR-009: Substrate Dependency Policy — Four-Axis Admission Rule
 
-**Status:** Accepted — 2026-05-19 (clarified 2026-05-21 — native runtime-substrate assets, see Clarification section)
+**Status:** Accepted — 2026-05-19 (clarified 2026-05-21 — native runtime-substrate assets, see Clarification section; amended 2026-10-30 — TraceEvent and Roslyn admitted, see Admissions recorded 2026-10-30)
 
 ## Context
 
@@ -137,6 +137,40 @@ This record lives in the ADR that admits the dependency — either inline (this 
 **Admitted under:** this ADR.
 **Substrate(s) using:** DrHook.Engine (planned; current DrHook v1 already uses it informally — this admission canonizes it).
 **v1 vs destination:** **keep.** The dependency satisfies all four axes; substrate independence is not improved by reimplementing it. If a substrate-driven reason surfaces later (version drift, an unhandled quirk, vendor deprecation, or a substrate-correctness investigation that requires owning the protocol decoder), the public spec makes the rewrite tractable on the timeline established under axis 4.
+
+### Admissions recorded 2026-10-30: TraceEvent and Roslyn
+
+DrHook references two more managed NuGets: TraceEvent since its first commit (`992e7be`, 1.5.0, 2026-03-23), and
+Roslyn in DrHook.Engine since 2026-05-28 (`5dd2a6a`). DrHook.Engine's project file cites this ADR for both, but
+neither had an admission record. The downstream section below also credits the EventPipe parser
+(`EventPipeEventSource`) to `Microsoft.Diagnostics.NETCore.Client`; that class is in TraceEvent. Martin admitted both
+on 2026-10-30. Neither owner is named in Axis 1's examples, so each record says why it is runtime-adjacent.
+
+#### Substrate dependency admission: `Microsoft.Diagnostics.Tracing.TraceEvent`
+
+| Axis | Justification |
+|---|---|
+| 1. Origin | Microsoft, published from [`microsoft/perfview`](https://github.com/microsoft/perfview) by the .NET performance and diagnostics engineers. It is the reference reader for the runtime's own trace formats: `dotnet-trace` in `dotnet/diagnostics` references it directly. |
+| 2. Shape | **Extends** — parses the EventPipe NetTrace stream that `NETCore.Client`'s `EventPipeSession` delivers into typed runtime events (`EventPipeEventSource`; the CLR, sample-profiler and dynamic parsers). It imposes no observability pattern: DrHook's `StackInspector` subscribes to the events it summarizes and decides what they mean. |
+| 3. Stability | The NetTrace format carries its version in the file: a `Nettrace` magic followed by major and minor version numbers. Its specification, [`NetTraceFormat.md`](https://github.com/microsoft/perfview/blob/main/src/TraceEvent/EventPipe/NetTraceFormat.md) (version 6, with version 5 kept), states the rules: a reader stops at a major version it does not know and continues across minor versions, skipping blocks it does not recognize. The package is semver-versioned on NuGet. |
+| 4. Replaceability | Reimplementable from that specification. The NETCore.Client record above estimates the IPC client and the NetTrace parser together at ~1–2 weeks; DrHook reads only exception, GC, contention and sample-profiler events from it. |
+
+**Admitted under:** this ADR, 2026-10-30.
+**Substrate(s) using:** DrHook.Engine (`Diagnostics/StackInspector`, behind `drhook_snapshot`).
+**v1 vs destination:** **keep**, on the same terms as `NETCore.Client`: rewrite only if a substrate-driven reason surfaces.
+
+#### Substrate dependency admission: `Microsoft.CodeAnalysis.CSharp` (Roslyn)
+
+| Axis | Justification |
+|---|---|
+| 1. Origin | Microsoft, [`dotnet/roslyn`](https://github.com/dotnet/roslyn): the C# compiler of the .NET platform, released with the SDK. The project file's reason, "Roslyn IS the platform compiler chain", is this axis. It is not the native-substrate clarification above: DrHook binds to Roslyn's managed API, so it faces the four axes. |
+| 2. Shape | **Extends** — gives access to C#'s own grammar. DrHook parses a breakpoint condition or a log-message template into a syntax tree and walks it into a typed `Expression.Compile()` delegate (`Expressions/CSharpCondition`, finding 34). Nothing is compiled by Roslyn and no compiler pipeline is imposed: DrHook uses the parser and the syntax types, nothing else. |
+| 3. Stability | Roslyn tracks its public API in `PublicAPI.Shipped.txt` and `PublicAPI.Unshipped.txt` files checked by analyzers, so a public change is a reviewed diff; the package is semver-versioned with the compiler. |
+| 4. Replaceability | Bounded by the subset DrHook reads: literals, names, member access, parentheses, unary `-` and `!`, arithmetic, comparisons, `&&` and `||`, and interpolated strings. A hand-written parser for that subset, by C#'s published grammar, is days of work, inside the 2–6 week bound. A full C# parser is not, and is not needed. |
+
+**Admitted under:** this ADR, 2026-10-30.
+**Substrate(s) using:** DrHook.Engine (`Expressions/CSharpCondition`: `drhook_break_source` and `drhook_break_function` conditions, logpoint templates).
+**v1 vs destination:** **keep** while the subset grows with the debugger's needs. If expression evaluation stays this small, a native parser of the subset is a reasonable later simplification.
 
 ### Immediate exclusion: netcoredbg (codifies existing state)
 
