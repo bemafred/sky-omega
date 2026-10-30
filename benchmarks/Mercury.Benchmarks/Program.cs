@@ -16,6 +16,8 @@ public class Program
                     return WdBenchRunner.Run(args.AsSpan(1).ToArray());
                 case "wdbench-diff":
                     return WdBenchDifferentialRunner.Run(args.AsSpan(1).ToArray());
+                case "bzip2-contention":
+                    return BZip2ContentionTrace.Run(args.AsSpan(1).ToArray());
             }
         }
 

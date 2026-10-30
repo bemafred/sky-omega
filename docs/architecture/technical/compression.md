@@ -167,18 +167,35 @@ This reproduces the committed files byte for byte (checked 2026-10-30). Replacin
 new multi-block file (more than 900 KB of input at level 9) and new values for its sizes and truncation points in the
 tests. The empty stream is written out in its test: the 14 bytes of `bzip2 -9 -c < /dev/null`.
 
-Three measurement classes (`LargeFixtureMeasurement`, `ConvertPathThroughputMeasurement`,
-`ParallelBZip2ContentionTrace`) read `/tmp/multiblock-large.txt.bz2`, made by `bzip2 -9` from a 50 MB text file and
-not committed. Without it they return without measuring and report as passed.
-
-The single-threaded and parallel streams are compared in `benchmarks/Mercury.Benchmarks/BZip2DecompressionBenchmarks`
-on the committed multi-block fixture, which the benchmark assembly embeds:
+The speed of the two streams is measured in `benchmarks/Mercury.Benchmarks`, not in the tests:
 
 ```bash
-dotnet run --project benchmarks/Mercury.Benchmarks -c Release -- --filter '*BZip2Decompression*'
+dotnet run --project benchmarks/Mercury.Benchmarks -c Release -- --filter '*BZip2Decompression*' '*ConvertPath*'
+dotnet run --project benchmarks/Mercury.Benchmarks -c Release -- bzip2-contention
 ```
 
-On omega (2026-10-30, `--job short`) the single-threaded stream takes 42 ms; the parallel stream takes 44 ms with one
-worker, 29 ms with two and about 18 ms with four or more, the fixture having about four blocks. This was a test that
-asserted 14 workers are faster than one thread; within the test suite, which runs in parallel, the single-threaded
-stream took 291 ms on a CI runner and the assertion failed there.
+- `BZip2DecompressionBenchmarks`: the single-threaded stream against the parallel one at 1 to 14 workers, on the
+  committed multi-block fixture (embedded in the benchmark assembly) and on a generated 50 MB Wikidata-shaped
+  N-Triples document (`BZip2LargeFixture`, 59 blocks).
+- `ConvertPathBenchmarks`: bzip2 → Turtle parser → N-Triples writer on the 50 MB document, against parsing and
+  writing its decompressed text.
+- `bzip2-contention`: the time to decode each block at 1 and at 14 workers.
+
+`BZip2LargeFixture` makes the 50 MB document's compressed file with the `bzip2` tool, which must be on PATH, and keeps
+it in the temp directory (`mercury-benchmarks/`). Mercury has no bzip2 compressor.
+
+On omega (2026-10-30, `--job short`):
+
+| Measurement | Single-threaded | Parallel, 4 workers | Parallel, 14 workers |
+|-------------|----------------:|--------------------:|---------------------:|
+| Decompress the committed fixture (about 4 blocks) | 42 ms | 18 ms | 19 ms |
+| Decompress the 50 MB document (59 blocks) | 452 ms | 130 ms | 53 ms |
+| Convert the 50 MB document | 743 ms | 283 ms | 293 ms |
+
+Parsing and writing the decompressed text takes 260 ms, so on the convert path the parallel stream removes nearly all
+of decompression's cost from four workers on. A block takes 1.16 times as long to decode at 14 workers as at one.
+
+These were four test classes. One asserted that 14 workers are faster than one thread; inside the test suite, which
+runs in parallel, the single-threaded stream took 291 ms on a CI runner, and the assertion failed there. The other
+three read a file in `/tmp` that existed only on the machine that made it, and otherwise returned and reported
+passed.

@@ -4,20 +4,25 @@ using SkyOmega.Mercury.Compression;
 namespace SkyOmega.Mercury.Benchmarks;
 
 /// <summary>
-/// Decompression of the committed multi-block bzip2 fixture (410 KB compressed, 3 MB of text) by the single-threaded
-/// stream and by the parallel stream at 1 to 14 workers (ADR-036).
+/// Decompression by the single-threaded stream and by the parallel stream at 1 to 14 workers (ADR-036), of two
+/// fixtures: the committed multi-block file (410 KB compressed, 3 MB of text, about four blocks) and the generated
+/// 50 MB Wikidata-shaped document (<see cref="BZip2LargeFixture"/>, about 55 blocks).
 /// </summary>
 /// <remarks>
 /// <para>This was a test, <c>ParallelBZip2ThroughputMeasurement</c>, that asserted 14 workers decompress faster than
 /// one thread. That depends on the machine and its load: it failed on the GitHub macOS x64 runner on 2026-10-30
 /// (322 ms against 291 ms) and had passed there the run before. A speed is measured here, not asserted
 /// (ADR-059 phase 7).</para>
-/// <para>The fixture is embedded from <c>tests/Mercury.Tests/Compression/Fixtures/multiblock.txt.bz2</c>, so the
-/// benchmark process reads it without a path.</para>
+/// <para>The small fixture is embedded from <c>tests/Mercury.Tests/Compression/Fixtures/multiblock.txt.bz2</c>, so the
+/// benchmark process reads it without a path. The large one was <c>LargeFixtureMeasurement</c>, which read a file in
+/// <c>/tmp</c> that existed only where it was made, and otherwise returned and reported passed.</para>
 /// </remarks>
 [MemoryDiagnoser]
 public class BZip2DecompressionBenchmarks
 {
+    [Params("multiblock", "wikidata-shaped-50mb")]
+    public string Fixture { get; set; } = "";
+
     [Params(1, 2, 4, 8, 14)]
     public int Workers { get; set; }
 
@@ -27,12 +32,18 @@ public class BZip2DecompressionBenchmarks
     [GlobalSetup]
     public void Setup()
     {
+        _buffer = new byte[64 * 1024];
+        if (Fixture == "wikidata-shaped-50mb")
+        {
+            _compressed = BZip2LargeFixture.Compressed();
+            return;
+        }
+
         using var fixture = typeof(BZip2DecompressionBenchmarks).Assembly.GetManifestResourceStream("multiblock.txt.bz2")
             ?? throw new InvalidOperationException("multiblock.txt.bz2 is not embedded in the benchmark assembly.");
         using var copy = new MemoryStream();
         fixture.CopyTo(copy);
         _compressed = copy.ToArray();
-        _buffer = new byte[64 * 1024];
     }
 
     [Benchmark(Baseline = true)]

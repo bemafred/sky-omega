@@ -198,6 +198,8 @@ The single-threaded decompressor (Phase 1) was originally framed as the architec
 
 Three measurements decomposed the convert-path stages on a 50 MB / 6.6 MB-compressed / ~58-block fixture (`/tmp/multiblock-large.txt.bz2`, generated locally, not committed):
 
+*(Since 2026-10-30 these three measurements are in `benchmarks/Mercury.Benchmarks`, on a generated fixture: see [compression.md](../../architecture/technical/compression.md#test-fixtures). The figures below are the record of the originals.)*
+
 **Direct decompression** (`LargeFixtureMeasurement`, commit `b39f186`):
 
 | Configuration | wall (ms) | output MB/s | speedup |
