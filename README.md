@@ -6,7 +6,7 @@
 
 *A home for AI & Shared Knowledge*
 
-**Current release: [Sky Omega 1.8.9](CHANGELOG.md)** · **Mercury convergence** — one SPARQL execution path ([ADR-047](docs/adrs/mercury/ADR-047-default-path-cutover.md)) and one `[110]` expression evaluator ([ADR-049](docs/adrs/mercury/ADR-049-unified-expression-evaluator.md), `BindExpressionEvaluator` deleted; divergence S2 closed) · Mercury substrate production-validated across the 1.7 line · DrHook substrate-independence reached at 1.8.2 (netcoredbg retired), with the lifecycle triad + console-I/O isolation + 22-tool MCP surface landing at 1.8.3, then **debug-state visualization** — a surface-agnostic model published over a Unix-domain socket to human-launched views ([ADR-012](docs/adrs/drhook/ADR-012-debug-state-surfaces.md) Phases 1–2, dogfooded end-to-end) at 1.8.9 · **three paired Mercury measurements** on the same substrate generation:
+**Current release: [Sky Omega 1.8.36](CHANGELOG.md)** · **[Five platforms](#platforms)** — macOS, Linux and Windows, on arm64 and x64, the whole test suite passing on each · **Mercury convergence** — one SPARQL execution path ([ADR-047](docs/adrs/mercury/ADR-047-default-path-cutover.md)) and one `[110]` expression evaluator ([ADR-049](docs/adrs/mercury/ADR-049-unified-expression-evaluator.md), `BindExpressionEvaluator` deleted; divergence S2 closed) · Mercury substrate production-validated across the 1.7 line · DrHook substrate-independence reached at 1.8.2 (netcoredbg retired), with the lifecycle triad + console-I/O isolation + 22-tool MCP surface landing at 1.8.3, then **debug-state visualization** — a surface-agnostic model published over a Unix-domain socket to human-launched views ([ADR-012](docs/adrs/drhook/ADR-012-debug-state-surfaces.md) Phases 1–2, dogfooded end-to-end) at 1.8.9 · **three paired Mercury measurements** on the same substrate generation:
 - [cycle 10 Phase 3 r4](docs/validations/cycle10-phase3-r4-21b-2026-05-12.md) — **21.3 B full** Wikidata, 23 h 57 m end-to-end (2026-05-13)
 - [truthy r1](docs/validations/truthy-r1-2026-05-14.md) — **8.17 B truthy** Wikidata, 14 h 13 m end-to-end (2026-05-14)
 - [WGPB step C](docs/validations/wgpb-step-c-2026-05-16.md) — **~150 M 2018 reduced-truthy** Wikidata, 4 m 30 s end-to-end + **849/850 WGPB queries in 4 m 43 s** (2026-05-16)
@@ -84,7 +84,7 @@ Sky Omega is what becomes possible when you stop building better travelers and s
 git clone --recurse-submodules <repo-url> && cd sky-omega
 dotnet build SkyOmega.sln
 dotnet test
-./tools/install-tools.sh      # macOS/Linux
+./tools/install-tools.sh      # macOS/Linux; on Windows: .\tools\install-tools.ps1
 mercury -m                    # Start an in-memory session — REPL + SPARQL HTTP endpoint at http://localhost:3031/sparql
 mercury <store> --bulk-load data.ttl.bz2  # Bulk-load Turtle (or .nt, .nq, .trig, .rdf, .jsonld; .bz2 / plain)
 ```
@@ -94,12 +94,44 @@ mercury <store> --bulk-load data.ttl.bz2  # Bulk-load Turtle (or .nt, .nq, .trig
 > `Internal CLR error. (0x80131506)`. See the
 > [Linux .NET runbook](docs/operations/runbook-linux-dotnet-runtime.md).
 
-> **Already cloned without submodules?** Run `./tools/update-submodules.sh` to fetch
-> the W3C conformance test data needed by `dotnet test`.
+> **Already cloned without submodules?** Run `./tools/update-submodules.sh` (on Windows,
+> `.\tools\update-submodules.ps1`) to fetch the W3C conformance test data needed by `dotnet test`.
 
 New here? Follow the **[Getting Started tutorial](docs/tutorials/getting-started.md)**.
 
 Want to give Claude persistent memory? See **[Mercury MCP tutorial](docs/tutorials/mercury-mcp.md)**.
+
+---
+
+## Platforms
+
+Sky Omega is built and tested on macOS, Linux and Windows, on arm64 and x64 processors. At 1.8.36 (2026-10-29) the
+whole test suite passes on five machines: 6,234 tests on each, none failed. They include the DrHook integration
+tests, which launch and debug real .NET processes.
+
+| Machine | OS | Architecture | Hardware |
+|---------|----|--------------|----------|
+| omega | macOS 27 | arm64 | Apple M5 Max, 18 cores, 128 GB |
+| zbook | Ubuntu 26.04 | x64 | Intel Core i7-6700HQ (2015), 4 cores, 60 GB |
+| elite | Ubuntu 26.04 | x64 | AMD Athlon II X4 640 (2010), 4 cores, 15 GB |
+| omega-ubuntu | Ubuntu 26.04 | arm64 | Virtual machine on omega, 4 cores, 7.2 GB |
+| omega-windows | Windows 11 | arm64 | Virtual machine on omega, 4 cores, 8 GB |
+
+Each machine skips the tests of other platforms' features. The skips and their reasons, the .NET versions and each
+run's time are in [STATISTICS.md](STATISTICS.md#test-runs-by-platform). Not tested yet: Windows on x64, macOS on
+Intel, and Linux distributions other than Ubuntu.
+
+Mercury's core has no package dependencies, and DrHook loads Microsoft's debugging shim (`libdbgshim`) for the
+platform it runs on. The stores are in each platform's data directory:
+
+| Platform | Stores |
+|----------|--------|
+| macOS | `~/Library/SkyOmega/stores/` |
+| Linux | `$XDG_DATA_HOME/SkyOmega/stores/`, or `~/.local/share/SkyOmega/stores/` when it is not set |
+| Windows | `%LOCALAPPDATA%\SkyOmega\stores\` |
+
+The first run on each new platform, and the fixes it called for, are in releases [1.8.13](docs/releases/1.8.13.md)
+to [1.8.21](docs/releases/1.8.21.md).
 
 ---
 
@@ -118,7 +150,7 @@ Want to give Claude persistent memory? See **[Mercury MCP tutorial](docs/tutoria
 | [CLAUDE.md](CLAUDE.md)                | Operational guidance for AI-assisted development |
 | [MERCURY.md](MERCURY.md)              | Semantic memory discipline — when, why, how      |
 | [DRHOOK.md](DRHOOK.md)                | Runtime observation with DrHook — debug workflow, MCP tools, running tests |
-| [STATISTICS.md](STATISTICS.md)        | Codebase metrics and conformance tracking        |
+| [STATISTICS.md](STATISTICS.md)        | Codebase metrics, conformance, test runs by platform |
 | [Getting Started](docs/tutorials/getting-started.md) | 30-minute onboarding tutorial           |
 | [Mercury CLI](docs/tutorials/mercury-cli.md) | CLI REPL deep dive                        |
 | [Mercury MCP](docs/tutorials/mercury-mcp.md) | Claude integration and persistent memory  |
@@ -215,7 +247,7 @@ Everything below has code in `src/`, tests, and benchmarks.
 | **Mercury.Pruning**    | Dual-instance pruning with copy-and-switch pattern                                         |
 | **Mercury MCP**        | Claude integration with persistent semantic memory                                         |
 | **Mercury CLI**        | Interactive REPL with persistent store, global tool install                                 |
-| **DrHook.Engine**      | Runtime observation substrate — BCL + P/Invoke + source-gen COM, 7,747 lines. ICorDebug via per-RID `libdbgshim`; EventPipe for process listing + thread/stack snapshots; `Transport/` publishes the unified debug-state model over a Unix-domain socket (ADR-012 Phase 2). Substrate-independence reached at 1.8.2 (netcoredbg retired). PoC probes through 63 with 81 dated findings validating each capability on macOS/arm64 (single-platform so far). Production-suitability sequenced under [ADR-007](docs/adrs/drhook/ADR-007-teardown-concurrency-test-debug.md) (Accepted). |
+| **DrHook.Engine**      | Runtime observation substrate — BCL + P/Invoke + source-gen COM, 7,747 lines. ICorDebug via per-RID `libdbgshim`; EventPipe for process listing + thread/stack snapshots; `Transport/` publishes the unified debug-state model over a Unix-domain socket (ADR-012 Phase 2). Substrate-independence reached at 1.8.2 (netcoredbg retired). PoC probes through 63 with 81 dated findings validating each capability on macOS/arm64; it has run on Linux since 1.8.13 and on Windows since 1.8.19 ([Platforms](#platforms)). Production-suitability sequenced under [ADR-007](docs/adrs/drhook/ADR-007-teardown-concurrency-test-debug.md) (Accepted). |
 | **DrHook MCP**         | MCP server for .NET runtime inspection (peer to Mercury MCP) — 22 tools backed by DrHook.Engine: session lifecycle (launch / attach / stop / detach / kill), execution control (continue / pause / step over / into / out), breakpoints (source / function / exception with subclass filtering + condition / hit-count / logpoint, list / remove / clear), `locals` (field + array inspection), `processes`, `snapshot`, and console / log / anomaly drains. Tool names follow IDE-debugger convention ([ADR-010](docs/adrs/drhook/ADR-010-mcp-tool-surface-redesign.md)); every state-changing or state-reading tool takes a `hypothesis`. |
 | **DrHook Viz**         | Debug-state **visualization** ([ADR-012](docs/adrs/drhook/ADR-012-debug-state-surfaces.md) Phases 1–2) — a surface-agnostic model the engine publishes over a Unix-domain socket to human-launched views, layered like Mercury's `Abstractions ← Tool ← Cli`: **DrHook.Wire** (89 lines, zero-dependency NDJSON protocol contract), **DrHook.Viz** (176 lines, BCL-only client library — `DebugStateClient` + model + `IDebugStateView`), **DrHook.Viz.Console** (100 lines, `drhook-viz-console` — the first console view, and the first proper DrHook debuggee). A view connects mid-session and renders live (snapshot-on-connect + delta stream); killing it never affects the LLM-owned debug session. |
 
