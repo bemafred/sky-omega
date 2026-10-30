@@ -4,6 +4,7 @@
 using System;
 using System.Reflection;
 using System.Threading.Tasks;
+using SkyOmega.Mercury;
 using SkyOmega.Mercury.Abstractions;
 using SkyOmega.Mercury.Turtle.Tool;
 
@@ -74,17 +75,10 @@ internal static class Program
                     break;
 
                 case "--output-format":
-                    if (i + 1 >= args.Length) { options.Error = "--output-format requires a format (nt, nq, trig)"; return options; }
-                    var fmt = args[++i].ToLowerInvariant();
-                    options.OutputFormat = fmt switch
-                    {
-                        "nt" or "ntriples" => RdfFormat.NTriples,
-                        "nq" or "nquads" => RdfFormat.NQuads,
-                        "trig" => RdfFormat.TriG,
-                        "ttl" or "turtle" => RdfFormat.Turtle,
-                        _ => RdfFormat.Unknown
-                    };
-                    if (options.OutputFormat == RdfFormat.Unknown) { options.Error = $"Unknown format: {fmt}. Use nt, nq, trig, or ttl."; return options; }
+                    if (i + 1 >= args.Length) { options.Error = "--output-format requires a format (nt, nq, ttl, trig, rdf, jsonld)"; return options; }
+                    var fmt = args[++i];
+                    options.OutputFormat = RdfEngine.DetermineFormatFromExtension(fmt.AsSpan());
+                    if (options.OutputFormat == RdfFormat.Unknown) { options.Error = $"Unknown format: {fmt}. Use nt, nq, ttl, trig, rdf or jsonld."; return options; }
                     break;
 
                 case "--validate":
@@ -137,7 +131,7 @@ internal static class Program
                 -h, --help              Show this help message
                 -i, --input <FILE>      Input Turtle file
                 -o, --output <FILE>     Output file (format detected from extension)
-                --output-format <FMT>   Output format: nt, nq, trig, ttl
+                --output-format <FMT>   Output format: nt, nq, ttl, trig, rdf, jsonld
                 --validate              Validate syntax only (report errors)
                 --stats                 Show statistics (triple count, predicates)
                 -b, --benchmark         Run performance benchmark

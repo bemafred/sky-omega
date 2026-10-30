@@ -85,6 +85,13 @@ public static class RdfEngine
         => RdfFormatNegotiator.FromContentType(contentType);
 
     /// <summary>
+    /// Determine the RDF format from a file extension (<c>.nt</c> or <c>nt</c>), which is also how a command-line
+    /// option names a format.
+    /// </summary>
+    public static RdfFormat DetermineFormatFromExtension(ReadOnlySpan<char> extension)
+        => RdfFormatNegotiator.FromExtension(extension);
+
+    /// <summary>
     /// Negotiate the best RDF format from an Accept header.
     /// </summary>
     public static RdfFormat NegotiateFromAccept(ReadOnlySpan<char> acceptHeader, RdfFormat defaultFormat = RdfFormat.Turtle)
