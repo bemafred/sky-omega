@@ -364,37 +364,12 @@ public static class RdfEngine
     public static void WriteTriples(TextWriter writer, RdfFormat format,
         IEnumerable<(string Subject, string Predicate, string Object)> triples)
     {
-        switch (format)
-        {
-            case RdfFormat.NTriples:
-                using (var w = new NTriplesStreamWriter(writer))
-                {
-                    foreach (var (s, p, o) in triples)
-                        w.WriteTriple(s.AsSpan(), p.AsSpan(), o.AsSpan());
-                }
-                break;
+        if (RdfDocumentWriter.HoldsNamedGraphs(format))
+            throw new NotSupportedException($"WriteTriples does not support format: {format}. Use WriteQuads for quad formats.");
 
-            case RdfFormat.Turtle:
-                using (var w = new TurtleStreamWriter(writer))
-                {
-                    foreach (var (s, p, o) in triples)
-                        w.WriteTriple(s.AsSpan(), p.AsSpan(), o.AsSpan());
-                }
-                break;
-
-            case RdfFormat.RdfXml:
-                using (var w = new RdfXmlStreamWriter(writer))
-                {
-                    w.WriteStartDocument();
-                    foreach (var (s, p, o) in triples)
-                        w.WriteTriple(s.AsSpan(), p.AsSpan(), o.AsSpan());
-                    w.WriteEndDocument();
-                }
-                break;
-
-            default:
-                throw new NotSupportedException($"WriteTriples does not support format: {format}. Use WriteQuads for quad formats.");
-        }
+        using var document = new RdfDocumentWriter(writer, format);
+        foreach (var (s, p, o) in triples)
+            document.Write(s.AsSpan(), p.AsSpan(), o.AsSpan(), ReadOnlySpan<char>.Empty);
     }
 
     /// <summary>
@@ -403,36 +378,12 @@ public static class RdfEngine
     public static void WriteQuads(TextWriter writer, RdfFormat format,
         IEnumerable<(string Subject, string Predicate, string Object, string Graph)> quads)
     {
-        switch (format)
-        {
-            case RdfFormat.NQuads:
-                using (var w = new NQuadsStreamWriter(writer))
-                {
-                    foreach (var (s, p, o, g) in quads)
-                        w.WriteQuad(s.AsSpan(), p.AsSpan(), o.AsSpan(), g.AsSpan());
-                }
-                break;
+        if (!RdfDocumentWriter.HoldsNamedGraphs(format))
+            throw new NotSupportedException($"WriteQuads does not support format: {format}. Use WriteTriples for triple formats.");
 
-            case RdfFormat.TriG:
-                using (var w = new TriGStreamWriter(writer))
-                {
-                    foreach (var (s, p, o, g) in quads)
-                        w.WriteQuad(s, p, o, g);
-                }
-                break;
-
-            case RdfFormat.JsonLd:
-                using (var w = new JsonLdStreamWriter(writer))
-                {
-                    foreach (var (s, p, o, g) in quads)
-                        w.WriteQuad(s, p, o, g);
-                    w.Flush();
-                }
-                break;
-
-            default:
-                throw new NotSupportedException($"WriteQuads does not support format: {format}. Use WriteTriples for triple formats.");
-        }
+        using var document = new RdfDocumentWriter(writer, format);
+        foreach (var (s, p, o, g) in quads)
+            document.Write(s.AsSpan(), p.AsSpan(), o.AsSpan(), g.AsSpan());
     }
 
     #endregion
@@ -469,52 +420,38 @@ public static class RdfEngine
         await using var outputFileStream = File.Create(outputPath);
         using var streamWriter = new StreamWriter(outputFileStream);
 
-        // For N-Triples output, route through NTriplesStreamWriter so literals
-        // are properly re-escaped. The in-memory lexical form produced by the
-        // Turtle parser has `\"` unescaped to `"`; writing those spans directly
-        // produces invalid N-Triples. See ADR commits and
-        // docs/validations/bulk-load-gradient-2026-04-17.md.
-        NTriples.NTriplesStreamWriter? ntWriter = outputFormat == RdfFormat.NTriples
-            ? new NTriples.NTriplesStreamWriter(streamWriter)
-            : null;
-
+        // Every output format through its writer, which re-escapes the parsers' decoded literals. Until 2026-10-30 only
+        // N-Triples was written: the other formats counted the statements and left an empty file. Statements keep their
+        // graph; a named graph written to a format without named graphs is an error (RdfDocumentWriter).
         long count = 0;
         var sw = Stopwatch.StartNew();
 
         using var cts = limit.HasValue ? new CancellationTokenSource() : null;
         var ct = cts?.Token ?? CancellationToken.None;
 
-        try
+        using (var document = new RdfDocumentWriter(streamWriter, outputFormat))
         {
-            await ParseAsync(inputStream, inputFormat, (s, p, o) =>
+            try
             {
-                if (limit.HasValue && count >= limit.Value)
+                await ParseQuadsAsync(inputStream, inputFormat, (s, p, o, g) =>
                 {
-                    cts!.Cancel();
-                    return;
-                }
-                count++;
-                switch (outputFormat)
-                {
-                    case RdfFormat.NTriples:
-                        ntWriter!.WriteTriple(s, p, o);
-                        break;
-                    default:
-                        // For other formats, fall through to materialized write below
-                        break;
-                }
+                    if (limit.HasValue && count >= limit.Value)
+                    {
+                        cts!.Cancel();
+                        return;
+                    }
+                    count++;
+                    document.Write(s, p, o, g);
 
-                if (count % 1_000_000 == 0)
-                    onProgress?.Invoke(new LoadProgress { TriplesLoaded = count, Elapsed = sw.Elapsed });
-            }, ct: ct).ConfigureAwait(false);
+                    if (count % 1_000_000 == 0)
+                        onProgress?.Invoke(new LoadProgress { TriplesLoaded = count, Elapsed = sw.Elapsed });
+                }, ct: ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (limit.HasValue && count >= limit.Value)
+            {
+                // Expected: parser cancelled once the limit was reached.
+            }
         }
-        catch (OperationCanceledException) when (limit.HasValue && count >= limit.Value)
-        {
-            // Expected: parser cancelled once the limit was reached.
-        }
-
-        ntWriter?.Flush();
-        ntWriter?.Dispose();
 
         if (inputStream != inputFileStream)
             await inputStream.DisposeAsync().ConfigureAwait(false);

@@ -48,6 +48,11 @@ internal sealed class RdfXmlStreamWriter : IDisposable, IAsyncDisposable
     private readonly Dictionary<string, string> _namespaces;
     private readonly Dictionary<string, string> _iriToPrefix; // Reverse lookup
 
+    // The prefixes the rdf:RDF element declares. A prefix first used after it is written (one this writer invents
+    // for a predicate's namespace, or one registered late) is declared on each property element that uses it:
+    // until 2026-10-30 such a prefix was used undeclared, which is not well-formed under Namespaces in XML.
+    private readonly HashSet<string> _declaredAtRoot = new(StringComparer.Ordinal);
+
     // Subject grouping state
     private string? _currentSubject;
     private bool _hasOpenDescription;
@@ -111,6 +116,7 @@ internal sealed class RdfXmlStreamWriter : IDisposable, IAsyncDisposable
             WriteString("=\"");
             WriteXmlEscaped(kvp.Value.AsSpan());
             WriteChar('"');
+            _declaredAtRoot.Add(kvp.Key);
         }
 
         WriteString(">\n");
@@ -320,6 +326,7 @@ internal sealed class RdfXmlStreamWriter : IDisposable, IAsyncDisposable
                     WriteString(prefix);
                     WriteChar(':');
                     WriteSpan(localName);
+                    WriteNamespaceDeclarationIfNotAtRoot(prefix, kvp.Key);
                     elementName = $"{prefix}:{localName.ToString()}".AsSpan();
                     return;
                 }
@@ -350,6 +357,7 @@ internal sealed class RdfXmlStreamWriter : IDisposable, IAsyncDisposable
             WriteString(registeredPrefix);
             WriteChar(':');
             WriteSpan(local);
+            WriteNamespaceDeclarationIfNotAtRoot(registeredPrefix, ns);
             elementName = $"{registeredPrefix}:{local.ToString()}".AsSpan();
             return;
         }
@@ -357,6 +365,20 @@ internal sealed class RdfXmlStreamWriter : IDisposable, IAsyncDisposable
         // Last resort - shouldn't happen with valid RDF
         WriteString("<rdf:value");
         elementName = "rdf:value".AsSpan();
+    }
+
+    /// <summary>
+    /// After an element's name: ` xmlns:prefix="namespace"` when the rdf:RDF element does not declare the prefix.
+    /// </summary>
+    private void WriteNamespaceDeclarationIfNotAtRoot(string prefix, string namespaceIri)
+    {
+        if (_declaredAtRoot.Contains(prefix))
+            return;
+        WriteString(" xmlns:");
+        WriteString(prefix);
+        WriteString("=\"");
+        WriteXmlEscaped(namespaceIri.AsSpan());
+        WriteChar('"');
     }
 
     private void WriteLiteralObject(ReadOnlySpan<char> literal, ReadOnlySpan<char> predicateElement)

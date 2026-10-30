@@ -3,6 +3,7 @@
 
 using System.Diagnostics;
 using System.Text;
+using SkyOmega.Mercury;
 using SkyOmega.Mercury.Abstractions;
 using SkyOmega.Mercury.NQuads;
 using SkyOmega.Mercury.NTriples;
@@ -311,55 +312,26 @@ public static class TurtleTool
         {
             long count = 0;
 
-            switch (outputFormat)
+            // Every output format through the one document writer, as RdfEngine.ConvertAsync does; Turtle input has
+            // only the default graph.
+            RdfDocumentWriter document;
+            try
             {
-                case RdfFormat.NTriples:
-                    await using (var writer = new NTriplesStreamWriter(outputWriter))
-                    {
-                        await parser.ParseAsync((subject, predicate, obj) =>
-                        {
-                            writer.WriteTriple(subject, predicate, obj);
-                            count++;
-                        });
-                    }
-                    break;
+                document = new RdfDocumentWriter(outputWriter, outputFormat);
+            }
+            catch (NotSupportedException)
+            {
+                await error.WriteLineAsync($"Output format not supported: {outputFormat}");
+                return ToolResult.Fail($"Output format not supported: {outputFormat}");
+            }
 
-                case RdfFormat.NQuads:
-                    await using (var writer = new NQuadsStreamWriter(outputWriter))
-                    {
-                        await parser.ParseAsync((subject, predicate, obj) =>
-                        {
-                            writer.WriteQuad(subject, predicate, obj, ReadOnlySpan<char>.Empty);
-                            count++;
-                        });
-                    }
-                    break;
-
-                case RdfFormat.TriG:
-                    await using (var writer = new TriGStreamWriter(outputWriter))
-                    {
-                        await parser.ParseAsync((subject, predicate, obj) =>
-                        {
-                            writer.WriteQuad(subject, predicate, obj, ReadOnlySpan<char>.Empty);
-                            count++;
-                        });
-                    }
-                    break;
-
-                case RdfFormat.Turtle:
-                    await using (var writer = new TurtleStreamWriter(outputWriter))
-                    {
-                        await parser.ParseAsync((subject, predicate, obj) =>
-                        {
-                            writer.WriteTriple(subject, predicate, obj);
-                            count++;
-                        });
-                    }
-                    break;
-
-                default:
-                    await error.WriteLineAsync($"Output format not supported: {outputFormat}");
-                    return ToolResult.Fail($"Output format not supported: {outputFormat}");
+            using (document)
+            {
+                await parser.ParseAsync((subject, predicate, obj) =>
+                {
+                    document.Write(subject, predicate, obj, ReadOnlySpan<char>.Empty);
+                    count++;
+                });
             }
 
             if (outputFile != null)

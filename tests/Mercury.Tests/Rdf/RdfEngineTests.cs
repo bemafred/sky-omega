@@ -279,6 +279,130 @@ public class RdfEngineTests : PooledStoreTestBase
         }
     }
 
+    [Fact]
+    public async Task ConvertAsync_NTriplesToNQuads_WritesEveryStatement()
+    {
+        // Until 2026-10-30 ConvertAsync wrote only N-Triples: every other output format was an empty file.
+        var inPath = Path.Combine(Path.GetTempPath(), $"rdfengine-conv-nq-in-{Guid.NewGuid():N}.nt");
+        var outPath = Path.Combine(Path.GetTempPath(), $"rdfengine-conv-nq-out-{Guid.NewGuid():N}.nq");
+        try
+        {
+            await File.WriteAllTextAsync(inPath,
+                "<http://e/s> <http://e/p> \"café \\\"x\\\"\" .\n<http://e/s> <http://e/q> <http://e/o> .\n",
+                TestContext.Current.CancellationToken);
+
+            var count = await RdfEngine.ConvertAsync(inPath, outPath);
+
+            var quads = new List<(string, string, string, string)>();
+            await using (var output = File.OpenRead(outPath))
+                await RdfEngine.ParseQuadsAsync(output, RdfFormat.NQuads,
+                    (s, p, o, g) => quads.Add((s.ToString(), p.ToString(), o.ToString(), g.ToString())),
+                    ct: TestContext.Current.CancellationToken);
+
+            Assert.Equal(2, count);
+            Assert.Equal(
+                [("<http://e/s>", "<http://e/p>", "\"café \"x\"\"", ""), ("<http://e/s>", "<http://e/q>", "<http://e/o>", "")],
+                quads);
+        }
+        finally
+        {
+            if (File.Exists(inPath)) File.Delete(inPath);
+            if (File.Exists(outPath)) File.Delete(outPath);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_NamedGraph_IsKeptInTriG_AndRefusedInNTriples()
+    {
+        // A statement keeps its graph; a format without named graphs refuses it rather than dropping the graph name.
+        var inPath = Path.Combine(Path.GetTempPath(), $"rdfengine-conv-graph-in-{Guid.NewGuid():N}.nq");
+        var trigPath = Path.Combine(Path.GetTempPath(), $"rdfengine-conv-graph-out-{Guid.NewGuid():N}.trig");
+        var ntPath = Path.Combine(Path.GetTempPath(), $"rdfengine-conv-graph-out-{Guid.NewGuid():N}.nt");
+        try
+        {
+            await File.WriteAllTextAsync(inPath, "<http://e/s> <http://e/p> \"v\" <http://e/g> .\n",
+                TestContext.Current.CancellationToken);
+
+            await RdfEngine.ConvertAsync(inPath, trigPath);
+            var quads = new List<(string, string, string, string)>();
+            await using (var output = File.OpenRead(trigPath))
+                await RdfEngine.ParseQuadsAsync(output, RdfFormat.TriG,
+                    (s, p, o, g) => quads.Add((s.ToString(), p.ToString(), o.ToString(), g.ToString())),
+                    ct: TestContext.Current.CancellationToken);
+            Assert.Equal([("<http://e/s>", "<http://e/p>", "\"v\"", "<http://e/g>")], quads);
+
+            var error = await Assert.ThrowsAsync<NotSupportedException>(() => RdfEngine.ConvertAsync(inPath, ntPath));
+            Assert.Contains("<http://e/g>", error.Message);
+        }
+        finally
+        {
+            if (File.Exists(inPath)) File.Delete(inPath);
+            if (File.Exists(trigPath)) File.Delete(trigPath);
+            if (File.Exists(ntPath)) File.Delete(ntPath);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_TurtleToRdfXmlAndJsonLd_RoundTrips()
+    {
+        var inPath = Path.Combine(Path.GetTempPath(), $"rdfengine-conv-ttl-in-{Guid.NewGuid():N}.ttl");
+        var rdfPath = Path.Combine(Path.GetTempPath(), $"rdfengine-conv-ttl-out-{Guid.NewGuid():N}.rdf");
+        var jsonLdPath = Path.Combine(Path.GetTempPath(), $"rdfengine-conv-ttl-out-{Guid.NewGuid():N}.jsonld");
+        try
+        {
+            await File.WriteAllTextAsync(inPath, """
+                @prefix e: <http://e/> .
+                e:s e:p "Hallå"@sv ;
+                    e:q e:o .
+                """, TestContext.Current.CancellationToken);
+            var expected = new HashSet<(string, string, string)>
+            {
+                ("<http://e/s>", "<http://e/p>", "\"Hallå\"@sv"),
+                ("<http://e/s>", "<http://e/q>", "<http://e/o>"),
+            };
+
+            await RdfEngine.ConvertAsync(inPath, rdfPath);
+            var fromRdfXml = new HashSet<(string, string, string)>();
+            await using (var output = File.OpenRead(rdfPath))
+                await RdfEngine.ParseAsync(output, RdfFormat.RdfXml,
+                    (s, p, o) => fromRdfXml.Add((s.ToString(), p.ToString(), o.ToString())),
+                    ct: TestContext.Current.CancellationToken);
+            Assert.Equal(expected, fromRdfXml);
+
+            await RdfEngine.ConvertAsync(inPath, jsonLdPath);
+            var fromJsonLd = new HashSet<(string, string, string)>();
+            await using (var output = File.OpenRead(jsonLdPath))
+                await RdfEngine.ParseAsync(output, RdfFormat.JsonLd,
+                    (s, p, o) => fromJsonLd.Add((s.ToString(), p.ToString(), o.ToString())),
+                    ct: TestContext.Current.CancellationToken);
+            Assert.Equal(expected, fromJsonLd);
+        }
+        finally
+        {
+            if (File.Exists(inPath)) File.Delete(inPath);
+            if (File.Exists(rdfPath)) File.Delete(rdfPath);
+            if (File.Exists(jsonLdPath)) File.Delete(jsonLdPath);
+        }
+    }
+
+    [Fact]
+    public async Task WriteQuads_JsonLd_WritesOneDocument()
+    {
+        // The JSON-LD writer writes its document when flushed, and disposing flushes; WriteQuads used to do both.
+        var quads = new List<(string, string, string, string)> { ("<http://e/s>", "<http://e/p>", "\"v\"", "") };
+
+        using var sw = new StringWriter();
+        RdfEngine.WriteQuads(sw, RdfFormat.JsonLd, quads);
+
+        var parsed = new List<(string, string, string)>();
+        await using (var input = new MemoryStream(Encoding.UTF8.GetBytes(sw.ToString())))
+            await RdfEngine.ParseAsync(input, RdfFormat.JsonLd,
+                (s, p, o) => parsed.Add((s.ToString(), p.ToString(), o.ToString())),
+                ct: TestContext.Current.CancellationToken);
+
+        Assert.Equal([("<http://e/s>", "<http://e/p>", "\"v\"")], parsed);
+    }
+
     #endregion
 
     #region Parsing

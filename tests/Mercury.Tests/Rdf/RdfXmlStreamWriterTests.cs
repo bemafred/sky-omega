@@ -353,4 +353,29 @@ public class RdfXmlStreamWriterTests
         }
         return count;
     }
+
+    [Fact]
+    public async Task WriteTriple_PredicateInUndeclaredNamespace_DeclaresItsPrefix()
+    {
+        // The rdf:RDF element is written before any triple, so a prefix the writer invents for a predicate's namespace
+        // (here ns3, for http://e/) is declared on the property element. Until 2026-10-30 it was used undeclared, and
+        // the output was not well-formed under Namespaces in XML.
+        using var sw = new StringWriter();
+        using (var writer = new RdfXmlStreamWriter(sw))
+        {
+            writer.WriteStartDocument();
+            writer.WriteTriple("<http://e/s>".AsSpan(), "<http://e/p>".AsSpan(), "\"v\"".AsSpan());
+            writer.WriteEndDocument();
+        }
+        var xml = sw.ToString();
+
+        Assert.Contains("<ns3:p xmlns:ns3=\"http://e/\"", xml);
+
+        var triples = new System.Collections.Generic.List<(string, string, string)>();
+        await using var input = new MemoryStream(Encoding.UTF8.GetBytes(xml));
+        using var parser = new RdfXmlStreamParser(input);
+        await parser.ParseAsync((s, p, o) => triples.Add((s.ToString(), p.ToString(), o.ToString())), TestContext.Current.CancellationToken);
+
+        Assert.Equal([("<http://e/s>", "<http://e/p>", "\"v\"")], triples);
+    }
 }
