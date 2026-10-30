@@ -60,16 +60,11 @@ public sealed class InformationalFloodTest
         public void OnEvent(string name)
         {
             Interlocked.Increment(ref _eventCount);
-            Console.WriteLine($"{DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)}  event {name}");
             if (name == "CreateThread" && Volatile.Read(ref _floodArmed) == 1)
                 FloodStarted.Set();
         }
 
-        public void OnAnomaly(EngineAnomaly a)
-        {
-            lock (_lock) { _anomalies.Add(a); }
-            Console.WriteLine($"{DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)}  anomaly {a.Kind} in {a.Operation}: {a.Observed}");
-        }
+        public void OnAnomaly(EngineAnomaly a) { lock (_lock) { _anomalies.Add(a); } }
     }
 
     [TestMethod]
@@ -141,7 +136,7 @@ public sealed class InformationalFloodTest
         string targetProject = IntegrationTargetPaths.VstestTargetProjectPath();
         Assert.IsTrue(File.Exists(targetProject), $"VSTest target csproj not found at {targetProject}.");
 
-        // The timeline: one line per step and per debuggee event (the sink's), in UTC to line up with the CI log, printed
+        // The timeline: one line per step, from the test's own thread, in UTC to line up with the CI log, printed
         // with the test's output when it fails or times out. On the GitHub macOS runners this test has hit the 120 s
         // limit with nothing to show where the time went (2026-10-30).
         using VstestRun run = TargetSpawn.Vstest(targetProject, methodFilter: "RunBriefObservableWork");
