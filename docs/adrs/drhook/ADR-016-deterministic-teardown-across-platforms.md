@@ -49,7 +49,7 @@ So a forced stop is DrHook's routine session end.
 a target that dies while mscordbi's Win32 event thread reads its memory leaves that debugger process unable to
 attach or launch again. It is proven on macOS (probe 100, 5 of 5 on omega). On the GitHub macOS runners it hit none
 of 8 jobs before a test change of ours (4b9812a) altered the timing of the test that runs before the one that hangs,
-4 of 8 with that change, and 1 of 6 after the change was removed (8ed9701). So the hang occurs with today's code;
+4 of 8 with that change, and 3 of 8 after the change was removed (8ed9701). So the hang occurs with today's code;
 whether the change made it more frequent, counts this small do not show. Earlier consequences of forced stops were
 the test-host crash of 2026-05-25 (ADR-008's Context) and finding 63's crash. Two single-test timeouts on those
 runners, after which the suite ran normally, were a different failure whose cause is unknown.
