@@ -1,0 +1,206 @@
+{
+  "probe": "101-platform-facts",
+  "recordedAt": "2026-10-31T19:05:39Z",
+  "environment": {
+    "machine": "omega",
+    "os": "macOS 27.0.1",
+    "architecture": "Arm64",
+    "cores": 18,
+    "memoryBytes": 137438953472,
+    "probeRuntime": ".NET 10.0.9",
+    "runtimeDirectory": "/usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/",
+    "dotnetHost": "/usr/local/share/dotnet/dotnet",
+    "debuggerExecutable": "/Users/bemafred/Library/Application Support/dotnet/runfile/101-platform-facts-smoke-2d3bfc26dc7fcd83838b27f741886fb5ee067dab347bdcc68779f552fb4a415b/bin/debug/101-platform-facts-smoke",
+    "runtimes": "Microsoft.AspNetCore.App 6.0.10 [/usr/local/share/dotnet/shared/Microsoft.AspNetCore.App]\nMicrosoft.AspNetCore.App 6.0.11 [/usr/local/share/dotnet/shared/Microsoft.AspNetCore.App]\nMicrosoft.AspNetCore.App 6.0.12 [/usr/local/share/dotnet/shared/Microsoft.AspNetCore.App]\nMicrosoft.AspNetCore.App 6.0.13 [/usr/local/share/dotnet/shared/Microsoft.AspNetCore.App]\nMicrosoft.AspNetCore.App 6.0.14 [/usr/local/share/dotnet/shared/Microsoft.AspNetCore.App]\nMicrosoft.AspNetCore.App 6.0.15 [/usr/local/share/dotnet/shared/Microsoft.AspNetCore.App]\nMicrosoft.AspNetCore.App 6.0.16 [/usr/local/share/dotnet/shared/Microsoft.AspNetCore.App]\nMicrosoft.AspNetCore.App 6.0.21 [/usr/local/share/dotnet/shared/Microsoft.AspNetCore.App]\nMicrosoft.AspNetCore.App 7.0.0 [/usr/local/share/dotnet/shared/Microsoft.AspNetCore.App]\nMicrosoft.AspNetCore.App 7.0.1 [/usr/local/share/dotnet/shared/Microsoft.AspNetCore.App]\nMicrosoft.AspNetCore.App 7.0.2 [/usr/local/share/dotnet/shared/Microsoft.AspNetCore.App]\nMicrosoft.AspNetCore.App 7.0.3 [/usr/local/share/dotnet/shared/Microsoft.AspNetCore.App]\nMicrosoft.AspNetCore.App 7.0.4 [/usr/local/share/dotnet/shared/Microsoft.AspNetCore.App]\nMicrosoft.AspNetCore.App 7.0.5 [/usr/local/share/dotnet/shared/Microsoft.AspNetCore.App]\nMicrosoft.AspNetCore.App 7.0.10 [/usr/local/share/dotnet/shared/Microsoft.AspNetCore.App]\nMicrosoft.AspNetCore.App 8.0.0-preview.1.23112.2 [/usr/local/share/dotnet/shared/Microsoft.AspNetCore.App]\nMicrosoft.AspNetCore.App 8.0.0 [/usr/local/share/dotnet/shared/Microsoft.AspNetCore.App]\nMicrosoft.AspNetCore.App 8.0.7 [/usr/local/share/dotnet/shared/Microsoft.AspNetCore.App]\nMicrosoft.AspNetCore.App 9.0.4 [/usr/local/share/dotnet/shared/Microsoft.AspNetCore.App]\nMicrosoft.AspNetCore.App 10.0.0 [/usr/local/share/dotnet/shared/Microsoft.AspNetCore.App]\nMicrosoft.AspNetCore.App 10.0.9 [/usr/local/share/dotnet/shared/Microsoft.AspNetCore.App]\nMicrosoft.AspNetCore.App 11.0.0-preview.5.26302.115 [/usr/local/share/dotnet/shared/Microsoft.AspNetCore.App]\nMicrosoft.NETCore.App 6.0.10 [/usr/local/share/dotnet/shared/Microsoft.NETCore.App]\nMicrosoft.NETCore.App 6.0.11 [/usr/local/share/dotnet/shared/Microsoft.NETCore.App]\nMicrosoft.NETCore.App 6.0.12 [/usr/local/share/dotnet/shared/Microsoft.NETCore.App]\nMicrosoft.NETCore.App 6.0.13 [/usr/local/share/dotnet/shared/Microsoft.NETCore.App]\nMicrosoft.NETCore.App 6.0.14 [/usr/local/share/dotnet/shared/Microsoft.NETCore.App]\nMicrosoft.NETCore.App 6.0.15 [/usr/local/share/dotnet/shared/Microsoft.NETCore.App]\nMicrosoft.NETCore.App 6.0.16 [/usr/local/share/dotnet/shared/Microsoft.NETCore.App]\nMicrosoft.NETCore.App 6.0.21 [/usr/local/share/dotnet/shared/Microsoft.NETCore.App]\nMicrosoft.NETCore.App 7.0.1 [/usr/local/share/dotnet/shared/Microsoft.NETCore.App]\nMicrosoft.NETCore.App 7.0.2 [/usr/local/share/dotnet/shared/Microsoft.NETCore.App]\nMicrosoft.NETCore.App 7.0.3 [/usr/local/share/dotnet/shared/Microsoft.NETCore.App]\nMicrosoft.NETCore.App 7.0.4 [/usr/local/share/dotnet/shared/Microsoft.NETCore.App]\nMicrosoft.NETCore.App 7.0.5 [/usr/local/share/dotnet/shared/Microsoft.NETCore.App]\nMicrosoft.NETCore.App 7.0.10 [/usr/local/share/dotnet/shared/Microsoft.NETCore.App]\nMicrosoft.NETCore.App 8.0.0-preview.1.23110.8 [/usr/local/share/dotnet/shared/Microsoft.NETCore.App]\nMicrosoft.NETCore.App 8.0.0 [/usr/local/share/dotnet/shared/Microsoft.NETCore.App]\nMicrosoft.NETCore.App 8.0.7 [/usr/local/share/dotnet/shared/Microsoft.NETCore.App]\nMicrosoft.NETCore.App 9.0.4 [/usr/local/share/dotnet/shared/Microsoft.NETCore.App]\nMicrosoft.NETCore.App 10.0.0 [/usr/local/share/dotnet/shared/Microsoft.NETCore.App]\nMicrosoft.NETCore.App 10.0.9 [/usr/local/share/dotnet/shared/Microsoft.NETCore.App]\nMicrosoft.NETCore.App 11.0.0-preview.5.26302.115 [/usr/local/share/dotnet/shared/Microsoft.NETCore.App]",
+    "DOTNET_ROOT": null,
+    "tempDirectory": "/var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/",
+    "commit": "ca4f93154633fb157f921c6fa0f485f398b00dd4",
+    "ci": "",
+    "kernel": "Darwin omega.local 27.0.0 Darwin Kernel Version 27.0.0: Tue Aug 11 21:06:40 PDT 2026; root:xnu-13432.1.9~1/RELEASE_ARM64_T6050 arm64",
+    "macOS": "ProductName:\t\tmacOS\nProductVersion:\t\t27.0.1\nBuildVersion:\t\t26A434",
+    "virtualMachine": "0",
+    "developerMode": "Developer mode is currently enabled.",
+    "systemIntegrityProtection": "System Integrity Protection status: enabled.",
+    "hostEntitlements": "[Dict]\n\t[Key] com.apple.security.cs.allow-dyld-environment-variables\n\t[Value]\n\t\t[Bool] true\n\t[Key] com.apple.security.cs.allow-jit\n\t[Value]\n\t\t[Bool] true\n\t[Key] com.apple.security.cs.disable-library-validation\n\t[Value]\n\t\t[Bool] true\n\t[Key] com.apple.security.get-task-allow\n\t[Value]\n\t\t[Bool] true",
+    "debuggerEntitlements": "Executable=/Users/bemafred/Library/Application Support/dotnet/runfile/101-platform-facts-smoke-2d3bfc26dc7fcd83838b27f741886fb5ee067dab347bdcc68779f552fb4a415b/bin/debug/101-platform-facts-smoke",
+    "user": "uid=501(bemafred) gid=20(staff) groups=20(staff),12(everyone),61(localaccounts),79(_appserverusr),80(admin),81(_appserveradm),98(_lpadmin),701(com.apple.sharepoint.group.1),33(_appstore),100(_lpoperator),204(_developer),250(_analyticsusers),395(com.apple.access_ftp),398(com.apple.access_screensharing),399(com.apple.access_ssh),400(com.apple.access_remote_ae)"
+  },
+  "runs": [
+    {
+      "mode": "descendant",
+      "result": "recorded",
+      "facts": {
+        "beforeAttach": {
+          "debuggerImages": [
+            {
+              "path": "/usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/libcoreclr.dylib",
+              "bytes": 6216352,
+              "sha256": "1c5644aec52ccaafb630b6586c3768991e5ae467dda33ca0e067483ec8f540ce"
+            }
+          ],
+          "threads": []
+        },
+        "target": {
+          "pid": 14392,
+          "mode": "descendant",
+          "ancestry": {
+            "parents": [
+              14391,
+              14390,
+              14370,
+              14361,
+              14360,
+              6666,
+              6665,
+              10377,
+              1
+            ],
+            "descendsFromDebugger": true
+          }
+        },
+        "attached": {
+          "eventsDuringAttach": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 3,
+            "LoadAssembly": 8,
+            "LoadModule": 8
+          },
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "debuggerImages": [
+            {
+              "path": "/Users/bemafred/Library/Application Support/dotnet/runfile/101-platform-facts-smoke-2d3bfc26dc7fcd83838b27f741886fb5ee067dab347bdcc68779f552fb4a415b/bin/debug/runtimes/osx-arm64/native/libdbgshim.dylib",
+              "bytes": 396624,
+              "sha256": "452a9778afe10f54189f9d6816e1e8250d6195a0e664b10d838f33cd8794abcb"
+            },
+            {
+              "path": "/usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/libcoreclr.dylib",
+              "bytes": 6216352,
+              "sha256": "1c5644aec52ccaafb630b6586c3768991e5ae467dda33ca0e067483ec8f540ce"
+            },
+            {
+              "path": "/usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/libmscordaccore.dylib",
+              "bytes": 2407968,
+              "sha256": "01227b106cd138854e670fbd1f945739316ecd4a5d9bcc4aad5ec1ef7a9f4772"
+            },
+            {
+              "path": "/usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/libmscordbi.dylib",
+              "bytes": 1786480,
+              "sha256": "1aa6a035180b1d9a491f8438e8b0018091943f1edd02bb4e29c3cc2bd9775184"
+            }
+          ],
+          "debugPipes": [
+            "clr-debug-pipe-14392-1793473499-in",
+            "clr-debug-pipe-14392-1793473499-out",
+            "dotnet-diagnostic-14392-1793473499-socket"
+          ],
+          "threads": [],
+          "anomalies": []
+        },
+        "afterDetach": {
+          "threads": [],
+          "debugPipes": [
+            "clr-debug-pipe-14392-1793473499-in",
+            "clr-debug-pipe-14392-1793473499-out",
+            "dotnet-diagnostic-14392-1793473499-socket"
+          ],
+          "anomalies": []
+        },
+        "targetEnd": {
+          "ended": true,
+          "doneMarker": true,
+          "exitCode": 0,
+          "waitedMs": 17901
+        }
+      }
+    },
+    {
+      "mode": "reparented",
+      "result": "recorded",
+      "facts": {
+        "beforeAttach": {
+          "debuggerImages": [
+            {
+              "path": "/usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/libcoreclr.dylib",
+              "bytes": 6216352,
+              "sha256": "1c5644aec52ccaafb630b6586c3768991e5ae467dda33ca0e067483ec8f540ce"
+            }
+          ],
+          "threads": []
+        },
+        "target": {
+          "pid": 14429,
+          "mode": "reparented",
+          "ancestry": {
+            "parents": [
+              1
+            ],
+            "descendsFromDebugger": false
+          }
+        },
+        "attached": {
+          "eventsDuringAttach": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 3,
+            "LoadAssembly": 8,
+            "LoadModule": 8
+          },
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "debuggerImages": [
+            {
+              "path": "/Users/bemafred/Library/Application Support/dotnet/runfile/101-platform-facts-smoke-2d3bfc26dc7fcd83838b27f741886fb5ee067dab347bdcc68779f552fb4a415b/bin/debug/runtimes/osx-arm64/native/libdbgshim.dylib",
+              "bytes": 396624,
+              "sha256": "452a9778afe10f54189f9d6816e1e8250d6195a0e664b10d838f33cd8794abcb"
+            },
+            {
+              "path": "/usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/libcoreclr.dylib",
+              "bytes": 6216352,
+              "sha256": "1c5644aec52ccaafb630b6586c3768991e5ae467dda33ca0e067483ec8f540ce"
+            },
+            {
+              "path": "/usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/libmscordaccore.dylib",
+              "bytes": 2407968,
+              "sha256": "01227b106cd138854e670fbd1f945739316ecd4a5d9bcc4aad5ec1ef7a9f4772"
+            },
+            {
+              "path": "/usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/libmscordbi.dylib",
+              "bytes": 1786480,
+              "sha256": "1aa6a035180b1d9a491f8438e8b0018091943f1edd02bb4e29c3cc2bd9775184"
+            }
+          ],
+          "debugPipes": [
+            "clr-debug-pipe-14429-1793473519-in",
+            "clr-debug-pipe-14429-1793473519-out",
+            "dotnet-diagnostic-14429-1793473519-socket"
+          ],
+          "threads": [],
+          "anomalies": []
+        },
+        "afterDetach": {
+          "threads": [],
+          "debugPipes": [
+            "clr-debug-pipe-14429-1793473519-in",
+            "clr-debug-pipe-14429-1793473519-out",
+            "dotnet-diagnostic-14429-1793473519-socket"
+          ],
+          "anomalies": []
+        },
+        "targetEnd": {
+          "ended": true,
+          "doneMarker": true,
+          "exitCode": null,
+          "waitedMs": 17888
+        }
+      }
+    }
+  ]
+}

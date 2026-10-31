@@ -426,7 +426,7 @@ accepted risk (Step 0), never on omega or zbook, and within enforced limits ther
 | macOS arm64 | omega (metal, macOS 27, Developer Mode on) | `macos-latest` (VM, macOS 26.6, 3 cores) | where finding 100 was found and reproduced |
 | macOS x64 | — | `macos-26-intel` (VM, macOS 26.6) | runner only |
 | Linux x64 | zbook (Microsoft .NET 10.0.14, `ptrace_scope=1`, dash) | `ubuntu-24.04` | elite (Microsoft 10.0.13) is excluded: it hung on 2026-10-31 and cannot be reset for now; its kernel log suggested failing RAM before that |
-| Linux arm64 | omega-ubuntu (VM, Ubuntu's .NET 10.0.13 by default, Microsoft's 10.0.13 in `~/.dotnet`, `ptrace_scope=1`, dash) | `ubuntu-24.04-arm` | the one machine where the two builds can be compared: one source commit, different binaries, mscordbi and the DAC included |
+| Linux arm64 | omega-ubuntu (VM, Ubuntu's .NET 10.0.14 by default, Microsoft's 10.0.13 in `~/.dotnet`, `ptrace_scope=1`, dash) | `ubuntu-24.04-arm` | the one machine where the two builds can be compared; since unattended-upgrades raised Ubuntu's to 10.0.14 (2026-10-31, finding 101) they differ in version too |
 | Windows x64 | — | `windows-latest` | runner only; no debugger transport |
 | Windows arm64 | omega-windows (VM, 10.0.14) | `windows-11-arm` | no debugger transport |
 
@@ -459,7 +459,10 @@ what succeeds and where the failure boundary is before any new infrastructure is
   compared on one machine. Done 2026-10-31: Microsoft's SDK 10.0.113 (runtime 10.0.13) in `~/.dotnet`, the same
   versions Ubuntu builds from source. Both runtimes name source commit `4099f83`, and neither links the system
   libunwind, but their `libmscordbi.so`, `libmscordaccore.so` and `libcoreclr.so` differ. Ubuntu's stays the
-  default; Microsoft's is selected by running `~/.dotnet/dotnet` (and `DOTNET_ROOT` for apphosts).
+  default; Microsoft's is selected by running `~/.dotnet/dotnet` (and `DOTNET_ROOT` for apphosts). Seven minutes
+  later, at 13:28:51 UTC, unattended-upgrades raised Ubuntu's to 10.0.14 (SDK 10.0.114), so the two builds no longer
+  share a version ([finding 101](../../../poc/drhook-engine/findings/101-platform-facts.md)). Open: hold Ubuntu's .NET
+  packages, add Microsoft's 10.0.14 beside them, or both.
 - Linux stack capture: `ptrace_scope=1` stops `gdb` from attaching to a non-descendant. Decided: constructions that
   need no capture. No outside debugger or stack sampler is attached to the debugger process; a probe establishes
   what it needs from inside that process or from outcomes alone.
@@ -472,6 +475,14 @@ debugger code loaded, how memory is read, and the environment; on Linux also wha
 its own threads' state without ptrace rights, which the no-capture constructions depend on. It ends the session with
 a clean detach and leaves the target to finish. Runs on each of our machines, and on the six runners through a
 `workflow_dispatch` job (a workflow change, reviewed when proposed).
+*Recorded on our machines, 2026-10-31* ([finding 101](../../../poc/drhook-engine/findings/101-platform-facts.md);
+probe 101 at `ca4f931`; omega, omega-ubuntu with both builds, zbook, omega-windows; every run recorded, every target
+ended by itself). On Linux mscordbi reads a descendant's memory directly and any other process's over the transport
+(`ptrace_scope=1`); on macOS it reads over the transport always (the debugger has no entitlement); Windows has no
+transport. DrHook's integration tests attach to descendants only, so on Linux they never take the transport path that
+finding 100 hangs in. On Linux the debugger can read its own threads' `comm`, state, `wchan` and syscall but not
+their stacks; mscordbi's transport thread is visible that way, and it outlives the detach. The runners are pending
+the workflow's review.
 
 **Step 2 — The natural end.** Hypothesis: letting a target complete normally narrows the debugger's teardown races,
 and should avoid the failure that forced termination causes. Whether it removes every dangerous race is an empirical

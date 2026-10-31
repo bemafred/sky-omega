@@ -1,0 +1,97 @@
+{
+  "probe": "101-platform-facts",
+  "recordedAt": "2026-10-31T19:24:38Z",
+  "environment": {
+    "machine": "OMEGA-WINDOWS",
+    "os": "Microsoft Windows 10.0.26100",
+    "architecture": "Arm64",
+    "cores": 4,
+    "memoryBytes": 8583315456,
+    "probeRuntime": ".NET 10.0.14",
+    "runtimeDirectory": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.14\\",
+    "dotnetHost": "C:\\Program Files\\dotnet\\dotnet.exe",
+    "debuggerExecutable": "C:\\Users\\bemafred\\AppData\\Local\\Temp\\dotnet\\runfile\\101-platform-facts-smoke-c864cffa55b6db0e9c3c511e2fd483636c78c8ac6adb99706c9731aca91536ec\\bin\\debug\\101-platform-facts-smoke.exe",
+    "runtimes": "Microsoft.AspNetCore.App 10.0.10 [C:\\Program Files\\dotnet\\shared\\Microsoft.AspNetCore.App]\r\nMicrosoft.AspNetCore.App 10.0.14 [C:\\Program Files\\dotnet\\shared\\Microsoft.AspNetCore.App]\r\nMicrosoft.AspNetCore.App 11.0.0-preview.6.26359.118 [C:\\Program Files\\dotnet\\shared\\Microsoft.AspNetCore.App]\r\nMicrosoft.NETCore.App 10.0.10 [C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App]\r\nMicrosoft.NETCore.App 10.0.14 [C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App]\r\nMicrosoft.NETCore.App 11.0.0-preview.6.26359.118 [C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App]\r\nMicrosoft.WindowsDesktop.App 10.0.10 [C:\\Program Files\\dotnet\\shared\\Microsoft.WindowsDesktop.App]\r\nMicrosoft.WindowsDesktop.App 10.0.14 [C:\\Program Files\\dotnet\\shared\\Microsoft.WindowsDesktop.App]\r\nMicrosoft.WindowsDesktop.App 11.0.0-preview.6.26359.118 [C:\\Program Files\\dotnet\\shared\\Microsoft.WindowsDesktop.App]",
+    "DOTNET_ROOT": null,
+    "tempDirectory": "C:\\Users\\bemafred\\AppData\\Local\\Temp\\",
+    "commit": "ca4f93154633fb157f921c6fa0f485f398b00dd4",
+    "ci": "",
+    "windows": "Microsoft Windows NT 10.0.26100.0"
+  },
+  "runs": [
+    {
+      "mode": "started",
+      "result": "recorded",
+      "facts": {
+        "beforeAttach": {
+          "debuggerImages": [
+            {
+              "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.14\\coreclr.dll",
+              "bytes": 5380904,
+              "sha256": "c8d6680d8580e60fd78d977391902cca6846a91a38770df067c9ff7becd03611"
+            }
+          ],
+          "threads": []
+        },
+        "target": {
+          "pid": 3708,
+          "mode": "started",
+          "ancestry": {
+            "parents": [],
+            "descendsFromDebugger": null
+          }
+        },
+        "attached": {
+          "eventsDuringAttach": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 3,
+            "LoadAssembly": 8,
+            "LoadModule": 8
+          },
+          "memoryOpen": {
+            "call": "OpenProcess(PROCESS_VM_READ)",
+            "error": 0,
+            "reads": "direct (Windows has no debugger transport)"
+          },
+          "debuggerImages": [
+            {
+              "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.14\\coreclr.dll",
+              "bytes": 5380904,
+              "sha256": "c8d6680d8580e60fd78d977391902cca6846a91a38770df067c9ff7becd03611"
+            },
+            {
+              "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.14\\mscordaccore.dll",
+              "bytes": 1559424,
+              "sha256": "76c7dff41f6e5d0bf82963190dc0adf8824dc15f380f78756f76478193c2741e"
+            },
+            {
+              "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.14\\mscordbi.dll",
+              "bytes": 1512792,
+              "sha256": "95e4e044a582f143be4a3157f53ab6cd363509d09ca21e71ebd77e56969fc174"
+            },
+            {
+              "path": "C:\\Users\\bemafred\\AppData\\Local\\Temp\\dotnet\\runfile\\101-platform-facts-smoke-c864cffa55b6db0e9c3c511e2fd483636c78c8ac6adb99706c9731aca91536ec\\bin\\debug\\runtimes\\win-arm64\\native\\dbgshim.dll",
+              "bytes": 162376,
+              "sha256": "fef88cc588634829fb1317273dcae3a2e420e6c05964e358068ea19d339b1c58"
+            }
+          ],
+          "debugPipes": [],
+          "threads": [],
+          "anomalies": []
+        },
+        "afterDetach": {
+          "threads": [],
+          "debugPipes": [],
+          "anomalies": []
+        },
+        "targetEnd": {
+          "ended": true,
+          "doneMarker": true,
+          "exitCode": 0,
+          "waitedMs": 19062
+        }
+      }
+    }
+  ]
+}
