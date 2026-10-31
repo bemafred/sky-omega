@@ -15,7 +15,9 @@ and an operator runs many such sessions an hour in one `drhook-mcp` process. The
 debugger usable: a `drhook-mcp` that can no longer attach ends the operator's debugging until a person restarts it.
 
 Debugging also meets programs that misbehave: a loop missing its exit condition, a deadlock, runaway recursion.
-DrHook must handle those as well, and know what each costs.
+DrHook must handle those as well, and know what each costs. How a session should end depends on why it began
+(Debugging scenarios, below). And DrHook is itself debugged and tested, by DrHook among others, so it must behave
+well in both roles.
 
 ### What DrHook does today (verified 2026-10-31)
 
@@ -57,6 +59,28 @@ runners, after which the suite ran normally, were a different failure whose caus
 The 2026-10-30 draft of this ADR asked how to make termination deterministic on each platform. That was the wrong
 question: it accepted the forced stop as routine and planned to engineer around its consequences.
 
+### What established debuggers do
+
+- The [Debug Adapter Protocol](https://microsoft.github.io/debug-adapter-protocol/specification) (DAP), which VS
+  Code and other editors speak, starts a session with `launch` or `attach`. `disconnect` ends it: by default the
+  adapter terminates a program it launched and leaves one it attached to running; `terminateDebuggee` and
+  `suspendDebuggee` override that. `terminate` asks for a graceful shutdown, typically a signal the program can
+  intercept; the program may refuse, and the session then continues. A client may use `terminate` as the first stage
+  of a stop and fall back to `disconnect`. The `exited` event reports that the program exited; `terminated` reports
+  that debugging ended, which need not mean the program did.
+- [Visual Studio](https://learn.microsoft.com/visualstudio/debugger/debug-multiple-processes): Stop Debugging ends
+  the processes it launched and detaches from those it attached to; Terminate All ends all of them; Detach All leaves
+  all of them running; each process can be set to "Detach when debugging stops".
+- VS Code asks for a debug adapter at the start of each session, and the Go extension starts a new adapter process
+  every time (vscode-go, `goDebugFactory.ts`).
+
+So the convention treats ending a launched program as the normal end of a session: a person who presses Stop wants
+it gone. DrHook follows it today (`drhook_stop` ends a launched program and detaches from an attached one), and DAP's
+`terminate` is what this ADR calls cancellation: a request the program may refuse. Two things differ for DrHook. Its
+operator, an LLM, runs many sessions an hour and cannot restart a stuck debugger itself. And `drhook-mcp` hosts
+mscordbi in one long-lived process for all its sessions, so a debugger left stuck costs every later session, not
+one.
+
 ## The ways a debugged program ends
 
 | How it ends | Who decides | DrHook's part | Known under DrHook | Not known |
@@ -69,6 +93,39 @@ question: it accepted the forced stop as routine and planned to engineer around 
 
 A hard reset is the one end nothing can be recovered from: no session survives it, only what was persisted before.
 
+## Debugging scenarios
+
+How a session should end depends on why it began. Each scenario has its own owner of the program's life, its own
+natural end and its own hazards, and DrHook and its client must know which scenario a session is in.
+
+| Scenario | How it starts | Whose program | Its natural end | Ending the session before that | Lifecycle hazards |
+|----------|---------------|---------------|-----------------|--------------------------------|-------------------|
+| **Inspecting code being designed:** a probe, a POC, a file-based app | `drhook_launch`, breakpoints armed before main | DrHook's | it runs to completion | continue it to the end, or detach and let it finish | mixing runtime versions in one debugger process (finding 86); a breakpoint on a file-based target that stays pending |
+| **Debugging a failing test,** instead of writing a probe that logs | the test executable launched (MTP), or `dotnet test` started with `VSTEST_HOST_DEBUG=1` and its test host attached to (VSTest) | DrHook's for a test executable it launched; otherwise the test runner's | the test run finishes and reports | remove the breakpoints and continue to the end | the runner waits for its host: a host killed mid-handshake leaves vstest.console waiting 90 s (finding 94); an early attach can skip the host's debug hold (finding 91); a host left waiting for a debugger is orphaned (finding 90); a test framework's timeout may expire while the test is paused (NUnit does not enforce its timeouts under a debugger; MSTest and xunit v3 not established) |
+| **Attaching to a running program,** a debug build, to learn the context of a reported bug | `drhook_attach` | its owner's: a user, a service manager | none on DrHook's side: the program goes on after the session | detach and leave it running; never kill it | a breakpoint stops the program for everyone using it: their requests time out, health checks fail, a watchdog may restart it and end the session; a program started with `DOTNET_EnableDiagnostics=0` refuses the attach |
+| **Diagnosing a hang** | attach; or a launched program stops making progress | its owner's, or DrHook's | none: it does not end | a stack snapshot first (`drhook_snapshot`, through EventPipe like `dotnet-stack`), which does not stop it at a breakpoint; then pause and inspect; detach, or, for DrHook's own program, a kill as the extraordinary act | the "won't end" row above |
+| **Catching a crash** | launch, with exception breakpoints to stop before the crash | DrHook's | the crash | — | the "crashes itself" row above; whether a stack overflow gives the debugger a chance to stop is unknown |
+| **Hunting an intermittent failure** ([ADR-015](ADR-015-run-until-anomaly.md), run until an anomaly) | many launches in a row in one debugger process | DrHook's | each run ends on its own | — | each end must leave the debugger clean, and nothing may pile up: finding 100 leaves a blocked thread and two pipe files per killed target |
+| **A program with a window** (Avalonia) | launch or attach | either | the user closes it, or the app quits on its own terms | detach and leave it running | a UI thread held at a breakpoint freezes the window; after a visual capture, the detach reports `uiLiveness`, whether the window recovered |
+| **A server or a service** (the Generic Host, ASP.NET Core) | launch or attach | either | a stop request: the host's `ConsoleLifetime` turns SIGINT or SIGTERM into `StopApplication`, and shutdown gets `HostOptions.ShutdownTimeout` (30 s by default) | a stop request | a program held at a breakpoint cannot shut down: continue it before asking it to stop |
+
+### DrHook as a debugger and as a debug target
+
+DrHook is debugged and tested too: its probes, its integration tests and `drhook-mcp` run under DrHook, and under
+other debuggers (Rider is the reference for correctness). It must behave well in both roles.
+
+- **As a program, it ends naturally.** `drhook-mcp` must end when its client closes the connection, and a test host
+  that uses DrHook.Engine when its tests have run, each ending its own sessions naturally first.
+- **One debugger per process.** An outer debugger attaches to DrHook's process, never to DrHook's target, which
+  DrHook already debugs.
+- **Paused by an outer debugger,** DrHook's own waits go on counting wall-clock time and may expire while it is
+  paused, and its target goes on running, or stays held, unobserved. A bound that expires because DrHook itself was
+  paused must not be reported as the target's fault. How DrHook tells the two apart is open.
+- **Runtime versions.** An outer debugger is locked to the first runtime version it debugs too (finding 86).
+- **Observing it without stopping it.** When DrHook's test host hung on CI, it was read with `sample` and
+  `dotnet-stack`, which do not stop it at a breakpoint. DrHook's own stack snapshot uses the same mechanism as
+  `dotnet-stack` (EventPipe) and should serve there as well.
+
 ## Decision (proposed)
 
 ### Principles
@@ -80,29 +137,38 @@ A hard reset is the one end nothing can be recovered from: no session survives i
    cancellation, and DrHook says so rather than sending it as one.
 3. **A forced end is extraordinary.** A kill is a separate, explicit decision (`drhook_kill`, `Abandon`), with its
    reason and expected cost stated first. It is never the fallback of an ordinary end.
-4. **DrHook survives the ends it did not choose.** A program that crashes, or is killed by someone else, leaves
+4. **Each scenario has its own natural end.** A probe or a test runs to completion; a program DrHook attached to
+   goes on after the session; a server ends on a stop request. DrHook knows how each session started and whose
+   program it is; the client and the operator know which scenario they are in, and end the session accordingly.
+5. **A program others use is not stopped lightly.** In a program DrHook did not start, a breakpoint stops it for
+   everyone using it. Observing without stopping comes first.
+6. **DrHook survives the ends it did not choose.** A program that crashes, or is killed by someone else, leaves
    DrHook able to report it and, where the platform allows, to keep working.
-5. **Every consequence is bounded, detected and reported.** No DrHook call waits without a bound. When an end
+7. **Every consequence is bounded, detected and reported.** No DrHook call waits without a bound. When an end
    leaves the debugger process unusable, DrHook detects it and reports a typed anomaly that names the level reached
    and what can still be done (for example: restart the debugger process).
-6. **Each consequence is contained at the smallest level:** session, then debugger process, then client, then
+8. **Each consequence is contained at the smallest level:** session, then debugger process, then client, then
    machine. Nothing DrHook does may risk the machine.
-7. **Record before an extraordinary act.** Before a kill, or anything else that could freeze, the intent and the
+9. **Record before an extraordinary act.** Before a kill, or anything else that could freeze, the intent and the
    state go to persistent storage (Mercury), since a hard reset erases everything else.
-8. **Native, per platform** (kept from the first draft). Every claim about a platform comes from a run on that
-   platform, with no emulation and no inference from another platform; a CI runner counts as the platform it is.
-   Results are reported N of N, and a result that varies is itself a finding. Each construction is reviewed with
-   Martin before it runs, and each step's result goes into a finding and into Mercury before the next.
+10. **DrHook behaves well as a debug target too.** Its own processes end naturally and honour cancellation, and a
+    bound that expires while DrHook itself is paused is not blamed on its target.
+11. **Native, per platform** (kept from the first draft). Every claim about a platform comes from a run on that
+    platform, with no emulation and no inference from another platform; a CI runner counts as the platform it is.
+    Results are reported N of N, and a result that varies is itself a finding. Each construction is reviewed with
+    Martin before it runs, and each step's result goes into a finding and into Mercury before the next.
 
 ### What each party must know
 
-- **DrHook** (the engine): the target's state; which end is under way; whether the target can receive a
-  cancellation request; each consequence, as a typed anomaly.
-- **Its clients** (`drhook-mcp` and other hosts): the ends available, and which one is natural for the target. A
-  probe or a test runs to completion; a server or an app ends on a stop request. The order: let it finish, then ask
-  it to stop, then kill, each a separate step, observed before the next.
-- **The operator** (an LLM or a person): the same order. Never kill to clean up. State the expected cost before a
-  kill, and record it first. The operator's guide is DRHOOK.md's lifecycle section.
+- **DrHook** (the engine): how each session started (launched or attached) and whose program it is; the target's
+  state; which end is under way; whether the target can receive a cancellation request; each consequence, as a typed
+  anomaly; and whether a bound expired because DrHook itself was paused.
+- **Its clients** (`drhook-mcp` and other hosts): the scenario, the ends available, and which one is natural for it
+  (the table above). The order: let it finish, then ask it to stop, then kill, each a separate step, observed before
+  the next. In a program DrHook did not start: detach, never kill.
+- **The operator** (an LLM or a person): the same. In a program others use, observe without stopping first. Never
+  kill to clean up. State the expected cost before a kill, and record it first. The operator's guide is DRHOOK.md's
+  lifecycle section, which gains the scenarios.
 
 ### What this would change (decided in Step 5, not now)
 
@@ -123,6 +189,11 @@ A hard reset is the one end nothing can be recovered from: no session survives i
 - **Extraordinary:** a target whose loop has no exit condition (it needs a kill), one that overflows its stack, one
   that calls `Environment.FailFast`. Each runs in a test process of its own, bounded in time and resources, and
   checks that the consequence is detected, reported and contained, not that nothing happens.
+
+The routine tests cover the scenarios: a probe launched and run to completion; a failing test debugged to the end of
+its run, under MTP and under VSTest; an attach to a running program, then a detach that leaves it running; and DrHook
+as the target, a DrHook test host debugged by `drhook-mcp` and left to end on its own. The cancellation tests include
+a Generic Host server stopped through its own lifetime.
 
 The flood and pause tests of today end their sessions mid-work by design. Each becomes a routine test (let the work
 finish) or an extraordinary one, named as such. Anything that could freeze a machine runs only on a disposable VM or
@@ -169,18 +240,21 @@ debugger continues it, so a program that ends on its own cannot die in the middl
 end never leaves the debugger unusable. Constructions: a flooding target that ends on its own, under the debugger,
 N times in one process, after which a further attach must succeed; a clean detach while the target floods, the
 target then finishing on its own; a target that exits right after the detach (finding 63's case, without the kill).
+Then the same natural end in each scenario: a launched probe, a test run under MTP and under VSTest, an attach
+followed by a detach, and DrHook's own test host as the target.
 
 **Step 3 — Cancellation.** A target with a SIGTERM handler that cancels its work, asked mid-flood under the
-debugger; the same target without a handler, to record what an unhandled signal does under a debugger. Windows: a
-console control event, built and reviewed before it runs.
+debugger; the same target without a handler, to record what an unhandled signal does under a debugger; a Generic
+Host server stopped through its own lifetime. Windows: a console control event, built and reviewed before it runs.
 
 **Step 4 — The extraordinary ends,** each in a process of its own: a kill (probe 100's modes on macOS; per-platform
 constructions built from Step 1's facts elsewhere), a stack overflow, `Environment.FailFast`. Result, per platform:
 what each consequence is, which level it reaches, and whether DrHook can detect it.
 
-**Step 5 — Decide (Epistemics).** From Steps 2 to 4: the session end for each kind of target; what replaces
-ADR-008's Decision 1; the bounds, detection and anomalies for the extraordinary ends; whether containment needs the
-debugger in a process of its own per session. This ADR moves to Accepted with that decision.
+**Step 5 — Decide (Epistemics).** From Steps 2 to 4: the session end for each scenario; what replaces ADR-008's
+Decision 1; the bounds, detection and anomalies for the extraordinary ends; how DrHook tells its own pauses from its
+target's; whether containment needs the debugger in a process of its own per session, as the Go extension for VS
+Code does. This ADR moves to Accepted with that decision.
 
 **Step 6 — Engineering.** Implement; rewrite the tests in the three kinds above; run CI with the hang watcher until
 the criteria below hold, then remove the watcher. Update ADR-007, ADR-008, DRHOOK.md's lifecycle section and the
@@ -191,6 +265,8 @@ MCP tools' descriptions.
 - On every platform, a natural end and a clean detach never leave the debugger unusable: N of N in Step 2's probes,
   and 10 consecutive green CI runs on all six runners with the watcher recording nothing.
 - No ordinary session end sends a signal the program has not registered for, or kills it.
+- Every scenario in the table ends naturally on every platform, and DRHOOK.md and the MCP tools' descriptions tell
+  the operator which end fits which scenario.
 - Every extraordinary end is detected and reported within a bound, naming the level it reached. No DrHook call waits
   without a bound.
 - No test or probe risks the machine.
@@ -200,7 +276,7 @@ MCP tools' descriptions.
 Separate items, to be taken up with Martin:
 
 - After a target is killed, `GetStackFrames` and `GetLocals` threw `NullReferenceException` instead of a structured
-  error (probe 100, kill mode). Principle 4 bears on it.
+  error (probe 100, kill mode). Principle 6 bears on it.
 - A line breakpoint set on an attached file-based target stayed pending and never bound.
 - An upstream report to dotnet/runtime of mscordbi's unbounded read. Secondary: the hang follows from our forced
   stop. Reconsidered after Step 4.
@@ -213,7 +289,18 @@ Separate items, to be taken up with Martin:
 - [ADR-008](ADR-008-process-lifecycle-discipline.md) (Decision 1, revisited here) and
   [ADR-007](ADR-007-teardown-concurrency-test-debug.md) Phase 9 (the cross-platform validation campaign)
 - Findings 63 (kill-first chosen), 66 (target-death detection), 67 (natural endings by default), 68 (signal
-  disposition without a debugger), 87, 92, 96 and 99 (first runs on Linux and Windows)
+  disposition without a debugger), 86 (one runtime version per debugger process), 90 and 91 (the VSTest host's
+  process group and hold), 94 (the VSTest handshake), 87, 92, 96 and 99 (first runs on Linux and Windows)
+- [ADR-015](ADR-015-run-until-anomaly.md) (run until an anomaly)
+- [Debug Adapter Protocol specification](https://microsoft.github.io/debug-adapter-protocol/specification): `launch`,
+  `attach`, `disconnect`, `terminate`, the `exited` and `terminated` events
+- [Visual Studio: debug multiple processes](https://learn.microsoft.com/visualstudio/debugger/debug-multiple-processes):
+  Stop Debugging, Terminate All, Detach All
+- vscode-go, [`goDebugFactory.ts`](https://go.googlesource.com/vscode-go/+/refs/tags/v0.24.2/src/goDebugFactory.ts):
+  a new adapter process for each session
+- [.NET Generic Host](https://learn.microsoft.com/aspnet/core/fundamentals/host/generic-host) and
+  [`HostOptions.ShutdownTimeout`](https://learn.microsoft.com/dotnet/api/microsoft.extensions.hosting.hostoptions.shutdowntimeout)
+- [NUnit issue 3054](https://github.com/nunit/nunit/issues/3054): test timeouts while a debugger is attached
 - Limits [drhook-clean-detach](../../limits/drhook-clean-detach.md) (stop before detaching) and
   [drhook-detach-exit-race](../../limits/drhook-detach-exit-race.md) (a target that exits at Dispose; finding 66)
 - [DRHOOK.md](../../../DRHOOK.md), "Lifecycle discipline & common pitfalls"
