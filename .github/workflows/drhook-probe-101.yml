@@ -1,0 +1,51 @@
+# ADR-016 Step 1: DrHook probe 101 (platform facts, read-only) on the six runners. Started by hand only. It attaches to
+# an idle target, records the debugger code loaded, how mscordbi reads the target's memory and the environment, detaches
+# cleanly and lets the target end by itself. Each runner uploads its facts as JSON. Its own concurrency group, so a push
+# never cancels it and it never cancels a test run.
+name: DrHook probe 101
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    name: ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { platform: macOS arm64, runner: macos-latest, file: macos-arm64 }
+          - { platform: macOS x64, runner: macos-26-intel, file: macos-x64 }
+          - { platform: Linux x64, runner: ubuntu-24.04, file: linux-x64 }
+          - { platform: Linux arm64, runner: ubuntu-24.04-arm, file: linux-arm64 }
+          - { platform: Windows x64, runner: windows-latest, file: windows-x64 }
+          - { platform: Windows arm64, runner: windows-11-arm, file: windows-arm64 }
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Install .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Probe 101
+        working-directory: poc/drhook-engine
+        run: dotnet run --no-cache 101-platform-facts-smoke.cs --out probe-101-${{ matrix.file }}.json
+
+      - name: Upload the facts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: probe-101-${{ matrix.file }}
+          path: poc/drhook-engine/probe-101-${{ matrix.file }}.json
+          if-no-files-found: warn
