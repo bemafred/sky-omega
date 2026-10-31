@@ -425,7 +425,7 @@ accepted risk (Step 0), never on omega or zbook, and within enforced limits ther
 | macOS arm64 | omega (metal, macOS 27, Developer Mode on) | `macos-latest` (VM, macOS 26.6, 3 cores) | where finding 100 was found and reproduced |
 | macOS x64 | — | `macos-26-intel` (VM, macOS 26.6) | runner only |
 | Linux x64 | zbook (Microsoft .NET 10.0.14, `ptrace_scope=1`, dash) | `ubuntu-24.04` | elite (Microsoft 10.0.13) is excluded: it hung on 2026-10-31 and cannot be reset for now; its kernel log suggested failing RAM before that |
-| Linux arm64 | omega-ubuntu (VM, Ubuntu's .NET 10.0.13, `ptrace_scope=1`, dash) | `ubuntu-24.04-arm` | Microsoft's build goes beside Ubuntu's (Step 0), making this the one machine where the two builds can be compared |
+| Linux arm64 | omega-ubuntu (VM, Ubuntu's .NET 10.0.13 by default, Microsoft's 10.0.13 in `~/.dotnet`, `ptrace_scope=1`, dash) | `ubuntu-24.04-arm` | the one machine where the two builds can be compared: one source commit, different binaries, mscordbi and the DAC included |
 | Windows x64 | — | `windows-latest` | runner only; no debugger transport |
 | Windows arm64 | omega-windows (VM, 10.0.14) | `windows-11-arm` | no debugger transport |
 
@@ -454,8 +454,11 @@ what succeeds and where the failure boundary is before any new infrastructure is
 **Step 0 — Preconditions (Martin's decisions, 2026-10-31).**
 - elite: excluded. It hung on 2026-10-31 and is out of reach for a hard reset; no result from it counts until it is
   reset and memtest86+ has run.
-- Linux arm64: Microsoft's .NET goes beside Ubuntu's on omega-ubuntu, so the debugger code of the two builds can be
-  compared on one machine. Ubuntu's stays the default; Microsoft's is selected per command.
+- Linux arm64: Microsoft's .NET beside Ubuntu's on omega-ubuntu, so the debugger code of the two builds can be
+  compared on one machine. Done 2026-10-31: Microsoft's SDK 10.0.113 (runtime 10.0.13) in `~/.dotnet`, the same
+  versions Ubuntu builds from source. Both runtimes name source commit `4099f83`, and neither links the system
+  libunwind, but their `libmscordbi.so`, `libmscordaccore.so` and `libcoreclr.so` differ. Ubuntu's stays the
+  default; Microsoft's is selected by running `~/.dotnet/dotnet` (and `DOTNET_ROOT` for apphosts).
 - Linux stack capture: `ptrace_scope=1` stops `gdb` from attaching to a non-descendant. Decided: constructions that
   need no capture. No outside debugger or stack sampler is attached to the debugger process; a probe establishes
   what it needs from inside that process or from outcomes alone.
