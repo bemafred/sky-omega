@@ -1,9 +1,10 @@
-# ADR-016: How a Debugged Program Ends — DrHook Stays Dependable When Its Target Is Not
+# ADR-016: Debugger Resilience and Recovery — DrHook Stays Dependable When Its Target Is Not
 
 **Status:** Proposed — 2026-10-31 (Emergence). Accepted as the experimental charter: the research direction, the
 principles and Steps 0 to 5 are approved; the production architecture is not decided, and the status stays Proposed
 until Step 6 (Martin's assessments, 2026-10-31). Reframes the 2026-10-30 draft, "Deterministic Target Teardown
-Across Platforms".
+Across Platforms"; titled "How a Debugged Program Ends" until 2026-10-31, when the title moved from the question it
+started from to the rule it serves.
 
 ## The rule this ADR serves
 
