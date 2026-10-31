@@ -92,10 +92,65 @@ makes it an invariant.
 | tests | `tests/Mercury.Tests` | xUnit's `TestContext.Current.CancellationToken` in some tests | none |
 
 `DiagnosticCode.QueryTimeout` (3001, "query execution exceeded time limit ({0}ms)") is defined and never raised.
-The HTTP server answers every failed query with 400, execution failures included. It runs on `HttpListener`, whose
-context, request and response expose no cancellation token and no client-disconnect signal (checked by reflection
-on .NET 10); a client that goes away is seen only when the response is written. Solid does not run SPARQL queries;
-its `RequestTimeoutMs` is likewise never read (outside this ADR).
+The HTTP server answers every failed query with 400, execution failures included. It runs on `HttpListener`, which
+does not watch the connection while a request runs (next section). Solid does not run SPARQL queries; its
+`RequestTimeoutMs` is likewise never read (outside this ADR).
+
+### How a server learns that its client is gone (sources read 2026-10-31)
+
+No cancellation token crosses a connection. A server makes one by watching its connection and cancels it when the
+connection ends. Read in dotnet/aspnetcore at [`4f556f7`](https://github.com/dotnet/aspnetcore/tree/4f556f73a610b386e5ec29355a300e493d30c4c5)
+and dotnet/runtime at [`591622c`](https://github.com/dotnet/runtime/tree/591622c69134f9a790f902e364c7a6a5c572b12d):
+
+- **Kestrel keeps a read pending on every connection.**
+  [`SocketConnection.DoReceive`](https://github.com/dotnet/aspnetcore/blob/4f556f73a610b386e5ec29355a300e493d30c4c5/src/Servers/Kestrel/Transport.Sockets/src/Internal/SocketConnection.cs#L136-L171)
+  loops on `ReceiveAsync`. A read of zero bytes is the client's FIN, and a reset ends the read with an error; either
+  ends the loop and cancels the transport's `ConnectionClosed` token. `HttpConnection` is registered on that token
+  ([L117](https://github.com/dotnet/aspnetcore/blob/4f556f73a610b386e5ec29355a300e493d30c4c5/src/Servers/Kestrel/Core/src/Internal/HttpConnection.cs#L117),
+  [L172–L184](https://github.com/dotnet/aspnetcore/blob/4f556f73a610b386e5ec29355a300e493d30c4c5/src/Servers/Kestrel/Core/src/Internal/HttpConnection.cs#L172-L184))
+  and calls `OnInputOrOutputCompleted`, which cancels `RequestAborted`
+  ([`Http1Connection`](https://github.com/dotnet/aspnetcore/blob/4f556f73a610b386e5ec29355a300e493d30c4c5/src/Servers/Kestrel/Core/src/Internal/Http/Http1Connection.cs#L131-L136)).
+  [`HttpContext.RequestAborted`](https://learn.microsoft.com/dotnet/api/microsoft.aspnetcore.http.httpcontext.requestaborted)
+  "Notifies when the connection underlying this request is aborted and thus request operations should be
+  cancelled." The loop's exit fires `ConnectionClosed` for a FIN as for a reset
+  ([L258–L263](https://github.com/dotnet/aspnetcore/blob/4f556f73a610b386e5ec29355a300e493d30c4c5/src/Servers/Kestrel/Transport.Sockets/src/Internal/SocketConnection.cs#L258-L263)),
+  so Kestrel takes a client's half-close as the end, although a half-close "does not imply that the client is no
+  longer interested in a response" ([RFC 9112 §9.6](https://www.rfc-editor.org/rfc/rfc9112.html#section-9.6)).
+- **ASP.NET Core's HTTP.sys server asks the kernel driver.** Per connection, it calls `HttpWaitForDisconnectEx` with
+  an overlapped callback that cancels a `CancellationTokenSource`
+  ([`DisconnectListener`](https://github.com/dotnet/aspnetcore/blob/4f556f73a610b386e5ec29355a300e493d30c4c5/src/Servers/HttpSys/src/NativeInterop/DisconnectListener.cs#L54-L116)).
+  [`HttpWaitForDisconnect`](https://learn.microsoft.com/windows/win32/api/http/nf-http-httpwaitfordisconnect)
+  "notifies the application when the connection to an HTTP client is broken for any reason"; it needs the request
+  queue's handle and the connection's id.
+- **A cancel that crosses the wire is a protocol message, turned into a token at the receiver.** HTTP/2's RST_STREAM
+  "is sent to request cancellation of a stream" ([RFC 9113 §6.4](https://www.rfc-editor.org/rfc/rfc9113.html#section-6.4));
+  Kestrel maps it to the same token
+  ([`ProcessRstStreamFrameAsync`](https://github.com/dotnet/aspnetcore/blob/4f556f73a610b386e5ec29355a300e493d30c4c5/src/Servers/Kestrel/Core/src/Internal/Http2/Http2Connection.cs#L955-L989)
+  → [`Http2Stream.AbortRstStreamReceived`](https://github.com/dotnet/aspnetcore/blob/4f556f73a610b386e5ec29355a300e493d30c4c5/src/Servers/Kestrel/Core/src/Internal/Http2/Http2Stream.cs#L569-L629)
+  → `CancelRequestAbortedToken`). MCP's `notifications/cancelled` is the same pattern one layer up. HTTP/1.1 defines
+  no such message; "A client, server, or proxy MAY close the transport connection at any time"
+  ([RFC 9112 §9.5](https://www.rfc-editor.org/rfc/rfc9112.html#section-9.5)), and the closing is what a server can
+  watch for.
+- **`HttpListener`, which Mercury's server uses, reports nothing it watches.** On Windows it calls
+  `HttpWaitForDisconnect` only for connection-based authentication, so that cached NTLM or Negotiate state is dropped
+  when the connection ends
+  ([L985–L988](https://github.com/dotnet/runtime/blob/591622c69134f9a790f902e364c7a6a5c572b12d/src/libraries/System.Net.HttpListener/src/System/Net/Windows/HttpListener.Windows.cs#L985-L988),
+  [L1118–L1121](https://github.com/dotnet/runtime/blob/591622c69134f9a790f902e364c7a6a5c572b12d/src/libraries/System.Net.HttpListener/src/System/Net/Windows/HttpListener.Windows.cs#L1118-L1121),
+  [L1399–L1414](https://github.com/dotnet/runtime/blob/591622c69134f9a790f902e364c7a6a5c572b12d/src/libraries/System.Net.HttpListener/src/System/Net/Windows/HttpListener.Windows.cs#L1399-L1414));
+  the application is not told. The managed implementation used on macOS and Linux reads the socket until the
+  request's headers are complete, hands the context over, and issues no further read until the response is done
+  ([`HttpConnection.OnReadInternal`](https://github.com/dotnet/runtime/blob/591622c69134f9a790f902e364c7a6a5c572b12d/src/libraries/System.Net.HttpListener/src/System/Net/Managed/HttpConnection.cs#L260-L325)).
+  The public API ([reference assembly](https://github.com/dotnet/runtime/blob/591622c69134f9a790f902e364c7a6a5c572b12d/src/libraries/System.Net.HttpListener/ref/System.Net.HttpListener.cs))
+  exposes no connection id, no request-queue handle, no socket and no token, so an application cannot do the
+  watching itself. While a query runs, nothing observes the connection; a client that left is found when the
+  response is written.
+- **What watching cannot see.** A disconnect is seen only while a read is pending: Kestrel stops receiving when its
+  input pipe is full, until the application reads
+  ([`DoReceive`](https://github.com/dotnet/aspnetcore/blob/4f556f73a610b386e5ec29355a300e493d30c4c5/src/Servers/Kestrel/Transport.Sockets/src/Internal/SocketConnection.cs#L175-L195)).
+  A client that vanishes without FIN or reset (power lost, route dropped) is seen only by a failed write or by TCP
+  keep-alive, which "MUST default to off" and otherwise to an interval "no less than two hours"
+  ([RFC 9293 §3.8.4](https://www.rfc-editor.org/rfc/rfc9293.html#section-3.8.4)). A disconnect token is therefore
+  best effort; the query's own time limit is what bounds it.
 
 ### What .NET provides (Microsoft Learn, verified 2026-10-31)
 
@@ -267,8 +322,9 @@ between matches and between rows.
   documented (`0` means no limit). `StopAsync` then stops running queries. Status codes follow SPARQL 1.1 Protocol
   §2.1.7: 400 only for a query that does not parse; 500 for a failure to execute, a timeout included (§3.1.10's
   example refuses an over-time query with 500); 503 when the server's shutdown cancelled the query. The body states
-  the outcome. A client that disconnects is not seen before the response is written, since `HttpListener` exposes
-  no signal for it; the query runs until its limit.
+  the outcome. A client that disconnects is not seen before the response is written, since `HttpListener` does not
+  watch the connection while a query runs (Context); the query runs until its limit. Cancelling on disconnect needs a
+  transport that watches the connection (Q7).
 - **`mercury-mcp` tools:** take the SDK's `CancellationToken`, as DrHook's tools do, with a default limit and an
   option to change it.
 - **`mercury` CLI and `mercury-sparql`:** Ctrl+C cancels the running query (`Console.CancelKeyPress`, with the
@@ -327,6 +383,9 @@ between matches and between rows.
 - **Q5. The `TimeProvider` seam:** internal for tests only, or public for hosts that run on their own clock.
 - **Q6. REPLACE's XPath fix ahead of the rest.** D4's replacement semantics are independent of the time limit and
   could land first, as their own change.
+- **Q7. Cancelling an HTTP query when its client leaves.** `HttpListener` cannot provide it. It needs a transport
+  that keeps a read pending on the connection, as Kestrel does: Mercury's own HTTP over `System.Net.Sockets`
+  (BCL only), or ASP.NET Core (outside the BCL). A transport change, outside this ADR.
 
 ## Validation plan
 
@@ -361,6 +420,13 @@ between matches and between rows.
   [Best practices for regular expressions](https://learn.microsoft.com/dotnet/standard/base-types/best-practices-regex),
   [Regular expression options](https://learn.microsoft.com/dotnet/standard/base-types/regular-expression-options)
 - [MCP C# SDK: cancellation](https://csharp.sdk.modelcontextprotocol.io/concepts/cancellation/cancellation.html)
+- Disconnect detection: dotnet/aspnetcore `4f556f7` (Kestrel `SocketConnection`, `HttpConnection`,
+  `Http1Connection`, `Http2Connection`, `Http2Stream`; HTTP.sys `DisconnectListener`), dotnet/runtime `591622c`
+  (`HttpListener.Windows.cs`, managed `HttpConnection.cs`, reference assembly);
+  [`HttpWaitForDisconnect`](https://learn.microsoft.com/windows/win32/api/http/nf-http-httpwaitfordisconnect),
+  [`HttpContext.RequestAborted`](https://learn.microsoft.com/dotnet/api/microsoft.aspnetcore.http.httpcontext.requestaborted);
+  RFC 9112 §9.5 and §9.6 (HTTP/1.1 connection close and half-close), RFC 9113 §6.4 (RST_STREAM), RFC 9293 §3.8.4
+  (keep-alives)
 - SPARQL 1.1 Query §17.4.3.14 (REGEX) and §17.4.3.15 (REPLACE); SPARQL 1.1 Protocol §2.1.7, §3.1.10 and §4.1;
   XPath and XQuery Functions and Operators 3.1 §5.6.1 (regular expression syntax) and §5.6.4 (`fn:replace`)
 - [ADR-046](ADR-046-multi-operation-update-facade.md) (multi-operation UPDATE at the engine facade: operations run
