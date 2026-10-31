@@ -1,0 +1,97 @@
+{
+  "probe": "101-platform-facts",
+  "recordedAt": "2026-10-31T19:44:46Z",
+  "environment": {
+    "machine": "runnervmmaf2v",
+    "os": "Microsoft Windows 10.0.26200",
+    "architecture": "Arm64",
+    "cores": 4,
+    "memoryBytes": 17169387520,
+    "probeRuntime": ".NET 10.0.14",
+    "runtimeDirectory": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.14\\",
+    "dotnetHost": "C:\\Program Files\\dotnet\\dotnet.exe",
+    "debuggerExecutable": "C:\\Users\\runneradmin\\AppData\\Local\\Temp\\dotnet\\runfile\\101-platform-facts-smoke-251a12695b38314f13c7668ca8855ce7dd87be6d001bcd61a30c165a1ef10b84\\bin\\debug\\101-platform-facts-smoke.exe",
+    "runtimes": "Microsoft.AspNetCore.App 8.0.6 [C:\\Program Files\\dotnet\\shared\\Microsoft.AspNetCore.App]\r\nMicrosoft.AspNetCore.App 8.0.22 [C:\\Program Files\\dotnet\\shared\\Microsoft.AspNetCore.App]\r\nMicrosoft.AspNetCore.App 8.0.33 [C:\\Program Files\\dotnet\\shared\\Microsoft.AspNetCore.App]\r\nMicrosoft.AspNetCore.App 9.0.6 [C:\\Program Files\\dotnet\\shared\\Microsoft.AspNetCore.App]\r\nMicrosoft.AspNetCore.App 9.0.22 [C:\\Program Files\\dotnet\\shared\\Microsoft.AspNetCore.App]\r\nMicrosoft.AspNetCore.App 10.0.8 [C:\\Program Files\\dotnet\\shared\\Microsoft.AspNetCore.App]\r\nMicrosoft.AspNetCore.App 10.0.11 [C:\\Program Files\\dotnet\\shared\\Microsoft.AspNetCore.App]\r\nMicrosoft.AspNetCore.App 10.0.14 [C:\\Program Files\\dotnet\\shared\\Microsoft.AspNetCore.App]\r\nMicrosoft.NETCore.App 8.0.6 [C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App]\r\nMicrosoft.NETCore.App 8.0.22 [C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App]\r\nMicrosoft.NETCore.App 8.0.33 [C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App]\r\nMicrosoft.NETCore.App 9.0.6 [C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App]\r\nMicrosoft.NETCore.App 9.0.22 [C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App]\r\nMicrosoft.NETCore.App 10.0.8 [C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App]\r\nMicrosoft.NETCore.App 10.0.11 [C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App]\r\nMicrosoft.NETCore.App 10.0.14 [C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App]\r\nMicrosoft.WindowsDesktop.App 8.0.6 [C:\\Program Files\\dotnet\\shared\\Microsoft.WindowsDesktop.App]\r\nMicrosoft.WindowsDesktop.App 8.0.22 [C:\\Program Files\\dotnet\\shared\\Microsoft.WindowsDesktop.App]\r\nMicrosoft.WindowsDesktop.App 8.0.33 [C:\\Program Files\\dotnet\\shared\\Microsoft.WindowsDesktop.App]\r\nMicrosoft.WindowsDesktop.App 9.0.6 [C:\\Program Files\\dotnet\\shared\\Microsoft.WindowsDesktop.App]\r\nMicrosoft.WindowsDesktop.App 9.0.22 [C:\\Program Files\\dotnet\\shared\\Microsoft.WindowsDesktop.App]\r\nMicrosoft.WindowsDesktop.App 10.0.8 [C:\\Program Files\\dotnet\\shared\\Microsoft.WindowsDesktop.App]\r\nMicrosoft.WindowsDesktop.App 10.0.11 [C:\\Program Files\\dotnet\\shared\\Microsoft.WindowsDesktop.App]\r\nMicrosoft.WindowsDesktop.App 10.0.14 [C:\\Program Files\\dotnet\\shared\\Microsoft.WindowsDesktop.App]",
+    "DOTNET_ROOT": "C:\\Program Files\\dotnet",
+    "tempDirectory": "C:\\Users\\runneradmin\\AppData\\Local\\Temp\\",
+    "commit": "73616fef3002de3c0b415af6510618b65ec0a938",
+    "ci": "GITHUB_ACTIONS=true RUNNER_OS=Windows RUNNER_ARCH=ARM64 ImageOS=win11-vs2026-arm64 ImageVersion=20261026.197.1",
+    "windows": "Microsoft Windows NT 10.0.26200.0"
+  },
+  "runs": [
+    {
+      "mode": "started",
+      "result": "recorded",
+      "facts": {
+        "beforeAttach": {
+          "debuggerImages": [
+            {
+              "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.14\\coreclr.dll",
+              "bytes": 5380904,
+              "sha256": "c8d6680d8580e60fd78d977391902cca6846a91a38770df067c9ff7becd03611"
+            }
+          ],
+          "threads": []
+        },
+        "target": {
+          "pid": 4040,
+          "mode": "started",
+          "ancestry": {
+            "parents": [],
+            "descendsFromDebugger": null
+          }
+        },
+        "attached": {
+          "eventsDuringAttach": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 3,
+            "LoadAssembly": 8,
+            "LoadModule": 8
+          },
+          "memoryOpen": {
+            "call": "OpenProcess(PROCESS_VM_READ)",
+            "error": 0,
+            "reads": "direct (Windows has no debugger transport)"
+          },
+          "debuggerImages": [
+            {
+              "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.14\\coreclr.dll",
+              "bytes": 5380904,
+              "sha256": "c8d6680d8580e60fd78d977391902cca6846a91a38770df067c9ff7becd03611"
+            },
+            {
+              "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.14\\mscordaccore.dll",
+              "bytes": 1559424,
+              "sha256": "76c7dff41f6e5d0bf82963190dc0adf8824dc15f380f78756f76478193c2741e"
+            },
+            {
+              "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.14\\mscordbi.dll",
+              "bytes": 1512792,
+              "sha256": "95e4e044a582f143be4a3157f53ab6cd363509d09ca21e71ebd77e56969fc174"
+            },
+            {
+              "path": "C:\\Users\\runneradmin\\AppData\\Local\\Temp\\dotnet\\runfile\\101-platform-facts-smoke-251a12695b38314f13c7668ca8855ce7dd87be6d001bcd61a30c165a1ef10b84\\bin\\debug\\runtimes\\win-arm64\\native\\dbgshim.dll",
+              "bytes": 162376,
+              "sha256": "fef88cc588634829fb1317273dcae3a2e420e6c05964e358068ea19d339b1c58"
+            }
+          ],
+          "debugPipes": [],
+          "threads": [],
+          "anomalies": []
+        },
+        "afterDetach": {
+          "threads": [],
+          "debugPipes": [],
+          "anomalies": []
+        },
+        "targetEnd": {
+          "ended": true,
+          "doneMarker": true,
+          "exitCode": 0,
+          "waitedMs": 18796
+        }
+      }
+    }
+  ]
+}

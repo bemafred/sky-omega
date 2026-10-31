@@ -1,0 +1,97 @@
+{
+  "probe": "101-platform-facts",
+  "recordedAt": "2026-10-31T19:44:39Z",
+  "environment": {
+    "machine": "runnervmdaln5",
+    "os": "Microsoft Windows 10.0.26100",
+    "architecture": "X64",
+    "cores": 4,
+    "memoryBytes": 17174360064,
+    "probeRuntime": ".NET 10.0.14",
+    "runtimeDirectory": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.14\\",
+    "dotnetHost": "C:\\Program Files\\dotnet\\dotnet.exe",
+    "debuggerExecutable": "C:\\Users\\runneradmin\\AppData\\Local\\Temp\\dotnet\\runfile\\101-platform-facts-smoke-6a453b9c0f8180b38ef7ae56c45f108395f16cfbbdd3d0dd48d39ca1b599e924\\bin\\debug\\101-platform-facts-smoke.exe",
+    "runtimes": "Microsoft.AspNetCore.App 8.0.6 [C:\\Program Files\\dotnet\\shared\\Microsoft.AspNetCore.App]\r\nMicrosoft.AspNetCore.App 8.0.22 [C:\\Program Files\\dotnet\\shared\\Microsoft.AspNetCore.App]\r\nMicrosoft.AspNetCore.App 8.0.32 [C:\\Program Files\\dotnet\\shared\\Microsoft.AspNetCore.App]\r\nMicrosoft.AspNetCore.App 9.0.6 [C:\\Program Files\\dotnet\\shared\\Microsoft.AspNetCore.App]\r\nMicrosoft.AspNetCore.App 9.0.21 [C:\\Program Files\\dotnet\\shared\\Microsoft.AspNetCore.App]\r\nMicrosoft.AspNetCore.App 10.0.8 [C:\\Program Files\\dotnet\\shared\\Microsoft.AspNetCore.App]\r\nMicrosoft.AspNetCore.App 10.0.11 [C:\\Program Files\\dotnet\\shared\\Microsoft.AspNetCore.App]\r\nMicrosoft.AspNetCore.App 10.0.13 [C:\\Program Files\\dotnet\\shared\\Microsoft.AspNetCore.App]\r\nMicrosoft.AspNetCore.App 10.0.14 [C:\\Program Files\\dotnet\\shared\\Microsoft.AspNetCore.App]\r\nMicrosoft.NETCore.App 8.0.6 [C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App]\r\nMicrosoft.NETCore.App 8.0.22 [C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App]\r\nMicrosoft.NETCore.App 8.0.32 [C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App]\r\nMicrosoft.NETCore.App 9.0.6 [C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App]\r\nMicrosoft.NETCore.App 9.0.21 [C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App]\r\nMicrosoft.NETCore.App 10.0.8 [C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App]\r\nMicrosoft.NETCore.App 10.0.11 [C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App]\r\nMicrosoft.NETCore.App 10.0.13 [C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App]\r\nMicrosoft.NETCore.App 10.0.14 [C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App]\r\nMicrosoft.WindowsDesktop.App 8.0.6 [C:\\Program Files\\dotnet\\shared\\Microsoft.WindowsDesktop.App]\r\nMicrosoft.WindowsDesktop.App 8.0.22 [C:\\Program Files\\dotnet\\shared\\Microsoft.WindowsDesktop.App]\r\nMicrosoft.WindowsDesktop.App 8.0.32 [C:\\Program Files\\dotnet\\shared\\Microsoft.WindowsDesktop.App]\r\nMicrosoft.WindowsDesktop.App 9.0.6 [C:\\Program Files\\dotnet\\shared\\Microsoft.WindowsDesktop.App]\r\nMicrosoft.WindowsDesktop.App 9.0.21 [C:\\Program Files\\dotnet\\shared\\Microsoft.WindowsDesktop.App]\r\nMicrosoft.WindowsDesktop.App 10.0.8 [C:\\Program Files\\dotnet\\shared\\Microsoft.WindowsDesktop.App]\r\nMicrosoft.WindowsDesktop.App 10.0.11 [C:\\Program Files\\dotnet\\shared\\Microsoft.WindowsDesktop.App]\r\nMicrosoft.WindowsDesktop.App 10.0.13 [C:\\Program Files\\dotnet\\shared\\Microsoft.WindowsDesktop.App]\r\nMicrosoft.WindowsDesktop.App 10.0.14 [C:\\Program Files\\dotnet\\shared\\Microsoft.WindowsDesktop.App]",
+    "DOTNET_ROOT": "C:\\Program Files\\dotnet",
+    "tempDirectory": "C:\\Users\\runneradmin\\AppData\\Local\\Temp\\",
+    "commit": "73616fef3002de3c0b415af6510618b65ec0a938",
+    "ci": "GITHUB_ACTIONS=true RUNNER_OS=Windows RUNNER_ARCH=X64 ImageOS=win25-vs2026 ImageVersion=20261021.278.1",
+    "windows": "Microsoft Windows NT 10.0.26100.0"
+  },
+  "runs": [
+    {
+      "mode": "started",
+      "result": "recorded",
+      "facts": {
+        "beforeAttach": {
+          "debuggerImages": [
+            {
+              "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.14\\coreclr.dll",
+              "bytes": 4613456,
+              "sha256": "1bc65b8d45474b19adf3ca85ce881087aff599ffc72b2c1a323e878227757b65"
+            }
+          ],
+          "threads": []
+        },
+        "target": {
+          "pid": 608,
+          "mode": "started",
+          "ancestry": {
+            "parents": [],
+            "descendsFromDebugger": null
+          }
+        },
+        "attached": {
+          "eventsDuringAttach": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 3,
+            "LoadAssembly": 8,
+            "LoadModule": 8
+          },
+          "memoryOpen": {
+            "call": "OpenProcess(PROCESS_VM_READ)",
+            "error": 0,
+            "reads": "direct (Windows has no debugger transport)"
+          },
+          "debuggerImages": [
+            {
+              "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.14\\coreclr.dll",
+              "bytes": 4613456,
+              "sha256": "1bc65b8d45474b19adf3ca85ce881087aff599ffc72b2c1a323e878227757b65"
+            },
+            {
+              "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.14\\mscordaccore.dll",
+              "bytes": 1356120,
+              "sha256": "4a9b277d882a52f19b89047748e6ab1043c1582f834b20423c8c7f16a76b6ea3"
+            },
+            {
+              "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.14\\mscordbi.dll",
+              "bytes": 1237336,
+              "sha256": "31081748cdac21d8734422cb3188070c4f49cb9fd85051a7605bbb7337a7331f"
+            },
+            {
+              "path": "C:\\Users\\runneradmin\\AppData\\Local\\Temp\\dotnet\\runfile\\101-platform-facts-smoke-6a453b9c0f8180b38ef7ae56c45f108395f16cfbbdd3d0dd48d39ca1b599e924\\bin\\debug\\runtimes\\win-x64\\native\\dbgshim.dll",
+              "bytes": 143392,
+              "sha256": "4b5d67e6325322e863e5edee33d2f94b83ef1178885824b65c57f7917d4970f3"
+            }
+          ],
+          "debugPipes": [],
+          "threads": [],
+          "anomalies": []
+        },
+        "afterDetach": {
+          "threads": [],
+          "debugPipes": [],
+          "anomalies": []
+        },
+        "targetEnd": {
+          "ended": true,
+          "doneMarker": true,
+          "exitCode": 0,
+          "waitedMs": 18902
+        }
+      }
+    }
+  ]
+}
