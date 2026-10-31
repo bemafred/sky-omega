@@ -198,6 +198,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "ADRs", "ADRs", "{F3A4B5C6-D
 		docs\adrs\mercury\ADR-057-expression-read-once.md = docs\adrs\mercury\ADR-057-expression-read-once.md
 		docs\adrs\mercury\ADR-058-wal-replay-restores-consistent-store.md = docs\adrs\mercury\ADR-058-wal-replay-restores-consistent-store.md
 		docs\adrs\mercury\ADR-059-every-w3c-test-runs.md = docs\adrs\mercury\ADR-059-every-w3c-test-runs.md
+		docs\adrs\mercury\ADR-060-query-time-limit-and-cancellation.md = docs\adrs\mercury\ADR-060-query-time-limit-and-cancellation.md
 		docs\adrs\mercury\README.md = docs\adrs\mercury\README.md
 	EndProjectSection
 EndProject
