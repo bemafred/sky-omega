@@ -263,7 +263,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "ADRs", "ADRs", "{1E5C8B91-3
 		docs\adrs\drhook\ADR-013-value-type-refstruct-inspection.md = docs\adrs\drhook\ADR-013-value-type-refstruct-inspection.md
 		docs\adrs\drhook\ADR-014-inspection-fault-containment.md = docs\adrs\drhook\ADR-014-inspection-fault-containment.md
 		docs\adrs\drhook\ADR-015-run-until-anomaly.md = docs\adrs\drhook\ADR-015-run-until-anomaly.md
-		docs\adrs\drhook\ADR-016-deterministic-teardown-across-platforms.md = docs\adrs\drhook\ADR-016-deterministic-teardown-across-platforms.md
+		docs\adrs\drhook\ADR-016-how-a-debugged-program-ends.md = docs\adrs\drhook\ADR-016-how-a-debugged-program-ends.md
 		docs\adrs\drhook\README.md = docs\adrs\drhook\README.md
 	EndProjectSection
 EndProject

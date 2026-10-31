@@ -146,7 +146,7 @@ At 1.8.38 a sibling test, `AttachAndOwn_VstestTestHost_DisposeDuringFlood_NoWork
 the same way on macOS x64; both pass on omega in about a second. Their cause is unknown. Investigating them found a
 different hang, [finding 100](poc/drhook-engine/findings/100-orphaned-transport-read-holds-dac-lock.md), after which a
 test host can never attach or launch again;
-[ADR-016](docs/adrs/drhook/ADR-016-deterministic-teardown-across-platforms.md) plans the work on each platform before
+[ADR-016](docs/adrs/drhook/ADR-016-how-a-debugged-program-ends.md) plans the work on each platform before
 DrHook's teardown changes. The macOS runners run the sparse-file test, which omega skips.
 
 ## W3C Conformance
