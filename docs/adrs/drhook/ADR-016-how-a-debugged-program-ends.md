@@ -1,8 +1,9 @@
 # ADR-016: How a Debugged Program Ends — DrHook Stays Dependable When Its Target Is Not
 
-**Status:** Proposed — 2026-10-31 (Emergence). Approved as the basis for the next experimental phase, not as an
-implementation decision (Martin's assessment, 2026-10-31). Reframes the 2026-10-30 draft, "Deterministic Target
-Teardown Across Platforms".
+**Status:** Proposed — 2026-10-31 (Emergence). Accepted as the experimental charter: the research direction, the
+principles and Steps 0 to 5 are approved; the production architecture is not decided, and the status stays Proposed
+until Step 6 (Martin's assessments, 2026-10-31). Reframes the 2026-10-30 draft, "Deterministic Target Teardown
+Across Platforms".
 
 ## The rule this ADR serves
 
@@ -132,7 +133,7 @@ one.
 | **Cancellation:** a stop request the program honours | the client asks; the program chooses when | send the request through a declared mechanism, keep observing, wait | without a debugger: with a handler the program cleans up and exits 0; without one the same signal is an abort, exit 143 (finding 68) | behaviour under a debugger; Windows (a console control event, never built) |
 | **Won't end:** a loop missing its exit condition, a deadlock | nobody; it is a bug | observe it, which is what debugging is; a kill only as a separate, deliberate, authorized and recorded decision | on macOS a kill while mscordbi was still busy with the target has left the debugger unusable (finding 100) and crashed the debugger's host process (2026-05-25; finding 63) | a kill whose consequence is bounded on each platform; what each platform's consequence is |
 | **Crashes itself:** runaway recursion and stack overflow, `Environment.FailFast`, an unhandled exception, a native fault | nobody | report the crash; survive it | nothing; not tested | everything. A crash lands at a moment nobody chose, like a kill, and discipline cannot prevent it. Whether it can leave mscordbi as finding 100 does is unknown |
-| **Machine catastrophe:** a freeze that needs a hard reset | nobody | never cause it | none observed | the paths to it. Plausible ones: a program held at a breakpoint while it holds something the whole system waits on; unbounded growth (finding 100 leaves one blocked thread and two pipe files per killed target; omega's `$TMPDIR` held 954 such files); runaway work started through function evaluation |
+| **Machine catastrophe:** a freeze that needs a hard reset | nobody | keep every known path to it inside enforced limits and isolation | none observed under DrHook | the paths to it. Plausible ones: a program held at a breakpoint while it holds something the whole system waits on; unbounded growth (finding 100 leaves one blocked thread and two pipe files per killed target; omega's `$TMPDIR` held 954 such files); runaway work started through function evaluation |
 
 A hard reset is the one end nothing can be recovered from: no session survives it, only what was persisted before.
 
@@ -194,12 +195,14 @@ other debuggers (Rider is the reference for correctness). It must behave well in
    it for everyone using it, so observing without stopping comes first.
 6. **Ending a session and ending a program are different operations,** with different ownership and safety
    contracts. What happened to the target and what happened to the session are recorded separately.
-7. **Every consequence is bounded, detected and reported, including the ends DrHook did not choose.** No DrHook
-   call waits without a bound. A bound lets the caller stop waiting; it does not release a native call that is
-   blocked, so recovery cannot rest on bounds alone.
+7. **Every public operation is bounded from the client's side, and every consequence is detected where possible and
+   reported, including the ends DrHook did not choose.** An operation returns within its bound even when a native
+   call beneath it cannot be interrupted, and then reports that call as still outstanding. A bound lets the caller
+   stop waiting; it does not release a native call that is blocked, so recovery cannot rest on bounds alone.
 8. **Each consequence is contained at the smallest level, and recovered from without a person:** session, then
-   debugger process, then client, then machine. Nothing DrHook does may risk the machine. Recovering the service and
-   recovering the target are separate obligations.
+   debugger process, then client, then machine. Risk to the machine is held by enforceable limits (time, memory,
+   threads, processes, files) and by isolation, and the risk accepted is defined beforehand for each kind of probe and
+   each machine. Recovering the service and recovering the target are separate obligations.
 9. **Intervention is governed.** Every operation that can run target code is identifiable, governed and recoverable
    at the service level, even when its effect on the target cannot be undone.
 10. **Resources are conserved across sessions.** A long run of sessions stays within budgets for threads,
@@ -247,11 +250,19 @@ A target can go on running after its session closes; a target can crash while th
 fail while the target is still alive. Keeping the two apart stops lifecycle decisions from being inferred from the
 wrong state, and gives typed anomalies and Mercury records a clean basis.
 
-**The debugger's health** is a third: healthy; degraded; unusable. After a `DebuggerError`, or when a native
-operation has stopped making progress, the instance is unusable: no further native debugging call is made on it,
-not even `Terminate`, and only the supervisor can recover. That is different from an ordinary session failure and is
-never treated as one. `DebuggerError`, bounds expiring, missing progress and failed health checks feed one health
-model, each keeping its own cause.
+**The debugger's health** is a third: healthy; degraded; suspected unresponsive; unusable.
+
+- **Suspected unresponsive:** an operation's bound expired, or progress stopped. That alone does not establish that
+  the instance is lost: the operation may still complete.
+- **Unusable:** confirmed. A `DebuggerError` confirms it, since Microsoft documents that debugging services are then
+  disabled. Evidence from outside the instance can also confirm it, such as a stack snapshot that shows a native
+  call blocked where finding 100 blocks. No further native debugging call is made on an unusable instance, not even
+  `Terminate`, and only the supervisor can recover.
+
+How a suspected instance is confirmed or cleared, and when the supervisor may discard one without confirmation, is
+decided in Step 6 from Step 4's evidence. Either state differs from an ordinary session failure and is never
+treated as one. `DebuggerError`, bounds expiring, missing progress and failed health checks feed one health model,
+each keeping its own cause.
 
 ### Ownership: how a target started, whose it is, what is authorized
 
@@ -273,8 +284,13 @@ These are responsibilities, not signatures the engine must adopt.
 | **Wait for exit** | observe the target's completion, without starting a shutdown |
 | **Request shutdown** | ask the target to end through a mechanism in its declared lifecycle contract; report completion, refusal, or the bound expiring |
 | **Detach** | end the debugger's attachment; a live target goes on running |
-| **Abandon** | extraordinary termination; authorized, and recorded before it happens |
-| **Dispose** | release the debugger's resources, never killing the target implicitly. A launched target still running is reported as left running, with its process ID, for the client to decide on; it is never orphaned silently. If the resources cannot be released safely, Dispose reports a degraded or unrecoverable outcome, contained, never a clean one |
+| **Abandon** | extraordinary termination; authorized, and recorded before it happens; aimed at the process identified, never at whatever now holds its process ID |
+| **Close** | end the session by the end chosen for its scenario, and return the outcome: the target's, the session's and the debugger's health |
+| **Dispose** | release the debugger's resources, never killing the target implicitly. Dispose returns nothing, so what it did is carried by the session's state, which the client can read afterwards; a client that needs the outcome closes first. A launched target still running is recorded as left running, for the client to decide on; it is never orphaned silently. If the resources cannot be released safely, the recorded outcome is degraded or unrecoverable, contained, never a clean one |
+
+A target is identified by more than its process ID, which the operating system reuses once a process has ended:
+the ID together with something that is not reused, such as the process's start time. Anything that acts on a
+process later, a kill above all, checks that identity first.
 
 A launched program left running is why DAP terminates launched programs by default: otherwise a program that won't
 end runs on with nobody to end it. Here that is a reported outcome and a decision for the client, not a silent one.
@@ -399,8 +415,8 @@ its run, under MTP and under VSTest; an attach to a running program, then a deta
 as the target, a DrHook test host debugged by `drhook-mcp` and left to end on its own.
 
 The flood and pause tests of today end their sessions mid-work by design. Each becomes a routine test (let the work
-finish) or an extraordinary one, named as such. Anything that could freeze a machine runs only on a disposable VM or
-CI runner, never on omega or zbook.
+finish) or an extraordinary one, named as such. Anything that could freeze a machine runs only where a freeze is an
+accepted risk (Step 0), never on omega or zbook, and within enforced limits there too.
 
 ### The platforms, and what support is evidence for
 
@@ -408,8 +424,8 @@ CI runner, never on omega or zbook.
 |----------|--------------|---------------|-------|
 | macOS arm64 | omega (metal, macOS 27, Developer Mode on) | `macos-latest` (VM, macOS 26.6, 3 cores) | where finding 100 was found and reproduced |
 | macOS x64 | — | `macos-26-intel` (VM, macOS 26.6) | runner only |
-| Linux x64 | zbook (Microsoft .NET 10.0.14, `ptrace_scope=1`, dash); elite (Microsoft 10.0.13, suspected RAM) | `ubuntu-24.04` | |
-| Linux arm64 | omega-ubuntu (VM, Ubuntu's .NET 10.0.13, `ptrace_scope=1`, dash) | `ubuntu-24.04-arm` | the only Linux arm64 machine runs the distribution's build |
+| Linux x64 | zbook (Microsoft .NET 10.0.14, `ptrace_scope=1`, dash) | `ubuntu-24.04` | elite (Microsoft 10.0.13) is excluded: it hung on 2026-10-31 and cannot be reset for now; its kernel log suggested failing RAM before that |
+| Linux arm64 | omega-ubuntu (VM, Ubuntu's .NET 10.0.13, `ptrace_scope=1`, dash) | `ubuntu-24.04-arm` | Microsoft's build goes beside Ubuntu's (Step 0), making this the one machine where the two builds can be compared |
 | Windows x64 | — | `windows-latest` | runner only; no debugger transport |
 | Windows arm64 | omega-windows (VM, 10.0.14) | `windows-11-arm` | no debugger transport |
 
@@ -435,19 +451,23 @@ finding 86's runtime-version lock.
 Each step answers one question and ends with a recorded result and a review before the next. Steps 1 to 4 establish
 what succeeds and where the failure boundary is before any new infrastructure is built.
 
-**Step 0 — Preconditions (Martin's decisions).**
-- elite: run memtest86+ before any result from it counts.
-- Linux arm64: whether to add Microsoft's .NET beside Ubuntu's on omega-ubuntu, so the debugger code can be
-  compared on one machine.
-- Linux stack capture: `ptrace_scope=1` stops `gdb` from attaching to a non-descendant. Options: sudo, a temporary
-  `ptrace_scope=0` during a probe, or constructions that need no capture.
-- Which machines may run the extraordinary probes of Steps 4 and 5 (proposed: CI runners and VMs only).
+**Step 0 — Preconditions (Martin's decisions, 2026-10-31).**
+- elite: excluded. It hung on 2026-10-31 and is out of reach for a hard reset; no result from it counts until it is
+  reset and memtest86+ has run.
+- Linux arm64: Microsoft's .NET goes beside Ubuntu's on omega-ubuntu, so the debugger code of the two builds can be
+  compared on one machine. Ubuntu's stays the default; Microsoft's is selected per command.
+- Linux stack capture: `ptrace_scope=1` stops `gdb` from attaching to a non-descendant. Decided: constructions that
+  need no capture. No outside debugger or stack sampler is attached to the debugger process; a probe establishes
+  what it needs from inside that process or from outcomes alone.
+- Open: which machines may run the extraordinary probes of Steps 4 and 5, and the risk accepted on each (proposed:
+  CI runners and VMs only).
 - Every machine at the same commit, with its runtimes listed (`dotnet --list-runtimes`).
 
 **Step 1 — Platform facts (probe 101, read-only).** Attach to an idle target, change nothing, and record the
-debugger code loaded, how memory is read, and the environment. It ends the session with a clean detach and leaves
-the target to finish. Runs on each of our machines, and on the six runners through a `workflow_dispatch` job (a
-workflow change, reviewed when proposed).
+debugger code loaded, how memory is read, and the environment; on Linux also what the debugger process can read of
+its own threads' state without ptrace rights, which the no-capture constructions depend on. It ends the session with
+a clean detach and leaves the target to finish. Runs on each of our machines, and on the six runners through a
+`workflow_dispatch` job (a workflow change, reviewed when proposed).
 
 **Step 2 — The natural end.** Hypothesis: letting a target complete normally narrows the debugger's teardown races,
 and should avoid the failure that forced termination causes. Whether it removes every dangerous race is an empirical
@@ -466,14 +486,16 @@ group and sent CTRL+BREAK, built and reviewed before it runs.
 **Step 4 — The failure boundary.** The failure matrix, the extraordinary ends (a kill, a stack overflow,
 `Environment.FailFast`) and, where it can be induced, a `DebuggerError`, each in a process of its own. Recorded,
 per platform and without generalizing across platforms: whether a native debugger operation stays blocked after the
-target vanishes; whether a failure contaminates later sessions; which level each consequence reaches; whether DrHook
+target vanishes, and whether one whose bound expired ever completes later; whether a failure contaminates later
+sessions; which level each consequence reaches; whether DrHook
 can detect it; and whether finding 100's fault is the target's abrupt disappearance rather than the signal that
 caused it.
 
 **Step 5 — A minimal process-isolation proof of concept.** A supervisor and one worker. Induce finding 100's exact
-failure in the worker; the supervisor must detect it, report the affected target's state, discard the worker, and
-conduct a fresh session that succeeds. Also recorded, per platform: what happens to a target held stopped when its
-worker dies.
+failure in the worker; the supervisor must detect it, discard the worker, and conduct a fresh session that succeeds.
+Having lost the worker, the supervisor cannot always know what became of the target, so it reports the target's last
+known state, when that was observed and how certain it is, and unknown when nothing establishes it. Also recorded,
+per platform: what happens to a target held stopped when its worker dies.
 
 **Step 6 — Decide (Epistemics).** From Steps 2 to 5: the session end for each scenario; the operation contracts; what
 replaces ADR-008's Decision 1; the bounds, detection and anomalies for the extraordinary ends; whether the worker is
@@ -501,15 +523,15 @@ DrHook is production-ready when each of these holds:
 | Cooperative shutdown | an explicit, declared shutdown mechanism, observed completion, and correct reporting on refusal or timeout |
 | Ordinary ends | no ordinary session end uses a potentially terminating operating-system signal unless that mechanism is part of the target's declared lifecycle contract |
 | Extraordinary termination | a known, reported consequence, with bounded impact on the supervising service |
-| Native deadlock | a blocked native debugger call cannot permanently block the MCP service |
-| Worker recovery | a fresh session succeeds after a deliberately induced unrecoverable debugger failure |
+| Native deadlock | a blocked native debugger call cannot permanently block the MCP service; every public operation returns within its bound from the client's side |
+| Worker recovery | a fresh session succeeds after a deliberately induced unrecoverable debugger failure, and the lost target is reported with its last known state, when that was observed and how certain it is |
 | Target preservation | attached programs survive ordinary session ends and debugger failures, wherever the platform permits that guarantee |
 | State correctness | no successful response after an operation has invalidated the session; errors are typed and informative; reading a dead target returns a structured failure, never an internal null dereference (the `NullReferenceException` from `GetStackFrames` and `GetLocals` after a kill, probe 100) |
-| Scenarios | every scenario in the table ends naturally on every claimed platform, and DRHOOK.md and the MCP tools' descriptions tell the operator which end fits which scenario |
+| Scenarios | every scenario in the table reaches its specified lifecycle outcome on every claimed platform, with failure containment and recovery verified, and DRHOOK.md and the MCP tools' descriptions tell the operator which end fits which scenario |
 | Resource stability | long sequences of sessions stay within the thread, memory, handle and temporary-file budgets |
 | Cross-platform evidence | each supported OS and architecture has recorded native tests for every claimed capability, along the four axes |
 | Continuous regression | ordinary, failure-injection and soak suites run at suitable intervals, keeping machine-readable evidence |
-| Safety | no test or probe risks the machine; attach, evaluation and termination are authorized before DrHook runs across hosts |
+| Safety | every test and probe runs within enforced limits and isolation, with the risk it may pose to its machine defined and accepted beforehand; attach, evaluation and termination are authorized before DrHook runs across hosts |
 
 ## Not in this ADR
 
@@ -526,6 +548,9 @@ Separate items, to be taken up with Martin:
 - Martin's assessment of ADR-016, 2026-10-31 (recorded in Mercury): the rule this ADR serves, recovery as a
   first-class requirement, the worker candidate, the separate state records, the operation contracts, cancellation
   as a declared capability, the failure matrix, the production gates
+- Martin's second assessment, 2026-10-31 (recorded in Mercury): accepted as the experimental charter; the
+  scenario gate as lifecycle outcomes; suspected against confirmed health; the lost target's last known state;
+  Close and process identity; limits, isolation and accepted risk in place of absolute promises
 - [Finding 100](../../../poc/drhook-engine/findings/100-orphaned-transport-read-holds-dac-lock.md) and probe 100
   (`poc/drhook-engine/100-orphaned-read-smoke.cs`)
 - [ADR-008](ADR-008-process-lifecycle-discipline.md) (Decision 1, revisited here) and

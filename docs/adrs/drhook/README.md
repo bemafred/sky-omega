@@ -19,4 +19,4 @@ Intent and rationale: [ADR-004 — DrHook: Runtime Observation Substrate](../ADR
 | [ADR-013](ADR-013-value-type-refstruct-inspection.md)            | Inspection of Value Types and Ref Structs — VALUETYPE + BYREF Field Expansion, Span-Aware Expression Evaluation | Completed |
 | [ADR-014](ADR-014-inspection-fault-containment.md)              | DrHook Inspection Robustness — Value-Type Read Safety and Fault Containment (a frame's shape must never crash the engine) | Completed |
 | [ADR-015](ADR-015-run-until-anomaly.md)                          | Run-Until-Anomaly — Repeat-Until-Failure Driving with Freeze-on-Catch for Intermittent Runtime Bugs | Proposed |
-| [ADR-016](ADR-016-how-a-debugged-program-ends.md)                | How a Debugged Program Ends — DrHook Stays Dependable When Its Target Is Not | Proposed · basis for the next experimental phase |
+| [ADR-016](ADR-016-how-a-debugged-program-ends.md)                | How a Debugged Program Ends — DrHook Stays Dependable When Its Target Is Not | Proposed · experimental charter (Steps 0–5 approved) |
