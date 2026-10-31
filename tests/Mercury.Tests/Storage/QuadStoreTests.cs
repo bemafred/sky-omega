@@ -1461,17 +1461,18 @@ public class QuadStoreTests : IDisposable
     [Fact]
     public void QueryAsOf_DeletedTriple_NotVisible()
     {
+        // ADR-054 D1: the delete ends the triple's valid time at the moment of the delete, so the query is as of a
+        // time taken after it. A time taken before the add, plus a margin, assumes the add and delete fit in the
+        // margin; with a 1 s margin this test failed on the GitHub Windows x64 runner, where it took 7 s (2026-10-31).
         var store = CreateStore();
-        var addTime = DateTimeOffset.UtcNow;
         store.AddCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
         store.DeleteCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
+        var afterDelete = DateTimeOffset.UtcNow;
 
         store.AcquireReadLock();
         try
         {
-            // Query as of slightly after add time
-            var results = store.QueryAsOf("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>",
-                addTime.AddSeconds(1));
+            var results = store.QueryAsOf("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", afterDelete);
             try
             {
                 Assert.False(results.MoveNext(), "Deleted triple should not be visible in QueryAsOf");
