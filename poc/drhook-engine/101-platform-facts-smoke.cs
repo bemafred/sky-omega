@@ -383,6 +383,7 @@ static JsonObject EnvironmentFacts(string host, string runtimeDirectory)
         ["probeRuntime"] = RuntimeInformation.FrameworkDescription,
         ["runtimeDirectory"] = runtimeDirectory,
         ["dotnetHost"] = host,
+        ["debuggerExecutable"] = System.Environment.ProcessPath, // the children, which attach, run this same file
         ["runtimes"] = Run(host, "--list-runtimes").Trim(),
         ["DOTNET_ROOT"] = System.Environment.GetEnvironmentVariable("DOTNET_ROOT"),
         ["tempDirectory"] = Path.GetTempPath(),
@@ -397,7 +398,10 @@ static JsonObject EnvironmentFacts(string host, string runtimeDirectory)
         e["virtualMachine"] = Run("sysctl", "-n", "kern.hv_vmm_present").Trim();
         e["developerMode"] = Run("DevToolsSecurity", "-status").Trim();
         e["systemIntegrityProtection"] = Run("csrutil", "status").Trim();
+        // task_for_pid depends on both sides: the target's executable (the dotnet host) and the caller's (the debugger).
         e["hostEntitlements"] = Run("codesign", "-d", "--entitlements", "-", host).Trim();
+        e["debuggerEntitlements"] = Run("codesign", "-d", "--entitlements", "-", System.Environment.ProcessPath!).Trim();
+        e["user"] = Run("id").Trim();
     }
     if (OperatingSystem.IsLinux())
     {
