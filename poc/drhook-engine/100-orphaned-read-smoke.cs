@@ -4,11 +4,12 @@
 //
 // DrHook.Engine probe 100 — a read of target memory that the target can never answer (finding 100) =================
 //
-// Observed (GitHub macOS runner, 2026-10-30, run 41068258696): the DrHook integration-test host hung in an attach, in
-// CordbProcess::Init -> ForceDacFlush -> DacDbiInterfaceImpl::FlushCache, waiting on the DAC's mutex. Inside the DAC
-// was the previous session's Win32 event thread, reading target memory over the debugger transport
-// (DbgTransportSession::ReadMemory -> SendRequestMessageAndWait), for a target that was dead; its transport thread was
-// in TwoWayPipe::Connect -> open(), reconnecting to the dead target's pipe. Every later attach and launch hung.
+// Observed (GitHub macOS runner, 2026-10-30, run 41068258696, since deleted; finding 100 quotes its stacks): the DrHook
+// integration-test host hung in an attach, in CordbProcess::Init -> ForceDacFlush -> DacDbiInterfaceImpl::FlushCache,
+// waiting on the DAC's mutex. Inside the DAC was the previous session's Win32 event thread, reading target memory over
+// the debugger transport (DbgTransportSession::ReadMemory -> SendRequestMessageAndWait), for a target that was dead;
+// its transport thread was in TwoWayPipe::Connect -> open(), reconnecting to the dead target's pipe. Every later attach
+// and launch hung.
 //
 // Runtime source (release/10.0): on macOS a read goes over the transport when task_for_pid fails. The read waits with
 // no timeout for the reply or the session's process-exit handle.

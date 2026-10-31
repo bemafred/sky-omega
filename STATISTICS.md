@@ -128,7 +128,8 @@ platform:
 ### GitHub Actions
 
 The same `dotnet test` for the push of 1.8.39 (`232afce`), on the six GitHub-hosted runners of
-`.github/workflows/test.yml` (run 41052511778), with .NET 10.0.14:
+`.github/workflows/test.yml`, with .NET 10.0.14. The run, 41052511778, was deleted from GitHub on 2026-10-30, so this
+table is its record:
 
 | Runner | OS, architecture | Tests | Failed | Skipped | Mercury.Tests |
 |--------|------------------|------:|-------:|--------:|--------------:|
