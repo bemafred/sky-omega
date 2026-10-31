@@ -9,9 +9,10 @@ reproduced a hang. When a target dies while mscordbi's Win32 event thread is rea
 transport, that read never returns. The thread is the one that would handle the target's exit, so nothing releases
 the read, and it keeps the DAC's lock. Every later attach and launch in the debugger process hangs. DrHook's owned
 `Dispose` opens the window: it resumes a running target, then terminates it while events are still being
-dispatched. Probe 100 reproduces it on omega, 5 of 5 runs. On the GitHub macOS runners it hit 4 of the 8 jobs after a
-test change of ours (4b9812a) altered the timing of the test that runs before the one that hangs, and none of the 8
-before; that change is the prime suspect for making it frequent there, not a proven cause. Two earlier single-test
+dispatched. Probe 100 reproduces it on omega, 5 of 5 runs. On the GitHub macOS runners it hit none of 8 jobs before a
+test change of ours (4b9812a) altered the timing of the test that runs before the one that hangs, 4 of 8 with that
+change, and 1 of 6 after the change was removed (8ed9701). So the hang occurs with today's code; whether the change
+made it more frequent, counts this small do not show. Two earlier single-test
 timeouts on those runners, after which the suite ran normally, were a different failure whose cause is unknown.
 
 All of that evidence is from macOS, mostly from one machine. DrHook supports six platforms, and the mechanism rests

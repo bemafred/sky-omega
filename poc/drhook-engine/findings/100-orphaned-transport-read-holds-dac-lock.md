@@ -14,20 +14,24 @@ every run, and DrHook's own code did not change in this period.
   VSTest PauseThenDispose test), one test hit the suite's 120 s limit and every later test passed normally. A
   process left in this finding's state cannot attach again, so these two were something else. Their cause is
   unknown: the tests printed nothing then.
-- **A cascade.** From 4b9812a on, the VSTest flood test hung and every later test timed out too (8 timeouts, about
-  16 minutes): in 4 of the 8 macOS jobs from 4b9812a to 02917df, against none of the 8 before. Each began right
+- **A cascade.** The VSTest flood test hung and every later test timed out too (8 timeouts, about 16 minutes). It
+  hit none of the 8 macOS jobs before 4b9812a and 4 of the 8 from 4b9812a to 02917df; each of those 4 began right
   after the MTP flood test. 4b9812a was the only DrHook change in the period. To diagnose the single timeouts, it
   made the flood tests' shared sink print a line for every debugger event, on the event pump's thread, before the
   test shuts the session down. So it changed the timing of the MTP flood test, whose session is the one left
-  holding the lock. That makes it the prime suspect for the cascades starting, not a proven cause: 0 of 8 against 4
-  of 8 happens by luck about 4% of the time.
+  holding the lock. 8ed9701 removed that printing, and the cascade came back anyway: in run 41140514248, at 8ed9701,
+  it hit 1 of the 6 macOS jobs of the run's three attempts (attempt 3, macOS arm64, 2026-10-31), with the same
+  stacks (Where it hung). So the cascade does not need the printing; whether the printing made it more frequent,
+  counts this small do not show. Attempt 3 was the only one run with GitHub's debug logging, which adds lines to
+  the runner's log; whether that changes the tests' timing is not measured.
 
 The tests pass on omega in about a second.
 
 The timeline added in 4b9812a showed where the cascade hangs: each VSTest-target test printed `testhost pid N`,
 then nothing. The call that did not return was `DebugSession.AttachAndOwn`.
 
-The CI runs cited here were deleted from GitHub on 2026-10-30; the stacks quoted below are their record.
+The CI runs cited here up to 02917df were deleted from GitHub on 2026-10-30; the stacks quoted below are their
+record. Run 41140514248 and its watcher records are still on GitHub.
 
 ## Where it hung
 
@@ -48,6 +52,10 @@ into the suite, with `sample` (native stacks) and `dotnet-stack` (managed stacks
   needs the DAC, so every later attach and launch in the process hangs.
 - **Beside it.** Seven more transport threads are blocked the same way in `TwoWayPipe::Connect` → `open()`, from
   earlier sessions. The host on omega shows such threads after 10 s of a normal run.
+- **Again at 8ed9701.** Run 41140514248's attempt 3 (macOS arm64, 2026-10-31) recorded the same state, 73 s and
+  254 s after the VSTest flood test started: the Win32 event thread in `IsThreadMarkedDead` →
+  `DbgTransportSession::ReadMemory`, one new attach waiting in `FlushCache` in the first record and three in the
+  second, and seven transport threads in `TwoWayPipe::Connect`.
 
 ## Mechanism (runtime source, `release/10.0`)
 
@@ -104,8 +112,8 @@ it runs and raises callbacks, which mscordbi's Win32 event thread dispatches, re
 `RequestExit` sends SIGTERM and, after the natural-exit timeout, `TryKillTargetAndSettle` kills it. A target that
 dies, by either signal, while the Win32 event thread has a read outstanding orphans that read. The faster the
 machine, the smaller the window: none of 23 runs on omega under CPU load hit it (20 of the flood pair, 3 of the
-whole solution). On the GitHub macOS runners it hit 4 of the 8 jobs after 4b9812a changed the MTP flood test's
-timing, and none of the 8 before (Symptom).
+whole solution). On the GitHub macOS runners it hit none of the 8 jobs before 4b9812a, 4 of the 8 while 4b9812a's
+printing was in, and 1 of the 6 after the printing was removed (Symptom).
 
 ## Consequence
 
