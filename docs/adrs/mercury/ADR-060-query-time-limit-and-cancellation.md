@@ -2,7 +2,16 @@
 
 ## Status
 
-**Status:** Proposed — 2026-10-31
+**Status:** Deferred — 2026-10-31
+
+Deferred by Martin, 2026-10-31: "we know what's at stake but actual capability in DrHook is more important at this
+moment." The direction stands (his assessment approved it); the query time limit, the cancellation plumbing, the
+outcome types, the entry points and REPLACE's XPath fix (Q6) wait. One piece is applied now as the interim: Q1's
+regex limit, one second per match everywhere, in place of the fixed 100 ms (`RegexMatchLimit` in
+`FilterEvaluator.Functions.cs`). Until the rest lands it is the only bound on a match, and a query as a whole has
+none.
+
+Proposed — 2026-10-31.
 
 Found by CI: on run 41203456690 (2026-10-31, `46b8db8`), the macOS x64 runner failed
 `Adr049FunctionReconciliationProbeTests.Functions_ProduceConformantForms`, because
@@ -369,10 +378,10 @@ between matches and between rows.
 
 ## Open questions
 
-- **Q1. Default limits.** Time limits, proposed: HTTP 30 s (as documented), `mercury-mcp` 30 s, CLI and library
-  none. The regex limit: its default value, and whether the library has one by default (the caller disables it
-  explicitly) or none unless set (the caller sets it explicitly). Recommended: a default for every entry point,
-  library included, disabled only on request, so an unlimited query never implies an unlimited regex.
+- **Q1. Default limits.** The regex limit is resolved (Martin, 2026-10-31): a default everywhere, library included,
+  of one second, "sufficient but not overly allowing", so an unlimited query never implies an unlimited regex.
+  Applied now as the interim; how a caller changes or turns it off comes with D1's API. Still open: the time limits,
+  proposed HTTP 30 s (as documented), `mercury-mcp` 30 s, CLI and library none.
 - **Q2. HTTP status for a timed-out query.** Resolved by the assessment: not 400, a documented 5xx. D6 proposes 500
   for a timeout and any execution failure, and 503 for the server's shutdown.
 - **Q3. The outcome's shape.** Resolved by the assessment: a typed enum, with the details (limit, diagnostic code,
@@ -411,6 +420,8 @@ between matches and between rows.
 - CI run 41203456690, macOS x64; `tests/Mercury.Tests/Sparql/Adr049FunctionReconciliationProbeTests.cs`
 - Probes: [`tools/probes/query-time-limit/`](../../../tools/probes/query-time-limit/README.md) (`regex-facts.cs`,
   `sparql-regex.cs`)
+- Memo: [How a server learns that its client is gone](../../memos/2026-10-31-how-a-server-learns-its-client-is-gone.md)
+  (the disconnect section of Context, with the client side of the loop)
 - Microsoft Learn: [Cancellation in managed threads](https://learn.microsoft.com/dotnet/standard/threading/cancellation-in-managed-threads),
   [`HttpClient.Timeout`](https://learn.microsoft.com/dotnet/api/system.net.http.httpclient.timeout),
   [`HttpClient.SendAsync`](https://learn.microsoft.com/dotnet/api/system.net.http.httpclient.sendasync),

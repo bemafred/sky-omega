@@ -91,6 +91,13 @@ internal ref partial struct FilterEvaluator
     }
 
     /// <summary>
+    /// The longest one REGEX or REPLACE match may run (ADR-060 Q1, Martin 2026-10-31: a default regex limit everywhere,
+    /// one second). It bounds a costly pattern without failing a trivial one on a busy machine, as the former 100 ms did
+    /// on a loaded CI runner. Until ADR-060's query time limit exists, it is the only bound on a match.
+    /// </summary>
+    private static readonly TimeSpan RegexMatchLimit = TimeSpan.FromSeconds(1);
+
+    /// <summary>
     /// The regular expression REGEX and REPLACE use (§17.4.3.14–15), with XPath fn:matches' flags (XPath and XQuery
     /// Functions §5.6.1.1): i, s, m and x as .NET options, and q, which makes every character of the pattern literal
     /// (m, s and x then have no effect; i still applies). Null for a flag outside these, an error (FORX0001), or a
@@ -116,7 +123,7 @@ internal ref partial struct FilterEvaluator
             options &= RegexOptions.IgnoreCase;
         try
         {
-            return new Regex(literal ? Regex.Escape(pattern.ToString()) : pattern.ToString(), options, TimeSpan.FromMilliseconds(100));
+            return new Regex(literal ? Regex.Escape(pattern.ToString()) : pattern.ToString(), options, RegexMatchLimit);
         }
         catch (ArgumentException)
         {

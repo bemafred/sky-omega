@@ -33,3 +33,6 @@ dotnet run --no-cache sparql-regex.cs
 - FILTER, BIND, SELECT expression, FILTER inside OPTIONAL, REPLACE inside BIND: each query fails with the regex's
   timeout message (Mercury's fixed 100 ms limit), none returns rows.
 - REPLACE differs from XPath in six of nine cases; the table is in ADR-060, Context.
+
+After the interim limit (one second per match, ADR-060 Q1), the same five queries each fail with the regex's
+timeout; the whole probe, build included, took 6.0 s on omega. The REPLACE outputs are unchanged.
