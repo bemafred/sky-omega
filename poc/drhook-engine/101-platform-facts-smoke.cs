@@ -20,16 +20,25 @@
 // probe attaches once to a descendant (started under bash, which waits for it; finding 87) and once to a reparented
 // target (started under bash, which exits at once).
 //
+// Why two launchers: on macOS task_for_pid depends on the target's executable. The dotnet host is signed by Microsoft
+// with the hardened runtime and get-task-allow; an apphost the SDK builds is signed ad hoc, with no entitlements. On
+// the GitHub macOS runners (SIP disabled) the dotnet-hosted targets were read directly, yet finding 100's stuck read,
+// in the session of the MTP flood test, whose target is the apphost DrHook.Engine.IntegrationTargets.Mtp, went over
+// the transport. So the same target is also started through its own apphost, which the SDK builds and signs as it
+// builds that test target. Each launcher runs both as a descendant and reparented.
+//
 // Expectation, to be checked and not assumed: on Linux the descendant is read directly and the reparented target over
-// the transport; on macOS both go over the transport unless task_for_pid is allowed (probe 100 on omega saw a read wait
-// for a frozen target). If that holds, the Linux CI tests never take the transport path, which would explain why finding
-// 100's cascade has appeared on macOS only.
+// the transport, whatever the launcher; on macOS both go over the transport unless task_for_pid is allowed (probe 100
+// on omega saw a read wait for a frozen target). If that holds, the Linux CI tests never take the transport path, which
+// would explain why finding 100's cascade has appeared on macOS only. Untested hypothesis: on the macOS runners the
+// apphost target is read over the transport and the dotnet-hosted one directly.
 //
 // Construction: one child process per target, bounded at 120 s from outside (as probe 100). The child
 //   1. records its threads (Linux) and the debugger images it has loaded, before touching DrHook;
 //   2. starts the target and records its parent and whether it descends from the child;
-//   3. attaches with DebugSession.Attach (borrowed: DrHook does not own the target's end) and waits until no debugger
-//      event has arrived for 500 ms (at most 10 s), so the attach-time events are done;
+//   3. attaches with DebugSession.Attach (borrowed: DrHook does not own the target's end) and, once Attach has
+//      returned, waits for the first debugger event and then until none has arrived for 500 ms (at most 10 s), so the
+//      attach-time events are done;
 //   4. records the memory-open result, the debugger images (path, size, sha256), the debug pipes, and (Linux) each
 //      thread's comm, state, wchan, syscall and stack, or the error reading them;
 //   5. ends the session with Dispose, the borrowed path (synchronize, then detach), and records the threads again;
@@ -37,10 +46,12 @@
 // Nothing is stopped, evaluated, signalled or killed by the child. The parent kills a child or a target only when the
 // bound expires, and reports that.
 //
-// The target runs under the same dotnet as the probe, so the debugger never mixes runtime versions (finding 86).
+// The target runs under the same dotnet as the probe, so the debugger never mixes runtime versions (finding 86): the
+// apphost is given DOTNET_ROOT, the probe's dotnet root.
 //
 // Output: a report on stdout; with --out <file>, the same facts as JSON for comparing machines.
-// Result codes: 0 every run recorded and every target ended by itself; 1 otherwise; 2 target build failed.
+// Result codes: 0 every run recorded and every target ended by itself; 1 otherwise; 2 target build failed or left no
+// apphost.
 //
 // Usage (from poc/drhook-engine):
 //   dotnet run --no-cache 101-platform-facts-smoke.cs [--out facts.json]
@@ -58,24 +69,27 @@ using System.Text.Json.Nodes;
 using System.Threading;
 using SkyOmega.DrHook.Engine;
 
-if (args.Length == 4 && args[0] == "child") return Child(args[1], args[2], args[3]);
+if (args.Length == 5 && args[0] == "child") return Child(args[1], args[2], args[3], args[4]);
 
 string? outFile = args.Length == 2 && args[0] == "--out" ? Path.GetFullPath(args[1]) : null;
 string runtimeDirectory = RuntimeEnvironment.GetRuntimeDirectory();
 string host = DotnetHostOf(runtimeDirectory);
 string? dll = BuildTarget(host, Path.GetFullPath("101-platform-facts-target.cs"));
 if (dll is null) { Console.WriteLine("FAIL(2): could not build 101-platform-facts-target.cs"); return 2; }
+string appHost = AppHostOf(dll);
+if (!File.Exists(appHost)) { Console.WriteLine($"FAIL(2): the target build left no apphost at {appHost}"); return 2; }
 
-JsonObject environment = EnvironmentFacts(host, runtimeDirectory);
+JsonObject environment = EnvironmentFacts(host, runtimeDirectory, appHost);
 Console.WriteLine("environment:");
 foreach (var (key, value) in environment) Console.WriteLine($"  {key}: {value?.ToJsonString().Trim('"')}");
 
 var runs = new JsonArray();
 bool allRecorded = true;
+foreach (string launcher in new[] { "dotnet", "apphost" })
 foreach (string mode in OperatingSystem.IsWindows() ? new[] { "started" } : new[] { "descendant", "reparented" })
 {
     var psi = new ProcessStartInfo(System.Environment.ProcessPath!) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
-    foreach (string a in new[] { "child", mode, host, dll }) psi.ArgumentList.Add(a);
+    foreach (string a in new[] { "child", mode, launcher, host, dll }) psi.ArgumentList.Add(a);
     using Process child = Process.Start(psi)!;
     var errors = new List<string>();
     child.ErrorDataReceived += (_, e) => { if (e.Data is not null) lock (errors) errors.Add(e.Data); };
@@ -100,27 +114,28 @@ foreach (string mode in OperatingSystem.IsWindows() ? new[] { "started" } : new[
     lock (lines)
     {
         // A target still alive when its run was not recorded is ended here, and the run says so. Only a process that is
-        // still the dotnet host is ended, so a reused PID is never touched.
+        // still the target's executable is ended, so a reused PID is never touched. Linux may cut the name to 15 bytes.
+        string expectedName = launcher == "dotnet" ? "dotnet" : Path.GetFileNameWithoutExtension(appHost);
         if (result != "recorded")
             foreach (string line in lines.Where(l => l.StartsWith("child: target=", StringComparison.Ordinal)))
                 try
                 {
                     using Process leftover = Process.GetProcessById(int.Parse(line.Split('=')[1].Trim(), System.Globalization.CultureInfo.InvariantCulture));
-                    if (leftover.ProcessName.StartsWith("dotnet", StringComparison.OrdinalIgnoreCase))
+                    if (leftover.ProcessName.Length > 0 && expectedName.StartsWith(leftover.ProcessName, StringComparison.OrdinalIgnoreCase))
                     {
                         leftover.Kill();
                         result += " (target killed by the parent after the run)";
                     }
                 }
                 catch (ArgumentException) { }
-        Console.WriteLine($"{mode}: {result}");
+        Console.WriteLine($"{launcher}, {mode}: {result}");
         foreach (string line in lines.Where(l => l.StartsWith("child:", StringComparison.Ordinal) && !l.StartsWith("child: result=", StringComparison.Ordinal)))
             Console.WriteLine($"    {line["child: ".Length..]}");
         if (result != "recorded")
             lock (errors) foreach (string line in errors) Console.WriteLine($"    stderr: {line}");
     }
     allRecorded &= result == "recorded";
-    runs.Add(new JsonObject { ["mode"] = mode, ["result"] = result, ["facts"] = facts is null ? null : JsonNode.Parse(facts) });
+    runs.Add(new JsonObject { ["launcher"] = launcher, ["mode"] = mode, ["result"] = result, ["facts"] = facts is null ? null : JsonNode.Parse(facts) });
 }
 
 if (outFile is not null)
@@ -136,7 +151,7 @@ return allRecorded ? 0 : 1;
 
 // ---- the child: one target, one attach, one clean detach ----------------------------------------------------------
 
-static int Child(string mode, string host, string dll)
+static int Child(string mode, string launcher, string host, string dll)
 {
     var clock = Stopwatch.StartNew();
     var facts = new JsonObject();
@@ -151,26 +166,35 @@ static int Child(string mode, string host, string dll)
 
     facts["beforeAttach"] = new JsonObject { ["debuggerImages"] = DebuggerImages(), ["threads"] = OwnThreads() };
 
-    string doneMarker = Path.Combine(Path.GetTempPath(), $"probe101-done-{System.Environment.ProcessId}-{mode}");
+    string doneMarker = Path.Combine(Path.GetTempPath(), $"probe101-done-{System.Environment.ProcessId}-{launcher}-{mode}");
     File.Delete(doneMarker);
     const int idleSeconds = 20;
-    (int pid, Process? waitable) = StartTarget(mode, host, dll, idleSeconds, doneMarker);
+    string[] command = launcher == "dotnet" ? new[] { host, dll } : new[] { AppHostOf(dll) };
+    (int pid, Process? waitable) = StartTarget(mode, command, launcher == "apphost" ? DotnetRootOf(host) : null, idleSeconds, doneMarker);
     Console.WriteLine($"child: target={pid}");
     Console.Out.Flush();
-    facts["target"] = new JsonObject { ["pid"] = pid, ["mode"] = mode, ["ancestry"] = Ancestry(pid) };
-    Say($"target {pid} started ({mode})");
+    facts["target"] = new JsonObject { ["pid"] = pid, ["launcher"] = launcher, ["executable"] = command[0], ["mode"] = mode, ["ancestry"] = Ancestry(pid) };
+    Say($"target {pid} started ({launcher}, {mode})");
 
     var sink = new Sink();
     DebugSession session;
+    long attachStartedAt = clock.ElapsedMilliseconds;
     try { session = DebugSession.Attach(pid, sink); }
     catch (Exception e) { Say($"attach failed: {e.GetType().Name}: {e.Message}"); facts["attachError"] = $"{e.GetType().Name}: {e.Message}"; return Result("attach-failed"); }
     long attachedAt = clock.ElapsedMilliseconds;
-    while (sink.QuietMilliseconds < 500 && clock.ElapsedMilliseconds - attachedAt < 10_000)
+    // The quiet window starts at the first event: an attach that takes longer than 500 ms and raises its events after
+    // it returns would otherwise look settled before any event had arrived (the macOS x64 runner, 73616fe).
+    while ((sink.Count == 0 || sink.QuietMilliseconds < 500) && clock.ElapsedMilliseconds - attachedAt < 10_000)
         Thread.Sleep(50);
-    Say($"attached; {sink.Count} debugger events, quiet for 500 ms");
+    long settledAt = clock.ElapsedMilliseconds;
+    Say(sink.Count == 0
+        ? $"attached in {attachedAt - attachStartedAt} ms; no debugger event within 10 s"
+        : $"attached in {attachedAt - attachStartedAt} ms; {sink.Count} debugger events, quiet for 500 ms");
 
     facts["attached"] = new JsonObject
     {
+        ["attachMs"] = attachedAt - attachStartedAt,
+        ["settledMs"] = settledAt - attachedAt,
         ["eventsDuringAttach"] = sink.Histogram(),
         ["memoryOpen"] = MemoryOpen(pid),
         ["debuggerImages"] = DebuggerImages(),
@@ -209,13 +233,17 @@ static int Child(string mode, string host, string dll)
 
 // Descendant: bash starts the target and waits for it, so the target is bash's child and the child's grandchild, and
 // bash's exit code is the target's (finding 87: not a direct child of the debugger process). Reparented: bash starts it
-// and exits at once, so the target is handed to init or the nearest subreaper. Windows: a direct child.
-static (int Pid, Process? Waitable) StartTarget(string mode, string host, string dll, int idleSeconds, string doneMarker)
+// and exits at once, so the target is handed to init or the nearest subreaper. Windows: a direct child. The command is
+// the dotnet host and the target's dll, or the target's apphost; for the apphost, DOTNET_ROOT points it at the probe's
+// own runtime, and the dotnet-hosted runs keep the environment they were first recorded with.
+static (int Pid, Process? Waitable) StartTarget(string mode, string[] command, string? dotnetRoot, int idleSeconds, string doneMarker)
 {
+    string[] arguments = command.Skip(1).Concat(new[] { idleSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture), doneMarker }).ToArray();
     if (OperatingSystem.IsWindows())
     {
-        var start = new ProcessStartInfo(host) { UseShellExecute = false, RedirectStandardOutput = true };
-        foreach (string a in new[] { dll, idleSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture), doneMarker }) start.ArgumentList.Add(a);
+        var start = new ProcessStartInfo(command[0]) { UseShellExecute = false, RedirectStandardOutput = true };
+        foreach (string a in arguments) start.ArgumentList.Add(a);
+        if (dotnetRoot is not null) start.Environment["DOTNET_ROOT"] = dotnetRoot;
         Process target = Process.Start(start)!;
         target.StandardOutput.ReadLine();
         return (target.Id, target);
@@ -223,9 +251,11 @@ static (int Pid, Process? Waitable) StartTarget(string mode, string host, string
     var psi = new ProcessStartInfo("bash") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
     psi.ArgumentList.Add("-c");
     psi.ArgumentList.Add(mode == "descendant"
-        ? "\"$0\" \"$1\" \"$2\" \"$3\" >/dev/null 2>&1 </dev/null & echo $!; wait $!"
-        : "\"$0\" \"$1\" \"$2\" \"$3\" >/dev/null 2>&1 </dev/null & echo $!");
-    foreach (string a in new[] { host, dll, idleSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture), doneMarker }) psi.ArgumentList.Add(a);
+        ? "\"$0\" \"$@\" >/dev/null 2>&1 </dev/null & echo $!; wait $!"
+        : "\"$0\" \"$@\" >/dev/null 2>&1 </dev/null & echo $!");
+    psi.ArgumentList.Add(command[0]);
+    foreach (string a in arguments) psi.ArgumentList.Add(a);
+    if (dotnetRoot is not null) psi.Environment["DOTNET_ROOT"] = dotnetRoot;
     Process shell = Process.Start(psi)!;
     int pid = int.Parse(shell.StandardOutput.ReadLine()!.Trim(), System.Globalization.CultureInfo.InvariantCulture);
     if (mode == "reparented") shell.WaitForExit();
@@ -371,7 +401,7 @@ static bool IsAlive(int pid) => kill(pid, 0) == 0 || Marshal.GetLastPInvokeError
 
 // ---- the environment, recorded once by the parent -----------------------------------------------------------------
 
-static JsonObject EnvironmentFacts(string host, string runtimeDirectory)
+static JsonObject EnvironmentFacts(string host, string runtimeDirectory, string appHost)
 {
     var e = new JsonObject
     {
@@ -384,6 +414,7 @@ static JsonObject EnvironmentFacts(string host, string runtimeDirectory)
         ["runtimeDirectory"] = runtimeDirectory,
         ["dotnetHost"] = host,
         ["debuggerExecutable"] = System.Environment.ProcessPath, // the children, which attach, run this same file
+        ["targetAppHost"] = appHost,
         ["runtimes"] = Run(host, "--list-runtimes").Trim(),
         ["DOTNET_ROOT"] = System.Environment.GetEnvironmentVariable("DOTNET_ROOT"),
         ["tempDirectory"] = Path.GetTempPath(),
@@ -398,9 +429,14 @@ static JsonObject EnvironmentFacts(string host, string runtimeDirectory)
         e["virtualMachine"] = Run("sysctl", "-n", "kern.hv_vmm_present").Trim();
         e["developerMode"] = Run("DevToolsSecurity", "-status").Trim();
         e["systemIntegrityProtection"] = Run("csrutil", "status").Trim();
-        // task_for_pid depends on both sides: the target's executable (the dotnet host) and the caller's (the debugger).
+        // task_for_pid depends on both sides: the target's executable (the dotnet host or the target's apphost) and the
+        // caller's (the debugger). codesign -dv prints the signature (ad hoc or a team, hardened runtime or not).
         e["hostEntitlements"] = Run("codesign", "-d", "--entitlements", "-", host).Trim();
+        e["hostSignature"] = Run("codesign", "-dv", host).Trim();
+        e["targetAppHostEntitlements"] = Run("codesign", "-d", "--entitlements", "-", appHost).Trim();
+        e["targetAppHostSignature"] = Run("codesign", "-dv", appHost).Trim();
         e["debuggerEntitlements"] = Run("codesign", "-d", "--entitlements", "-", System.Environment.ProcessPath!).Trim();
+        e["debuggerSignature"] = Run("codesign", "-dv", System.Environment.ProcessPath!).Trim();
         e["user"] = Run("id").Trim();
     }
     if (OperatingSystem.IsLinux())
@@ -427,6 +463,12 @@ static string DotnetHostOf(string runtimeDirectory)
     string candidate = Path.Combine(root, OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet");
     return File.Exists(candidate) ? candidate : "dotnet";
 }
+
+// The dotnet root the host lives in, or null when the host was not found by path.
+static string? DotnetRootOf(string host) => Path.IsPathRooted(host) ? Path.GetDirectoryName(host) : null;
+
+// The SDK puts a program's apphost beside its dll: the same name without .dll, with .exe on Windows.
+static string AppHostOf(string dll) => Path.ChangeExtension(dll, OperatingSystem.IsWindows() ? ".exe" : null);
 
 // A read-only command, bounded at 10 s; its output, or the reason there is none.
 static string Run(string file, params string[] arguments)
