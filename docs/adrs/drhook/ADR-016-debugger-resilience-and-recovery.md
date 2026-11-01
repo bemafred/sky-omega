@@ -489,6 +489,10 @@ take the transport path that finding 100 hangs in; on the macOS runners only the
 finding 100 places the stuck read. On Linux the
 debugger can read its own threads' `comm`, state, `wchan` and syscall but not their stacks; mscordbi's transport
 thread is visible that way, and it outlives the detach.
+*Closed 2026-11-01* (Martin: "move on to Step 2"). Left open, recorded in finding 101: which part of a macOS
+signature lets `task_for_pid` succeed (signer, hardened runtime and `get-task-allow` changed together); whether SIP
+alone makes omega read every target over the transport; whether a debugger signed with `cs.debugger` would read
+directly on omega.
 
 **Step 2 — The natural end.** Hypothesis: letting a target complete normally narrows the debugger's teardown races,
 and should avoid the failure that forced termination causes. Whether it removes every dangerous race is an empirical
