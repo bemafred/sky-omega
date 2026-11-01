@@ -423,7 +423,7 @@ accepted risk (Step 0), never on omega or zbook, and within enforced limits ther
 
 | Platform | Our machines | GitHub runner | Notes |
 |----------|--------------|---------------|-------|
-| macOS arm64 | omega (metal, macOS 27, Developer Mode on, SIP enabled) | `macos-latest` (VM, macOS 26.6, SIP disabled) | where finding 100 was found and reproduced; `task_for_pid` fails on omega and succeeds on the runners (finding 101) |
+| macOS arm64 | omega (metal, macOS 27, Developer Mode on, SIP enabled) | `macos-latest` (VM, macOS 26.6, SIP disabled) | where finding 100 was found and reproduced; `task_for_pid` fails on omega for every target, and on the runners succeeds for a `dotnet`-hosted target and fails for an ad hoc signed apphost (finding 101) |
 | macOS x64 | — | `macos-26-intel` (VM, macOS 26.6) | runner only |
 | Linux x64 | zbook (Microsoft .NET 10.0.14, `ptrace_scope=1`, dash) | `ubuntu-24.04` | elite (Microsoft 10.0.13) is excluded: it hung on 2026-10-31 and cannot be reset for now; its kernel log suggested failing RAM before that |
 | Linux arm64 | omega-ubuntu (VM, Ubuntu's .NET 10.0.14 by default, Microsoft's 10.0.13 and 10.0.14 in `~/.dotnet`, `ptrace_scope=1`, dash) | `ubuntu-24.04-arm` | the one machine where the two builds can be compared, at 10.0.14 from one source commit (finding 101) |
@@ -462,8 +462,9 @@ what succeeds and where the failure boundary is before any new infrastructure is
   default; Microsoft's is selected by running `~/.dotnet/dotnet` (and `DOTNET_ROOT` for apphosts). Seven minutes
   later, at 13:28:51 UTC, unattended-upgrades raised Ubuntu's to 10.0.14 (SDK 10.0.114), so the two builds no longer
   share a version ([finding 101](../../../poc/drhook-engine/findings/101-platform-facts.md)). Martin: both. Microsoft's
-  SDK 10.0.114 (runtime 10.0.14, source commit `0427b9a`, as Ubuntu's) added beside 10.0.113 the same day. Holding
-  Ubuntu's packages (`apt-mark hold`) needs root on the VM, so Martin runs it; not yet done when this was written.
+  SDK 10.0.114 (runtime 10.0.14, source commit `0427b9a`, as Ubuntu's) added beside 10.0.113 the same day. Martin
+  then held Ubuntu's ten .NET packages at 10.0.14 / SDK 10.0.114 (`apt-mark hold`; `apt-mark showhold` lists all ten,
+  checked 2026-11-01).
 - Linux stack capture: `ptrace_scope=1` stops `gdb` from attaching to a non-descendant. Decided: constructions that
   need no capture. No outside debugger or stack sampler is attached to the debugger process; a probe establishes
   what it needs from inside that process or from outcomes alone.
@@ -480,10 +481,12 @@ a clean detach and leaves the target to finish. Runs on each of our machines, an
 omega-ubuntu with both builds, and the six runners through `.github/workflows/drhook-probe-101.yml`; every run
 recorded, every target ended by itself). On Linux mscordbi reads a descendant's memory directly and any other
 process's over the transport (`ptrace_scope=1` everywhere). On macOS it depends on the machine: on omega (SIP enabled)
-`task_for_pid` fails and every read goes over the transport; on the runners (SIP disabled) it succeeds for a
-`dotnet`-hosted target. Windows has no transport. DrHook's integration tests attach to descendants only, so on Linux
-they never take the transport path that finding 100 hangs in. Open: the runners' hang stacks still show a transport
-read, probably for the MTP target, a locally built apphost; probe 101 does not yet attach to an apphost. On Linux the
+`task_for_pid` fails and every read goes over the transport; on the runners (SIP disabled) it depends on the
+target's executable: it succeeds for a `dotnet`-hosted target and fails for one started through its own apphost, which
+the SDK signs ad hoc as it signs the MTP test target (second run, probe at `9e29407`, 2026-11-01, on omega and the
+six runners). Windows has no transport. DrHook's integration tests attach to descendants only, so on Linux they never
+take the transport path that finding 100 hangs in; on the macOS runners only the MTP sessions do, which is where
+finding 100 places the stuck read. On Linux the
 debugger can read its own threads' `comm`, state, `wchan` and syscall but not their stacks; mscordbi's transport
 thread is visible that way, and it outlives the detach.
 

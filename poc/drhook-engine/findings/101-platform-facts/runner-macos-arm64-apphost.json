@@ -1,0 +1,409 @@
+{
+  "probe": "101-platform-facts",
+  "recordedAt": "2026-11-01T07:22:35Z",
+  "environment": {
+    "machine": "sjc22-bm210-c08633e4-8c69-4ac0-b6f1-b8dd5ab41be1-EEF957AA2C04",
+    "os": "macOS 26.6.2",
+    "architecture": "Arm64",
+    "cores": 3,
+    "memoryBytes": 7516192768,
+    "probeRuntime": ".NET 10.0.14",
+    "runtimeDirectory": "/Users/runner/.dotnet/shared/Microsoft.NETCore.App/10.0.14/",
+    "dotnetHost": "/Users/runner/.dotnet/dotnet",
+    "debuggerExecutable": "/Users/runner/Library/Application Support/dotnet/runfile/101-platform-facts-smoke-e0b18e2c7ac8ba648374f196c6969281b90706bf590333ed228eed6405999cb2/bin/debug/101-platform-facts-smoke",
+    "targetAppHost": "/Users/runner/Library/Application Support/dotnet/runfile/101-platform-facts-target-0dae3461cafbc0b2a91613a517ff3b5ae305fc167d9e7b12adfa0346be985949/bin/debug/101-platform-facts-target",
+    "runtimes": "Microsoft.AspNetCore.App 8.0.1 [/Users/runner/.dotnet/shared/Microsoft.AspNetCore.App]\nMicrosoft.AspNetCore.App 8.0.4 [/Users/runner/.dotnet/shared/Microsoft.AspNetCore.App]\nMicrosoft.AspNetCore.App 8.0.7 [/Users/runner/.dotnet/shared/Microsoft.AspNetCore.App]\nMicrosoft.AspNetCore.App 8.0.33 [/Users/runner/.dotnet/shared/Microsoft.AspNetCore.App]\nMicrosoft.AspNetCore.App 9.0.1 [/Users/runner/.dotnet/shared/Microsoft.AspNetCore.App]\nMicrosoft.AspNetCore.App 9.0.4 [/Users/runner/.dotnet/shared/Microsoft.AspNetCore.App]\nMicrosoft.AspNetCore.App 9.0.22 [/Users/runner/.dotnet/shared/Microsoft.AspNetCore.App]\nMicrosoft.AspNetCore.App 10.0.3 [/Users/runner/.dotnet/shared/Microsoft.AspNetCore.App]\nMicrosoft.AspNetCore.App 10.0.7 [/Users/runner/.dotnet/shared/Microsoft.AspNetCore.App]\nMicrosoft.AspNetCore.App 10.0.10 [/Users/runner/.dotnet/shared/Microsoft.AspNetCore.App]\nMicrosoft.AspNetCore.App 10.0.14 [/Users/runner/.dotnet/shared/Microsoft.AspNetCore.App]\nMicrosoft.NETCore.App 8.0.1 [/Users/runner/.dotnet/shared/Microsoft.NETCore.App]\nMicrosoft.NETCore.App 8.0.4 [/Users/runner/.dotnet/shared/Microsoft.NETCore.App]\nMicrosoft.NETCore.App 8.0.7 [/Users/runner/.dotnet/shared/Microsoft.NETCore.App]\nMicrosoft.NETCore.App 8.0.33 [/Users/runner/.dotnet/shared/Microsoft.NETCore.App]\nMicrosoft.NETCore.App 9.0.1 [/Users/runner/.dotnet/shared/Microsoft.NETCore.App]\nMicrosoft.NETCore.App 9.0.4 [/Users/runner/.dotnet/shared/Microsoft.NETCore.App]\nMicrosoft.NETCore.App 9.0.22 [/Users/runner/.dotnet/shared/Microsoft.NETCore.App]\nMicrosoft.NETCore.App 10.0.3 [/Users/runner/.dotnet/shared/Microsoft.NETCore.App]\nMicrosoft.NETCore.App 10.0.7 [/Users/runner/.dotnet/shared/Microsoft.NETCore.App]\nMicrosoft.NETCore.App 10.0.10 [/Users/runner/.dotnet/shared/Microsoft.NETCore.App]\nMicrosoft.NETCore.App 10.0.14 [/Users/runner/.dotnet/shared/Microsoft.NETCore.App]",
+    "DOTNET_ROOT": "/Users/runner/.dotnet",
+    "tempDirectory": "/var/folders/n6/hn37q6pj7sj_9dmqqc2113800000gn/T/",
+    "commit": "f4250a1026403c93ae7053d3e3a18b4518e8c4c3",
+    "ci": "GITHUB_ACTIONS=true RUNNER_OS=macOS RUNNER_ARCH=ARM64 ImageOS=macos26 ImageVersion=20261026.0455.2",
+    "kernel": "Darwin sjc22-bm210-c08633e4-8c69-4ac0-b6f1-b8dd5ab41be1-EEF957AA2C04.local 25.6.0 Darwin Kernel Version 25.6.0: Fri Jul 31 19:16:43 PDT 2026; root:xnu-12377.161.14~5/RELEASE_ARM64_VMAPPLE arm64",
+    "macOS": "ProductName:\t\tmacOS\nProductVersion:\t\t26.6.2\nBuildVersion:\t\t25G83",
+    "virtualMachine": "1",
+    "developerMode": "Developer mode is currently enabled.",
+    "systemIntegrityProtection": "System Integrity Protection status: disabled.",
+    "hostEntitlements": "[Dict]\n\t[Key] com.apple.security.cs.allow-dyld-environment-variables\n\t[Value]\n\t\t[Bool] true\n\t[Key] com.apple.security.cs.allow-jit\n\t[Value]\n\t\t[Bool] true\n\t[Key] com.apple.security.cs.debugger\n\t[Value]\n\t\t[Bool] true\n\t[Key] com.apple.security.cs.disable-library-validation\n\t[Value]\n\t\t[Bool] true\n\t[Key] com.apple.security.get-task-allow\n\t[Value]\n\t\t[Bool] true",
+    "hostSignature": "Executable=/Users/runner/.dotnet/dotnet\nIdentifier=dotnet-55554944bc08ded3630e3bdf95aaca10460c3881\nFormat=Mach-O thin (arm64)\nCodeDirectory v=20500 size=1211 flags=0x10000(runtime) hashes=26\u002B7 location=embedded\nSignature size=9012\nTimestamp=Jan 25, 2026 at 6:12:07\u202FPM\nInfo.plist=not bound\nTeamIdentifier=UBF8T346G9\nRuntime Version=15.5.0\nSealed Resources=none\nInternal requirements count=1 size=208",
+    "targetAppHostEntitlements": "Executable=/Users/runner/Library/Application Support/dotnet/runfile/101-platform-facts-target-0dae3461cafbc0b2a91613a517ff3b5ae305fc167d9e7b12adfa0346be985949/bin/debug/101-platform-facts-target",
+    "targetAppHostSignature": "Executable=/Users/runner/Library/Application Support/dotnet/runfile/101-platform-facts-target-0dae3461cafbc0b2a91613a517ff3b5ae305fc167d9e7b12adfa0346be985949/bin/debug/101-platform-facts-target\nIdentifier=apphost\nFormat=Mach-O thin (arm64)\nCodeDirectory v=20400 size=1152 flags=0x2(adhoc) hashes=31\u002B2 location=embedded\nSignature=adhoc\nInfo.plist=not bound\nTeamIdentifier=not set\nSealed Resources=none\nInternal requirements count=0 size=12",
+    "debuggerEntitlements": "Executable=/Users/runner/Library/Application Support/dotnet/runfile/101-platform-facts-smoke-e0b18e2c7ac8ba648374f196c6969281b90706bf590333ed228eed6405999cb2/bin/debug/101-platform-facts-smoke",
+    "debuggerSignature": "Executable=/Users/runner/Library/Application Support/dotnet/runfile/101-platform-facts-smoke-e0b18e2c7ac8ba648374f196c6969281b90706bf590333ed228eed6405999cb2/bin/debug/101-platform-facts-smoke\nIdentifier=apphost\nFormat=Mach-O thin (arm64)\nCodeDirectory v=20400 size=1152 flags=0x2(adhoc) hashes=31\u002B2 location=embedded\nSignature=adhoc\nInfo.plist=not bound\nTeamIdentifier=not set\nSealed Resources=none\nInternal requirements count=0 size=12",
+    "user": "uid=501(runner) gid=20(staff) groups=20(staff),12(everyone),61(localaccounts),79(_appserverusr),80(admin),81(_appserveradm),264(_webdeveloper),701(com.apple.sharepoint.group.1),33(_appstore),98(_lpadmin),100(_lpoperator),204(_developer),250(_analyticsusers),395(com.apple.access_ftp),398(com.apple.access_screensharing),399(com.apple.access_ssh),400(com.apple.access_remote_ae)"
+  },
+  "runs": [
+    {
+      "launcher": "dotnet",
+      "mode": "descendant",
+      "result": "recorded",
+      "facts": {
+        "beforeAttach": {
+          "debuggerImages": [
+            {
+              "path": "/Users/runner/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.dylib",
+              "bytes": 6219744,
+              "sha256": "704493d2348cb314bb3a68bb426b7d536f9b84e4ec9ce3c6fc3054c5a35f8921"
+            }
+          ],
+          "threads": []
+        },
+        "target": {
+          "pid": 2813,
+          "launcher": "dotnet",
+          "executable": "/Users/runner/.dotnet/dotnet",
+          "mode": "descendant",
+          "ancestry": {
+            "parents": [
+              2812,
+              2810,
+              2779,
+              2600,
+              2599,
+              2072,
+              1987,
+              956,
+              942,
+              1
+            ],
+            "descendsFromDebugger": true
+          }
+        },
+        "attached": {
+          "attachMs": 165,
+          "settledMs": 544,
+          "eventsDuringAttach": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 3,
+            "LoadAssembly": 8,
+            "LoadModule": 8
+          },
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 0,
+            "reads": "direct"
+          },
+          "debuggerImages": [
+            {
+              "path": "/Users/runner/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.dylib",
+              "bytes": 6219744,
+              "sha256": "704493d2348cb314bb3a68bb426b7d536f9b84e4ec9ce3c6fc3054c5a35f8921"
+            },
+            {
+              "path": "/Users/runner/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libmscordaccore.dylib",
+              "bytes": 2410624,
+              "sha256": "6bc9a3310cc72b0e70fcbb66ab56decf694a0d53ca30dcf481f46b50c7a96a99"
+            },
+            {
+              "path": "/Users/runner/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libmscordbi.dylib",
+              "bytes": 1787280,
+              "sha256": "685e13517c4f4f3c80a2a2b86a1558714f91530c14c05f3851b7907d79899f57"
+            },
+            {
+              "path": "/Users/runner/Library/Application Support/dotnet/runfile/101-platform-facts-smoke-e0b18e2c7ac8ba648374f196c6969281b90706bf590333ed228eed6405999cb2/bin/debug/runtimes/osx-arm64/native/libdbgshim.dylib",
+              "bytes": 396624,
+              "sha256": "452a9778afe10f54189f9d6816e1e8250d6195a0e664b10d838f33cd8794abcb"
+            }
+          ],
+          "debugPipes": [
+            "clr-debug-pipe-2813-1793517673-in",
+            "clr-debug-pipe-2813-1793517673-out",
+            "dotnet-diagnostic-2813-1793517673-socket"
+          ],
+          "threads": [],
+          "anomalies": []
+        },
+        "afterDetach": {
+          "threads": [],
+          "debugPipes": [
+            "clr-debug-pipe-2813-1793517673-in",
+            "clr-debug-pipe-2813-1793517673-out",
+            "dotnet-diagnostic-2813-1793517673-socket"
+          ],
+          "anomalies": []
+        },
+        "targetEnd": {
+          "ended": true,
+          "doneMarker": true,
+          "exitCode": 0,
+          "waitedMs": 17484
+        }
+      }
+    },
+    {
+      "launcher": "dotnet",
+      "mode": "reparented",
+      "result": "recorded",
+      "facts": {
+        "beforeAttach": {
+          "debuggerImages": [
+            {
+              "path": "/Users/runner/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.dylib",
+              "bytes": 6219744,
+              "sha256": "704493d2348cb314bb3a68bb426b7d536f9b84e4ec9ce3c6fc3054c5a35f8921"
+            }
+          ],
+          "threads": []
+        },
+        "target": {
+          "pid": 3212,
+          "launcher": "dotnet",
+          "executable": "/Users/runner/.dotnet/dotnet",
+          "mode": "reparented",
+          "ancestry": {
+            "parents": [
+              1
+            ],
+            "descendsFromDebugger": false
+          }
+        },
+        "attached": {
+          "attachMs": 31,
+          "settledMs": 529,
+          "eventsDuringAttach": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 3,
+            "LoadAssembly": 8,
+            "LoadModule": 8
+          },
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 0,
+            "reads": "direct"
+          },
+          "debuggerImages": [
+            {
+              "path": "/Users/runner/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.dylib",
+              "bytes": 6219744,
+              "sha256": "704493d2348cb314bb3a68bb426b7d536f9b84e4ec9ce3c6fc3054c5a35f8921"
+            },
+            {
+              "path": "/Users/runner/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libmscordaccore.dylib",
+              "bytes": 2410624,
+              "sha256": "6bc9a3310cc72b0e70fcbb66ab56decf694a0d53ca30dcf481f46b50c7a96a99"
+            },
+            {
+              "path": "/Users/runner/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libmscordbi.dylib",
+              "bytes": 1787280,
+              "sha256": "685e13517c4f4f3c80a2a2b86a1558714f91530c14c05f3851b7907d79899f57"
+            },
+            {
+              "path": "/Users/runner/Library/Application Support/dotnet/runfile/101-platform-facts-smoke-e0b18e2c7ac8ba648374f196c6969281b90706bf590333ed228eed6405999cb2/bin/debug/runtimes/osx-arm64/native/libdbgshim.dylib",
+              "bytes": 396624,
+              "sha256": "452a9778afe10f54189f9d6816e1e8250d6195a0e664b10d838f33cd8794abcb"
+            }
+          ],
+          "debugPipes": [
+            "clr-debug-pipe-3212-1793517693-in",
+            "clr-debug-pipe-3212-1793517693-out",
+            "dotnet-diagnostic-3212-1793517693-socket"
+          ],
+          "threads": [],
+          "anomalies": []
+        },
+        "afterDetach": {
+          "threads": [],
+          "debugPipes": [
+            "clr-debug-pipe-3212-1793517693-in",
+            "clr-debug-pipe-3212-1793517693-out",
+            "dotnet-diagnostic-3212-1793517693-socket"
+          ],
+          "anomalies": []
+        },
+        "targetEnd": {
+          "ended": true,
+          "doneMarker": true,
+          "exitCode": null,
+          "waitedMs": 18058
+        }
+      }
+    },
+    {
+      "launcher": "apphost",
+      "mode": "descendant",
+      "result": "recorded",
+      "facts": {
+        "beforeAttach": {
+          "debuggerImages": [
+            {
+              "path": "/Users/runner/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.dylib",
+              "bytes": 6219744,
+              "sha256": "704493d2348cb314bb3a68bb426b7d536f9b84e4ec9ce3c6fc3054c5a35f8921"
+            }
+          ],
+          "threads": []
+        },
+        "target": {
+          "pid": 3580,
+          "launcher": "apphost",
+          "executable": "/Users/runner/Library/Application Support/dotnet/runfile/101-platform-facts-target-0dae3461cafbc0b2a91613a517ff3b5ae305fc167d9e7b12adfa0346be985949/bin/debug/101-platform-facts-target",
+          "mode": "descendant",
+          "ancestry": {
+            "parents": [
+              3579,
+              3578,
+              2779,
+              2600,
+              2599,
+              2072,
+              1987,
+              956,
+              942,
+              1
+            ],
+            "descendsFromDebugger": true
+          }
+        },
+        "attached": {
+          "attachMs": 48,
+          "settledMs": 561,
+          "eventsDuringAttach": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 3,
+            "LoadAssembly": 8,
+            "LoadModule": 8
+          },
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "debuggerImages": [
+            {
+              "path": "/Users/runner/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.dylib",
+              "bytes": 6219744,
+              "sha256": "704493d2348cb314bb3a68bb426b7d536f9b84e4ec9ce3c6fc3054c5a35f8921"
+            },
+            {
+              "path": "/Users/runner/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libmscordaccore.dylib",
+              "bytes": 2410624,
+              "sha256": "6bc9a3310cc72b0e70fcbb66ab56decf694a0d53ca30dcf481f46b50c7a96a99"
+            },
+            {
+              "path": "/Users/runner/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libmscordbi.dylib",
+              "bytes": 1787280,
+              "sha256": "685e13517c4f4f3c80a2a2b86a1558714f91530c14c05f3851b7907d79899f57"
+            },
+            {
+              "path": "/Users/runner/Library/Application Support/dotnet/runfile/101-platform-facts-smoke-e0b18e2c7ac8ba648374f196c6969281b90706bf590333ed228eed6405999cb2/bin/debug/runtimes/osx-arm64/native/libdbgshim.dylib",
+              "bytes": 396624,
+              "sha256": "452a9778afe10f54189f9d6816e1e8250d6195a0e664b10d838f33cd8794abcb"
+            }
+          ],
+          "debugPipes": [
+            "clr-debug-pipe-3580-1793517714-in",
+            "clr-debug-pipe-3580-1793517714-out",
+            "dotnet-diagnostic-3580-1793517714-socket"
+          ],
+          "threads": [],
+          "anomalies": []
+        },
+        "afterDetach": {
+          "threads": [],
+          "debugPipes": [
+            "clr-debug-pipe-3580-1793517714-in",
+            "clr-debug-pipe-3580-1793517714-out",
+            "dotnet-diagnostic-3580-1793517714-socket"
+          ],
+          "anomalies": []
+        },
+        "targetEnd": {
+          "ended": true,
+          "doneMarker": true,
+          "exitCode": 0,
+          "waitedMs": 17747
+        }
+      }
+    },
+    {
+      "launcher": "apphost",
+      "mode": "reparented",
+      "result": "recorded",
+      "facts": {
+        "beforeAttach": {
+          "debuggerImages": [
+            {
+              "path": "/Users/runner/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.dylib",
+              "bytes": 6219744,
+              "sha256": "704493d2348cb314bb3a68bb426b7d536f9b84e4ec9ce3c6fc3054c5a35f8921"
+            }
+          ],
+          "threads": []
+        },
+        "target": {
+          "pid": 4092,
+          "launcher": "apphost",
+          "executable": "/Users/runner/Library/Application Support/dotnet/runfile/101-platform-facts-target-0dae3461cafbc0b2a91613a517ff3b5ae305fc167d9e7b12adfa0346be985949/bin/debug/101-platform-facts-target",
+          "mode": "reparented",
+          "ancestry": {
+            "parents": [
+              1
+            ],
+            "descendsFromDebugger": false
+          }
+        },
+        "attached": {
+          "attachMs": 42,
+          "settledMs": 529,
+          "eventsDuringAttach": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 3,
+            "LoadAssembly": 8,
+            "LoadModule": 8
+          },
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "debuggerImages": [
+            {
+              "path": "/Users/runner/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.dylib",
+              "bytes": 6219744,
+              "sha256": "704493d2348cb314bb3a68bb426b7d536f9b84e4ec9ce3c6fc3054c5a35f8921"
+            },
+            {
+              "path": "/Users/runner/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libmscordaccore.dylib",
+              "bytes": 2410624,
+              "sha256": "6bc9a3310cc72b0e70fcbb66ab56decf694a0d53ca30dcf481f46b50c7a96a99"
+            },
+            {
+              "path": "/Users/runner/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libmscordbi.dylib",
+              "bytes": 1787280,
+              "sha256": "685e13517c4f4f3c80a2a2b86a1558714f91530c14c05f3851b7907d79899f57"
+            },
+            {
+              "path": "/Users/runner/Library/Application Support/dotnet/runfile/101-platform-facts-smoke-e0b18e2c7ac8ba648374f196c6969281b90706bf590333ed228eed6405999cb2/bin/debug/runtimes/osx-arm64/native/libdbgshim.dylib",
+              "bytes": 396624,
+              "sha256": "452a9778afe10f54189f9d6816e1e8250d6195a0e664b10d838f33cd8794abcb"
+            }
+          ],
+          "debugPipes": [
+            "clr-debug-pipe-4092-1793517734-in",
+            "clr-debug-pipe-4092-1793517734-out",
+            "dotnet-diagnostic-4092-1793517734-socket"
+          ],
+          "threads": [],
+          "anomalies": []
+        },
+        "afterDetach": {
+          "threads": [],
+          "debugPipes": [
+            "clr-debug-pipe-4092-1793517734-in",
+            "clr-debug-pipe-4092-1793517734-out",
+            "dotnet-diagnostic-4092-1793517734-socket"
+          ],
+          "anomalies": []
+        },
+        "targetEnd": {
+          "ended": true,
+          "doneMarker": true,
+          "exitCode": null,
+          "waitedMs": 17737
+        }
+      }
+    }
+  ]
+}

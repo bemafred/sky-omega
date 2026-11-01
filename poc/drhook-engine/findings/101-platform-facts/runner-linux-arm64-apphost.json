@@ -1,0 +1,1442 @@
+{
+  "probe": "101-platform-facts",
+  "recordedAt": "2026-11-01T07:22:31Z",
+  "environment": {
+    "machine": "runnervm9u1px",
+    "os": "Ubuntu 24.04.5 LTS",
+    "architecture": "Arm64",
+    "cores": 4,
+    "memoryBytes": 16715927552,
+    "probeRuntime": ".NET 10.0.14",
+    "runtimeDirectory": "/usr/share/dotnet/shared/Microsoft.NETCore.App/10.0.14/",
+    "dotnetHost": "/usr/share/dotnet/dotnet",
+    "debuggerExecutable": "/home/runner/.local/share/dotnet/runfile/101-platform-facts-smoke-d2eafcc45d6cbef12f859de8e7067cde6a856f0bb95510dc5b15225fe9c4581f/bin/debug/101-platform-facts-smoke",
+    "targetAppHost": "/home/runner/.local/share/dotnet/runfile/101-platform-facts-target-aeb2fc58c2bb71840bf4b9e7f01296d3a96a0eae79d2aecccff6f5720f66d431/bin/debug/101-platform-facts-target",
+    "runtimes": "Microsoft.AspNetCore.App 8.0.6 [/usr/share/dotnet/shared/Microsoft.AspNetCore.App]\nMicrosoft.AspNetCore.App 8.0.22 [/usr/share/dotnet/shared/Microsoft.AspNetCore.App]\nMicrosoft.AspNetCore.App 8.0.33 [/usr/share/dotnet/shared/Microsoft.AspNetCore.App]\nMicrosoft.AspNetCore.App 9.0.6 [/usr/share/dotnet/shared/Microsoft.AspNetCore.App]\nMicrosoft.AspNetCore.App 9.0.22 [/usr/share/dotnet/shared/Microsoft.AspNetCore.App]\nMicrosoft.AspNetCore.App 10.0.8 [/usr/share/dotnet/shared/Microsoft.AspNetCore.App]\nMicrosoft.AspNetCore.App 10.0.11 [/usr/share/dotnet/shared/Microsoft.AspNetCore.App]\nMicrosoft.AspNetCore.App 10.0.14 [/usr/share/dotnet/shared/Microsoft.AspNetCore.App]\nMicrosoft.NETCore.App 8.0.6 [/usr/share/dotnet/shared/Microsoft.NETCore.App]\nMicrosoft.NETCore.App 8.0.22 [/usr/share/dotnet/shared/Microsoft.NETCore.App]\nMicrosoft.NETCore.App 8.0.33 [/usr/share/dotnet/shared/Microsoft.NETCore.App]\nMicrosoft.NETCore.App 9.0.6 [/usr/share/dotnet/shared/Microsoft.NETCore.App]\nMicrosoft.NETCore.App 9.0.22 [/usr/share/dotnet/shared/Microsoft.NETCore.App]\nMicrosoft.NETCore.App 10.0.8 [/usr/share/dotnet/shared/Microsoft.NETCore.App]\nMicrosoft.NETCore.App 10.0.11 [/usr/share/dotnet/shared/Microsoft.NETCore.App]\nMicrosoft.NETCore.App 10.0.14 [/usr/share/dotnet/shared/Microsoft.NETCore.App]",
+    "DOTNET_ROOT": "/usr/share/dotnet",
+    "tempDirectory": "/tmp/",
+    "commit": "f4250a1026403c93ae7053d3e3a18b4518e8c4c3",
+    "ci": "GITHUB_ACTIONS=true RUNNER_OS=Linux RUNNER_ARCH=ARM64 ImageOS=ubuntu24-arm64 ImageVersion=20261026.166.1",
+    "kernel": "Linux runnervm9u1px 7.0.0-1017-azure #17~24.04.1-Ubuntu SMP PREEMPT Thu Sep 24 19:06:39 UTC 2026 aarch64 aarch64 aarch64 GNU/Linux",
+    "distribution": "PRETTY_NAME=\u0022Ubuntu 24.04.5 LTS\u0022",
+    "ptraceScope": "1",
+    "binSh": "/usr/bin/dash",
+    "virtualization": "microsoft",
+    "libunwindLinked": "",
+    "user": "uid=1001(runner) gid=1001(runner) groups=1001(runner),4(adm),100(users),118(docker),999(systemd-journal)"
+  },
+  "runs": [
+    {
+      "launcher": "dotnet",
+      "mode": "descendant",
+      "result": "recorded",
+      "facts": {
+        "beforeAttach": {
+          "debuggerImages": [
+            {
+              "path": "/usr/share/dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.so",
+              "bytes": 6848912,
+              "sha256": "5eaed8176e960fa1b00a244d25a5d64116d8cd19909e9bad1f65f0c1415117c7"
+            }
+          ],
+          "threads": [
+            {
+              "tid": 2590,
+              "comm": "101-platform-fa",
+              "stat": "R",
+              "wchan": "0",
+              "syscall": "67",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2590/stack\u0027 is denied."
+            },
+            {
+              "tid": 2592,
+              "comm": ".NET SynchManag",
+              "stat": "S",
+              "wchan": "poll_schedule_timeout.constprop.0",
+              "syscall": "73",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2592/stack\u0027 is denied."
+            },
+            {
+              "tid": 2593,
+              "comm": ".NET EventPipe",
+              "stat": "S",
+              "wchan": "poll_schedule_timeout.constprop.0",
+              "syscall": "73",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2593/stack\u0027 is denied."
+            },
+            {
+              "tid": 2594,
+              "comm": ".NET DebugPipe",
+              "stat": "S",
+              "wchan": "wait_for_partner",
+              "syscall": "56",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2594/stack\u0027 is denied."
+            },
+            {
+              "tid": 2595,
+              "comm": ".NET Debugger",
+              "stat": "S",
+              "wchan": "futex_do_wait",
+              "syscall": "98",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2595/stack\u0027 is denied."
+            },
+            {
+              "tid": 2596,
+              "comm": ".NET Finalizer",
+              "stat": "S",
+              "wchan": "futex_do_wait",
+              "syscall": "98",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2596/stack\u0027 is denied."
+            },
+            {
+              "tid": 2597,
+              "comm": ".NET Tiered Com",
+              "stat": "S",
+              "wchan": "futex_do_wait",
+              "syscall": "98",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2597/stack\u0027 is denied."
+            }
+          ]
+        },
+        "target": {
+          "pid": 2600,
+          "launcher": "dotnet",
+          "executable": "/usr/share/dotnet/dotnet",
+          "mode": "descendant",
+          "ancestry": {
+            "parents": [
+              2599,
+              2590,
+              2533,
+              2430,
+              2429,
+              2097,
+              2082,
+              1969,
+              1
+            ],
+            "descendsFromDebugger": true
+          }
+        },
+        "attached": {
+          "attachMs": 229,
+          "settledMs": 553,
+          "eventsDuringAttach": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 3,
+            "LoadAssembly": 8,
+            "LoadModule": 8
+          },
+          "memoryOpen": {
+            "call": "open(/proc/2600/mem, O_RDONLY)",
+            "errno": 0,
+            "error": null,
+            "reads": "direct"
+          },
+          "debuggerImages": [
+            {
+              "path": "/home/runner/.local/share/dotnet/runfile/101-platform-facts-smoke-d2eafcc45d6cbef12f859de8e7067cde6a856f0bb95510dc5b15225fe9c4581f/bin/debug/runtimes/linux-arm64/native/libdbgshim.so",
+              "bytes": 313136,
+              "sha256": "d5a795efac5db08c9a7485a33a03ec40335caa71e239f35557faebcbbb0a2b15"
+            },
+            {
+              "path": "/usr/share/dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.so",
+              "bytes": 6848912,
+              "sha256": "5eaed8176e960fa1b00a244d25a5d64116d8cd19909e9bad1f65f0c1415117c7"
+            },
+            {
+              "path": "/usr/share/dotnet/shared/Microsoft.NETCore.App/10.0.14/libmscordaccore.so",
+              "bytes": 2383360,
+              "sha256": "170c3a19bd2b5c39cb7d9f1834643bd704a95ca8d21d4107b3dbeccfd2e53e20"
+            },
+            {
+              "path": "/usr/share/dotnet/shared/Microsoft.NETCore.App/10.0.14/libmscordbi.so",
+              "bytes": 1716560,
+              "sha256": "475bbda9e39495eccb78ab5fcb825e592aa6e8d37c4a041a223a15f89a2f230f"
+            }
+          ],
+          "debugPipes": [
+            "clr-debug-pipe-2600-23587-in",
+            "clr-debug-pipe-2600-23587-out",
+            "dotnet-diagnostic-2600-23587-socket"
+          ],
+          "threads": [
+            {
+              "tid": 2590,
+              "comm": "101-platform-fa",
+              "stat": "R",
+              "wchan": "0",
+              "syscall": "67",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2590/stack\u0027 is denied."
+            },
+            {
+              "tid": 2592,
+              "comm": ".NET SynchManag",
+              "stat": "S",
+              "wchan": "poll_schedule_timeout.constprop.0",
+              "syscall": "73",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2592/stack\u0027 is denied."
+            },
+            {
+              "tid": 2593,
+              "comm": ".NET EventPipe",
+              "stat": "S",
+              "wchan": "poll_schedule_timeout.constprop.0",
+              "syscall": "73",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2593/stack\u0027 is denied."
+            },
+            {
+              "tid": 2594,
+              "comm": ".NET DebugPipe",
+              "stat": "S",
+              "wchan": "wait_for_partner",
+              "syscall": "56",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2594/stack\u0027 is denied."
+            },
+            {
+              "tid": 2595,
+              "comm": ".NET Debugger",
+              "stat": "S",
+              "wchan": "futex_do_wait",
+              "syscall": "98",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2595/stack\u0027 is denied."
+            },
+            {
+              "tid": 2596,
+              "comm": ".NET Finalizer",
+              "stat": "S",
+              "wchan": "futex_do_wait",
+              "syscall": "98",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2596/stack\u0027 is denied."
+            },
+            {
+              "tid": 2597,
+              "comm": ".NET Tiered Com",
+              "stat": "S",
+              "wchan": "futex_do_wait",
+              "syscall": "98",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2597/stack\u0027 is denied."
+            },
+            {
+              "tid": 2598,
+              "comm": ".NET SigHandler",
+              "stat": "S",
+              "wchan": "anon_pipe_read",
+              "syscall": "63",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2598/stack\u0027 is denied."
+            },
+            {
+              "tid": 2601,
+              "comm": ".NET Sockets",
+              "stat": "S",
+              "wchan": "ep_poll",
+              "syscall": "22",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2601/stack\u0027 is denied."
+            },
+            {
+              "tid": 2609,
+              "comm": "101-platform-fa",
+              "stat": "S",
+              "wchan": "futex_do_wait",
+              "syscall": "98",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2609/stack\u0027 is denied."
+            },
+            {
+              "tid": 2610,
+              "comm": "101-platform-fa",
+              "stat": "S",
+              "wchan": "futex_do_wait",
+              "syscall": "98",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2610/stack\u0027 is denied."
+            },
+            {
+              "tid": 2611,
+              "comm": ".NET DebugPipe",
+              "stat": "S",
+              "wchan": "anon_pipe_read",
+              "syscall": "63",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2611/stack\u0027 is denied."
+            },
+            {
+              "tid": 2613,
+              "comm": "DrHook.Callback",
+              "stat": "S",
+              "wchan": "futex_do_wait",
+              "syscall": "98",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2613/stack\u0027 is denied."
+            },
+            {
+              "tid": 2614,
+              "comm": ".NET BGC",
+              "stat": "S",
+              "wchan": "futex_do_wait",
+              "syscall": "98",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2614/stack\u0027 is denied."
+            }
+          ],
+          "anomalies": []
+        },
+        "afterDetach": {
+          "threads": [
+            {
+              "tid": 2590,
+              "comm": "101-platform-fa",
+              "stat": "R",
+              "wchan": "0",
+              "syscall": "67",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2590/stack\u0027 is denied."
+            },
+            {
+              "tid": 2592,
+              "comm": ".NET SynchManag",
+              "stat": "S",
+              "wchan": "poll_schedule_timeout.constprop.0",
+              "syscall": "73",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2592/stack\u0027 is denied."
+            },
+            {
+              "tid": 2593,
+              "comm": ".NET EventPipe",
+              "stat": "S",
+              "wchan": "poll_schedule_timeout.constprop.0",
+              "syscall": "73",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2593/stack\u0027 is denied."
+            },
+            {
+              "tid": 2594,
+              "comm": ".NET DebugPipe",
+              "stat": "S",
+              "wchan": "wait_for_partner",
+              "syscall": "56",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2594/stack\u0027 is denied."
+            },
+            {
+              "tid": 2595,
+              "comm": ".NET Debugger",
+              "stat": "S",
+              "wchan": "futex_do_wait",
+              "syscall": "98",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2595/stack\u0027 is denied."
+            },
+            {
+              "tid": 2596,
+              "comm": ".NET Finalizer",
+              "stat": "S",
+              "wchan": "futex_do_wait",
+              "syscall": "98",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2596/stack\u0027 is denied."
+            },
+            {
+              "tid": 2597,
+              "comm": ".NET Tiered Com",
+              "stat": "S",
+              "wchan": "futex_do_wait",
+              "syscall": "98",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2597/stack\u0027 is denied."
+            },
+            {
+              "tid": 2598,
+              "comm": ".NET SigHandler",
+              "stat": "S",
+              "wchan": "anon_pipe_read",
+              "syscall": "63",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2598/stack\u0027 is denied."
+            },
+            {
+              "tid": 2601,
+              "comm": ".NET Sockets",
+              "stat": "S",
+              "wchan": "ep_poll",
+              "syscall": "22",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2601/stack\u0027 is denied."
+            },
+            {
+              "tid": 2611,
+              "comm": ".NET DebugPipe",
+              "stat": "S",
+              "wchan": "anon_pipe_read",
+              "syscall": "63",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2611/stack\u0027 is denied."
+            },
+            {
+              "tid": 2614,
+              "comm": ".NET BGC",
+              "stat": "S",
+              "wchan": "futex_do_wait",
+              "syscall": "98",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2614/stack\u0027 is denied."
+            }
+          ],
+          "debugPipes": [
+            "clr-debug-pipe-2600-23587-in",
+            "clr-debug-pipe-2600-23587-out",
+            "dotnet-diagnostic-2600-23587-socket"
+          ],
+          "anomalies": []
+        },
+        "targetEnd": {
+          "ended": true,
+          "doneMarker": true,
+          "exitCode": 0,
+          "waitedMs": 17611
+        }
+      }
+    },
+    {
+      "launcher": "dotnet",
+      "mode": "reparented",
+      "result": "recorded",
+      "facts": {
+        "beforeAttach": {
+          "debuggerImages": [
+            {
+              "path": "/usr/share/dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.so",
+              "bytes": 6848912,
+              "sha256": "5eaed8176e960fa1b00a244d25a5d64116d8cd19909e9bad1f65f0c1415117c7"
+            }
+          ],
+          "threads": [
+            {
+              "tid": 2626,
+              "comm": "101-platform-fa",
+              "stat": "R",
+              "wchan": "0",
+              "syscall": "67",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2626/stack\u0027 is denied."
+            },
+            {
+              "tid": 2628,
+              "comm": ".NET SynchManag",
+              "stat": "S",
+              "wchan": "poll_schedule_timeout.constprop.0",
+              "syscall": "73",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2628/stack\u0027 is denied."
+            },
+            {
+              "tid": 2629,
+              "comm": ".NET EventPipe",
+              "stat": "S",
+              "wchan": "poll_schedule_timeout.constprop.0",
+              "syscall": "73",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2629/stack\u0027 is denied."
+            },
+            {
+              "tid": 2630,
+              "comm": ".NET DebugPipe",
+              "stat": "S",
+              "wchan": "wait_for_partner",
+              "syscall": "56",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2630/stack\u0027 is denied."
+            },
+            {
+              "tid": 2631,
+              "comm": ".NET Debugger",
+              "stat": "S",
+              "wchan": "futex_do_wait",
+              "syscall": "98",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2631/stack\u0027 is denied."
+            },
+            {
+              "tid": 2632,
+              "comm": ".NET Finalizer",
+              "stat": "S",
+              "wchan": "futex_do_wait",
+              "syscall": "98",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2632/stack\u0027 is denied."
+            },
+            {
+              "tid": 2633,
+              "comm": ".NET Tiered Com",
+              "stat": "S",
+              "wchan": "futex_do_wait",
+              "syscall": "98",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2633/stack\u0027 is denied."
+            }
+          ]
+        },
+        "target": {
+          "pid": 2636,
+          "launcher": "dotnet",
+          "executable": "/usr/share/dotnet/dotnet",
+          "mode": "reparented",
+          "ancestry": {
+            "parents": [
+              1
+            ],
+            "descendsFromDebugger": false
+          }
+        },
+        "attached": {
+          "attachMs": 22,
+          "settledMs": 553,
+          "eventsDuringAttach": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 3,
+            "LoadAssembly": 8,
+            "LoadModule": 8
+          },
+          "memoryOpen": {
+            "call": "open(/proc/2636/mem, O_RDONLY)",
+            "errno": 13,
+            "error": "Permission denied",
+            "reads": "transport"
+          },
+          "debuggerImages": [
+            {
+              "path": "/home/runner/.local/share/dotnet/runfile/101-platform-facts-smoke-d2eafcc45d6cbef12f859de8e7067cde6a856f0bb95510dc5b15225fe9c4581f/bin/debug/runtimes/linux-arm64/native/libdbgshim.so",
+              "bytes": 313136,
+              "sha256": "d5a795efac5db08c9a7485a33a03ec40335caa71e239f35557faebcbbb0a2b15"
+            },
+            {
+              "path": "/usr/share/dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.so",
+              "bytes": 6848912,
+              "sha256": "5eaed8176e960fa1b00a244d25a5d64116d8cd19909e9bad1f65f0c1415117c7"
+            },
+            {
+              "path": "/usr/share/dotnet/shared/Microsoft.NETCore.App/10.0.14/libmscordaccore.so",
+              "bytes": 2383360,
+              "sha256": "170c3a19bd2b5c39cb7d9f1834643bd704a95ca8d21d4107b3dbeccfd2e53e20"
+            },
+            {
+              "path": "/usr/share/dotnet/shared/Microsoft.NETCore.App/10.0.14/libmscordbi.so",
+              "bytes": 1716560,
+              "sha256": "475bbda9e39495eccb78ab5fcb825e592aa6e8d37c4a041a223a15f89a2f230f"
+            }
+          ],
+          "debugPipes": [
+            "clr-debug-pipe-2636-25616-in",
+            "clr-debug-pipe-2636-25616-out",
+            "dotnet-diagnostic-2636-25616-socket"
+          ],
+          "threads": [
+            {
+              "tid": 2626,
+              "comm": "101-platform-fa",
+              "stat": "R",
+              "wchan": "0",
+              "syscall": "67",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2626/stack\u0027 is denied."
+            },
+            {
+              "tid": 2628,
+              "comm": ".NET SynchManag",
+              "stat": "S",
+              "wchan": "poll_schedule_timeout.constprop.0",
+              "syscall": "73",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2628/stack\u0027 is denied."
+            },
+            {
+              "tid": 2629,
+              "comm": ".NET EventPipe",
+              "stat": "S",
+              "wchan": "poll_schedule_timeout.constprop.0",
+              "syscall": "73",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2629/stack\u0027 is denied."
+            },
+            {
+              "tid": 2630,
+              "comm": ".NET DebugPipe",
+              "stat": "S",
+              "wchan": "wait_for_partner",
+              "syscall": "56",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2630/stack\u0027 is denied."
+            },
+            {
+              "tid": 2631,
+              "comm": ".NET Debugger",
+              "stat": "S",
+              "wchan": "futex_do_wait",
+              "syscall": "98",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2631/stack\u0027 is denied."
+            },
+            {
+              "tid": 2632,
+              "comm": ".NET Finalizer",
+              "stat": "S",
+              "wchan": "futex_do_wait",
+              "syscall": "98",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2632/stack\u0027 is denied."
+            },
+            {
+              "tid": 2633,
+              "comm": ".NET Tiered Com",
+              "stat": "S",
+              "wchan": "futex_do_wait",
+              "syscall": "98",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2633/stack\u0027 is denied."
+            },
+            {
+              "tid": 2634,
+              "comm": ".NET SigHandler",
+              "stat": "S",
+              "wchan": "anon_pipe_read",
+              "syscall": "63",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2634/stack\u0027 is denied."
+            },
+            {
+              "tid": 2637,
+              "comm": ".NET Sockets",
+              "stat": "S",
+              "wchan": "ep_poll",
+              "syscall": "22",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2637/stack\u0027 is denied."
+            },
+            {
+              "tid": 2645,
+              "comm": "101-platform-fa",
+              "stat": "S",
+              "wchan": "futex_do_wait",
+              "syscall": "98",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2645/stack\u0027 is denied."
+            },
+            {
+              "tid": 2646,
+              "comm": "101-platform-fa",
+              "stat": "S",
+              "wchan": "futex_do_wait",
+              "syscall": "98",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2646/stack\u0027 is denied."
+            },
+            {
+              "tid": 2647,
+              "comm": ".NET DebugPipe",
+              "stat": "S",
+              "wchan": "anon_pipe_read",
+              "syscall": "63",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2647/stack\u0027 is denied."
+            },
+            {
+              "tid": 2649,
+              "comm": "DrHook.Callback",
+              "stat": "S",
+              "wchan": "futex_do_wait",
+              "syscall": "98",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2649/stack\u0027 is denied."
+            },
+            {
+              "tid": 2650,
+              "comm": ".NET BGC",
+              "stat": "S",
+              "wchan": "futex_do_wait",
+              "syscall": "98",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2650/stack\u0027 is denied."
+            }
+          ],
+          "anomalies": []
+        },
+        "afterDetach": {
+          "threads": [
+            {
+              "tid": 2626,
+              "comm": "101-platform-fa",
+              "stat": "R",
+              "wchan": "0",
+              "syscall": "67",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2626/stack\u0027 is denied."
+            },
+            {
+              "tid": 2628,
+              "comm": ".NET SynchManag",
+              "stat": "S",
+              "wchan": "poll_schedule_timeout.constprop.0",
+              "syscall": "73",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2628/stack\u0027 is denied."
+            },
+            {
+              "tid": 2629,
+              "comm": ".NET EventPipe",
+              "stat": "S",
+              "wchan": "poll_schedule_timeout.constprop.0",
+              "syscall": "73",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2629/stack\u0027 is denied."
+            },
+            {
+              "tid": 2630,
+              "comm": ".NET DebugPipe",
+              "stat": "S",
+              "wchan": "wait_for_partner",
+              "syscall": "56",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2630/stack\u0027 is denied."
+            },
+            {
+              "tid": 2631,
+              "comm": ".NET Debugger",
+              "stat": "S",
+              "wchan": "futex_do_wait",
+              "syscall": "98",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2631/stack\u0027 is denied."
+            },
+            {
+              "tid": 2632,
+              "comm": ".NET Finalizer",
+              "stat": "S",
+              "wchan": "futex_do_wait",
+              "syscall": "98",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2632/stack\u0027 is denied."
+            },
+            {
+              "tid": 2633,
+              "comm": ".NET Tiered Com",
+              "stat": "S",
+              "wchan": "futex_do_wait",
+              "syscall": "98",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2633/stack\u0027 is denied."
+            },
+            {
+              "tid": 2634,
+              "comm": ".NET SigHandler",
+              "stat": "S",
+              "wchan": "anon_pipe_read",
+              "syscall": "63",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2634/stack\u0027 is denied."
+            },
+            {
+              "tid": 2637,
+              "comm": ".NET Sockets",
+              "stat": "S",
+              "wchan": "ep_poll",
+              "syscall": "22",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2637/stack\u0027 is denied."
+            },
+            {
+              "tid": 2647,
+              "comm": ".NET DebugPipe",
+              "stat": "S",
+              "wchan": "anon_pipe_read",
+              "syscall": "63",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2647/stack\u0027 is denied."
+            },
+            {
+              "tid": 2650,
+              "comm": ".NET BGC",
+              "stat": "S",
+              "wchan": "futex_do_wait",
+              "syscall": "98",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2650/stack\u0027 is denied."
+            }
+          ],
+          "debugPipes": [
+            "clr-debug-pipe-2636-25616-in",
+            "clr-debug-pipe-2636-25616-out",
+            "dotnet-diagnostic-2636-25616-socket"
+          ],
+          "anomalies": []
+        },
+        "targetEnd": {
+          "ended": true,
+          "doneMarker": true,
+          "exitCode": null,
+          "waitedMs": 18018
+        }
+      }
+    },
+    {
+      "launcher": "apphost",
+      "mode": "descendant",
+      "result": "recorded",
+      "facts": {
+        "beforeAttach": {
+          "debuggerImages": [
+            {
+              "path": "/usr/share/dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.so",
+              "bytes": 6848912,
+              "sha256": "5eaed8176e960fa1b00a244d25a5d64116d8cd19909e9bad1f65f0c1415117c7"
+            }
+          ],
+          "threads": [
+            {
+              "tid": 2665,
+              "comm": "101-platform-fa",
+              "stat": "R",
+              "wchan": "0",
+              "syscall": "67",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2665/stack\u0027 is denied."
+            },
+            {
+              "tid": 2667,
+              "comm": ".NET SynchManag",
+              "stat": "S",
+              "wchan": "poll_schedule_timeout.constprop.0",
+              "syscall": "73",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2667/stack\u0027 is denied."
+            },
+            {
+              "tid": 2668,
+              "comm": ".NET EventPipe",
+              "stat": "S",
+              "wchan": "poll_schedule_timeout.constprop.0",
+              "syscall": "73",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2668/stack\u0027 is denied."
+            },
+            {
+              "tid": 2669,
+              "comm": ".NET DebugPipe",
+              "stat": "S",
+              "wchan": "wait_for_partner",
+              "syscall": "56",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2669/stack\u0027 is denied."
+            },
+            {
+              "tid": 2670,
+              "comm": ".NET Debugger",
+              "stat": "S",
+              "wchan": "futex_do_wait",
+              "syscall": "98",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2670/stack\u0027 is denied."
+            },
+            {
+              "tid": 2671,
+              "comm": ".NET Finalizer",
+              "stat": "S",
+              "wchan": "futex_do_wait",
+              "syscall": "98",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2671/stack\u0027 is denied."
+            },
+            {
+              "tid": 2672,
+              "comm": ".NET Tiered Com",
+              "stat": "S",
+              "wchan": "futex_do_wait",
+              "syscall": "98",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2672/stack\u0027 is denied."
+            }
+          ]
+        },
+        "target": {
+          "pid": 2675,
+          "launcher": "apphost",
+          "executable": "/home/runner/.local/share/dotnet/runfile/101-platform-facts-target-aeb2fc58c2bb71840bf4b9e7f01296d3a96a0eae79d2aecccff6f5720f66d431/bin/debug/101-platform-facts-target",
+          "mode": "descendant",
+          "ancestry": {
+            "parents": [
+              2674,
+              2665,
+              2533,
+              2430,
+              2429,
+              2097,
+              2082,
+              1969,
+              1
+            ],
+            "descendsFromDebugger": true
+          }
+        },
+        "attached": {
+          "attachMs": 22,
+          "settledMs": 552,
+          "eventsDuringAttach": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 3,
+            "LoadAssembly": 8,
+            "LoadModule": 8
+          },
+          "memoryOpen": {
+            "call": "open(/proc/2675/mem, O_RDONLY)",
+            "errno": 0,
+            "error": null,
+            "reads": "direct"
+          },
+          "debuggerImages": [
+            {
+              "path": "/home/runner/.local/share/dotnet/runfile/101-platform-facts-smoke-d2eafcc45d6cbef12f859de8e7067cde6a856f0bb95510dc5b15225fe9c4581f/bin/debug/runtimes/linux-arm64/native/libdbgshim.so",
+              "bytes": 313136,
+              "sha256": "d5a795efac5db08c9a7485a33a03ec40335caa71e239f35557faebcbbb0a2b15"
+            },
+            {
+              "path": "/usr/share/dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.so",
+              "bytes": 6848912,
+              "sha256": "5eaed8176e960fa1b00a244d25a5d64116d8cd19909e9bad1f65f0c1415117c7"
+            },
+            {
+              "path": "/usr/share/dotnet/shared/Microsoft.NETCore.App/10.0.14/libmscordaccore.so",
+              "bytes": 2383360,
+              "sha256": "170c3a19bd2b5c39cb7d9f1834643bd704a95ca8d21d4107b3dbeccfd2e53e20"
+            },
+            {
+              "path": "/usr/share/dotnet/shared/Microsoft.NETCore.App/10.0.14/libmscordbi.so",
+              "bytes": 1716560,
+              "sha256": "475bbda9e39495eccb78ab5fcb825e592aa6e8d37c4a041a223a15f89a2f230f"
+            }
+          ],
+          "debugPipes": [
+            "clr-debug-pipe-2675-27645-in",
+            "clr-debug-pipe-2675-27645-out",
+            "dotnet-diagnostic-2675-27645-socket"
+          ],
+          "threads": [
+            {
+              "tid": 2665,
+              "comm": "101-platform-fa",
+              "stat": "R",
+              "wchan": "0",
+              "syscall": "67",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2665/stack\u0027 is denied."
+            },
+            {
+              "tid": 2667,
+              "comm": ".NET SynchManag",
+              "stat": "S",
+              "wchan": "poll_schedule_timeout.constprop.0",
+              "syscall": "73",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2667/stack\u0027 is denied."
+            },
+            {
+              "tid": 2668,
+              "comm": ".NET EventPipe",
+              "stat": "S",
+              "wchan": "poll_schedule_timeout.constprop.0",
+              "syscall": "73",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2668/stack\u0027 is denied."
+            },
+            {
+              "tid": 2669,
+              "comm": ".NET DebugPipe",
+              "stat": "S",
+              "wchan": "wait_for_partner",
+              "syscall": "56",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2669/stack\u0027 is denied."
+            },
+            {
+              "tid": 2670,
+              "comm": ".NET Debugger",
+              "stat": "S",
+              "wchan": "futex_do_wait",
+              "syscall": "98",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2670/stack\u0027 is denied."
+            },
+            {
+              "tid": 2671,
+              "comm": ".NET Finalizer",
+              "stat": "S",
+              "wchan": "futex_do_wait",
+              "syscall": "98",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2671/stack\u0027 is denied."
+            },
+            {
+              "tid": 2672,
+              "comm": ".NET Tiered Com",
+              "stat": "S",
+              "wchan": "futex_do_wait",
+              "syscall": "98",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2672/stack\u0027 is denied."
+            },
+            {
+              "tid": 2673,
+              "comm": ".NET SigHandler",
+              "stat": "S",
+              "wchan": "anon_pipe_read",
+              "syscall": "63",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2673/stack\u0027 is denied."
+            },
+            {
+              "tid": 2676,
+              "comm": ".NET Sockets",
+              "stat": "S",
+              "wchan": "ep_poll",
+              "syscall": "22",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2676/stack\u0027 is denied."
+            },
+            {
+              "tid": 2684,
+              "comm": "101-platform-fa",
+              "stat": "S",
+              "wchan": "futex_do_wait",
+              "syscall": "98",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2684/stack\u0027 is denied."
+            },
+            {
+              "tid": 2685,
+              "comm": "101-platform-fa",
+              "stat": "S",
+              "wchan": "futex_do_wait",
+              "syscall": "98",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2685/stack\u0027 is denied."
+            },
+            {
+              "tid": 2686,
+              "comm": ".NET DebugPipe",
+              "stat": "S",
+              "wchan": "anon_pipe_read",
+              "syscall": "63",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2686/stack\u0027 is denied."
+            },
+            {
+              "tid": 2688,
+              "comm": "DrHook.Callback",
+              "stat": "S",
+              "wchan": "futex_do_wait",
+              "syscall": "98",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2688/stack\u0027 is denied."
+            },
+            {
+              "tid": 2689,
+              "comm": ".NET BGC",
+              "stat": "S",
+              "wchan": "futex_do_wait",
+              "syscall": "98",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2689/stack\u0027 is denied."
+            }
+          ],
+          "anomalies": []
+        },
+        "afterDetach": {
+          "threads": [
+            {
+              "tid": 2665,
+              "comm": "101-platform-fa",
+              "stat": "R",
+              "wchan": "0",
+              "syscall": "67",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2665/stack\u0027 is denied."
+            },
+            {
+              "tid": 2667,
+              "comm": ".NET SynchManag",
+              "stat": "S",
+              "wchan": "poll_schedule_timeout.constprop.0",
+              "syscall": "73",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2667/stack\u0027 is denied."
+            },
+            {
+              "tid": 2668,
+              "comm": ".NET EventPipe",
+              "stat": "S",
+              "wchan": "poll_schedule_timeout.constprop.0",
+              "syscall": "73",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2668/stack\u0027 is denied."
+            },
+            {
+              "tid": 2669,
+              "comm": ".NET DebugPipe",
+              "stat": "S",
+              "wchan": "wait_for_partner",
+              "syscall": "56",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2669/stack\u0027 is denied."
+            },
+            {
+              "tid": 2670,
+              "comm": ".NET Debugger",
+              "stat": "S",
+              "wchan": "futex_do_wait",
+              "syscall": "98",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2670/stack\u0027 is denied."
+            },
+            {
+              "tid": 2671,
+              "comm": ".NET Finalizer",
+              "stat": "S",
+              "wchan": "futex_do_wait",
+              "syscall": "98",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2671/stack\u0027 is denied."
+            },
+            {
+              "tid": 2672,
+              "comm": ".NET Tiered Com",
+              "stat": "S",
+              "wchan": "futex_do_wait",
+              "syscall": "98",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2672/stack\u0027 is denied."
+            },
+            {
+              "tid": 2673,
+              "comm": ".NET SigHandler",
+              "stat": "S",
+              "wchan": "anon_pipe_read",
+              "syscall": "63",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2673/stack\u0027 is denied."
+            },
+            {
+              "tid": 2676,
+              "comm": ".NET Sockets",
+              "stat": "S",
+              "wchan": "ep_poll",
+              "syscall": "22",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2676/stack\u0027 is denied."
+            },
+            {
+              "tid": 2686,
+              "comm": ".NET DebugPipe",
+              "stat": "S",
+              "wchan": "anon_pipe_read",
+              "syscall": "63",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2686/stack\u0027 is denied."
+            },
+            {
+              "tid": 2689,
+              "comm": ".NET BGC",
+              "stat": "S",
+              "wchan": "futex_do_wait",
+              "syscall": "98",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2689/stack\u0027 is denied."
+            }
+          ],
+          "debugPipes": [
+            "clr-debug-pipe-2675-27645-in",
+            "clr-debug-pipe-2675-27645-out",
+            "dotnet-diagnostic-2675-27645-socket"
+          ],
+          "anomalies": []
+        },
+        "targetEnd": {
+          "ended": true,
+          "doneMarker": true,
+          "exitCode": 0,
+          "waitedMs": 18020
+        }
+      }
+    },
+    {
+      "launcher": "apphost",
+      "mode": "reparented",
+      "result": "recorded",
+      "facts": {
+        "beforeAttach": {
+          "debuggerImages": [
+            {
+              "path": "/usr/share/dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.so",
+              "bytes": 6848912,
+              "sha256": "5eaed8176e960fa1b00a244d25a5d64116d8cd19909e9bad1f65f0c1415117c7"
+            }
+          ],
+          "threads": [
+            {
+              "tid": 2702,
+              "comm": "101-platform-fa",
+              "stat": "R",
+              "wchan": "0",
+              "syscall": "67",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2702/stack\u0027 is denied."
+            },
+            {
+              "tid": 2705,
+              "comm": ".NET SynchManag",
+              "stat": "S",
+              "wchan": "poll_schedule_timeout.constprop.0",
+              "syscall": "73",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2705/stack\u0027 is denied."
+            },
+            {
+              "tid": 2706,
+              "comm": ".NET EventPipe",
+              "stat": "S",
+              "wchan": "poll_schedule_timeout.constprop.0",
+              "syscall": "73",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2706/stack\u0027 is denied."
+            },
+            {
+              "tid": 2707,
+              "comm": ".NET DebugPipe",
+              "stat": "S",
+              "wchan": "wait_for_partner",
+              "syscall": "56",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2707/stack\u0027 is denied."
+            },
+            {
+              "tid": 2708,
+              "comm": ".NET Debugger",
+              "stat": "S",
+              "wchan": "futex_do_wait",
+              "syscall": "98",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2708/stack\u0027 is denied."
+            },
+            {
+              "tid": 2709,
+              "comm": ".NET Finalizer",
+              "stat": "S",
+              "wchan": "futex_do_wait",
+              "syscall": "98",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2709/stack\u0027 is denied."
+            },
+            {
+              "tid": 2710,
+              "comm": ".NET Tiered Com",
+              "stat": "S",
+              "wchan": "futex_do_wait",
+              "syscall": "98",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2710/stack\u0027 is denied."
+            }
+          ]
+        },
+        "target": {
+          "pid": 2713,
+          "launcher": "apphost",
+          "executable": "/home/runner/.local/share/dotnet/runfile/101-platform-facts-target-aeb2fc58c2bb71840bf4b9e7f01296d3a96a0eae79d2aecccff6f5720f66d431/bin/debug/101-platform-facts-target",
+          "mode": "reparented",
+          "ancestry": {
+            "parents": [
+              1
+            ],
+            "descendsFromDebugger": false
+          }
+        },
+        "attached": {
+          "attachMs": 25,
+          "settledMs": 552,
+          "eventsDuringAttach": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 3,
+            "LoadAssembly": 8,
+            "LoadModule": 8
+          },
+          "memoryOpen": {
+            "call": "open(/proc/2713/mem, O_RDONLY)",
+            "errno": 13,
+            "error": "Permission denied",
+            "reads": "transport"
+          },
+          "debuggerImages": [
+            {
+              "path": "/home/runner/.local/share/dotnet/runfile/101-platform-facts-smoke-d2eafcc45d6cbef12f859de8e7067cde6a856f0bb95510dc5b15225fe9c4581f/bin/debug/runtimes/linux-arm64/native/libdbgshim.so",
+              "bytes": 313136,
+              "sha256": "d5a795efac5db08c9a7485a33a03ec40335caa71e239f35557faebcbbb0a2b15"
+            },
+            {
+              "path": "/usr/share/dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.so",
+              "bytes": 6848912,
+              "sha256": "5eaed8176e960fa1b00a244d25a5d64116d8cd19909e9bad1f65f0c1415117c7"
+            },
+            {
+              "path": "/usr/share/dotnet/shared/Microsoft.NETCore.App/10.0.14/libmscordaccore.so",
+              "bytes": 2383360,
+              "sha256": "170c3a19bd2b5c39cb7d9f1834643bd704a95ca8d21d4107b3dbeccfd2e53e20"
+            },
+            {
+              "path": "/usr/share/dotnet/shared/Microsoft.NETCore.App/10.0.14/libmscordbi.so",
+              "bytes": 1716560,
+              "sha256": "475bbda9e39495eccb78ab5fcb825e592aa6e8d37c4a041a223a15f89a2f230f"
+            }
+          ],
+          "debugPipes": [
+            "clr-debug-pipe-2713-29674-in",
+            "clr-debug-pipe-2713-29674-out",
+            "dotnet-diagnostic-2713-29674-socket"
+          ],
+          "threads": [
+            {
+              "tid": 2702,
+              "comm": "101-platform-fa",
+              "stat": "R",
+              "wchan": "0",
+              "syscall": "67",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2702/stack\u0027 is denied."
+            },
+            {
+              "tid": 2705,
+              "comm": ".NET SynchManag",
+              "stat": "S",
+              "wchan": "poll_schedule_timeout.constprop.0",
+              "syscall": "73",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2705/stack\u0027 is denied."
+            },
+            {
+              "tid": 2706,
+              "comm": ".NET EventPipe",
+              "stat": "S",
+              "wchan": "poll_schedule_timeout.constprop.0",
+              "syscall": "73",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2706/stack\u0027 is denied."
+            },
+            {
+              "tid": 2707,
+              "comm": ".NET DebugPipe",
+              "stat": "S",
+              "wchan": "wait_for_partner",
+              "syscall": "56",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2707/stack\u0027 is denied."
+            },
+            {
+              "tid": 2708,
+              "comm": ".NET Debugger",
+              "stat": "S",
+              "wchan": "futex_do_wait",
+              "syscall": "98",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2708/stack\u0027 is denied."
+            },
+            {
+              "tid": 2709,
+              "comm": ".NET Finalizer",
+              "stat": "S",
+              "wchan": "futex_do_wait",
+              "syscall": "98",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2709/stack\u0027 is denied."
+            },
+            {
+              "tid": 2710,
+              "comm": ".NET Tiered Com",
+              "stat": "S",
+              "wchan": "futex_do_wait",
+              "syscall": "98",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2710/stack\u0027 is denied."
+            },
+            {
+              "tid": 2711,
+              "comm": ".NET SigHandler",
+              "stat": "S",
+              "wchan": "anon_pipe_read",
+              "syscall": "63",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2711/stack\u0027 is denied."
+            },
+            {
+              "tid": 2714,
+              "comm": ".NET Sockets",
+              "stat": "S",
+              "wchan": "ep_poll",
+              "syscall": "22",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2714/stack\u0027 is denied."
+            },
+            {
+              "tid": 2722,
+              "comm": "101-platform-fa",
+              "stat": "S",
+              "wchan": "futex_do_wait",
+              "syscall": "98",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2722/stack\u0027 is denied."
+            },
+            {
+              "tid": 2723,
+              "comm": "101-platform-fa",
+              "stat": "S",
+              "wchan": "futex_do_wait",
+              "syscall": "98",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2723/stack\u0027 is denied."
+            },
+            {
+              "tid": 2724,
+              "comm": ".NET DebugPipe",
+              "stat": "S",
+              "wchan": "anon_pipe_read",
+              "syscall": "63",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2724/stack\u0027 is denied."
+            },
+            {
+              "tid": 2726,
+              "comm": "DrHook.Callback",
+              "stat": "S",
+              "wchan": "futex_do_wait",
+              "syscall": "98",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2726/stack\u0027 is denied."
+            },
+            {
+              "tid": 2728,
+              "comm": ".NET BGC",
+              "stat": "S",
+              "wchan": "futex_do_wait",
+              "syscall": "98",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2728/stack\u0027 is denied."
+            }
+          ],
+          "anomalies": []
+        },
+        "afterDetach": {
+          "threads": [
+            {
+              "tid": 2702,
+              "comm": "101-platform-fa",
+              "stat": "R",
+              "wchan": "0",
+              "syscall": "67",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2702/stack\u0027 is denied."
+            },
+            {
+              "tid": 2705,
+              "comm": ".NET SynchManag",
+              "stat": "S",
+              "wchan": "poll_schedule_timeout.constprop.0",
+              "syscall": "73",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2705/stack\u0027 is denied."
+            },
+            {
+              "tid": 2706,
+              "comm": ".NET EventPipe",
+              "stat": "S",
+              "wchan": "poll_schedule_timeout.constprop.0",
+              "syscall": "73",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2706/stack\u0027 is denied."
+            },
+            {
+              "tid": 2707,
+              "comm": ".NET DebugPipe",
+              "stat": "S",
+              "wchan": "wait_for_partner",
+              "syscall": "56",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2707/stack\u0027 is denied."
+            },
+            {
+              "tid": 2708,
+              "comm": ".NET Debugger",
+              "stat": "S",
+              "wchan": "futex_do_wait",
+              "syscall": "98",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2708/stack\u0027 is denied."
+            },
+            {
+              "tid": 2709,
+              "comm": ".NET Finalizer",
+              "stat": "S",
+              "wchan": "futex_do_wait",
+              "syscall": "98",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2709/stack\u0027 is denied."
+            },
+            {
+              "tid": 2710,
+              "comm": ".NET Tiered Com",
+              "stat": "S",
+              "wchan": "futex_do_wait",
+              "syscall": "98",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2710/stack\u0027 is denied."
+            },
+            {
+              "tid": 2711,
+              "comm": ".NET SigHandler",
+              "stat": "S",
+              "wchan": "anon_pipe_read",
+              "syscall": "63",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2711/stack\u0027 is denied."
+            },
+            {
+              "tid": 2714,
+              "comm": ".NET Sockets",
+              "stat": "S",
+              "wchan": "ep_poll",
+              "syscall": "22",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2714/stack\u0027 is denied."
+            },
+            {
+              "tid": 2724,
+              "comm": ".NET DebugPipe",
+              "stat": "S",
+              "wchan": "anon_pipe_read",
+              "syscall": "63",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2724/stack\u0027 is denied."
+            },
+            {
+              "tid": 2728,
+              "comm": ".NET BGC",
+              "stat": "S",
+              "wchan": "futex_do_wait",
+              "syscall": "98",
+              "stack": "unreadable: UnauthorizedAccessException: Access to the path \u0027/proc/self/task/2728/stack\u0027 is denied."
+            }
+          ],
+          "debugPipes": [
+            "clr-debug-pipe-2713-29674-in",
+            "clr-debug-pipe-2713-29674-out",
+            "dotnet-diagnostic-2713-29674-socket"
+          ],
+          "anomalies": []
+        },
+        "targetEnd": {
+          "ended": true,
+          "doneMarker": true,
+          "exitCode": null,
+          "waitedMs": 18024
+        }
+      }
+    }
+  ]
+}
