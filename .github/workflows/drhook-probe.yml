@@ -1,11 +1,22 @@
-# ADR-016 Step 1: DrHook probe 101 (platform facts, read-only) on the six runners. Started by hand only. It attaches to
-# an idle target, records the debugger code loaded, how mscordbi reads the target's memory and the environment, detaches
-# cleanly and lets the target end by itself. Each runner uploads its facts as JSON. Its own concurrency group, so a push
-# never cancels it and it never cancels a test run.
-name: DrHook probe 101
+# ADR-016: a DrHook probe on the six runners. Started by hand only, choosing the probe:
+#   101-platform-facts  Step 1, read-only: attaches to an idle target, records the debugger code loaded, how mscordbi
+#                       reads the target's memory and the environment, detaches and lets the target end by itself.
+#   102-natural-end     Step 2: targets that end by themselves, or after the debugger has left, 20 sessions per
+#                       construction and read path in one process each, then a final attach.
+# Each runner uploads the probe's facts as JSON. Its own concurrency group, so a push never cancels it and it never
+# cancels a test run.
+name: DrHook probe
 
 on:
   workflow_dispatch:
+    inputs:
+      probe:
+        description: Probe to run
+        required: true
+        type: choice
+        options:
+          - 101-platform-facts
+          - 102-natural-end
 
 permissions:
   contents: read
@@ -16,9 +27,9 @@ concurrency:
 
 jobs:
   probe:
-    name: ${{ matrix.platform }}
+    name: ${{ inputs.probe }} on ${{ matrix.platform }}
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 15
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -29,6 +40,9 @@ jobs:
           - { platform: Linux arm64, runner: ubuntu-24.04-arm, file: linux-arm64 }
           - { platform: Windows x64, runner: windows-latest, file: windows-x64 }
           - { platform: Windows arm64, runner: windows-11-arm, file: windows-arm64 }
+    env:
+      PROBE: ${{ inputs.probe }}
+      FILE: ${{ matrix.file }}
     steps:
       - name: Check out
         uses: actions/checkout@v4
@@ -38,14 +52,15 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
-      - name: Probe 101
+      - name: Probe
         working-directory: poc/drhook-engine
-        run: dotnet run --no-cache 101-platform-facts-smoke.cs --out probe-101-${{ matrix.file }}.json
+        shell: bash
+        run: dotnet run --no-cache "$PROBE-smoke.cs" --out "probe-$PROBE-$FILE.json"
 
       - name: Upload the facts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: probe-101-${{ matrix.file }}
-          path: poc/drhook-engine/probe-101-${{ matrix.file }}.json
+          name: probe-${{ inputs.probe }}-${{ matrix.file }}
+          path: poc/drhook-engine/probe-${{ inputs.probe }}-${{ matrix.file }}.json
           if-no-files-found: warn

@@ -478,7 +478,8 @@ its own threads' state without ptrace rights, which the no-capture constructions
 a clean detach and leaves the target to finish. Runs on each of our machines, and on the six runners through a
 `workflow_dispatch` job (a workflow change, reviewed when proposed).
 *Recorded 2026-10-31* ([finding 101](../../../poc/drhook-engine/findings/101-platform-facts.md); our four machines,
-omega-ubuntu with both builds, and the six runners through `.github/workflows/drhook-probe-101.yml`; every run
+omega-ubuntu with both builds, and the six runners through `.github/workflows/drhook-probe.yml`, then named
+`drhook-probe-101.yml`; every run
 recorded, every target ended by itself). On Linux mscordbi reads a descendant's memory directly and any other
 process's over the transport (`ptrace_scope=1` everywhere). On macOS it depends on the machine: on omega (SIP enabled)
 `task_for_pid` fails and every read goes over the transport; on the runners (SIP disabled) it depends on the
