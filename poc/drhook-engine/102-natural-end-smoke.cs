@@ -38,10 +38,11 @@
 // CreateThread and ExitThread events and reading the target's memory to do it. Every session is borrowed
 // (DebugSession.Attach): DrHook never ends the target, and the child signals, stops or kills nothing.
 //
-// Recorded per session: the read path; the attach, exit and Dispose times; the debugger events; anomalies; whether the
-// target ended by itself and wrote its marker; the debug pipes left once the target is gone (finding 100's orphaned
-// read leaves them), which the child then removes; the child's thread count; on Linux, the debugger's transport
-// threads (".NET DebugPipe") beyond those present before the first session, with their wchan and syscall.
+// Recorded per session: the read path; the attach, exit and Dispose times; the debugger events; anomalies, each with
+// its context (for a late callback, which event arrived); whether the target ended by itself and wrote its marker;
+// the debug pipes left once the target is gone (finding 100's orphaned read leaves them), which the child then
+// removes; the child's thread count; on Linux, the debugger's transport threads (".NET DebugPipe") beyond those
+// present before the first session, with their wchan and syscall.
 //
 // Bounds: a step of the child that does not finish within its bound (30 s for a debugger call) is reported by a
 // watchdog thread in the child, on Linux with each thread's comm, wchan and syscall (finding 101; no outside sampler,
@@ -644,7 +645,11 @@ sealed class Sink : IDebugEventSink
     public int Count { get { lock (_events) return _events.Values.Sum(); } }
     public int CountOf(string name) { lock (_events) return _events.GetValueOrDefault(name); }
     public void OnEvent(string name) { lock (_events) { _events[name] = _events.GetValueOrDefault(name) + 1; _lastEventTicks = Stopwatch.GetTimestamp(); } }
-    public void OnAnomaly(EngineAnomaly a) { lock (_anomalies) _anomalies.Add($"{a.Kind} in {a.Operation}: {a.Observed}"); }
+    public void OnAnomaly(EngineAnomaly a)
+    {
+        string context = a.Context is { Count: > 0 } c ? " (" + string.Join(", ", c.OrderBy(kv => kv.Key, StringComparer.Ordinal).Select(kv => $"{kv.Key}={kv.Value}")) + ")" : "";
+        lock (_anomalies) _anomalies.Add($"{a.Kind} in {a.Operation}: {a.Observed}{context}");
+    }
     public long QuietMilliseconds { get { lock (_events) return (long)Stopwatch.GetElapsedTime(_lastEventTicks).TotalMilliseconds; } }
     public JsonObject Histogram() { lock (_events) return new JsonObject(_events.OrderBy(kv => kv.Key, StringComparer.Ordinal).Select(kv => KeyValuePair.Create(kv.Key, (JsonNode?)kv.Value))); }
     public JsonArray Anomalies() { lock (_anomalies) return new JsonArray(_anomalies.Select(a => (JsonNode?)a).ToArray()); }
