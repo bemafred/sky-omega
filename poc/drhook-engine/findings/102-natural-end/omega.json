@@ -1,0 +1,5699 @@
+{
+  "probe": "102-natural-end",
+  "recordedAt": "2026-11-01T14:10:53Z",
+  "environment": {
+    "machine": "omega",
+    "os": "macOS 27.0.1",
+    "architecture": "Arm64",
+    "cores": 18,
+    "probeRuntime": ".NET 10.0.9",
+    "runtimeDirectory": "/usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/",
+    "dotnetHost": "/usr/local/share/dotnet/dotnet",
+    "debuggerExecutable": "/Users/bemafred/Library/Application Support/dotnet/runfile/102-natural-end-smoke-4afd5c4d6b25b495dcb13ec492bdbbbf838f63cdd6ec94e5c85c3f22f8203a59/bin/debug/102-natural-end-smoke",
+    "targetAppHost": "/Users/bemafred/Library/Application Support/dotnet/runfile/102-natural-end-target-46b076a4d5eadfd6d111caa250022cf7ff9fb07a3cb8ba88f26202ab1c4489e9/bin/debug/102-natural-end-target",
+    "sessionsPerChild": 20,
+    "tempDirectory": "/var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/",
+    "commit": "6bb7ef8df4129173db868b73845db2bb1b1da111",
+    "ci": "",
+    "macOS": "27.0.1",
+    "systemIntegrityProtection": "System Integrity Protection status: enabled."
+  },
+  "children": [
+    {
+      "construction": "quiet",
+      "launcher": "dotnet",
+      "mode": "descendant",
+      "seed": 102001,
+      "final": {
+        "pid": 81861,
+        "attachMs": 29,
+        "events": 21,
+        "targetEnded": true,
+        "marker": true,
+        "anomalies": [],
+        "ok": true
+      },
+      "sessions": [
+        {
+          "session": 1,
+          "pid": 81613,
+          "attachMs": 24,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1825,
+          "otherStops": [],
+          "disposeMs": 262,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4511,
+            "ExitProcess": 1,
+            "ExitThread": 4508,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 15,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 2,
+          "pid": 81621,
+          "attachMs": 22,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1839,
+          "otherStops": [],
+          "disposeMs": 261,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4473,
+            "ExitProcess": 1,
+            "ExitThread": 4470,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 15,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 3,
+          "pid": 81626,
+          "attachMs": 25,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1855,
+          "otherStops": [],
+          "disposeMs": 255,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4684,
+            "ExitProcess": 1,
+            "ExitThread": 4681,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 4,
+          "pid": 81641,
+          "attachMs": 28,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1826,
+          "otherStops": [],
+          "disposeMs": 253,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4609,
+            "ExitProcess": 1,
+            "ExitThread": 4606,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 5,
+          "pid": 81654,
+          "attachMs": 22,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1838,
+          "otherStops": [],
+          "disposeMs": 258,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4665,
+            "ExitProcess": 1,
+            "ExitThread": 4662,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 6,
+          "pid": 81661,
+          "attachMs": 22,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1832,
+          "otherStops": [],
+          "disposeMs": 258,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4702,
+            "ExitProcess": 1,
+            "ExitThread": 4699,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 7,
+          "pid": 81665,
+          "attachMs": 24,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1830,
+          "otherStops": [],
+          "disposeMs": 257,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4717,
+            "ExitProcess": 1,
+            "ExitThread": 4714,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 8,
+          "pid": 81670,
+          "attachMs": 23,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1831,
+          "otherStops": [],
+          "disposeMs": 257,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4641,
+            "ExitProcess": 1,
+            "ExitThread": 4638,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 9,
+          "pid": 81674,
+          "attachMs": 23,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1830,
+          "otherStops": [],
+          "disposeMs": 261,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4527,
+            "ExitProcess": 1,
+            "ExitThread": 4524,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 10,
+          "pid": 81683,
+          "attachMs": 24,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1827,
+          "otherStops": [],
+          "disposeMs": 260,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4678,
+            "ExitProcess": 1,
+            "ExitThread": 4675,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 11,
+          "pid": 81687,
+          "attachMs": 22,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1839,
+          "otherStops": [],
+          "disposeMs": 258,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4632,
+            "ExitProcess": 1,
+            "ExitThread": 4629,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 12,
+          "pid": 81701,
+          "attachMs": 24,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1821,
+          "otherStops": [],
+          "disposeMs": 260,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4651,
+            "ExitProcess": 1,
+            "ExitThread": 4648,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 13,
+          "pid": 81705,
+          "attachMs": 23,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1823,
+          "otherStops": [],
+          "disposeMs": 255,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4464,
+            "ExitProcess": 1,
+            "ExitThread": 4461,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 14,
+          "pid": 81723,
+          "attachMs": 22,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1836,
+          "otherStops": [],
+          "disposeMs": 259,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4753,
+            "ExitProcess": 1,
+            "ExitThread": 4750,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 15,
+          "pid": 81727,
+          "attachMs": 25,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1835,
+          "otherStops": [],
+          "disposeMs": 259,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4811,
+            "ExitProcess": 1,
+            "ExitThread": 4808,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 16,
+          "pid": 81732,
+          "attachMs": 30,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1839,
+          "otherStops": [],
+          "disposeMs": 257,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4723,
+            "ExitProcess": 1,
+            "ExitThread": 4720,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 17,
+          "pid": 81737,
+          "attachMs": 22,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1832,
+          "otherStops": [],
+          "disposeMs": 257,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4669,
+            "ExitProcess": 1,
+            "ExitThread": 4666,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 18,
+          "pid": 81741,
+          "attachMs": 25,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1833,
+          "otherStops": [],
+          "disposeMs": 259,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4660,
+            "ExitProcess": 1,
+            "ExitThread": 4657,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 19,
+          "pid": 81762,
+          "attachMs": 23,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1825,
+          "otherStops": [],
+          "disposeMs": 261,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4671,
+            "ExitProcess": 1,
+            "ExitThread": 4668,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 20,
+          "pid": 81770,
+          "attachMs": 24,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1845,
+          "otherStops": [],
+          "disposeMs": 261,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4507,
+            "ExitProcess": 1,
+            "ExitThread": 4504,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        }
+      ],
+      "outcome": "natural",
+      "parentActions": []
+    },
+    {
+      "construction": "quiet",
+      "launcher": "apphost",
+      "mode": "descendant",
+      "seed": 102002,
+      "final": {
+        "pid": 82242,
+        "attachMs": 18,
+        "events": 21,
+        "targetEnded": true,
+        "marker": true,
+        "anomalies": [],
+        "ok": true
+      },
+      "sessions": [
+        {
+          "session": 1,
+          "pid": 81956,
+          "attachMs": 155,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1836,
+          "otherStops": [],
+          "disposeMs": 266,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4267,
+            "ExitProcess": 1,
+            "ExitThread": 4264,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 15,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 2,
+          "pid": 82052,
+          "attachMs": 20,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1830,
+          "otherStops": [],
+          "disposeMs": 265,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4158,
+            "ExitProcess": 1,
+            "ExitThread": 4155,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 15,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 3,
+          "pid": 82138,
+          "attachMs": 25,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1829,
+          "otherStops": [],
+          "disposeMs": 258,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4590,
+            "ExitProcess": 1,
+            "ExitThread": 4587,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 4,
+          "pid": 82162,
+          "attachMs": 18,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1852,
+          "otherStops": [],
+          "disposeMs": 266,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4527,
+            "ExitProcess": 1,
+            "ExitThread": 4524,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 5,
+          "pid": 82166,
+          "attachMs": 18,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1848,
+          "otherStops": [],
+          "disposeMs": 269,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4707,
+            "ExitProcess": 1,
+            "ExitThread": 4704,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 6,
+          "pid": 82171,
+          "attachMs": 18,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1836,
+          "otherStops": [],
+          "disposeMs": 266,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4737,
+            "ExitProcess": 1,
+            "ExitThread": 4734,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 7,
+          "pid": 82175,
+          "attachMs": 19,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1842,
+          "otherStops": [],
+          "disposeMs": 262,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4642,
+            "ExitProcess": 1,
+            "ExitThread": 4639,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 8,
+          "pid": 82179,
+          "attachMs": 18,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1843,
+          "otherStops": [],
+          "disposeMs": 253,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4797,
+            "ExitProcess": 1,
+            "ExitThread": 4794,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 9,
+          "pid": 82185,
+          "attachMs": 24,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1839,
+          "otherStops": [],
+          "disposeMs": 256,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4777,
+            "ExitProcess": 1,
+            "ExitThread": 4774,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 10,
+          "pid": 82190,
+          "attachMs": 17,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1837,
+          "otherStops": [],
+          "disposeMs": 270,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4774,
+            "ExitProcess": 1,
+            "ExitThread": 4771,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 11,
+          "pid": 82196,
+          "attachMs": 18,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1845,
+          "otherStops": [],
+          "disposeMs": 271,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4762,
+            "ExitProcess": 1,
+            "ExitThread": 4759,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 12,
+          "pid": 82201,
+          "attachMs": 17,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1837,
+          "otherStops": [],
+          "disposeMs": 267,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4354,
+            "ExitProcess": 1,
+            "ExitThread": 4351,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 13,
+          "pid": 82205,
+          "attachMs": 26,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1860,
+          "otherStops": [],
+          "disposeMs": 264,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4579,
+            "ExitProcess": 1,
+            "ExitThread": 4576,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 14,
+          "pid": 82210,
+          "attachMs": 17,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1848,
+          "otherStops": [],
+          "disposeMs": 264,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4799,
+            "ExitProcess": 1,
+            "ExitThread": 4796,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 15,
+          "pid": 82214,
+          "attachMs": 17,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1832,
+          "otherStops": [],
+          "disposeMs": 256,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4740,
+            "ExitProcess": 1,
+            "ExitThread": 4737,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 16,
+          "pid": 82219,
+          "attachMs": 20,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1840,
+          "otherStops": [],
+          "disposeMs": 258,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4704,
+            "ExitProcess": 1,
+            "ExitThread": 4701,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 17,
+          "pid": 82223,
+          "attachMs": 18,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1840,
+          "otherStops": [],
+          "disposeMs": 263,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4771,
+            "ExitProcess": 1,
+            "ExitThread": 4768,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 18,
+          "pid": 82228,
+          "attachMs": 19,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1834,
+          "otherStops": [],
+          "disposeMs": 262,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4201,
+            "ExitProcess": 1,
+            "ExitThread": 4198,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 19,
+          "pid": 82232,
+          "attachMs": 25,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1857,
+          "otherStops": [],
+          "disposeMs": 269,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4513,
+            "ExitProcess": 1,
+            "ExitThread": 4510,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 13,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 20,
+          "pid": 82237,
+          "attachMs": 30,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1832,
+          "otherStops": [],
+          "disposeMs": 269,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4521,
+            "ExitProcess": 1,
+            "ExitThread": 4518,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        }
+      ],
+      "outcome": "natural",
+      "parentActions": []
+    },
+    {
+      "construction": "mid-flood",
+      "launcher": "dotnet",
+      "mode": "descendant",
+      "seed": 102003,
+      "final": {
+        "pid": 82337,
+        "attachMs": 19,
+        "events": 21,
+        "targetEnded": true,
+        "marker": true,
+        "anomalies": [],
+        "ok": true
+      },
+      "sessions": [
+        {
+          "session": 1,
+          "pid": 82248,
+          "attachMs": 26,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1549,
+          "otherStops": [],
+          "disposeMs": 265,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4776,
+            "ExitProcess": 1,
+            "ExitThread": 4770,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 15,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 2,
+          "pid": 82252,
+          "attachMs": 27,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1571,
+          "otherStops": [],
+          "disposeMs": 270,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4683,
+            "ExitProcess": 1,
+            "ExitThread": 4677,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 15,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 3,
+          "pid": 82256,
+          "attachMs": 18,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1555,
+          "otherStops": [],
+          "disposeMs": 264,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4354,
+            "ExitProcess": 1,
+            "ExitThread": 4348,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 15,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 4,
+          "pid": 82261,
+          "attachMs": 22,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1559,
+          "otherStops": [],
+          "disposeMs": 272,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4421,
+            "ExitProcess": 1,
+            "ExitThread": 4415,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 5,
+          "pid": 82265,
+          "attachMs": 18,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1538,
+          "otherStops": [],
+          "disposeMs": 259,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4329,
+            "ExitProcess": 1,
+            "ExitThread": 4323,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 6,
+          "pid": 82269,
+          "attachMs": 20,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1538,
+          "otherStops": [],
+          "disposeMs": 261,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4478,
+            "ExitProcess": 1,
+            "ExitThread": 4472,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 7,
+          "pid": 82274,
+          "attachMs": 21,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1573,
+          "otherStops": [],
+          "disposeMs": 258,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4494,
+            "ExitProcess": 1,
+            "ExitThread": 4489,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 8,
+          "pid": 82278,
+          "attachMs": 25,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1571,
+          "otherStops": [],
+          "disposeMs": 260,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 3949,
+            "ExitProcess": 1,
+            "ExitThread": 3943,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 9,
+          "pid": 82284,
+          "attachMs": 28,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1536,
+          "otherStops": [],
+          "disposeMs": 265,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4476,
+            "ExitProcess": 1,
+            "ExitThread": 4470,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 10,
+          "pid": 82288,
+          "attachMs": 20,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1544,
+          "otherStops": [],
+          "disposeMs": 264,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 3902,
+            "ExitProcess": 1,
+            "ExitThread": 3896,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 11,
+          "pid": 82292,
+          "attachMs": 30,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1541,
+          "otherStops": [],
+          "disposeMs": 270,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 3632,
+            "ExitProcess": 1,
+            "ExitThread": 3626,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 12,
+          "pid": 82296,
+          "attachMs": 19,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1555,
+          "otherStops": [],
+          "disposeMs": 261,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4347,
+            "ExitProcess": 1,
+            "ExitThread": 4341,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 13,
+          "pid": 82300,
+          "attachMs": 20,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1580,
+          "otherStops": [],
+          "disposeMs": 260,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4293,
+            "ExitProcess": 1,
+            "ExitThread": 4287,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 14,
+          "pid": 82305,
+          "attachMs": 20,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1560,
+          "otherStops": [],
+          "disposeMs": 270,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4762,
+            "ExitProcess": 1,
+            "ExitThread": 4756,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 15,
+          "pid": 82311,
+          "attachMs": 20,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1548,
+          "otherStops": [],
+          "disposeMs": 270,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4695,
+            "ExitProcess": 1,
+            "ExitThread": 4689,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 16,
+          "pid": 82315,
+          "attachMs": 17,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1547,
+          "otherStops": [],
+          "disposeMs": 270,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4650,
+            "ExitProcess": 1,
+            "ExitThread": 4644,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 17,
+          "pid": 82320,
+          "attachMs": 19,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1553,
+          "otherStops": [],
+          "disposeMs": 271,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4727,
+            "ExitProcess": 1,
+            "ExitThread": 4721,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 18,
+          "pid": 82324,
+          "attachMs": 27,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1546,
+          "otherStops": [],
+          "disposeMs": 264,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4722,
+            "ExitProcess": 1,
+            "ExitThread": 4716,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 19,
+          "pid": 82328,
+          "attachMs": 23,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1572,
+          "otherStops": [],
+          "disposeMs": 263,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4773,
+            "ExitProcess": 1,
+            "ExitThread": 4768,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 20,
+          "pid": 82332,
+          "attachMs": 19,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1547,
+          "otherStops": [],
+          "disposeMs": 270,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4730,
+            "ExitProcess": 1,
+            "ExitThread": 4724,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        }
+      ],
+      "outcome": "natural",
+      "parentActions": []
+    },
+    {
+      "construction": "mid-flood",
+      "launcher": "apphost",
+      "mode": "descendant",
+      "seed": 102004,
+      "final": {
+        "pid": 82438,
+        "attachMs": 17,
+        "events": 21,
+        "targetEnded": true,
+        "marker": true,
+        "anomalies": [],
+        "ok": true
+      },
+      "sessions": [
+        {
+          "session": 1,
+          "pid": 82343,
+          "attachMs": 31,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1546,
+          "otherStops": [],
+          "disposeMs": 273,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4726,
+            "ExitProcess": 1,
+            "ExitThread": 4720,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 15,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 2,
+          "pid": 82347,
+          "attachMs": 20,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1574,
+          "otherStops": [],
+          "disposeMs": 270,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4458,
+            "ExitProcess": 1,
+            "ExitThread": 4453,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 15,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 3,
+          "pid": 82351,
+          "attachMs": 19,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1553,
+          "otherStops": [],
+          "disposeMs": 270,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4564,
+            "ExitProcess": 1,
+            "ExitThread": 4558,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 4,
+          "pid": 82356,
+          "attachMs": 18,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1551,
+          "otherStops": [],
+          "disposeMs": 271,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4776,
+            "ExitProcess": 1,
+            "ExitThread": 4771,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 5,
+          "pid": 82360,
+          "attachMs": 19,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1543,
+          "otherStops": [],
+          "disposeMs": 265,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4769,
+            "ExitProcess": 1,
+            "ExitThread": 4763,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 6,
+          "pid": 82364,
+          "attachMs": 18,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1557,
+          "otherStops": [],
+          "disposeMs": 267,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4771,
+            "ExitProcess": 1,
+            "ExitThread": 4765,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 7,
+          "pid": 82368,
+          "attachMs": 17,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1534,
+          "otherStops": [],
+          "disposeMs": 270,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4760,
+            "ExitProcess": 1,
+            "ExitThread": 4754,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 8,
+          "pid": 82373,
+          "attachMs": 18,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1549,
+          "otherStops": [],
+          "disposeMs": 270,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4766,
+            "ExitProcess": 1,
+            "ExitThread": 4761,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 9,
+          "pid": 82377,
+          "attachMs": 19,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1548,
+          "otherStops": [],
+          "disposeMs": 270,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4737,
+            "ExitProcess": 1,
+            "ExitThread": 4731,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 10,
+          "pid": 82381,
+          "attachMs": 19,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1543,
+          "otherStops": [],
+          "disposeMs": 266,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4753,
+            "ExitProcess": 1,
+            "ExitThread": 4747,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 11,
+          "pid": 82386,
+          "attachMs": 17,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1549,
+          "otherStops": [],
+          "disposeMs": 271,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4761,
+            "ExitProcess": 1,
+            "ExitThread": 4755,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 12,
+          "pid": 82396,
+          "attachMs": 20,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1545,
+          "otherStops": [],
+          "disposeMs": 270,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4677,
+            "ExitProcess": 1,
+            "ExitThread": 4671,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 13,
+          "pid": 82401,
+          "attachMs": 23,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1544,
+          "otherStops": [],
+          "disposeMs": 270,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4697,
+            "ExitProcess": 1,
+            "ExitThread": 4691,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 14,
+          "pid": 82405,
+          "attachMs": 18,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1609,
+          "otherStops": [],
+          "disposeMs": 271,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4859,
+            "ExitProcess": 1,
+            "ExitThread": 4854,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 15,
+          "pid": 82409,
+          "attachMs": 17,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1545,
+          "otherStops": [],
+          "disposeMs": 269,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4734,
+            "ExitProcess": 1,
+            "ExitThread": 4728,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 16,
+          "pid": 82416,
+          "attachMs": 17,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1552,
+          "otherStops": [],
+          "disposeMs": 270,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4786,
+            "ExitProcess": 1,
+            "ExitThread": 4780,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 17,
+          "pid": 82421,
+          "attachMs": 17,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1581,
+          "otherStops": [],
+          "disposeMs": 266,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4739,
+            "ExitProcess": 1,
+            "ExitThread": 4733,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 18,
+          "pid": 82425,
+          "attachMs": 24,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1548,
+          "otherStops": [],
+          "disposeMs": 271,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4734,
+            "ExitProcess": 1,
+            "ExitThread": 4728,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 19,
+          "pid": 82429,
+          "attachMs": 19,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1548,
+          "otherStops": [],
+          "disposeMs": 269,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4745,
+            "ExitProcess": 1,
+            "ExitThread": 4739,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        },
+        {
+          "session": 20,
+          "pid": 82434,
+          "attachMs": 17,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "exitSeenMs": 1573,
+          "otherStops": [],
+          "disposeMs": 270,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 4778,
+            "ExitProcess": 1,
+            "ExitThread": 4772,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [],
+          "ownThreads": 14,
+          "natural": true,
+          "deviations": []
+        }
+      ],
+      "outcome": "natural",
+      "parentActions": []
+    },
+    {
+      "construction": "detach-then-end",
+      "launcher": "dotnet",
+      "mode": "descendant",
+      "seed": 102005,
+      "final": {
+        "pid": 82526,
+        "attachMs": 17,
+        "events": 21,
+        "targetEnded": true,
+        "marker": true,
+        "anomalies": [],
+        "ok": true
+      },
+      "sessions": [
+        {
+          "session": 1,
+          "pid": 82451,
+          "attachMs": 27,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 17,
+          "detachDelayMs": 360,
+          "disposeMs": 71,
+          "targetEnded": true,
+          "endWaitMs": 1025,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 1196,
+            "ExitThread": 1192,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 14,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 2,
+          "pid": 82455,
+          "attachMs": 20,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 17,
+          "detachDelayMs": 491,
+          "disposeMs": 90,
+          "targetEnded": true,
+          "endWaitMs": 994,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 1615,
+            "ExitThread": 1611,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 14,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 3,
+          "pid": 82459,
+          "attachMs": 18,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 16,
+          "detachDelayMs": 18,
+          "disposeMs": 70,
+          "targetEnded": true,
+          "endWaitMs": 1023,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 106,
+            "ExitThread": 101,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=ExitThread)"
+          ],
+          "ownThreads": 14,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 4,
+          "pid": 82463,
+          "attachMs": 17,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 14,
+          "detachDelayMs": 402,
+          "disposeMs": 70,
+          "targetEnded": true,
+          "endWaitMs": 1024,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 1339,
+            "ExitThread": 1335,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 13,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 5,
+          "pid": 82466,
+          "attachMs": 19,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 9,
+          "detachDelayMs": 4,
+          "disposeMs": 60,
+          "targetEnded": true,
+          "endWaitMs": 1010,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 35,
+            "ExitThread": 31,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 13,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 6,
+          "pid": 82470,
+          "attachMs": 18,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 10,
+          "detachDelayMs": 252,
+          "disposeMs": 90,
+          "targetEnded": true,
+          "endWaitMs": 1009,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 841,
+            "ExitThread": 836,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=ExitThread)"
+          ],
+          "ownThreads": 13,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 7,
+          "pid": 82474,
+          "attachMs": 17,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 14,
+          "detachDelayMs": 464,
+          "disposeMs": 66,
+          "targetEnded": true,
+          "endWaitMs": 1032,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 1521,
+            "ExitThread": 1517,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 13,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 8,
+          "pid": 82478,
+          "attachMs": 19,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 12,
+          "detachDelayMs": 379,
+          "disposeMs": 70,
+          "targetEnded": true,
+          "endWaitMs": 1023,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 1261,
+            "ExitThread": 1257,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 13,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 9,
+          "pid": 82482,
+          "attachMs": 27,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 16,
+          "detachDelayMs": 349,
+          "disposeMs": 70,
+          "targetEnded": true,
+          "endWaitMs": 1033,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 1080,
+            "ExitThread": 1076,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 13,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 10,
+          "pid": 82486,
+          "attachMs": 17,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 11,
+          "detachDelayMs": 364,
+          "disposeMs": 71,
+          "targetEnded": true,
+          "endWaitMs": 1019,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 1211,
+            "ExitThread": 1207,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 13,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 11,
+          "pid": 82489,
+          "attachMs": 20,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 9,
+          "detachDelayMs": 244,
+          "disposeMs": 68,
+          "targetEnded": true,
+          "endWaitMs": 1022,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 822,
+            "ExitThread": 817,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=ExitThread)"
+          ],
+          "ownThreads": 13,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 12,
+          "pid": 82493,
+          "attachMs": 18,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 9,
+          "detachDelayMs": 122,
+          "disposeMs": 70,
+          "targetEnded": true,
+          "endWaitMs": 1024,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 434,
+            "ExitThread": 430,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 13,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 13,
+          "pid": 82497,
+          "attachMs": 21,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 17,
+          "detachDelayMs": 38,
+          "disposeMs": 61,
+          "targetEnded": true,
+          "endWaitMs": 1034,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 176,
+            "ExitThread": 171,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=ExitThread)"
+          ],
+          "ownThreads": 13,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 14,
+          "pid": 82500,
+          "attachMs": 24,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 17,
+          "detachDelayMs": 54,
+          "disposeMs": 70,
+          "targetEnded": true,
+          "endWaitMs": 1002,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 238,
+            "ExitThread": 233,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=ExitThread)"
+          ],
+          "ownThreads": 13,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 15,
+          "pid": 82504,
+          "attachMs": 20,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 17,
+          "detachDelayMs": 306,
+          "disposeMs": 71,
+          "targetEnded": true,
+          "endWaitMs": 1025,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 1041,
+            "ExitThread": 1037,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 13,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 16,
+          "pid": 82507,
+          "attachMs": 18,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 17,
+          "detachDelayMs": 142,
+          "disposeMs": 63,
+          "targetEnded": true,
+          "endWaitMs": 1028,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 528,
+            "ExitThread": 524,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 13,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 17,
+          "pid": 82512,
+          "attachMs": 18,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 10,
+          "detachDelayMs": 294,
+          "disposeMs": 70,
+          "targetEnded": true,
+          "endWaitMs": 1024,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 982,
+            "ExitThread": 978,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 13,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 18,
+          "pid": 82515,
+          "attachMs": 18,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 14,
+          "detachDelayMs": 13,
+          "disposeMs": 61,
+          "targetEnded": true,
+          "endWaitMs": 1008,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 82,
+            "ExitThread": 77,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=ExitThread)"
+          ],
+          "ownThreads": 13,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 19,
+          "pid": 82519,
+          "attachMs": 28,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 14,
+          "detachDelayMs": 495,
+          "disposeMs": 70,
+          "targetEnded": true,
+          "endWaitMs": 1017,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 1625,
+            "ExitThread": 1621,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 13,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 20,
+          "pid": 82523,
+          "attachMs": 19,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 17,
+          "detachDelayMs": 74,
+          "disposeMs": 70,
+          "targetEnded": true,
+          "endWaitMs": 1007,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 281,
+            "ExitThread": 276,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=ExitThread)"
+          ],
+          "ownThreads": 13,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        }
+      ],
+      "outcome": "deviations",
+      "parentActions": [],
+      "stderr": []
+    },
+    {
+      "construction": "detach-then-end",
+      "launcher": "apphost",
+      "mode": "descendant",
+      "seed": 102006,
+      "final": {
+        "pid": 82613,
+        "attachMs": 18,
+        "events": 21,
+        "targetEnded": true,
+        "marker": true,
+        "anomalies": [],
+        "ok": true
+      },
+      "sessions": [
+        {
+          "session": 1,
+          "pid": 82533,
+          "attachMs": 31,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 21,
+          "detachDelayMs": 121,
+          "disposeMs": 71,
+          "targetEnded": true,
+          "endWaitMs": 1022,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 451,
+            "ExitThread": 447,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 14,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 2,
+          "pid": 82537,
+          "attachMs": 17,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 12,
+          "detachDelayMs": 138,
+          "disposeMs": 65,
+          "targetEnded": true,
+          "endWaitMs": 1001,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 486,
+            "ExitThread": 481,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=ExitThread)"
+          ],
+          "ownThreads": 14,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 3,
+          "pid": 82541,
+          "attachMs": 19,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 23,
+          "detachDelayMs": 368,
+          "disposeMs": 70,
+          "targetEnded": true,
+          "endWaitMs": 997,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 1248,
+            "ExitThread": 1243,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=ExitThread)"
+          ],
+          "ownThreads": 14,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 4,
+          "pid": 82545,
+          "attachMs": 25,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 9,
+          "detachDelayMs": 8,
+          "disposeMs": 63,
+          "targetEnded": true,
+          "endWaitMs": 1010,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 53,
+            "ExitThread": 49,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 13,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 5,
+          "pid": 82548,
+          "attachMs": 19,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 14,
+          "detachDelayMs": 230,
+          "disposeMs": 95,
+          "targetEnded": true,
+          "endWaitMs": 989,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 795,
+            "ExitThread": 791,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 13,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 6,
+          "pid": 82553,
+          "attachMs": 19,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 17,
+          "detachDelayMs": 189,
+          "disposeMs": 70,
+          "targetEnded": true,
+          "endWaitMs": 1028,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 671,
+            "ExitThread": 667,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 13,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 7,
+          "pid": 82556,
+          "attachMs": 17,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 17,
+          "detachDelayMs": 188,
+          "disposeMs": 70,
+          "targetEnded": true,
+          "endWaitMs": 1007,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 660,
+            "ExitThread": 656,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 13,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 8,
+          "pid": 82560,
+          "attachMs": 18,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 17,
+          "detachDelayMs": 130,
+          "disposeMs": 70,
+          "targetEnded": true,
+          "endWaitMs": 1009,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 489,
+            "ExitThread": 485,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 13,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 9,
+          "pid": 82564,
+          "attachMs": 20,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 17,
+          "detachDelayMs": 411,
+          "disposeMs": 68,
+          "targetEnded": true,
+          "endWaitMs": 1007,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 1217,
+            "ExitThread": 1213,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 13,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 10,
+          "pid": 82567,
+          "attachMs": 19,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 12,
+          "detachDelayMs": 49,
+          "disposeMs": 65,
+          "targetEnded": true,
+          "endWaitMs": 1022,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 194,
+            "ExitThread": 189,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=ExitThread)"
+          ],
+          "ownThreads": 13,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 11,
+          "pid": 82571,
+          "attachMs": 18,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 17,
+          "detachDelayMs": 113,
+          "disposeMs": 63,
+          "targetEnded": true,
+          "endWaitMs": 1037,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 432,
+            "ExitThread": 428,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 13,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 12,
+          "pid": 82575,
+          "attachMs": 20,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 13,
+          "detachDelayMs": 12,
+          "disposeMs": 70,
+          "targetEnded": true,
+          "endWaitMs": 1021,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 78,
+            "ExitThread": 74,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 13,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 13,
+          "pid": 82582,
+          "attachMs": 17,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 15,
+          "detachDelayMs": 382,
+          "disposeMs": 92,
+          "targetEnded": true,
+          "endWaitMs": 997,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 1294,
+            "ExitThread": 1289,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=ExitThread)"
+          ],
+          "ownThreads": 13,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 14,
+          "pid": 82586,
+          "attachMs": 18,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 15,
+          "detachDelayMs": 314,
+          "disposeMs": 91,
+          "targetEnded": true,
+          "endWaitMs": 1003,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 1065,
+            "ExitThread": 1060,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=ExitThread)"
+          ],
+          "ownThreads": 13,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 15,
+          "pid": 82590,
+          "attachMs": 18,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 11,
+          "detachDelayMs": 156,
+          "disposeMs": 70,
+          "targetEnded": true,
+          "endWaitMs": 999,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 543,
+            "ExitThread": 539,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 13,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 16,
+          "pid": 82595,
+          "attachMs": 19,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 16,
+          "detachDelayMs": 454,
+          "disposeMs": 70,
+          "targetEnded": true,
+          "endWaitMs": 1023,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 1504,
+            "ExitThread": 1499,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=ExitThread)"
+          ],
+          "ownThreads": 13,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 17,
+          "pid": 82599,
+          "attachMs": 19,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 9,
+          "detachDelayMs": 4,
+          "disposeMs": 63,
+          "targetEnded": true,
+          "endWaitMs": 1026,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 34,
+            "ExitThread": 30,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 13,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 18,
+          "pid": 82602,
+          "attachMs": 18,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 17,
+          "detachDelayMs": 323,
+          "disposeMs": 70,
+          "targetEnded": true,
+          "endWaitMs": 1000,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 1102,
+            "ExitThread": 1097,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=ExitThread)"
+          ],
+          "ownThreads": 13,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 19,
+          "pid": 82606,
+          "attachMs": 17,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 9,
+          "detachDelayMs": 9,
+          "disposeMs": 89,
+          "targetEnded": true,
+          "endWaitMs": 979,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 54,
+            "ExitThread": 49,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=ExitThread)"
+          ],
+          "ownThreads": 13,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 20,
+          "pid": 82609,
+          "attachMs": 17,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 15,
+          "detachDelayMs": 267,
+          "disposeMs": 70,
+          "targetEnded": true,
+          "endWaitMs": 1023,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 921,
+            "ExitThread": 916,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=ExitThread)"
+          ],
+          "ownThreads": 13,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        }
+      ],
+      "outcome": "deviations",
+      "parentActions": [],
+      "stderr": []
+    },
+    {
+      "construction": "exit-at-detach",
+      "launcher": "dotnet",
+      "mode": "descendant",
+      "seed": 102007,
+      "final": {
+        "pid": 82674,
+        "attachMs": 24,
+        "events": 21,
+        "targetEnded": true,
+        "marker": true,
+        "anomalies": [],
+        "ok": true
+      },
+      "sessions": [
+        {
+          "session": 1,
+          "pid": 82619,
+          "attachMs": 26,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 17,
+          "detachDelayMs": 382,
+          "disposeMs": 72,
+          "targetEnded": true,
+          "endWaitMs": 3,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 1245,
+            "ExitThread": 1241,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 15,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 2,
+          "pid": 82622,
+          "attachMs": 18,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 17,
+          "detachDelayMs": 285,
+          "disposeMs": 63,
+          "targetEnded": true,
+          "endWaitMs": 29,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 856,
+            "ExitThread": 852,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 14,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 3,
+          "pid": 82625,
+          "attachMs": 19,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 16,
+          "detachDelayMs": 217,
+          "disposeMs": 70,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 577,
+            "ExitThread": 572,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=ExitThread)"
+          ],
+          "ownThreads": 15,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 4,
+          "pid": 82628,
+          "attachMs": 18,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 17,
+          "detachDelayMs": 115,
+          "disposeMs": 70,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 422,
+            "ExitThread": 418,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 16,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 5,
+          "pid": 82631,
+          "attachMs": 18,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 17,
+          "detachDelayMs": 455,
+          "disposeMs": 67,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 1464,
+            "ExitThread": 1460,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 15,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 6,
+          "pid": 82633,
+          "attachMs": 25,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 11,
+          "detachDelayMs": 126,
+          "disposeMs": 56,
+          "targetEnded": true,
+          "endWaitMs": 24,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 445,
+            "ExitThread": 440,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=ExitThread)"
+          ],
+          "ownThreads": 15,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 7,
+          "pid": 82636,
+          "attachMs": 25,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 11,
+          "detachDelayMs": 412,
+          "disposeMs": 63,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 1184,
+            "ExitThread": 1180,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 15,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 8,
+          "pid": 82639,
+          "attachMs": 24,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 10,
+          "detachDelayMs": 381,
+          "disposeMs": 60,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 1209,
+            "ExitThread": 1204,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=ExitThread)"
+          ],
+          "ownThreads": 15,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 9,
+          "pid": 82642,
+          "attachMs": 22,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 11,
+          "detachDelayMs": 473,
+          "disposeMs": 58,
+          "targetEnded": true,
+          "endWaitMs": 24,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 1418,
+            "ExitThread": 1413,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=ExitThread)"
+          ],
+          "ownThreads": 14,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 10,
+          "pid": 82645,
+          "attachMs": 22,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 11,
+          "detachDelayMs": 233,
+          "disposeMs": 60,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 767,
+            "ExitThread": 763,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 15,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 11,
+          "pid": 82647,
+          "attachMs": 23,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 11,
+          "detachDelayMs": 481,
+          "disposeMs": 56,
+          "targetEnded": true,
+          "endWaitMs": 24,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 1436,
+            "ExitThread": 1431,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=ExitThread)"
+          ],
+          "ownThreads": 13,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 12,
+          "pid": 82650,
+          "attachMs": 24,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 11,
+          "detachDelayMs": 402,
+          "disposeMs": 56,
+          "targetEnded": true,
+          "endWaitMs": 24,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 1280,
+            "ExitThread": 1275,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=ExitThread)"
+          ],
+          "ownThreads": 13,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 13,
+          "pid": 82653,
+          "attachMs": 22,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 11,
+          "detachDelayMs": 226,
+          "disposeMs": 86,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 744,
+            "ExitThread": 740,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 14,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 14,
+          "pid": 82656,
+          "attachMs": 24,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 11,
+          "detachDelayMs": 74,
+          "disposeMs": 82,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 173,
+            "ExitThread": 168,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=ExitThread)"
+          ],
+          "ownThreads": 15,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 15,
+          "pid": 82658,
+          "attachMs": 24,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 7,
+          "detachDelayMs": 6,
+          "disposeMs": 61,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 37,
+            "ExitThread": 33,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 15,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 16,
+          "pid": 82661,
+          "attachMs": 24,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 11,
+          "detachDelayMs": 266,
+          "disposeMs": 60,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 870,
+            "ExitThread": 865,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=ExitThread)"
+          ],
+          "ownThreads": 15,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 17,
+          "pid": 82663,
+          "attachMs": 24,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 9,
+          "detachDelayMs": 215,
+          "disposeMs": 60,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 632,
+            "ExitThread": 628,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 15,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 18,
+          "pid": 82665,
+          "attachMs": 22,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 11,
+          "detachDelayMs": 133,
+          "disposeMs": 60,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 456,
+            "ExitThread": 451,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=ExitThread)"
+          ],
+          "ownThreads": 15,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 19,
+          "pid": 82668,
+          "attachMs": 28,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 17,
+          "detachDelayMs": 23,
+          "disposeMs": 84,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 116,
+            "ExitThread": 112,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 15,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 20,
+          "pid": 82671,
+          "attachMs": 24,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 11,
+          "detachDelayMs": 461,
+          "disposeMs": 60,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 1311,
+            "ExitThread": 1307,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 14,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        }
+      ],
+      "outcome": "deviations",
+      "parentActions": [],
+      "stderr": []
+    },
+    {
+      "construction": "exit-at-detach",
+      "launcher": "apphost",
+      "mode": "descendant",
+      "seed": 102008,
+      "final": {
+        "pid": 82741,
+        "attachMs": 23,
+        "events": 21,
+        "targetEnded": true,
+        "marker": true,
+        "anomalies": [],
+        "ok": true
+      },
+      "sessions": [
+        {
+          "session": 1,
+          "pid": 82684,
+          "attachMs": 31,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 11,
+          "detachDelayMs": 143,
+          "disposeMs": 61,
+          "targetEnded": true,
+          "endWaitMs": 1,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 412,
+            "ExitThread": 408,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 15,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 2,
+          "pid": 82688,
+          "attachMs": 23,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 11,
+          "detachDelayMs": 431,
+          "disposeMs": 56,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 1293,
+            "ExitThread": 1289,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 15,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 3,
+          "pid": 82691,
+          "attachMs": 24,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 6,
+          "detachDelayMs": 67,
+          "disposeMs": 60,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 205,
+            "ExitThread": 201,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 16,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 4,
+          "pid": 82693,
+          "attachMs": 22,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 8,
+          "detachDelayMs": 222,
+          "disposeMs": 60,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 563,
+            "ExitThread": 559,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 16,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 5,
+          "pid": 82696,
+          "attachMs": 25,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 7,
+          "detachDelayMs": 181,
+          "disposeMs": 60,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 593,
+            "ExitThread": 589,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 16,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 6,
+          "pid": 82699,
+          "attachMs": 24,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 11,
+          "detachDelayMs": 63,
+          "disposeMs": 60,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 224,
+            "ExitThread": 219,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=ExitThread)"
+          ],
+          "ownThreads": 16,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 7,
+          "pid": 82701,
+          "attachMs": 21,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 11,
+          "detachDelayMs": 136,
+          "disposeMs": 61,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 465,
+            "ExitThread": 460,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=ExitThread)"
+          ],
+          "ownThreads": 16,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 8,
+          "pid": 82704,
+          "attachMs": 23,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 7,
+          "detachDelayMs": 132,
+          "disposeMs": 60,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 452,
+            "ExitThread": 448,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 16,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 9,
+          "pid": 82706,
+          "attachMs": 22,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 10,
+          "detachDelayMs": 35,
+          "disposeMs": 61,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 142,
+            "ExitThread": 138,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 16,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 10,
+          "pid": 82710,
+          "attachMs": 24,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 6,
+          "detachDelayMs": 417,
+          "disposeMs": 60,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 1318,
+            "ExitThread": 1313,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=ExitThread)"
+          ],
+          "ownThreads": 14,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 11,
+          "pid": 82713,
+          "attachMs": 23,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 11,
+          "detachDelayMs": 349,
+          "disposeMs": 58,
+          "targetEnded": true,
+          "endWaitMs": 24,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 1066,
+            "ExitThread": 1062,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 13,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 12,
+          "pid": 82716,
+          "attachMs": 24,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 11,
+          "detachDelayMs": 293,
+          "disposeMs": 85,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 682,
+            "ExitThread": 677,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=ExitThread)"
+          ],
+          "ownThreads": 14,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 13,
+          "pid": 82719,
+          "attachMs": 24,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 11,
+          "detachDelayMs": 70,
+          "disposeMs": 59,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 259,
+            "ExitThread": 254,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=ExitThread)"
+          ],
+          "ownThreads": 15,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 14,
+          "pid": 82722,
+          "attachMs": 23,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 10,
+          "detachDelayMs": 334,
+          "disposeMs": 60,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 1008,
+            "ExitThread": 1003,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=ExitThread)"
+          ],
+          "ownThreads": 14,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 15,
+          "pid": 82724,
+          "attachMs": 25,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 11,
+          "detachDelayMs": 356,
+          "disposeMs": 57,
+          "targetEnded": true,
+          "endWaitMs": 24,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 973,
+            "ExitThread": 969,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 13,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 16,
+          "pid": 82727,
+          "attachMs": 24,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 42,
+          "detachDelayMs": 78,
+          "disposeMs": 60,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 298,
+            "ExitThread": 294,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 14,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 17,
+          "pid": 82730,
+          "attachMs": 22,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 11,
+          "detachDelayMs": 425,
+          "disposeMs": 60,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 1188,
+            "ExitThread": 1183,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=ExitThread)"
+          ],
+          "ownThreads": 14,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 18,
+          "pid": 82733,
+          "attachMs": 25,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 10,
+          "detachDelayMs": 443,
+          "disposeMs": 61,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 1319,
+            "ExitThread": 1315,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 14,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 19,
+          "pid": 82736,
+          "attachMs": 24,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 10,
+          "detachDelayMs": 36,
+          "disposeMs": 58,
+          "targetEnded": true,
+          "endWaitMs": 22,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 144,
+            "ExitThread": 140,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 15,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 20,
+          "pid": 82738,
+          "attachMs": 24,
+          "reads": "transport",
+          "memoryOpen": {
+            "call": "task_for_pid",
+            "kern_return": 5,
+            "reads": "transport"
+          },
+          "floodSeenMs": 11,
+          "detachDelayMs": 155,
+          "disposeMs": 56,
+          "targetEnded": true,
+          "endWaitMs": 24,
+          "exitCode": 0,
+          "marker": true,
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 435,
+            "ExitThread": 431,
+            "LoadAssembly": 8,
+            "LoadModule": 8,
+            "NameChange": 1
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 15,
+          "natural": false,
+          "deviations": [
+            "anomalies"
+          ]
+        }
+      ],
+      "outcome": "deviations",
+      "parentActions": [],
+      "stderr": []
+    }
+  ]
+}

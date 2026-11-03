@@ -503,6 +503,19 @@ process, after which a further attach must succeed; a clean detach while the tar
 finishing on its own; a target that exits right after the detach (finding 63's case, without the kill). Then the
 same natural end in each scenario: a launched probe, a test run under MTP and under VSTest, an attach followed by a
 detach, and DrHook's own test host as the target.
+*Constructions recorded 2026-11-01* ([finding 102](../../../poc/drhook-engine/findings/102-natural-end.md); probe 102
+at `6bb7ef8` on our machines, omega-ubuntu with both builds, and the six runners through `drhook-probe.yml`; 1,520
+borrowed sessions, 20 per child process, each child ending with an attach that must succeed). A target that ends by
+itself under the debugger, idle or mid-flood, left DrHook usable everywhere: 760 of 760, 360 of them over the
+transport, and 76 of 76 final attaches. A detach of a flooding target drops one callback in almost every session (754
+of 760, never two): `Dispose` closes the callback pump before it synchronizes the target, and a callback in between
+is neither queued nor continued. Once, on omega-windows, the target stayed held after the detach: it never ended,
+though it ends itself after 60 s; whether it was suspended or a thread was blocked is not recorded. This touches the
+Target preservation gate, not the debugger's own state. Also recorded: `Detach` gives `CORDBG_E_PROCESS_TERMINATED`
+the value `0x8013134F` (that is `OBJECT_NEUTERED`; the right value is `0x80131301`), so it reports a gone target as an
+anomaly; debug pipes left after
+exit-at-detach on the Linux x64 runner; mscordbi's transport threads do not accumulate across sessions (finding 101's
+open question). Step 2's scenarios (launched targets, MTP and VSTest runs, DrHook's own test host) are not yet run.
 
 **Step 3 — Cancellation.** Targets with a declared shutdown mechanism: a SIGTERM handler that cancels its work,
 asked mid-flood under the debugger; the same target without a handler, to record what an unhandled signal does under
