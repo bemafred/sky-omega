@@ -154,13 +154,37 @@ Attach: median 13 to 14 ms in every construction; slowest 7.8 s and 2.4 s, both 
 (quiet, `dotnet` host, sessions 1 and 8, both natural; finding 101 saw a 4.7 s attach there too). `Dispose` of a
 detach: 50 to 133 ms on our machines and the Linux and Windows runners, up to 350 ms on the macOS runners.
 
+## Rerun against the Detach change (2026-11-04)
+
+Probe 102 ran again on omega-windows and on omega-ubuntu with both .NET builds, on `8e20b4f` with the `Detach`
+change (`7f5965e`) applied as a patch, so the records' `commit` is `8e20b4f`. The Windows run overlapped the
+first Linux run (both VMs on omega). zbook and elite were not used. Records: `rerun-2026-11-04-*.json` in
+[`102-natural-end/`](102-natural-end/).
+
+- **No gone-target code at all.** `Detach` returned neither `PROCESS_TERMINATED` nor `OBJECT_NEUTERED` in any of the
+  200 detach sessions. So the new check never ran, and the rerun shows only that the change broke nothing on these
+  paths. On 11-01 only zbook and the `ubuntu-24.04` runner drew the codes, both Linux x64.
+- **One dropped callback per detach, again:** 200 of 200 detach sessions reported exactly one `LateCallback`, and
+  none reported two. quiet and mid-flood: 240 of 240 natural, and every final attach succeeded.
+- **The Windows target was held again,** exit-at-detach session 4 (pid 28320, detach 295 ms into the flood,
+  `Dispose` 53 ms, its one late callback a CreateThread after the queue was disposed). This time the target **wrote
+  its marker**: `Main` returned, and the process did not exit; the parent ended it 75 s after it started. The
+  11-01 held target (detach-then-end) did not write its marker; it was stuck before it, in `flooder.Join()`. In
+  exit-at-detach `Main` returns with the flood thread still running, so this one was stuck in the process's exit.
+  Both fit one held flood thread, but that is not established. omega-windows: 2 held targets in 80 detach
+  sessions, one in each detach construction.
+- **Debug pipes on omega-ubuntu,** Ubuntu's .NET build: 2 of 40 exit-at-detach sessions (descendant 2, reparented
+  19) left the target's pipes. Until now only the `ubuntu-24.04` runner had done so; Microsoft's build on the
+  same VM left none.
+
 ## What this establishes
 
 - A target that ends by itself, idle or mid-flood, leaves DrHook usable, on all six platforms, both read paths and
   both Linux .NET builds: Step 2's hypothesis held for these constructions.
 - A borrowed detach of a busy target drops one debugger callback almost every time, on every platform, in a window
   DrHook's own `Dispose` opens.
-- A borrowed detach can leave the target held: once in 760, on the Windows VM.
+- A borrowed detach can leave the target held: once in 760 on 11-01, and once more in the 11-04 rerun, both on the
+  Windows VM.
 
 ## Not established
 
@@ -176,6 +200,6 @@ detach: 50 to 133 ms on our machines and the Linux and Windows runners, up to 35
 1. On Windows, record the held target's state when a target outlives its bound: its threads' suspend counts and wait
    reasons, and a dump; then repeat detach-then-end many times on omega-windows and both Windows runners for a rate.
 2. ~~Decide how `Detach` treats `0x80131301` and `0x8013134F`, with the zbook case in view.~~ Decided 2026-11-04
-   (the section above). Rerunning probe 102 would show `GoneTargetAlive` in place of zbook's `UnexpectedHResult`,
-   and nothing in place of the other three.
+   (the section above). The 11-04 rerun on the VMs drew neither code, so the change is not yet seen working; only a
+   Linux x64 machine (zbook, or the `ubuntu-24.04` runner) has drawn them.
 3. Step 2's remaining scenarios (above).
