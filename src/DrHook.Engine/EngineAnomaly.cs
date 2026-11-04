@@ -17,6 +17,7 @@
 //   - TargetStuckAtDispose     — Owned Dispose's Stage 1 SIGTERM timed out; escalated to SIGKILL
 //   - TargetIsHostChild        — Attach/AttachAndOwn target is a direct OS child of the debugger host (finding 87)
 //   - UiThreadUnresponsive     — after a visual capture + detach, the target's UI thread did not drain a queued job
+//   - GoneTargetAlive          — Detach said the target is gone (terminated / neutered), but it is still running
 //
 // New kinds are added as new substrate surprises surface. The discipline rule: each kind is a
 // named concept, not "Generic / Other" — and each emission site documents what would have to be
@@ -106,6 +107,13 @@ public enum AnomalyKind
     /// and native hangs never drain). Actionable: the app beachballs — sample it (<c>sample &lt;pid&gt; 3</c>)
     /// BEFORE killing it; the stuck stack is the only path to the root cause.</summary>
     UiThreadUnresponsive,
+
+    /// <summary><c>ICorDebugController.Detach</c> returned CORDBG_E_PROCESS_TERMINATED or CORDBG_E_OBJECT_NEUTERED,
+    /// both meaning the target is gone, but the target was still running when the OS was asked, after a short
+    /// confirmation wait (finding 102: once on zbook, Linux x64, a borrowed detach of a live target drew
+    /// TERMINATED and the target ran on). The debugger is disconnected; the target's state is not known to be
+    /// right. Actionable: check that the target is running normally, not held.</summary>
+    GoneTargetAlive,
 }
 
 /// <summary>A structured record of a substrate-correctness anomaly. Surfaced through

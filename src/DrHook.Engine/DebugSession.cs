@@ -40,7 +40,7 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
     private int _detached;  // 0 = attached, 1 = detached; atomic via Interlocked.Exchange (ENG-DS-1)
     private int _disposed;  // 0 = live, 1 = disposed; atomic via Interlocked.Exchange (ENG-DS-1)
     private readonly bool _ownsTarget;  // true = Owned (substrate kills target on Dispose); false = Borrowed (detach-leave-running). Probe 44 + finding 64.
-    private readonly Process? _targetProcess;  // non-null when _ownsTarget — substrate holds Process handle, kills internally on Dispose. Closes MCH-RE-2 (finding 63).
+    private readonly Process? _targetProcess;  // Owned: the handle the substrate kills through on Dispose (closes MCH-RE-2, finding 63). Borrowed (Attach): death detection only, never killed. Null only for an owned launch whose target was already gone.
     private readonly string? _imageBaseDir;    // directory of the launched/attached executable — where a single-file app's sidecar <module>.pdb lives when the bundled module has no on-disk PE.
 
     // The .NET runtime MAJOR this debugger PROCESS is locked to — the first target it debugged. dbgshim
@@ -65,6 +65,12 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
     /// (OS reaping / waitpid). 50 ms gives HasExited time to propagate before the death-detection
     /// routing decision. Finding 66 / Probe 47.</summary>
     private const int BorrowedDeathCheckSettleMs = 50;
+
+    /// <summary>How long Detach waits for the OS to confirm a target mscordbi reported gone (terminated or
+    /// neutered). The target may still be exiting when Detach returns. Basis, finding 102: exit-at-detach
+    /// targets ended 0 to 109 ms after Dispose returned (the three that drew TERMINATED: 0, 20, 20 ms); the
+    /// one live target that drew TERMINATED ran on 1,024 ms; detach-then-end targets ran 0.9 s or more.</summary>
+    private const int GoneTargetExitConfirmMs = 500;
 
     /// <summary>How long an attach waits for the target's runtime debugger to start (finding 99). A starting
     /// runtime gets there within milliseconds of loading; 10 s is the bound mscordbi itself gives the transport
@@ -2058,17 +2064,41 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
     /// <summary>Detach the debugger; the target resumes running without it. Idempotent.</summary>
     public void Detach()
     {
-        // CORDBG_E_PROCESS_TERMINATED — the target already exited. Detaching from a gone process is a
-        // benign no-op (the detach goal, disconnect, is already met), NOT a substrate-correctness
-        // surprise — so it is not flagged as an anomaly. ADR-011 D1 smoke surfaced this: drhook_kill of
-        // a stopped Owned target reliably hit it on the dead-target Dispose→Detach path.
-        const int CORDBG_E_PROCESS_TERMINATED = unchecked((int)0x8013134F);
+        // Two failures mean mscordbi is finished with the target (CordbProcess::Detach, release/10.0, neuters
+        // its process object on every return path, so nothing is left connected either way):
+        //   CORDBG_E_OBJECT_NEUTERED    — mscordbi had already closed its process object, after handling the
+        //                                 target's exit. Detach checks this first.
+        //   CORDBG_E_PROCESS_TERMINATED — mscordbi still held the process but found the target gone before or
+        //                                 during the detach. A detach resumes the target, so it can end mid-
+        //                                 detach; mscordbi then returns this code and "pretends" the exit came first.
+        // Until finding 102 DrHook named 0x8013134F PROCESS_TERMINATED, so it accepted NEUTERED and reported
+        // TERMINATED as unexpected. ADR-011 D1's smoke (drhook_kill of a stopped Owned target) was NEUTERED.
+        const int CORDBG_E_PROCESS_TERMINATED = unchecked((int)0x80131301);
+        const int CORDBG_E_OBJECT_NEUTERED = unchecked((int)0x8013134F);
 
         // Atomic idempotence gate (ENG-DS-1) — concurrent Detach calls don't double-invoke
         // ICorDebugController.Detach (whose behavior on already-detached is undefined per docs).
         if (Interlocked.Exchange(ref _detached, 1) != 0) return;
         int hr = _controller.Detach();
-        if (hr < 0 && hr != CORDBG_E_PROCESS_TERMINATED)
+        if (hr == CORDBG_E_PROCESS_TERMINATED || hr == CORDBG_E_OBJECT_NEUTERED)
+        {
+            // Both codes say the target is gone. Check that with the OS: in finding 102 one TERMINATED came
+            // while the target was running (zbook, it ran 1,024 ms more).
+            if (_targetProcess is not null && !_targetProcess.WaitForExit(GoneTargetExitConfirmMs))
+            {
+                _sink.OnAnomaly(new EngineAnomaly(
+                    DateTimeOffset.UtcNow, AnomalyKind.GoneTargetAlive, "mcp-request", "Detach",
+                    Observed: $"HRESULT 0x{hr:X8}, target {_targetProcess.Id} still running {GoneTargetExitConfirmMs} ms later",
+                    Expected: "the target has exited, or exits within the confirmation window",
+                    Context: new Dictionary<string, string>
+                    {
+                        ["hresult"] = $"0x{hr:X8}",
+                        ["pid"] = _targetProcess.Id.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                        ["waitMs"] = GoneTargetExitConfirmMs.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    }));
+            }
+        }
+        else if (hr < 0)
         {
             // EA capture (UnexpectedHResult): Detach failed for a reason OTHER than the target being
             // already gone. Engine continues teardown — this usually means mscordbi is in an
@@ -2076,7 +2106,7 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
             _sink.OnAnomaly(new EngineAnomaly(
                 DateTimeOffset.UtcNow, AnomalyKind.UnexpectedHResult, "mcp-request", "Detach",
                 Observed: $"HRESULT 0x{hr:X8}",
-                Expected: "S_OK (or CORDBG_E_PROCESS_TERMINATED, the expected gone-target case)",
+                Expected: "S_OK, CORDBG_E_PROCESS_TERMINATED or CORDBG_E_OBJECT_NEUTERED (the gone-target cases)",
                 Context: new Dictionary<string, string> { ["hresult"] = $"0x{hr:X8}" }));
         }
     }

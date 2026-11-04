@@ -111,6 +111,21 @@ constructions: zbook three times (detach-then-end reparented session 4, exit-at-
 alive when `Detach` said so: it flooded 1 s more, ended by itself and wrote its marker. So accepting the code as
 harmless is not obviously right either. DrHook is unchanged (ADR-016: no teardown change before measurement).
 
+What the two codes mean, read in `CordbProcess::Detach` (`debug/di/process.cpp`, `release/10.0`): `OBJECT_NEUTERED`
+is its first check, and means mscordbi had already closed its process object, after handling the target's exit.
+`PROCESS_TERMINATED` means mscordbi still held the process but found the target gone before or during the detach: a
+detach resumes the target, and if it ends mid-detach, the source comment says Detach must return this code and
+"pretend" the exit came first. It is also returned when the target's helper thread is lost while mscordbi waits for
+the detach reply. Detach neuters the process object on every return path, so on both codes nothing is left
+connected. Which path gave zbook's TERMINATED for a live target, the source does not show.
+
+**Decided 2026-11-04 (Martin):** `Detach` names both codes correctly and accepts both. After either, it asks the OS
+whether the target has exited, waiting up to 500 ms (`GoneTargetExitConfirmMs`). The exit-at-detach targets that drew
+TERMINATED were gone 0, 20 and 20 ms after `Dispose` returned, all exit-at-detach targets within 109 ms, so the wait
+is needed: an instant check would have called all three alive. zbook's live target ran 1,024 ms more. A target still
+running after the wait is reported as a new anomaly, `GoneTargetAlive`. This changes how a return code is reported,
+not the order or content of the teardown; no probe has been run against it yet.
+
 ## Debug pipes left on the Linux x64 runner
 
 On the `ubuntu-24.04` runner, 3 of 40 exit-at-detach sessions (descendant 15, reparented 6 and 13) left the target's
@@ -160,5 +175,7 @@ detach: 50 to 133 ms on our machines and the Linux and Windows runners, up to 35
 
 1. On Windows, record the held target's state when a target outlives its bound: its threads' suspend counts and wait
    reasons, and a dump; then repeat detach-then-end many times on omega-windows and both Windows runners for a rate.
-2. Decide how `Detach` treats `0x80131301` and `0x8013134F`, with the zbook case in view.
+2. ~~Decide how `Detach` treats `0x80131301` and `0x8013134F`, with the zbook case in view.~~ Decided 2026-11-04
+   (the section above). Rerunning probe 102 would show `GoneTargetAlive` in place of zbook's `UnexpectedHResult`,
+   and nothing in place of the other three.
 3. Step 2's remaining scenarios (above).
