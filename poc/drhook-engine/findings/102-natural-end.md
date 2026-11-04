@@ -177,6 +177,20 @@ first Linux run (both VMs on omega). zbook and elite were not used. Records: `re
   19) left the target's pipes. Until now only the `ubuntu-24.04` runner had done so; Microsoft's build on the
   same VM left none.
 
+Then on the six runners, at `f4bd82e` (the change committed), workflow run 41889859462; records
+`rerun-2026-11-04-runner-*.json`. Every job ended RESULT(1), as on 11-01, because a dropped callback counts as a
+deviation.
+
+- **No gone-target code on the runners either,** not even on `ubuntu-24.04`, which drew one in 40 on 11-01. So in
+  560 detach sessions on 11-04, the new check never ran. `GoneTargetAlive` is not yet seen, in either direction.
+- **One dropped callback per detach:** 278 of 280 runner detach sessions, none with two; the other two, both on
+  `macos-latest` (exit-at-detach, dotnet session 6 and apphost session 8), had none, as six did there on 11-01.
+  Natural ends: 240 of 240; every final attach succeeded.
+- **No held target on either Windows runner** (0 of 40 each, 0 of 80 each over both runs).
+- **Debug pipes:** `ubuntu-24.04` 1 of 40 exit-at-detach (reparented 17), and, the first time on macOS,
+  `macos-26-intel` 2 of 40 (apphost 15 and 17, read over the transport; session 15 left only the `-in` pipe). Both
+  macOS targets ended later than usual after `Dispose` (97 and 122 ms).
+
 ## What this establishes
 
 - A target that ends by itself, idle or mid-flood, leaves DrHook usable, on all six platforms, both read paths and
@@ -191,7 +205,8 @@ first Linux run (both VMs on omega). zbook and elite were not used. Records: `re
 - What held the Windows target, and whether the dropped callback is the cause; whether it happens elsewhere at a
   rate 20 sessions cannot show.
 - Why `Detach` reported "process terminated" for a live target on zbook.
-- Why the Linux x64 runner left debug pipes.
+- Why an exit-at-detach target sometimes leaves its debug pipes (the Linux x64 runner; on 11-04 also omega-ubuntu's
+  Ubuntu build and the macOS x64 runner).
 - The rest of Step 2: the natural end of a launched (owned) target, a test run under MTP and VSTest, and DrHook's own
   test host as the target. Probe 102 measured borrowed sessions only.
 
@@ -200,6 +215,7 @@ first Linux run (both VMs on omega). zbook and elite were not used. Records: `re
 1. On Windows, record the held target's state when a target outlives its bound: its threads' suspend counts and wait
    reasons, and a dump; then repeat detach-then-end many times on omega-windows and both Windows runners for a rate.
 2. ~~Decide how `Detach` treats `0x80131301` and `0x8013134F`, with the zbook case in view.~~ Decided 2026-11-04
-   (the section above). The 11-04 rerun on the VMs drew neither code, so the change is not yet seen working; only a
-   Linux x64 machine (zbook, or the `ubuntu-24.04` runner) has drawn them.
+   (the section above). The 11-04 rerun, on the VMs and the six runners, drew neither code in 560 detach sessions,
+   so the change is not yet seen working. Only Linux x64 has drawn them (zbook 3 of 80 detach sessions, the
+   `ubuntu-24.04` runner 1 of 80); zbook, once it is free, is the likeliest place to see it.
 3. Step 2's remaining scenarios (above).
