@@ -92,7 +92,16 @@ internal sealed unsafe class ReferenceQuadIndex : IQuadIndex
 
     public long QuadCount => _file.EntryCount;
 
-    public void Flush() => _file.Flush();
+    /// <summary>Force all pending mmap writes to disk.</summary>
+    /// <remarks>
+    /// Saves the header with the current entry count first: page allocation saves only the
+    /// tree structure (ADR-058), so the count reaches disk here, at commit, or at Dispose.
+    /// </remarks>
+    public void Flush()
+    {
+        _file.SaveMetadata();
+        _file.Flush();
+    }
 
     public void Clear()
     {

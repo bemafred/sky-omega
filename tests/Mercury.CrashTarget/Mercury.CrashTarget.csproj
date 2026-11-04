@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Crash target for the ADR-058 restart tests. A plain console app that opens a QuadStore,
+    writes to it, and then ends its own process the way a crash or a killed server does:
+    no Dispose, no checkpoint, no finalizers. The tests in Mercury.Tests/Storage/CrashRecoveryTests.cs
+    reopen the store afterwards and check what survived.
+
+    Built as a sibling artifact via Mercury.Tests' ProjectReference (ReferenceOutputAssembly=false);
+    located at test time by CrashTarget.DllPath().
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>MercuryCrashTarget</AssemblyName>
+    <RootNamespace>SkyOmega.Mercury.CrashTarget</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Mercury\Mercury.csproj" />
+  </ItemGroup>
+
+</Project>

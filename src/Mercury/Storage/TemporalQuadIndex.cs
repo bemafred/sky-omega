@@ -138,12 +138,24 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
         InsertIntoTree(temporalKey, _file.RootPageId);
     }
 
+    /// <summary>What an insert did. WAL recovery needs to tell a replayed entry from a new one (ADR-058).</summary>
+    internal enum InsertOutcome
+    {
+        /// <summary>A new row was written.</summary>
+        Inserted,
+        /// <summary>The same Add (same ValidFrom and TransactionTime) was already in the tree: a WAL replay.</summary>
+        AlreadyPresent,
+        /// <summary>A current entry with the same dimensions exists (RDF idempotency); nothing was written.</summary>
+        Duplicate,
+    }
+
+    private InsertOutcome _lastInsertOutcome;
+
     /// <summary>
-    /// Insert a key with pre-resolved atom IDs. Used during secondary index rebuild
-    /// to avoid re-interning billions of strings — atom IDs are already known from
-    /// the primary index scan.
+    /// Insert a key with pre-resolved atom IDs. Used by the WAL apply and replay paths and
+    /// by secondary index rebuild, to avoid re-interning strings whose atom IDs are known.
     /// </summary>
-    internal void AddRaw(long graph, long primary, long secondary, long tertiary,
+    internal InsertOutcome AddRaw(long graph, long primary, long secondary, long tertiary,
         long validFrom, long validTo, long transactionTime)
     {
         var temporalKey = new TemporalKey
@@ -157,8 +169,22 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
             TransactionTime = transactionTime
         };
 
+        _lastInsertOutcome = InsertOutcome.Inserted;
         InsertIntoTree(temporalKey, _file.RootPageId);
+        return _lastInsertOutcome;
     }
+
+    /// <summary>The WAL transaction up to which the saved entry count is exact (ADR-058).</summary>
+    internal long CountTxId => _file.CountTxId;
+
+    /// <summary>Save the entry count as exact up to WAL transaction <paramref name="txId"/> (ADR-058).</summary>
+    internal void CommitEntryCount(long txId, bool durable) => _file.CommitEntryCount(txId, durable);
+
+    /// <summary>
+    /// Count an entry that WAL recovery found already present: a crashed process inserted
+    /// it after the saved count was last committed (ADR-058).
+    /// </summary>
+    internal void CountRecoveredEntry() => _file.IncrementEntryCount();
 
     /// <summary>
     /// End a version (ADR-054 D1): the live entry with these dimensions and exactly <paramref name="validFrom"/> stops
@@ -961,7 +987,9 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
         _file.RootPageId = newRootId;
 
         _file.FlushPage();
-        _file.SaveMetadata();
+        // ADR-058: save the new root now, but not the entry count, which may include
+        // entries of a transaction that has not finished applying.
+        _file.SaveStructure();
     }
 
     private SplitResult InsertIntoLeaf(TemporalBTreePage* page, TemporalKey key)
@@ -987,13 +1015,19 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
                 // ended version back.
                 if (prevEntry.Key.ValidFrom == key.ValidFrom &&
                     prevEntry.Key.TransactionTime == key.TransactionTime)
+                {
+                    _lastInsertOutcome = InsertOutcome.AlreadyPresent;
                     return default;
+                }
 
                 // Case B: Both entries are "current" (ValidTo is far future) — RDF idempotency. A retracted entry is
                 // not current and never blocks an insert (ADR-054 D3).
                 const long FarFutureThreshold = 253370764800000L; // Year 9000 in Unix ms
                 if (!prevEntry.IsDeleted && prevEntry.Key.ValidTo >= FarFutureThreshold && key.ValidTo >= FarFutureThreshold)
+                {
+                    _lastInsertOutcome = InsertOutcome.Duplicate;
                     return default;
+                }
 
                 // Case C: Same dimensions, different temporal key — truncate a live predecessor, then insert new row
                 if (!prevEntry.IsDeleted)
@@ -1311,7 +1345,15 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
     /// Force all pending mmap writes to disk. Called once at the end of a bulk
     /// load to flush dirty pages that BTreeFile.FlushPage skipped in bulk mode.
     /// </summary>
-    public void Flush() => _file.Flush();
+    /// <remarks>
+    /// Saves the header with the current entry count first: page allocation saves only the
+    /// tree structure (ADR-058), so the count reaches disk here, at commit, or at Dispose.
+    /// </remarks>
+    public void Flush()
+    {
+        _file.SaveMetadata();
+        _file.Flush();
+    }
 
     /// <summary>
     /// Toggle whether BTreeFile.FlushPage / SaveMetadata issue per-operation msyncs.

@@ -112,6 +112,13 @@ internal sealed unsafe class HashAtomStore : IAtomStore
     private long _totalBytes;
     private long _atomCount;
 
+    // ADR-058. Atoms were interned since the last Flush, so the files and the header are behind memory.
+    private bool _dirty;
+
+    // ADR-058 D7. Set at open when the atom records past the header do not form an unbroken
+    // chain: the store was damaged (atom IDs reused) and must not take new atoms.
+    private string? _writeRefusal;
+
     // ADR-035 Phase 7a.3 (Category B). Optional observer; lazily-allocated probe-distance
     // histogram bounded by MaxProbeDistance. Zero hot-path overhead when no observer
     // is attached — the null-check in InternUtf8 elides the increment.
@@ -599,6 +606,10 @@ internal sealed unsafe class HashAtomStore : IAtomStore
     /// </remarks>
     private long InsertAtomUtf8(ReadOnlySpan<byte> utf8Value, long hash, long bucket)
     {
+        if (_writeRefusal is not null)
+            throw new InvalidOperationException(_writeRefusal);
+        _dirty = true;
+
         // ADR-028: proactively grow the hash table before this insert pushes load factor
         // past the threshold. Rehash invalidates `bucket` (derived from old _hashTableSize),
         // so recompute from the stored hash against the new table size.
@@ -1052,6 +1063,8 @@ internal sealed unsafe class HashAtomStore : IAtomStore
 
             if (_dataPosition < 1024)
                 _dataPosition = 1024;
+
+            RecoverAtomsPastHeader();
         }
         else
         {
@@ -1063,27 +1076,104 @@ internal sealed unsafe class HashAtomStore : IAtomStore
         }
     }
 
-    private void SaveMetadata()
+    /// <summary>
+    /// ADR-058 D7. The header can be behind the data: before ADR-058 it was saved only by
+    /// Dispose and Flush, and a batch that crashes before its commit leaves atoms past it.
+    /// Walk the atom records that follow the header and take every one that continues the
+    /// chain (its offset is where the previous record ends, its length is sane), so no ID that
+    /// is present on disk is ever handed out again.
+    /// </summary>
+    /// <remarks>
+    /// An offset entry right after the header that does not continue the chain is a leftover
+    /// (Clear before ADR-058 left offset entries in place) and is ignored: a real atom past the
+    /// header always starts where the header says the data ends. A chain that continues and
+    /// then breaks is what ID reuse leaves (newer atoms written over the start of older ones):
+    /// the store stops there and refuses new atoms (<see cref="WriteRefusal"/>).
+    /// </remarks>
+    private void RecoverAtomsPastHeader()
+    {
+        long recovered = 0;
+        for (var id = _nextAtomId + 1; id < _offsetCapacity; id++)
+        {
+            var offset = _offsetIndex[id];
+            if (offset == 0)
+                break;
+
+            long length = -1;
+            if (offset == _dataPosition && offset + sizeof(long) <= _dataCapacity)
+                length = *(long*)(_dataPtr + offset);
+
+            if (length <= 0 || length > _maxAtomSize || offset + sizeof(long) + length > _dataCapacity)
+            {
+                if (recovered == 0)
+                    break; // a leftover entry, not an atom of this store
+                _writeRefusal =
+                    $"The atom store at {_indexPath[..^".atomidx".Length]} is damaged: atom {id} does not continue the " +
+                    $"chain of atom records (offset {offset}, expected {_dataPosition}). Atom IDs were reused by a " +
+                    "Mercury older than ADR-058 after an unclean shutdown. The store is read-only; export what is " +
+                    "readable and rebuild it.";
+                break;
+            }
+
+            _nextAtomId = id;
+            _dataPosition = offset + sizeof(long) + length;
+            _atomCount++;
+            _totalBytes += length;
+            recovered++;
+        }
+
+        AtomsRecoveredAtOpen = recovered;
+        if (recovered > 0 && _writeRefusal is null)
+            SaveMetadata();
+    }
+
+    /// <summary>
+    /// Atoms found at open past the saved header (ADR-058 D7): the header was behind the data.
+    /// </summary>
+    internal long AtomsRecoveredAtOpen { get; private set; }
+
+    /// <summary>
+    /// Why this store refuses new atoms, or null (ADR-058 D7). Set at open when the atom
+    /// records past the header break the chain, which is what ID reuse leaves behind.
+    /// </summary>
+    public string? WriteRefusal => _writeRefusal;
+
+    private void WriteHeader()
     {
         _dataAccessor.Write(0, _dataPosition);
         _dataAccessor.Write(8, _nextAtomId);
         _dataAccessor.Write(16, _atomCount);
         _dataAccessor.Write(24, _totalBytes);
         _dataAccessor.Write(32, MagicNumber);
+    }
+
+    private void SaveMetadata()
+    {
+        WriteHeader();
         _dataAccessor.Flush();
     }
 
+    /// <summary>
+    /// Make every atom interned so far durable: the data, the offset index, the hash table,
+    /// and the header that says how many there are (ADR-058 D6). QuadStore calls this before
+    /// the WAL commit that references the atoms. A no-op when nothing was interned since the
+    /// last call.
+    /// </summary>
     public void Flush()
     {
-        SaveMetadata();
+        if (!_dirty)
+            return;
+        WriteHeader();
         _dataAccessor.Flush();
         _indexAccessor.Flush();
         _offsetAccessor.Flush();
+        _dirty = false;
     }
 
     public void Dispose()
     {
-        SaveMetadata();
+        if (_writeRefusal is null)
+            SaveMetadata();
 
         // Release all acquired pointers before disposing accessors
         if (_dataPtr != null)
@@ -1143,10 +1233,19 @@ internal sealed unsafe class HashAtomStore : IAtomStore
                 new Span<byte>(basePtr + cleared, span).Clear();
             }
 
-            // Offset index doesn't need clearing - stale entries are ignored
-            // since lookups check atomId <= _nextAtomId
+            // Zero the offset entries in use. Lookups ignore IDs past _nextAtomId, but the
+            // open-time walk (RecoverAtomsPastHeader, ADR-058 D7) would take them back.
+            var used = 1L;
+            while (used < _offsetCapacity && _offsetIndex[used] != 0)
+                used++;
+            const int OffsetChunk = 1 << 27; // 1 GB of longs per span
+            for (long cleared = 0; cleared < used; cleared += OffsetChunk)
+                new Span<long>(_offsetIndex + cleared, (int)Math.Min(OffsetChunk, used - cleared)).Clear();
+            _offsetAccessor.Flush();
 
             SaveMetadata();
+            _indexAccessor.Flush();
+            _dirty = false;
         }
     }
 

@@ -42,6 +42,11 @@
     <ProjectReference Include="..\..\src\Mercury.Pruning\Mercury.Pruning.csproj" />
     <ProjectReference Include="..\..\src\Mercury.Sparql.Tool\Mercury.Sparql.Tool.csproj" />
     <ProjectReference Include="..\..\src\Mercury.Turtle.Tool\Mercury.Turtle.Tool.csproj" />
+    <!-- Build dependency on the ADR-058 crash target so its DLL is available at test time. -->
+    <ProjectReference Include="..\Mercury.CrashTarget\Mercury.CrashTarget.csproj">
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <Private>false</Private>
+    </ProjectReference>
   </ItemGroup>
 
   <ItemGroup>

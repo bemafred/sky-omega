@@ -65,8 +65,17 @@ internal interface IAtomStore : IDisposable
     /// </summary>
     (long AtomCount, long TotalBytes, double AvgLength) GetStatistics();
 
-    /// <summary>Flush in-memory state to disk. No-op for stores already durable per write.</summary>
+    /// <summary>
+    /// Flush in-memory state to disk. No-op for stores already durable per write.
+    /// QuadStore calls it before every WAL commit that references new atoms (ADR-058 D6).
+    /// </summary>
     void Flush();
+
+    /// <summary>
+    /// Why this store refuses new atoms, or null. Set at open when the store finds it was
+    /// damaged by atom-ID reuse (ADR-058 D7); QuadStore then refuses every write.
+    /// </summary>
+    string? WriteRefusal => null;
 
     /// <summary>
     /// Reset the store to empty: zero atoms, all underlying files truncated. Used by

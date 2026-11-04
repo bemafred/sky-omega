@@ -7,8 +7,8 @@ namespace SkyOmega.Mercury.Runtime;
 
 /// <summary>
 /// A single B+Tree's persistent home on disk. One memory-mapped file organized into
-/// 16 KB pages: page 0 is reserved for a 32-byte metadata header (magic + RootPageId
-/// + NextPageId + EntryCount); pages 1+ hold the tree's leaf and internal nodes.
+/// 16 KB pages: page 0 is reserved for the metadata header (RootPageId + NextPageId
+/// + EntryCount + magic, then CountTxId); pages 1+ hold the tree's leaf and internal nodes.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -35,6 +35,15 @@ namespace SkyOmega.Mercury.Runtime;
 /// <see cref="FlushPage"/> and <see cref="SaveMetadata"/> issue per-write
 /// <c>msync</c>. Bulk-load defers; Cognitive single-write fsyncs each.
 /// </para>
+/// <para>
+/// <b>Entry count after a crash (ADR-058):</b> the tree structure (root, next page) is
+/// saved whenever it changes, so a killed process leaves a tree that can be walked.
+/// The entry count is not saved per insert. It is saved by <see cref="SaveMetadata"/>
+/// and by <see cref="CommitEntryCount"/>, which also records <see cref="CountTxId"/>:
+/// the WAL transaction up to which the saved count is exact. Recovery uses it to count
+/// the entries a crashed process inserted after that transaction (their WAL records
+/// replay as no-ops, so they would otherwise never be counted).
+/// </para>
 /// </remarks>
 public sealed unsafe class BTreeFile : IDisposable
 {
@@ -43,10 +52,13 @@ public sealed unsafe class BTreeFile : IDisposable
 
     /// <summary>
     /// Metadata header bytes (offset 0 of the file): RootPageId (8) + NextPageId (8) +
-    /// EntryCount (8) + MagicNumber (8) = 32 B. Page 0 is reserved for this header
-    /// even though only 32 bytes are used; pages 1+ are tree pages.
+    /// EntryCount (8) + MagicNumber (8) = 32 B. Page 0 is reserved for this header;
+    /// pages 1+ are tree pages. <see cref="CountTxId"/> follows at offset 32, inside the
+    /// reserved page (files written before ADR-058 hold 0 there).
     /// </summary>
     public const int HeaderBytes = 32;
+
+    private const int CountTxIdOffset = 32;
 
     private readonly long _magicNumber;
     private readonly FileStream _fileStream;
@@ -58,6 +70,8 @@ public sealed unsafe class BTreeFile : IDisposable
     private long _rootPageId;
     private long _nextPageId;
     private long _entryCount;
+    private long _savedEntryCount;
+    private long _countTxId;
     private bool _deferMsync;
     private bool _disposed;
 
@@ -72,6 +86,12 @@ public sealed unsafe class BTreeFile : IDisposable
 
     /// <summary>Number of entries (quads / triples / keys) the B+Tree contains. Consumer increments via <see cref="IncrementEntryCount"/>.</summary>
     public long EntryCount => _entryCount;
+
+    /// <summary>
+    /// The WAL transaction up to which the entry count saved on disk is exact (ADR-058).
+    /// 0 for files that never had <see cref="CommitEntryCount"/> called.
+    /// </summary>
+    public long CountTxId => _countTxId;
 
     /// <summary>Magic number stamped in the file header. Set at construction; unique per consumer.</summary>
     public long MagicNumber => _magicNumber;
@@ -162,6 +182,8 @@ public sealed unsafe class BTreeFile : IDisposable
             _accessor.Read(0, out _rootPageId);
             _accessor.Read(8, out _nextPageId);
             _accessor.Read(16, out _entryCount);
+            _accessor.Read(CountTxIdOffset, out _countTxId);
+            _savedEntryCount = _entryCount;
         }
         else if (storedMagic != 0)
         {
@@ -176,6 +198,7 @@ public sealed unsafe class BTreeFile : IDisposable
             _rootPageId = 1;
             _nextPageId = 2;
             _entryCount = 0;
+            _countTxId = 0;
             SaveMetadata();
             initRoot?.Invoke(this);
         }
@@ -183,16 +206,53 @@ public sealed unsafe class BTreeFile : IDisposable
 
     /// <summary>
     /// Persist the metadata header (RootPageId, NextPageId, EntryCount, MagicNumber)
-    /// at file offset 0. Honors <see cref="DeferMsync"/>: skips the <c>msync</c> in
-    /// bulk mode for amortization at <see cref="Flush"/> time.
+    /// at file offset 0, with the current entry count. Honors <see cref="DeferMsync"/>:
+    /// skips the <c>msync</c> in bulk mode for amortization at <see cref="Flush"/> time.
     /// </summary>
+    /// <remarks>
+    /// Leaves <see cref="CountTxId"/> as it is. A WAL-backed consumer saves the count
+    /// with <see cref="CommitEntryCount"/>, which names the transaction it is exact for.
+    /// </remarks>
     public void SaveMetadata()
+    {
+        _savedEntryCount = _entryCount;
+        WriteHeader();
+    }
+
+    /// <summary>
+    /// Persist the current entry count as exact up to WAL transaction <paramref name="txId"/>
+    /// (ADR-058), together with the rest of the header.
+    /// </summary>
+    /// <param name="txId">The WAL transaction the count is exact for.</param>
+    /// <param name="durable">
+    /// When false, the header is written to the mapping without an <c>msync</c>. That survives
+    /// a killed process. After a power loss the header may show an older count and transaction,
+    /// which recovery corrects as long as the WAL still holds the transactions after it, so a
+    /// checkpoint must call this with <paramref name="durable"/> true before it truncates the log.
+    /// </param>
+    public void CommitEntryCount(long txId, bool durable = true)
+    {
+        _countTxId = txId;
+        _savedEntryCount = _entryCount;
+        WriteHeader(msync: durable);
+    }
+
+    /// <summary>
+    /// Persist the tree structure (RootPageId, NextPageId) and leave the saved entry count
+    /// as it was. Called when the structure changes in the middle of an operation (page
+    /// allocation, root split), where the in-memory count may include entries of a
+    /// transaction that is not finished (ADR-058).
+    /// </summary>
+    public void SaveStructure() => WriteHeader();
+
+    private void WriteHeader(bool msync = true)
     {
         _accessor.Write(0, _rootPageId);
         _accessor.Write(8, _nextPageId);
-        _accessor.Write(16, _entryCount);
+        _accessor.Write(16, _savedEntryCount);
         _accessor.Write(24, _magicNumber);
-        if (_deferMsync) return;
+        _accessor.Write(CountTxIdOffset, _countTxId);
+        if (_deferMsync || !msync) return;
         _accessor.Flush();
     }
 
@@ -200,7 +260,7 @@ public sealed unsafe class BTreeFile : IDisposable
     /// Allocate a new B+Tree page. Returns the page id; the consumer's tree algorithm
     /// initializes the page's content via <see cref="GetPagePointer{T}"/>. Grows the
     /// file (doubles capacity, minimum required) when the new page exceeds the
-    /// currently-allocated extent. Persists metadata via <see cref="SaveMetadata"/>.
+    /// currently-allocated extent. Persists the structure via <see cref="SaveStructure"/>.
     /// </summary>
     public long AllocatePage()
     {
@@ -218,7 +278,7 @@ public sealed unsafe class BTreeFile : IDisposable
                 }
             }
         }
-        SaveMetadata();
+        SaveStructure();
         return pageId;
     }
 
@@ -272,6 +332,8 @@ public sealed unsafe class BTreeFile : IDisposable
         _rootPageId = 1;
         _nextPageId = 2;
         _entryCount = 0;
+        _savedEntryCount = 0;
+        _countTxId = 0; // the store's WAL is cleared with it, so its TxIds start over
     }
 
     /// <summary>Persist metadata one last time, release the pinned pointer, dispose mmap + file.</summary>

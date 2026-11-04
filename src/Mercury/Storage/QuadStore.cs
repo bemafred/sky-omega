@@ -63,6 +63,11 @@ public sealed class QuadStore : IDisposable
     private readonly long _maxResultRows;
     private readonly StatisticsStore _statistics = new();
     private long _activeBatchTxId = -1;
+
+    // ADR-058: set while Recover replays the WAL. Entries a crashed process inserted after an
+    // index last committed its count replay as no-ops; these sets count each of them once.
+    private bool _recovering;
+    private HashSet<(TemporalQuadIndex, TemporalKeyIds)>? _countedDuringRecovery;
     // Reference profile has no WAL and therefore no batch transaction id. A simple
     // in-bulk flag lets AddCurrentBatched / CommitBatch enforce the "must be inside
     // BeginBatch" contract without fabricating a tx id that has no durable meaning.
@@ -189,6 +194,12 @@ public sealed class QuadStore : IDisposable
         };
 
         _bulkLoadMode = options.BulkMode;
+
+        // ADR-058 D7: the atom store checks its header against the data at open.
+        if (_atoms is HashAtomStore hashAtoms && hashAtoms.AtomsRecoveredAtOpen > 0)
+            _logger.Warning("Atom header was behind the data; took {0} atoms written after it".AsSpan(), hashAtoms.AtomsRecoveredAtOpen);
+        if (_atoms.WriteRefusal is { } refusal)
+            _logger.Error(refusal.AsSpan());
 
         // ADR-034 Decision 7: SortedAtomStore-backed stores accept exactly ONE bulk-load
         // (the build that populates the vocab files). A second bulk-load against an
@@ -429,6 +440,9 @@ public sealed class QuadStore : IDisposable
     [MemberNotNull(nameof(_wal))]
     private void RequireWriteCapableProfile(string operation)
     {
+        // ADR-058 D7: a store whose atom IDs were reused stops taking writes.
+        if (_atoms.WriteRefusal is { } refusal)
+            throw new InvalidOperationException($"Operation '{operation}' refused. {refusal}");
         if (_schema.HasVersioning && _wal is not null)
             return;
         throw new ProfileCapabilityException(
@@ -545,20 +559,24 @@ public sealed class QuadStore : IDisposable
         _lock.EnterWriteLock();
         try
         {
-            // 1. Intern atoms first (IAtomStore is append-only, naturally durable)
+            // 1. Intern atoms first
             var graphId = graph.IsEmpty ? 0 : _atoms.Intern(graph);
             var subjectId = _atoms.Intern(subject);
             var predicateId = _atoms.Intern(predicate);
             var objectId = _atoms.Intern(@object);
             var transactionTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
-            // 2. Write to WAL (fsync ensures durability)
+            // 2. The WAL record holds only atom IDs, so the atoms must be durable first (ADR-058 D6)
+            MakeAtomsDurable();
+
+            // 3. Write to WAL (fsync ensures durability)
             var record = LogRecord.CreateAdd(subjectId, predicateId, objectId, validFrom, validTo, graphId,
                 transactionTimeTicks: transactionTime);
             _wal.Append(record);
 
-            // 3. Apply to indexes using pre-resolved IDs (no re-intern)
+            // 4. Apply to indexes using pre-resolved IDs (no re-intern), then save their counts
             ApplyToIndexesById(record);
+            CommitIndexCounts(_wal.CurrentTxId, durable: false);
 
             // 4. Check if checkpoint needed
             CheckpointIfNeeded();
@@ -1252,11 +1270,19 @@ public sealed class QuadStore : IDisposable
             if (_activeBatchTxId < 0)
                 throw new InvalidOperationException("No active batch.");
 
-            // 1. Write CommitTx marker — fsync in cognitive mode, deferred in bulk mode
+            // 1. Write CommitTx marker — fsync in cognitive mode, deferred in bulk mode.
+            // The WAL records hold only atom IDs, so the atoms they reference are made
+            // durable before the commit that makes the records count (ADR-058 D6).
+            var committedTxId = _activeBatchTxId;
             if (_bulkLoadMode)
-                _wal.CommitBatchNoSync(_activeBatchTxId);
+            {
+                _wal.CommitBatchNoSync(committedTxId);
+            }
             else
-                _wal.CommitBatch(_activeBatchTxId);
+            {
+                MakeAtomsDurable();
+                _wal.CommitBatch(committedTxId);
+            }
             _activeBatchTxId = -1;
 
             // 2. Materialize buffered records into indexes. IDs are already in the
@@ -1267,6 +1293,10 @@ public sealed class QuadStore : IDisposable
                     ApplyRecordToIndexesById(record);
                 _batchBuffer.Clear();
             }
+
+            // 3. The indexes now hold this transaction: save their counts as of it (ADR-058).
+            if (!_bulkLoadMode)
+                CommitIndexCounts(committedTxId, durable: false);
 
             CheckpointIfNeeded();
 
@@ -1359,6 +1389,12 @@ public sealed class QuadStore : IDisposable
         // complete" boundary where we stream the sorted (G,S,P,O) tuples into the
         // GSPO B+Tree as a single sequential AppendSorted run.
         DrainBulkSorter();
+
+        // ADR-058 D6: the atoms the WAL references are durable before the WAL is, and the
+        // index headers carry counts as of the last transaction.
+        _atoms.Flush();
+        if (_wal is not null)
+            CommitIndexCounts(_wal.CurrentTxId, durable: true);
         _wal?.FlushToDisk();
         _gspoIndex?.Flush();
         _gposIndex?.Flush();
@@ -2298,17 +2334,13 @@ public sealed class QuadStore : IDisposable
         var validFromMs = UtcTicksToUnixMs(record.ValidFromTicks);
         var validToMs = UtcTicksToUnixMs(record.ValidToTicks);
 
-        _gspoIndex!.AddRaw(record.GraphId, record.SubjectId, record.PredicateId, record.ObjectId,
-            validFromMs, validToMs, record.TransactionTimeTicks);
+        AddToTemporalIndex(_gspoIndex!, record, record.SubjectId, record.PredicateId, record.ObjectId, validFromMs, validToMs);
 
         if (!_bulkLoadMode)
         {
-            _gposIndex!.AddRaw(record.GraphId, record.PredicateId, record.ObjectId, record.SubjectId,
-                validFromMs, validToMs, record.TransactionTimeTicks);
-            _gospIndex!.AddRaw(record.GraphId, record.ObjectId, record.SubjectId, record.PredicateId,
-                validFromMs, validToMs, record.TransactionTimeTicks);
-            _tgspIndex!.AddRaw(record.GraphId, record.SubjectId, record.PredicateId, record.ObjectId,
-                validFromMs, validToMs, record.TransactionTimeTicks);
+            AddToTemporalIndex(_gposIndex!, record, record.PredicateId, record.ObjectId, record.SubjectId, validFromMs, validToMs);
+            AddToTemporalIndex(_gospIndex!, record, record.ObjectId, record.SubjectId, record.PredicateId, validFromMs, validToMs);
+            AddToTemporalIndex(_tgspIndex!, record, record.SubjectId, record.PredicateId, record.ObjectId, validFromMs, validToMs);
 
             // Full-text trigram indexing for literal objects. Peek the first UTF-8
             // byte directly from the atom store; avoids the GetAtomSpan → re-check
@@ -2319,6 +2351,59 @@ public sealed class QuadStore : IDisposable
                 _trigramIndex.IndexAtom(record.ObjectId, utf8Span);
             }
         }
+    }
+
+    /// <summary>
+    /// Add one WAL record to one Cognitive index. During recovery, an entry the index already
+    /// holds from a transaction after its saved count (<see cref="TemporalQuadIndex.CountTxId"/>)
+    /// was inserted by the crashed process but never counted: count it, once (ADR-058).
+    /// </summary>
+    private void AddToTemporalIndex(TemporalQuadIndex index, in LogRecord record,
+        long primary, long secondary, long tertiary, long validFromMs, long validToMs)
+    {
+        var outcome = index.AddRaw(record.GraphId, primary, secondary, tertiary,
+            validFromMs, validToMs, record.TransactionTimeTicks);
+
+        if (_recovering && outcome == TemporalQuadIndex.InsertOutcome.AlreadyPresent && record.TxId > index.CountTxId)
+        {
+            _countedDuringRecovery ??= new HashSet<(TemporalQuadIndex, TemporalKeyIds)>();
+            var key = new TemporalKeyIds(record.GraphId, primary, secondary, tertiary, validFromMs, record.TransactionTimeTicks);
+            if (_countedDuringRecovery.Add((index, key)))
+                index.CountRecoveredEntry();
+        }
+    }
+
+    /// <summary>The identity of a Cognitive index entry for <see cref="AddToTemporalIndex"/>.</summary>
+    private readonly record struct TemporalKeyIds(long Graph, long Primary, long Secondary, long Tertiary, long ValidFrom, long TransactionTime);
+
+    /// <summary>
+    /// Make the atoms interned so far durable before a WAL commit that references them
+    /// (ADR-058 D6). A WAL record carries atom IDs, not strings. Bulk mode defers this to
+    /// <see cref="FlushToDisk"/>.
+    /// </summary>
+    private void MakeAtomsDurable()
+    {
+        if (!_bulkLoadMode)
+            _atoms.Flush();
+    }
+
+    /// <summary>
+    /// Save every WAL-profile index's entry count as exact up to <paramref name="txId"/> (ADR-058).
+    /// After each transaction the save is not msynced (<paramref name="durable"/> false): a
+    /// killed process keeps it, and after a power loss recovery recounts from the older header
+    /// it finds. The checkpoint and the end of bulk load save durably, before the log they rely
+    /// on can be truncated.
+    /// </summary>
+    private void CommitIndexCounts(long txId, bool durable)
+    {
+        _gspoIndex?.CommitEntryCount(txId, durable);
+        _gposIndex?.CommitEntryCount(txId, durable);
+        _gospIndex?.CommitEntryCount(txId, durable);
+        _tgspIndex?.CommitEntryCount(txId, durable);
+        _gspoGraph?.CommitEntryCount(txId, durable);
+        _gposGraph?.CommitEntryCount(txId, durable);
+        _gospGraph?.CommitEntryCount(txId, durable);
+        _tgspGraph?.CommitEntryCount(txId, durable);
     }
 
     /// <summary>
@@ -2415,6 +2500,7 @@ public sealed class QuadStore : IDisposable
         var enumerator = _wal!.GetUncommittedRecords();
         var recoveredCount = 0;
 
+        _recovering = true;
         try
         {
             while (enumerator.MoveNext())
@@ -2426,6 +2512,8 @@ public sealed class QuadStore : IDisposable
         }
         finally
         {
+            _recovering = false;
+            _countedDuringRecovery = null;
             enumerator.Dispose(); // Return pooled buffer
         }
 
@@ -2478,6 +2566,13 @@ public sealed class QuadStore : IDisposable
 
         // Flush trigram index if enabled
         _trigramIndex.Flush();
+
+        // ADR-058 D1/D2: the store must be whole without the log before the log is truncated.
+        // Atoms and index counts are already saved at each commit; saving them here again
+        // covers recovery's replay and any path that did not. An exception here leaves the
+        // WAL as it is, and the next open replays it.
+        _atoms.Flush();
+        CommitIndexCounts(_wal.CurrentTxId, durable: true);
 
         // Write checkpoint marker to WAL
         _wal.Checkpoint();

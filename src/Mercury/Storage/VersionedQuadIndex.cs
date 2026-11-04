@@ -454,7 +454,9 @@ internal sealed unsafe class VersionedQuadIndex : IQuadIndex
         _file.RootPageId = newRootId;
 
         _file.FlushPage();
-        _file.SaveMetadata();
+        // ADR-058: save the new root now, but not the entry count, which may include
+        // entries of a transaction that has not finished applying.
+        _file.SaveStructure();
     }
 
     private SplitResult InsertIntoLeaf(VersionedBTreePage* page, VersionedKey key)
@@ -680,7 +682,18 @@ internal sealed unsafe class VersionedQuadIndex : IQuadIndex
     }
 
     /// <summary>Force all pending mmap writes to disk. Called at end of bulk-load.</summary>
-    public void Flush() => _file.Flush();
+    /// <remarks>
+    /// Saves the header with the current entry count first: page allocation saves only the
+    /// tree structure (ADR-058), so the count reaches disk here, at commit, or at Dispose.
+    /// </remarks>
+    public void Flush()
+    {
+        _file.SaveMetadata();
+        _file.Flush();
+    }
+
+    /// <summary>Save the entry count as exact up to WAL transaction <paramref name="txId"/> (ADR-058).</summary>
+    internal void CommitEntryCount(long txId, bool durable) => _file.CommitEntryCount(txId, durable);
 
     /// <summary>Toggle deferred-msync mode (used by rebuild paths, mirrors TemporalQuadIndex).</summary>
     internal void SetDeferMsync(bool value) => _file.DeferMsync = value;

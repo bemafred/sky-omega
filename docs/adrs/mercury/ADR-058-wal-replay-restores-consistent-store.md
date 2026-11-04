@@ -2,7 +2,7 @@
 
 ## Status
 
-**Status:** Proposed — 2026-10-29
+**Status:** Accepted — 2026-11-04
 
 Found by a scripted SIGKILL + restart repro of mercury-mcp 1.8.32 against a scratch
 store (recorded in Mercury memory as `urn:finding:mercury-crash-recovery-root-cause`,
@@ -279,13 +279,24 @@ replay.
 
 ### D7. Open checks the atom header against the data
 
-On open, `HashAtomStore` checks the header against the atom records actually
-present (the offsets and the length-prefixed records from offset 1024). If the
-data shows more atoms than the header claims, the store does not take new IDs
-from the header. It reports the mismatch and opens read-only until an explicit
-repair runs. A store damaged before this ADR (elite's) then stops being damaged
-further, and a future regression of D6 is caught at open instead of being found
-weeks later as scrambled recall. What the repair does is Q6.
+On open, `HashAtomStore` walks the atom records that follow the header. Atoms are
+written one after another, so a record that belongs to the store starts exactly
+where the previous one ends. Every record that continues the chain is taken: the
+next ID moves past it, and the header is saved. No ID that is present on disk is
+handed out again, whether the atoms came from a batch that crashed before its
+commit or from a Mercury older than this ADR that never saved its header.
+
+A chain that continues and then breaks is what ID reuse leaves: newer atoms written
+over the start of older ones. The store then refuses every write (`WriteRefusal`,
+checked by `QuadStore` before each write) and logs why. Reads still work. An offset
+entry right after the header that does not continue the chain is a leftover, since
+`Clear` before this ADR left offset entries in place. It is ignored, and `Clear`
+now zeroes them.
+
+D7 stops further damage. It cannot find damage that is already complete: when the
+reused atoms form an unbroken chain (the newer session wrote at least as many
+atoms as the older one had), the store looks consistent, and only outside evidence
+shows that older quads point at reassigned IDs. What a repair does is Q6.
 
 ## Consequences
 
@@ -392,6 +403,54 @@ weeks later as scrambled recall. What the repair does is Q6.
    under `benchmarks/Mercury.Benchmarks`, and the end-to-end effect on
    `MercuryWalBenchmarks` (if the shape names it). This is a measurement, not a
    target; the correctness fix is the point.
+
+## Implementation (started 2026-11-04)
+
+Done, on zbook (Linux x64), with every test in the solution passing (6,676):
+
+- **D3: the restart tests** (`tests/Mercury.Tests/Storage/CrashRecoveryTests.cs`). A
+  separate process (`tests/Mercury.CrashTarget`) writes and kills itself, and the test
+  reopens the store. The cases: kill after a commit, two killed sessions in a row
+  (elite's shape), a killed session then a clean one, a batch killed before its commit,
+  ten killed sessions with batches of up to 2,000 triples, and kills inside `Dispose`
+  after 0–30 ms. Each checks every triple with its terms and the exact quad count. All
+  ten failed before the fix and pass after it.
+- **D6.** `CommitBatch` and the single-write paths call `IAtomStore.Flush` before the
+  WAL commit. It writes the header and msyncs data, offsets and hash table, and is a
+  no-op when nothing was interned. `FlushToDisk` (bulk) flushes the atoms before the WAL too.
+- **D1 and D2.** `CheckpointInternal` flushes the atoms and saves every index's count
+  durably before `_wal.Checkpoint` truncates the log. An exception there leaves the log.
+- **Index counts.** `BTreeFile` keeps the saved count apart from the live one, with
+  `CountTxId` (header offset 32): the WAL transaction the saved count is exact for.
+  Page allocation and root splits save only the structure (`SaveStructure`).
+  `CommitBatch` and `Add` save the count after applying, without an msync, and the
+  checkpoint saves it with one. On replay, an entry already present from a transaction
+  after `CountTxId` (the replayed Add is a no-op) is counted, once.
+- **D5** holds by construction: after a commit the files are consistent, so a kill
+  anywhere in `Dispose` loses nothing. The `dispose-killed` tests check it.
+- **D7**, with tests on edited files (`AtomStoreRecoveryTests.cs`): a header behind
+  the data, a chain that breaks, a leftover offset, and `Clear` then reopen.
+
+Cost, measured on zbook (NVMe, `/data`, Release, 1,000 single `AddCurrent` with new
+terms and 200 `CommitBatch` of 50): a single write went from 4.0–4.3 ms to 6.5–6.8 ms
+(the three atom msyncs), and a batch of 50 stayed within noise (127 ms before,
+127–136 ms after).
+
+Not done yet:
+
+- **The Graph profile.** It gets the atom fix (D6, D7) and the checkpoint order, but
+  its keys carry no transaction time, so replay cannot tell an entry the crashed
+  process inserted from a duplicate Add. Its count can stay low after a crash. The
+  crash target only writes Cognitive stores so far.
+- **The trigram index after a crash** is not covered by a test.
+- **A kill inside a leaf split.** The entries move to the new page before the parent
+  learns about it, so a kill in that window (microseconds per split) can leave entries
+  reachable only through the leaf chain. This predates this ADR and is not addressed.
+- **Power loss on Windows.** `MemoryMappedViewAccessor.Flush` there is
+  `FlushViewOfFile`, which does not reach the disk without `FlushFileBuffers`. This
+  holds for every mmap'd file Mercury writes, not only the atoms.
+- **Q6** (repair), **Q7** (why SIGTERM ends `Dispose`), and **validation 9** (rerun R1
+  on elite with Claude Code 2.0.76 once the tools are installed there).
 
 ## References
 
