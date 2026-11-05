@@ -13,7 +13,9 @@ every run, and DrHook's own code did not change in this period.
 - **A single timeout, then recovery.** In 1.8.38 (macOS x64, the VSTest flood test) and 1.8.39 (macOS arm64, the
   VSTest PauseThenDispose test), one test hit the suite's 120 s limit and every later test passed normally. A
   process left in this finding's state cannot attach again, so these two were something else. Their cause is
-  unknown: the tests printed nothing then.
+  unknown: the tests printed nothing then. [Finding 103](103-terminate-waits-on-error-write.md) recorded the stacks
+  of a third, on 2026-11-04: `Terminate` waits on the Win32 event thread, which is writing an error into the gone
+  target over the transport.
 - **A cascade.** The VSTest flood test hung and every later test timed out too (8 timeouts, about 16 minutes). It
   hit none of the 8 macOS jobs before 4b9812a and 4 of the 8 from 4b9812a to 02917df; each of those 4 began right
   after the MTP flood test. 4b9812a was the only DrHook change in the period. To diagnose the single timeouts, it

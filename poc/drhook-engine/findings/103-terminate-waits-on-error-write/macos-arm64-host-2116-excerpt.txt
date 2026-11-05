@@ -1,0 +1,109 @@
+# Finding 103 evidence: excerpt of the watcher record, test.yml run 41889846674 attempt 1, job macOS arm64 (macos-latest)
+# Host: DrHook.Engine.IntegrationTests pid 2116, macOS 26.7.2 (25G332), arm64, runtime 10.0.14; libmscordbi UUID C1773E77-C8A7-3831-BC39-E397FC1936F6
+# Recorded 2026-11-04 18:45:24 UTC by tools/watch-drhook-hang.sh (the host had run 92 s). No target process was recorded: pgrep found no testhost.dll.
+# Excerpt: the three threads of the hung session, and the host's own runtime pipe for comparison. Addresses removed; '???' frames are managed (JIT) code.
+# The full records were the run's artifact drhook-hang-macos-latest (GitHub retention).
+
+## Native stacks (sample, 3 s at 1 ms; 2392 samples each)
+
+    2392 Thread_9499: .NET TP Worker
+    + 2392 thread_start  (in libsystem_pthread.dylib) + 8
+    +   2392 _pthread_start  (in libsystem_pthread.dylib) + 136
+    +     2392 CorUnix::CPalThread::ThreadEntry(void*)  (in libcoreclr.dylib) + 352
+    +       2392 KickOffThread(void*)  (in libcoreclr.dylib) + 212
+    +         2392 ManagedThreadBase::KickOff(void (*)(void*), void*)  (in libcoreclr.dylib) + 236
+    +           2392 KickOffThread_Worker(void*)  (in libcoreclr.dylib) + 144
+    +             2392 DispatchCallSimple(unsigned long*, unsigned int, unsigned long, unsigned int)  (in libcoreclr.dylib) + 276
+    +               2392 CallDescrWorkerInternal  (in libcoreclr.dylib) + 132
+    +                 2392 ???  (in <unknown binary>)
+    +                   2392 ???  (in <unknown binary>)
+    +                     2392 ???  (in <unknown binary>)
+    +                       2392 ???  (in <unknown binary>)
+    +                         2392 ???  (in <unknown binary>)
+    +                           2392 ???  (in <unknown binary>)
+    +                             2392 ???  (in <unknown binary>)
+    +                               2392 ???  (in <unknown binary>)
+    +                                 2392 ???  (in <unknown binary>)
+    +                                   2392 ???  (in <unknown binary>)
+    +                                     2392 ???  (in <unknown binary>)
+    +                                       2392 ???  (in <unknown binary>)
+    +                                         2392 ???  (in <unknown binary>)
+    +                                           2392 ???  (in <unknown binary>)
+    +                                             2392 RuntimeMethodHandle_InvokeMethod  (in libcoreclr.dylib) + 2152
+    +                                               2392 CallDescrWorkerWithHandler(CallDescrData*, int)  (in libcoreclr.dylib) + 104
+    +                                                 2392 CallDescrWorkerInternal  (in libcoreclr.dylib) + 132
+    +                                                   2392 ???  (in <unknown binary>)
+    +                                                     2392 ???  (in <unknown binary>)
+    +                                                       2392 ???  (in <unknown binary>)
+    +                                                         2392 ???  (in <unknown binary>)
+    +                                                           2392 Cordb::Terminate()  (in libmscordbi.dylib) + 412
+    +                                                             2392 Cordb::Neuter()  (in libmscordbi.dylib) + 468
+    +                                                               2392 CordbProcess::Neuter()  (in libmscordbi.dylib) + 116
+    +                                                                 2392 ShimProcess::Dispose()  (in libmscordbi.dylib) + 76
+    +                                                                   2392 CordbWin32EventThread::Stop()  (in libmscordbi.dylib) + 68
+    +                                                                     2392 WaitForSingleObject  (in libmscordaccore.dylib) + 76
+    +                                                                       2392 CorUnix::InternalWaitForMultipleObjectsEx(CorUnix::CPalThread*, unsigned int, void* const*, int, unsigned int, int, int)  (in libmscordaccore.dylib) + 1292
+    +                                                                         2392 CorUnix::CPalSynchronizationManager::BlockThread(CorUnix::CPalThread*, unsigned int, bool, bool, CorUnix::ThreadWakeupReason*, unsigned int*)  (in libmscordaccore.dylib) + 300
+    +                                                                           2392 CorUnix::CPalSynchronizationManager::ThreadNativeWait(CorUnix::_ThreadNativeWaitData*, unsigned int, CorUnix::ThreadWakeupReason*, unsigned int*)  (in libmscordaccore.dylib) + 116
+    +                                                                             2392 _pthread_cond_wait  (in libsystem_pthread.dylib) + 1024
+    +                                                                               2392 __psynch_cvwait  (in libsystem_kernel.dylib) + 8
+    2392 Thread_10724
+    + 2392 thread_start  (in libsystem_pthread.dylib) + 8
+    +   2392 _pthread_start  (in libsystem_pthread.dylib) + 136
+    +     2392 CorUnix::CPalThread::ThreadEntry(void*)  (in libmscordaccore.dylib) + 352
+    +       2392 CordbWin32EventThread::ThreadProc(void*)  (in libmscordbi.dylib) + 44
+    +         2392 CordbWin32EventThread::Win32EventLoop()  (in libmscordbi.dylib) + 384
+    +           2392 CordbProcess::UnrecoverableError(int, unsigned int, char const*, unsigned int)  (in libmscordbi.dylib) + 412
+    +             2392 DbgTransportSession::SetDCB(DebuggerIPCControlBlock*)  (in libmscordbi.dylib) + 180
+    +               2392 DbgTransportSession::SendRequestMessageAndWait(DbgTransportSession::Message*)  (in libmscordbi.dylib) + 192
+    +                 2392 CorUnix::InternalWaitForMultipleObjectsEx(CorUnix::CPalThread*, unsigned int, void* const*, int, unsigned int, int, int)  (in libmscordaccore.dylib) + 1292
+    +                   2392 CorUnix::CPalSynchronizationManager::BlockThread(CorUnix::CPalThread*, unsigned int, bool, bool, CorUnix::ThreadWakeupReason*, unsigned int*)  (in libmscordaccore.dylib) + 300
+    +                     2392 CorUnix::CPalSynchronizationManager::ThreadNativeWait(CorUnix::_ThreadNativeWaitData*, unsigned int, CorUnix::ThreadWakeupReason*, unsigned int*)  (in libmscordaccore.dylib) + 116
+    +                       2392 _pthread_cond_wait  (in libsystem_pthread.dylib) + 1024
+    +                         2392 __psynch_cvwait  (in libsystem_kernel.dylib) + 8
+    2392 Thread_10725: .NET DebugPipe
+    + 2392 thread_start  (in libsystem_pthread.dylib) + 8
+    +   2392 _pthread_start  (in libsystem_pthread.dylib) + 136
+    +     2392 CorUnix::CPalThread::ThreadEntry(void*)  (in libmscordaccore.dylib) + 352
+    +       2392 DbgTransportSession::TransportWorkerStatic(void*)  (in libmscordbi.dylib) + 40
+    +         2392 DbgTransportSession::TransportWorker()  (in libmscordbi.dylib) + 144
+    +           2392 TwoWayPipe::Connect(ProcessDescriptor const&)  (in libmscordbi.dylib) + 100
+    +             2392 open$NOCANCEL  (in libsystem_kernel.dylib) + 64
+    +               2392 __open_nocancel  (in libsystem_kernel.dylib) + 8
+
+## The other debugger transport threads (one per earlier session; each in TwoWayPipe::Connect -> open)
+    2392 Thread_10119: .NET DebugPipe
+    2392 Thread_10393: .NET DebugPipe
+    2392 Thread_10556: .NET DebugPipe
+    2392 Thread_9524: .NET DebugPipe
+    2392 Thread_9762: .NET DebugPipe
+    2392 Thread_9815: .NET DebugPipe
+
+## The host's own runtime pipe (normal: the host's runtime waiting for a debugger of its own)
+    2392 Thread_9474: .NET DebugPipe
+    + 2392 thread_start  (in libsystem_pthread.dylib) + 8
+    +   2392 _pthread_start  (in libsystem_pthread.dylib) + 136
+    +     2392 CorUnix::CPalThread::ThreadEntry(void*)  (in libcoreclr.dylib) + 352
+    +       2392 DbgTransportSession::TransportWorkerStatic(void*)  (in libcoreclr.dylib) + 40
+    +         2392 DbgTransportSession::TransportWorker()  (in libcoreclr.dylib) + 200
+    +           2392 TwoWayPipe::WaitForConnection()  (in libcoreclr.dylib) + 40
+    +             2392 open$NOCANCEL  (in libsystem_kernel.dylib) + 64
+    +               2392 __open_nocancel  (in libsystem_kernel.dylib) + 8
+
+## Managed stack of the test thread (dotnet-stack)
+Thread (0x251B):
+  [Native Frames]
+  SkyOmega.DrHook.Engine!<SkyOmega_DrHook_Engine_Interop_ICorDebug>F20C5E5520BE5C70D839AB1131C7AD71F46910EE37FF2B9B862F14DB74F5F824C__InterfaceImplementation.global::SkyOmega.DrHook.Engine.Interop.ICorDebug.Terminate()
+  SkyOmega.DrHook.Engine!SkyOmega.DrHook.Engine.DebugSession.Dispose()
+  DrHook.Engine.IntegrationTests!DrHook.Engine.IntegrationTests.InformationalFloodTest.AttachAndOwn_VstestTestHost_DisposeDuringFlood_NoWorkerExceptionOrSilentBreak()
+  System.Private.CoreLib!System.Reflection.MethodBaseInvoker.InterpretedInvoke_Method(class System.Object,int*)
+  System.Private.CoreLib!System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(class System.Object,value class System.Reflection.BindingFlags)
+  System.Private.CoreLib!System.Reflection.RuntimeMethodInfo.Invoke(class System.Object,value class System.Reflection.BindingFlags,class System.Reflection.Binder,class System.Object[],class System.Globalization.CultureInfo)
+  MSTestAdapter.PlatformServices!Microsoft.VisualStudio.TestPlatform.MSTest.TestAdapter.Extensions.MethodInfoExtensions.GetInvokeResultWithParametersAsync(class System.Reflection.MethodInfo,class System.Object,class System.Reflection.ParameterInfo[],class System.Object[])
+  MSTestAdapter.PlatformServices!Microsoft.VisualStudio.TestPlatform.MSTest.TestAdapter.Execution.TestMethodInfo+<ExecuteInternalAsync>d__63.MoveNext()
+  System.Private.CoreLib!System.Runtime.CompilerServices.AsyncMethodBuilderCore.Start(!!0&)
+  System.Private.CoreLib!System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1[System.__Canon].Start(!!0&)
+  MSTestAdapter.PlatformServices!Microsoft.VisualStudio.TestPlatform.MSTest.TestAdapter.Execution.TestMethodInfo.ExecuteInternalAsync(class System.Object[],class System.Threading.CancellationTokenSource,class TestInvocationState)
+  MSTestAdapter.PlatformServices!Microsoft.VisualStudio.TestPlatform.MSTest.TestAdapter.Execution.TestMethodInfo+<>c__DisplayClass67_0.<ExecuteInternalWithTimeoutAsync>g__ExecuteAsyncAction|1()
+  System.Private.CoreLib!System.Threading.ExecutionContext.RunFromThreadPoolDispatchLoop(class System.Threading.Thread,class System.Threading.ExecutionContext,class System.Threading.ContextCallback,class System.Object)
+  System.Private.CoreLib!System.Threading.Tasks.Task.ExecuteWithThreadLocal(class System.Threading.Tasks.Task&,class System.Threading.Thread)

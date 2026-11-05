@@ -96,6 +96,9 @@ do not show. Finding 100 also leaves a blocked thread and two pipe files per kil
 accumulates, not only a teardown defect. Earlier consequences of forced stops were the test-host crash of
 2026-05-25 (ADR-008's Context) and finding 63's crash. Two single-test timeouts on those runners, after which the
 suite ran normally, were a different failure whose cause is unknown.
+[Finding 103](../../../poc/drhook-engine/findings/103-terminate-waits-on-error-write.md) recorded the stacks of a
+third (2026-11-04): `ICorDebug::Terminate` waited forever on the Win32 event thread, which was writing an error into
+the gone target over the transport, before sending `DebuggerError`; no lock was held, and later sessions worked.
 
 Finding 100 may not be about SIGTERM or SIGKILL as such. They are two ways to make a target vanish abruptly; the
 deeper fault may be an unsafe interaction between a target's disappearance and the debugger's native state. That is
@@ -579,7 +582,7 @@ Separate items, to be taken up with Martin:
 - A line breakpoint set on an attached file-based target stayed pending and never bound.
 - An upstream report to dotnet/runtime of mscordbi's unbounded read. Secondary: the hang follows from our forced
   stop. Reconsidered after Step 4.
-- The cause of the two single-test timeouts of 1.8.38 and 1.8.39.
+- The cause of the two single-test timeouts of 1.8.38 and 1.8.39 (no stacks exist; finding 103 records a third).
 - A general-purpose worker or distributed-execution framework.
 
 ## References

@@ -143,7 +143,8 @@ table is its record:
 The failure on macOS arm64 is the DrHook integration test
 `AttachAndOwn_VstestTestHost_PauseThenDisposeWithoutResume_WorkerSilentBreakOnly`, which hit the suite's 120 s limit.
 At 1.8.38 a sibling test, `AttachAndOwn_VstestTestHost_DisposeDuringFlood_NoWorkerExceptionOrSilentBreak`, timed out
-the same way on macOS x64; both pass on omega in about a second. Their cause is unknown. Investigating them found a
+the same way on macOS x64; both pass on omega in about a second. Their cause is unknown;
+[finding 103](poc/drhook-engine/findings/103-terminate-waits-on-error-write.md) records the stacks of a third (2026-11-04). Investigating them found a
 different hang, [finding 100](poc/drhook-engine/findings/100-orphaned-transport-read-holds-dac-lock.md), after which a
 test host can never attach or launch again;
 [ADR-016](docs/adrs/drhook/ADR-016-debugger-resilience-and-recovery.md) plans the work on each platform before
