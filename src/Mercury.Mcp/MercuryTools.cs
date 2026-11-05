@@ -74,13 +74,12 @@ public sealed class MercuryTools
 
                 case ExecutionResultKind.Construct:
                 case ExecutionResultKind.Describe:
-                    var count = 0;
-                    foreach (var (s, p, o) in result.Triples ?? [])
-                    {
-                        sb.AppendLine($"{s} {p} {o} .");
-                        count++;
-                    }
-                    sb.AppendLine($"\n{count} triple(s)");
+                    // Through Mercury's N-Triples writer, which escapes the literals. Joining the stored terms by hand
+                    // left quotes, backslashes and line breaks unescaped, so the output did not parse back.
+                    var triples = result.Triples ?? [];
+                    using (var writer = new StringWriter(sb))
+                        RdfEngine.WriteTriples(writer, RdfFormat.NTriples, triples);
+                    sb.AppendLine($"\n{triples.Count} triple(s)");
                     break;
 
                 default:
