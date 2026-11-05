@@ -6,7 +6,9 @@
 // Prints its PID, then runs for up to 60 s and exits by itself. With no argument it loops, and once a debugger is
 // attached breaks into it each round, so the stop has a thread with managed frames and live locals to read. With
 // "flood" it starts and joins threads without pause, so the debugger is always dispatching CreateThread and
-// ExitThread events (and reading target memory to do it).
+// ExitThread events (and reading target memory to do it). "flood-crash" floods the same way, and a second thread
+// calls Environment.FailFast at a random moment 0.5 to 3 s after a debugger has attached: the target ends itself
+// abruptly, at a moment nobody outside it chose.
 
 using System;
 using System.Diagnostics;
@@ -14,7 +16,16 @@ using System.Threading;
 
 Console.WriteLine($"PROBE100_TARGET pid={Environment.ProcessId}");
 Console.Out.Flush();
-if (args.Length > 0 && args[0] == "flood")
+if (args.Length > 0 && args[0] == "flood-crash")
+{
+    new Thread(static () =>
+    {
+        while (!Debugger.IsAttached) Thread.Sleep(10);
+        Thread.Sleep(Random.Shared.Next(500, 3000));
+        Environment.FailFast("probe100 flood-crash: the target ends itself");
+    }) { IsBackground = true, Name = "probe100-crasher" }.Start();
+}
+if (args.Length > 0 && (args[0] == "flood" || args[0] == "flood-crash"))
 {
     var flooding = Stopwatch.StartNew();
     while (flooding.Elapsed < TimeSpan.FromSeconds(60))

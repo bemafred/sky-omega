@@ -35,19 +35,53 @@
 // A read that returns while the target is frozen did not go over the transport (task_for_pid succeeded: direct
 // reads), and the mode's outcome is no-wait.
 //
+// ADR-016 Step 4 adds two modes (run only when named; drafted 2026-11-05, not yet run). Together they decide whether
+// DrHook can stay dependable with simpler means, or needs its debugger in a worker process it can discard (Step 5):
+// a deliberate kill is sometimes needed (a program that won't end), and a crash can happen at any moment.
+//   flood-sync-kill — Hypothesis: a kill made while the debugger holds the target synchronized leaves no transport
+//             request of the Win32 event thread outstanding, so mscordbi handles the exit and a second attach in the
+//             same process succeeds. Construction: the flooding target; Pause (ICorDebugController.Stop) and wait for
+//             the Pause stop; on macOS, sample this process and record whether the Win32 event thread is inside
+//             DbgTransportSession::SendRequestMessageAndWait (if it is, the run ends as sync-not-idle: the premise
+//             failed); SIGKILL; wait for the target to be gone; after 10 s, record the event thread's state and the
+//             dead target's pipes; then a second attach, bounded at 30 s. Predicted: sync-kill-attach-ok, N of N.
+//   flood-crash — Hypothesis: Environment.FailFast goes through the runtime, which tells the debugger before the
+//             process dies, so the Win32 event thread is not mid-request when it dies and a second attach succeeds.
+//             Unverified: the runtime's fatal-error path (vm/eepolicy.cpp) was not read. Construction: the target
+//             floods and calls FailFast at a random moment 0.5 to 3 s after the attach; a resumer thread continues
+//             every stop that surfaces, as an operator would, and records its reason; wait (up to 30 s) for the
+//             target to be gone; after 10 s, the same records and second attach as above. Predicted: crash-attach-ok,
+//             N of N. Any crash-orphaned-and-attach-hung means no session discipline protects DrHook from a crashing
+//             target.
+// Both run on macOS and Linux; the Win32 event thread's state is read only on macOS (sample), elsewhere "not checked".
+// Observed 2026-11-05, omega (macOS 27.0.1, arm64, SDK 10.0.301), 10 runs each:
+//   flood-sync-kill 10/10 sync-kill-attach-ok: the event thread was idle before every kill, the pipes were removed,
+//             and the second attach succeeded. Holds on omega.
+//   flood-crash 8/10 crash-attach-ok, 2/10 crash-orphaned-and-attach-hung (runs 5 and 6): the debugger got an
+//             Exception(Unhandled) stop before every crash, and the resumer continued it; in 2 runs the event thread
+//             was still inside a transport request 10 s after the target was gone, and the second attach was pending
+//             after 30 s. The dead target's pipes were absent in all 10, unlike flood-kill. Falsified: a crash can
+//             leave the debugger unusable even though the runtime tells the debugger first. Which transport request
+//             it was is not recorded (the probe checks SendRequestMessageAndWait, not the frame above it).
+//
 // Observed 2026-10-30, omega (macOS 27, arm64): control 3/3 completed after SIGCONT and kill 3/3 returned within
 // ~20 ms of the kill (the dead target's pipes removed), refuting the first form of the hypothesis (any pending read
 // never returns). With flood-kill, two batches: control 5/5, kill 5/5, flood-kill 5/5 (the Win32 event thread caught
 // in a read on the first or second attempt; still in it 10 s after the kill; pipes left; the second attach pending
 // after 30 s). RESULT(0) both times.
 //
-// Result codes: 0 confirmed (control completed; kill returned; flood-kill: the Win32 event thread stayed in the read,
-// the pipes stayed, the second attach hung); 1 otherwise; 2 target build failed.
+// Result codes: 0 confirmed: every mode run gave its predicted outcome every time (control-completed;
+// kill-read-returned; flood-kill: flood-orphaned-and-attach-hung; flood-sync-kill: sync-kill-attach-ok; flood-crash:
+// crash-attach-ok); 1 otherwise; 2 target build failed.
 // Child results: control-completed, kill-read-returned, kill-orphaned-and-attach-hung, kill-orphaned-attach-ok,
-// flood-orphaned-and-attach-hung, flood-orphaned-attach-ok, flood-read-returned, flood-not-caught, no-wait, no-stop,
-// setup-failed.
+// flood-orphaned-and-attach-hung, flood-orphaned-attach-ok, flood-read-returned, flood-not-caught, sync-kill-attach-ok,
+// sync-kill-attach-hung, sync-kill-orphaned-and-attach-hung, sync-not-idle, crash-attach-ok, crash-attach-hung,
+// crash-orphaned-and-attach-hung, crash-no-exit, no-wait, no-stop, setup-failed. "orphaned" means the sample showed the
+// Win32 event thread still in a transport request 10 s after the target was gone (macOS only).
 //
-// Usage (from poc/drhook-engine):  dotnet run --no-cache 100-orphaned-read-smoke.cs [runs]
+// Usage (from poc/drhook-engine):  dotnet run --no-cache 100-orphaned-read-smoke.cs [runs] [mode ...]
+// With no modes: control, kill, and on macOS flood-kill (the set recorded above). Step 4:
+//   dotnet run --no-cache 100-orphaned-read-smoke.cs 10 flood-sync-kill flood-crash
 
 using System;
 using System.Collections.Generic;
@@ -60,15 +94,36 @@ using System.Threading;
 using SkyOmega.DrHook.Engine;
 
 if (OperatingSystem.IsWindows()) { Console.WriteLine("SKIP: Windows has no debug transport pipes; reads are direct."); return 0; }
-if (args.Length == 3 && args[0] == "child") return args[1] == "flood-kill" ? ChildFlood(args[2]) : Child(args[1], args[2]);
+if (args.Length == 3 && args[0] == "child")
+    return args[1] switch
+    {
+        "flood-kill" => ChildFlood(args[2]),
+        "flood-sync-kill" => ChildSyncKill(args[2]),
+        "flood-crash" => ChildCrash(args[2]),
+        _ => Child(args[1], args[2]),
+    };
 
+var predicted = new Dictionary<string, string>
+{
+    ["control"] = "control-completed",
+    ["kill"] = "kill-read-returned",
+    ["flood-kill"] = "flood-orphaned-and-attach-hung",
+    ["flood-sync-kill"] = "sync-kill-attach-ok",
+    ["flood-crash"] = "crash-attach-ok",
+};
 int runs = args.Length > 0 ? int.Parse(args[0]) : 3;
+string[] modes = args.Length > 1 ? args[1..] : OperatingSystem.IsMacOS() ? ["control", "kill", "flood-kill"] : ["control", "kill"];
+foreach (string mode in modes)
+{
+    if (!predicted.ContainsKey(mode)) { Console.WriteLine($"unknown mode '{mode}'; modes: {string.Join(", ", predicted.Keys)}"); return 1; }
+    if (mode == "flood-kill" && !OperatingSystem.IsMacOS()) { Console.WriteLine("flood-kill needs macOS (it catches the event thread with sample)"); return 1; }
+}
 string? dll = BuildTarget(Path.GetFullPath("100-orphaned-read-target.cs"));
 if (dll is null) { Console.WriteLine("FAIL(2): could not build 100-orphaned-read-target.cs"); return 2; }
 Console.WriteLine($"platform: {RuntimeInformation.OSDescription} {RuntimeInformation.ProcessArchitecture}");
 
 var results = new Dictionary<string, List<string>>();
-foreach (string mode in OperatingSystem.IsMacOS() ? new[] { "control", "kill", "flood-kill" } : new[] { "control", "kill" })
+foreach (string mode in modes)
 {
     for (int i = 1; i <= runs; i++)
     {
@@ -109,10 +164,11 @@ foreach (string mode in OperatingSystem.IsMacOS() ? new[] { "control", "kill", "
 }
 
 Console.WriteLine(string.Join("; ", results.SelectMany(kv => kv.Value.GroupBy(r => r).Select(g => $"{kv.Key} {g.Key}: {g.Count()}"))));
-bool confirmed = results["control"].All(r => r == "control-completed") && results["kill"].All(r => r == "kill-read-returned")
-    && (!results.ContainsKey("flood-kill") || results["flood-kill"].All(r => r == "flood-orphaned-and-attach-hung"));
+foreach ((string mode, List<string> outcomes) in results)
+    Console.WriteLine($"{mode}: predicted {predicted[mode]}, {outcomes.Count(r => r == predicted[mode])} of {outcomes.Count}");
+bool confirmed = results.All(kv => kv.Value.All(r => r == predicted[kv.Key]));
 Console.WriteLine(confirmed
-    ? "RESULT(0): confirmed — a read waits for the target; another thread's read is released when the target dies, but the Win32 event thread's own read never returns, and a later attach in the same process hangs"
+    ? "RESULT(0): confirmed — every mode run gave its predicted outcome every time (see the header for each hypothesis)"
     : "RESULT(1): not confirmed as stated (see the outcomes above)");
 return confirmed ? 0 : 1;
 
@@ -227,7 +283,7 @@ static int ChildFlood(string dll)
         Thread.Sleep(random.Next(20, 200));
         kill(pid, SIGSTOP);
         Thread.Sleep(300);
-        caught = Win32EventThreadInRead();
+        caught = Win32EventThreadIn("DbgTransportSession::ReadMemory");
         if (!caught) kill(pid, SIGCONT);
     }
     if (!caught) { kill(pid, SIGKILL); Say("the Win32 event thread was never caught in a read"); return Result("flood-not-caught"); }
@@ -236,7 +292,7 @@ static int ChildFlood(string dll)
     kill(pid, SIGKILL);
     Say("target killed (SIGKILL)");
     Thread.Sleep(10_000);
-    bool stillInRead = Win32EventThreadInRead();
+    bool stillInRead = Win32EventThreadIn("DbgTransportSession::ReadMemory");
     Say(stillInRead ? "10 s after the kill the Win32 event thread is still in the read" : "10 s after the kill the Win32 event thread has left the read");
     Say($"the dead target's pipes: {(PipesExist(pid) ? "present" : "absent")}");
     if (!stillInRead) return Result("flood-read-returned");
@@ -257,9 +313,135 @@ static int ChildFlood(string dll)
     return Result(attached ? "flood-orphaned-attach-ok" : "flood-orphaned-and-attach-hung");
 }
 
+// flood-sync-kill: synchronize the flooding target through the debugger, then kill it.
+[System.Runtime.Versioning.UnsupportedOSPlatform("windows")]
+static int ChildSyncKill(string dll)
+{
+    var clock = Stopwatch.StartNew();
+    void Say(string text) { Console.WriteLine($"child: {text} [{clock.ElapsedMilliseconds} ms]"); Console.Out.Flush(); }
+    int Result(string outcome) { Console.WriteLine($"child: result={outcome}"); Console.Out.Flush(); return 0; }
+
+    int pid = StartTarget(dll, "flood");
+    Console.WriteLine($"child: target={pid}");
+    Console.Out.Flush();
+    DebugSession session;
+    try { session = DebugSession.AttachAndOwn(pid, new Sink()); }
+    catch (Exception e) { Say($"attach failed: {e.Message}"); return Result("setup-failed"); }
+    Say("attached; the target floods thread events");
+    Thread.Sleep(1000);
+
+    session.Pause();
+    StopInfo? stop = session.WaitForStop(TimeSpan.FromSeconds(10));
+    Say($"stop: {stop?.Reason.ToString() ?? "none"}");
+    if (stop?.Reason != StopReason.Pause) { kill(pid, SIGKILL); return Result("no-stop"); }
+
+    if (OperatingSystem.IsMacOS())
+    {
+        bool busy = Win32EventThreadIn("DbgTransportSession::SendRequestMessageAndWait");
+        Say(busy ? "synchronized, but the Win32 event thread is inside a transport request" : "synchronized; the Win32 event thread is not inside a transport request");
+        if (busy) { kill(pid, SIGKILL); return Result("sync-not-idle"); }
+    }
+    else Say("the Win32 event thread's state before the kill: not checked (macOS only)");
+
+    kill(pid, SIGKILL);
+    Say("target killed (SIGKILL) while synchronized");
+    Say(WaitUntilGone(pid, TimeSpan.FromSeconds(10)) ? "target gone" : "target still present 10 s after the kill");
+    return AfterTheEnd("sync-kill", pid, dll, Say, Result);
+}
+
+// flood-crash: the flooding target calls Environment.FailFast at a moment of its own; every stop is continued.
+[System.Runtime.Versioning.UnsupportedOSPlatform("windows")]
+static int ChildCrash(string dll)
+{
+    var clock = Stopwatch.StartNew();
+    void Say(string text) { Console.WriteLine($"child: {text} [{clock.ElapsedMilliseconds} ms]"); Console.Out.Flush(); }
+    int Result(string outcome) { Console.WriteLine($"child: result={outcome}"); Console.Out.Flush(); return 0; }
+
+    int pid = StartTarget(dll, "flood-crash");
+    Console.WriteLine($"child: target={pid}");
+    Console.Out.Flush();
+    DebugSession session;
+    try { session = DebugSession.AttachAndOwn(pid, new Sink()); }
+    catch (Exception e) { Say($"attach failed: {e.Message}"); return Result("setup-failed"); }
+    Say("attached; the target floods thread events and will call FailFast within 0.5 to 3 s");
+
+    // An operator who continues every stop: the crash then proceeds whatever the debugger is told about it.
+    var stops = new List<string>();
+    bool resuming = true;
+    var resumer = new Thread(() =>
+    {
+        while (Volatile.Read(ref resuming))
+        {
+            try
+            {
+                StopInfo? s = session.WaitForStop(TimeSpan.FromMilliseconds(200));
+                if (s is null) continue;
+                lock (stops) stops.Add(s.Reason == StopReason.Exception ? $"Exception({s.ExceptionKind})" : s.Reason.ToString());
+                session.Resume();
+            }
+            catch (Exception e) { lock (stops) stops.Add($"threw {e.GetType().Name}"); return; }
+        }
+    }) { IsBackground = true, Name = "probe100-resumer" };
+    resumer.Start();
+
+    bool gone = WaitUntilGone(pid, TimeSpan.FromSeconds(30));
+    Volatile.Write(ref resuming, false);
+    lock (stops) Say($"stops seen before the end: {(stops.Count == 0 ? "none" : string.Join(", ", stops))}");
+    if (!gone) { kill(pid, SIGKILL); Say("target still present 30 s after the attach"); return Result("crash-no-exit"); }
+    Say("target gone (FailFast)");
+    resumer.Join(TimeSpan.FromSeconds(2));
+    return AfterTheEnd("crash", pid, dll, Say, Result);
+}
+
+// After the target is gone: let mscordbi handle the exit, record the event thread and the pipes, then attach again.
+[System.Runtime.Versioning.UnsupportedOSPlatform("windows")]
+static int AfterTheEnd(string prefix, int pid, string dll, Action<string> say, Func<string, int> result)
+{
+    Thread.Sleep(10_000);
+    bool? stuck = OperatingSystem.IsMacOS() ? Win32EventThreadIn("DbgTransportSession::SendRequestMessageAndWait") : null;
+    say(stuck switch
+    {
+        true => "10 s after the end the Win32 event thread is inside a transport request",
+        false => "10 s after the end the Win32 event thread is not inside a transport request",
+        null => "10 s after the end the Win32 event thread's state: not checked (macOS only)",
+    });
+    say($"the dead target's pipes: {(PipesExist(pid) ? "present" : "absent")}");
+
+    int second = StartTarget(dll);
+    Console.WriteLine($"child: second={second}");
+    Console.Out.Flush();
+    string? attachOutcome = null;
+    var attachDone = new ManualResetEventSlim();
+    new Thread(() =>
+    {
+        try { DebugSession.AttachAndOwn(second, new Sink()); attachOutcome = "attached"; }
+        catch (Exception e) { attachOutcome = $"threw {e.GetType().Name}: {e.Message}"; }
+        attachDone.Set();
+    }) { IsBackground = true, Name = "probe100-second-attach" }.Start();
+    bool attached = attachDone.Wait(TimeSpan.FromSeconds(30));
+    say(attached ? $"second attach finished: {attachOutcome}" : "second attach still pending after 30 s");
+    if (attached && attachOutcome == "attached") return result($"{prefix}-attach-ok");
+    if (attached) return result("setup-failed");
+    return result(stuck == true ? $"{prefix}-orphaned-and-attach-hung" : $"{prefix}-attach-hung");
+}
+
+// Polls with signal 0 until the process is gone (bash, its parent, reaps it). True once kill(pid, 0) fails.
+[System.Runtime.Versioning.UnsupportedOSPlatform("windows")]
+static bool WaitUntilGone(int pid, TimeSpan bound)
+{
+    var waited = Stopwatch.StartNew();
+    while (waited.Elapsed < bound)
+    {
+        if (kill(pid, 0) != 0) return true;
+        Thread.Sleep(20);
+    }
+    return false;
+}
+
 // macOS: samples this process for a second and reports whether one thread is both in mscordbi's Win32 event loop and
-// inside a transport read. Only the per-thread call graph is read: sample's summary totals frames across threads.
-static bool Win32EventThreadInRead()
+// inside the given frame (a transport read, or any transport request). Only the per-thread call graph is read:
+// sample's summary totals frames across threads.
+static bool Win32EventThreadIn(string frame)
 {
     string file = Path.Combine(Path.GetTempPath(), $"probe100-sample-{Environment.ProcessId}.txt");
     var psi = new ProcessStartInfo("sample") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
@@ -274,7 +456,7 @@ static bool Win32EventThreadInRead()
     string graph = end > start ? text[start..end] : text[start..];
     return Regex.Split(graph, @"\n(?=\s+\d+ Thread_)")
         .Any(t => t.Contains("CordbWin32EventThread::Win32EventLoop", StringComparison.Ordinal)
-               && t.Contains("DbgTransportSession::ReadMemory", StringComparison.Ordinal));
+               && t.Contains(frame, StringComparison.Ordinal));
 }
 
 // The target runs under bash, so it is bash's child and not this process's (finding 87: an attached child of the
