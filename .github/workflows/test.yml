@@ -13,9 +13,12 @@ on:
 permissions:
   contents: read
 
+# A push to main never cancels another run: two hosts (and two agents) push to main, and a later push
+# used to cancel the earlier one's Windows jobs about 40 minutes in. Each push gets its own group (its
+# commit). A pull request still cancels its own older run when a new commit is pushed to it.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # The solution's ADR folders are kept by hand. This fails when an ADR in docs/adrs is missing from SkyOmega.sln, sits
