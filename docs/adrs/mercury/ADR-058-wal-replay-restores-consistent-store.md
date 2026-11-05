@@ -106,9 +106,8 @@ signals reach the server directly.
 
 - **What the client does.** Claude Code sends SIGINT, waits 100 ms, then sends
   SIGTERM, and SIGKILL later. mercury-mcp handles the SIGINT as a graceful
-  stop. The SIGTERM arrives during `pool.Dispose()` and ends the process.
-  Why a SIGTERM at that point ends .NET's process instead of being handled is
-  not verified (Q7).
+  stop. The SIGTERM arrives during `pool.Dispose()` and ends the process,
+  because by then no handler for it is registered (Q7).
 - **Why nothing was saved in R1.** After a mutation, `Dispose` runs
   `CheckpointInternal` (predicate statistics, trigram flush) before any index or
   atom header is saved, so the kill lands before anything is written. A
@@ -363,12 +362,22 @@ shows that older quads point at reassigned IDs. What a repair does is Q6.
   whose atoms changed meaning; (b) a repair that rebuilds the header from the data
   and marks suspect quads; (c) export what can be read, then rebuild the store.
   elite's store is the first case. Work on a copy.
-- **Q7. Why SIGTERM ends the process inside `Dispose`.** One reading: once
-  `RunAsync` returns, the host's `ConsoleLifetime` has removed its signal handlers,
-  so a SIGTERM gets the runtime's default handling, and the process ends while
-  `Main` is still in `pool.Dispose()`. Not verified. Knowing it makes a
-  mitigation possible (keep the handlers registered until `Dispose` returns, or
-  make the stop faster than 100 ms). D5 makes it a mitigation, not the fix.
+- **Q7. Why SIGTERM ends the process inside `Dispose`.** Answered 2026-11-05.
+  `RunAsync` disposes the host before it returns, and disposing `ConsoleLifetime`
+  removes its SIGINT and SIGTERM handlers. A SIGTERM after that gets the default
+  action and ends the process while `Main` is still in `pool.Dispose()`: no
+  `ProcessExit`, no `finally`. On zbook, a probe (a host, `RunAsync`, then
+  2 s of work after it) exits 143 after 2 of 10 work steps on a SIGTERM; with its
+  own `PosixSignalRegistration` kept until the work ends, it finishes and exits 0.
+  mercury-mcp itself: SIGINT, then a SIGTERM delivered inside `pool.Dispose()` (the
+  process is frozen with SIGSTOP when it prints `MCP Server shutting down...`, so the
+  SIGTERM lands there every time). Before the change it was killed by the signal
+  6 of 6 times, after it it finished and exited 0 6 of 6 times. Fixed in
+  `src/Mercury.Mcp/Program.cs`: SIGINT and SIGTERM handlers registered before the host
+  starts and disposed when `Main` returns, after `pool.Dispose()`. They set
+  `Cancel` (no default action) and stop the host. D5 is still the fix; this
+  lets a normal stop finish its checkpoint instead of leaving the work to the next
+  open's replay. A SIGKILL still ends the process at once, and D5 covers that.
 
 ## Validation plan
 
@@ -449,8 +458,8 @@ Not done yet:
 - **Power loss on Windows.** `MemoryMappedViewAccessor.Flush` there is
   `FlushViewOfFile`, which does not reach the disk without `FlushFileBuffers`. This
   holds for every mmap'd file Mercury writes, not only the atoms.
-- **Q6** (repair), **Q7** (why SIGTERM ends `Dispose`), and **validation 9** (rerun R1
-  on elite with Claude Code 2.0.76 once the tools are installed there).
+- **Q6** (repair) and **validation 9** (rerun R1 on elite with Claude Code 2.0.76
+  once the tools are installed there). Q7 is answered and fixed (see Q7).
 
 ## References
 

@@ -2,6 +2,7 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System.Reflection;
+using System.Runtime.InteropServices;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -188,12 +189,29 @@ Console.Error.WriteLine();
 Console.Error.WriteLine("Ready. Waiting for MCP messages on stdin...");
 Console.Error.WriteLine();
 
-await builder.Build().RunAsync();
+// Stop signals (ADR-058 Q7). Claude Code sends SIGINT, then SIGTERM 100 ms later. The host's
+// ConsoleLifetime handles both only while the host runs: RunAsync disposes the host, which removes
+// its handlers, so a signal during pool.Dispose() got the default action and ended the process
+// mid-Dispose. These registrations are disposed when Main returns, after pool.Dispose(): a signal
+// stops the host, and the process stays up until the store is closed.
+using var stopping = new CancellationTokenSource();
+using var onSigterm = PosixSignalRegistration.Create(PosixSignal.SIGTERM, OnStopSignal);
+using var onSigint = PosixSignalRegistration.Create(PosixSignal.SIGINT, OnStopSignal);
+
+await builder.Build().RunAsync(stopping.Token);
 
 Console.Error.WriteLine("MCP Server shutting down...");
 pool.Dispose();
+Console.Error.WriteLine("MCP Server stopped.");
 
 return 0;
+
+void OnStopSignal(PosixSignalContext context)
+{
+    context.Cancel = true; // no default action: the process ends when Main returns
+    try { stopping.Cancel(); }
+    catch (ObjectDisposedException) { } // a signal racing the end of Main
+}
 
 // --- Session factory for pipe connections ---
 
