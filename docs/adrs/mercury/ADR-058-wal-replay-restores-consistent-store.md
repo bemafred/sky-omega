@@ -362,6 +362,39 @@ shows that older quads point at reassigned IDs. What a repair does is Q6.
   whose atoms changed meaning; (b) a repair that rebuilds the header from the data
   and marks suspect quads; (c) export what can be read, then rebuild the store.
   elite's store is the first case. Work on a copy.
+
+  **Answered for elite, 2026-11-05: (c), with the store's own times as the evidence.**
+  The live store was byte-identical to the 2026-10-30 backup
+  (`~/diag/mcp-pristine-20261030.tar`), so nothing had changed since the damage.
+  - *The 92.* It is `gspo`'s stale header count. A scan returns 116 entries.
+  - *Generations, by `AS OF` on each entry's valid-from.* 71 entries are from
+    2026-10-27, the day the store was created, and `bootstrap.ttl` loads exactly 71
+    triples: that generation is the bootstrap. 25 are from 2026-10-29 12:00–12:30
+    CET and 20 from 12:30–12:50 CET. Atoms 1–51 are the 10-29 strings.
+  - *Shape misleads.* About 60 triples read sensibly, but some of those are bootstrap
+    entries read through reused IDs; one finding showed two labels and two comments.
+    The times decide instead. On 10-29 the IDs restarted at 1 in the same order as the
+    bootstrap's first writes, so six 10-29 triples had the same ID tuples as bootstrap
+    entries. Their insert was a no-op on an existing key, and they kept the 10-27 time.
+    Each fills the one type, label, comment or date missing from its finding's 10-29
+    writes, and their text matches this ADR as first committed (72b6443) and
+    sky-omega's 2026-10-30 record of the store.
+  - *The rebuild.* A fresh store got `bootstrap.ttl`, then the 45 + 6 = 51 recovered
+    triples in their original graph under their original IRIs, then a note for the next
+    Claude on elite (graph `<urn:sky-omega:session:2026-11-05-elite-store-rebuild>`):
+    what happened, what was kept and dropped, and the evidence.
+  - *What is lost.* Nothing beyond the bootstrap, which was reloaded. The 65 dropped
+    entries are the bootstrap generation read through reused IDs.
+  - *The new store.* Live since 2026-11-05; the damaged one is archived at
+    `~/diag/mcp-live-archived-20261105`.
+  - *Limits.* The recovered triples carry 2026-11-05 as their store time, because
+    SPARQL UPDATE cannot set valid-from; the note gives their original windows.
+    They were written after the first kernel memory-corruption warning on elite
+    (2026-10-29 11:58 CET); the text checks reduce that risk, they do not remove it.
+  - *What the repair needed.* (a) and (b) stay open for a general tool. The repair
+    relied on the temporal indexes, outside evidence (the ADR, sky-omega's record)
+    and a hand check: a Graph-profile store has no valid-from, and would have
+    needed more outside evidence.
 - **Q7. Why SIGTERM ends the process inside `Dispose`.** Answered 2026-11-05.
   `RunAsync` disposes the host before it returns, and disposing `ConsoleLifetime`
   removes its SIGINT and SIGTERM handlers. A SIGTERM after that gets the default
@@ -464,7 +497,8 @@ Not done yet:
 - **Power loss on Windows.** `MemoryMappedViewAccessor.Flush` there is
   `FlushViewOfFile`, which does not reach the disk without `FlushFileBuffers`. This
   holds for every mmap'd file Mercury writes, not only the atoms.
-- **Q6** (repair). Q7 is answered and fixed (see Q7).
+- **Q6** (repair) is answered for elite (see Q6); a general verify or repair tool, (a)
+  or (b), is not built. Q7 is answered and fixed (see Q7).
 
 Validation 9, on elite, 2026-11-05 (tools 1.8.39 from `f6464c74`, Claude Code 2.0.76,
 scratch store `/data/shutdown-test/r9`, script `bin/v9.sh`). The same `claude -p` call
@@ -482,6 +516,7 @@ offset 3472 where the chain expects 11078, and refuses writes (D7): an `INSERT` 
 the refusal, reads work. 116 quads read back, all in one graph, against 92 entries in
 gspo's header. The header is not advanced, so opening the real store this way writes
 nothing. The next Claude Code session on elite gets a read-only memory until Q6.
+The store was rebuilt the same day (see Q6).
 
 ## References
 
