@@ -458,8 +458,27 @@ Not done yet:
 - **Power loss on Windows.** `MemoryMappedViewAccessor.Flush` there is
   `FlushViewOfFile`, which does not reach the disk without `FlushFileBuffers`. This
   holds for every mmap'd file Mercury writes, not only the atoms.
-- **Q6** (repair) and **validation 9** (rerun R1 on elite with Claude Code 2.0.76
-  once the tools are installed there). Q7 is answered and fixed (see Q7).
+- **Q6** (repair). Q7 is answered and fixed (see Q7).
+- **A refused write still writes the WAL.** `BeginBatch` appends its begin record before
+  the first `AddBatched` checks `WriteRefusal`, so each refused `INSERT` leaves an 80-byte
+  begin record with no commit. Replay ignores it, but a read-only store should not write.
+
+Validation 9, on elite, 2026-11-05 (tools 1.8.39 from `f6464c74`, Claude Code 2.0.76,
+scratch store `/data/shutdown-test/r9`, script `bin/v9.sh`). The same `claude -p` call
+as R1. Claude's debug log: `Sending SIGINT` at 16:40:38.498Z, `SIGINT failed, sending
+SIGTERM` at .600, `exited cleanly` at .702. The server printed `MCP Server shutting
+down...` at .631 (after the SIGTERM) and `MCP Server stopped.` at .649. Headers as the
+client left them: nextAtomId 8, atomCount 8, 3 entries in all four indexes, WAL
+checkpointed to 80 B. A reopened copy returns the 3 triples with their terms. R1 lost
+all of them.
+
+elite's real store, opened as a copy with 1.8.39 (`/data/shutdown-test/real-20261105b`;
+the real store was only read, by `cp`): the atom header reads as new (nextAtomId 0)
+while 51 atom records follow it in the chain. Open takes those 51, then finds atom 52 at
+offset 3472 where the chain expects 11078, and refuses writes (D7): an `INSERT` returns
+the refusal, reads work. 116 quads read back, all in one graph, against 92 entries in
+gspo's header. The header is not advanced, so opening the real store this way writes
+nothing. The next Claude Code session on elite gets a read-only memory until Q6.
 
 ## References
 
