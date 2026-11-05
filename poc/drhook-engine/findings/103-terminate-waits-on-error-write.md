@@ -98,7 +98,7 @@ after `Dispose` returns.
 
 | | Finding 100 | Finding 103 |
 |---|---|---|
-| The Win32 event thread waits in | a target-memory **read** inside the DAC (`IsThreadMarkedDead` → `ReadMemory`), while dispatching an event | an error **write** to the target (`UnrecoverableError` → `SetDCB`), after a failed event |
+| The Win32 event thread waits in | a target-memory read or write inside the DAC (`IsThreadMarkedDead` → `ReadMemory`; once, 2026-11-05, `RequestSyncAtEvent` → `WriteMemory`), while dispatching an event | an error **write** to the target (`UnrecoverableError` → `SetDCB`), after a failed event |
 | What else it holds | the DAC's lock, which every new session needs | no lock any other session needs |
 | What hangs | the next attach or launch (`FlushCache`), and every one after it | `Terminate`, in the session's own `Dispose` |
 | Seen as | a cascade: every later test times out | a single timeout; later tests pass |
@@ -106,6 +106,11 @@ after `Dispose` returns.
 What they share: in both, the Win32 event thread itself makes a transport request to a target that is gone. That
 request has no timeout, and the thread making it is the one that would handle the target's exit, so nothing can ever
 release it.
+
+Why `Terminate` blocks here but returned in finding 100's 2026-11-05 cascade is a hypothesis, recorded in finding
+100's Mechanism: `Cordb::Terminate` returns `CORDBG_E_ILLEGAL_SHUTDOWN_ORDER` at once while a live process with no
+unrecoverable error is still in its list, and goes on to stop the event threads only otherwise. Here
+`UnrecoverableError` had marked the process first.
 
 ## Was the Detach change involved?
 

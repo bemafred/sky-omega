@@ -1,0 +1,112 @@
+# Finding 100 evidence: excerpt of the watcher record, test.yml run 41889846674 attempt 2, job macOS x64 (macos-26-intel)
+# Host: DrHook.Engine.IntegrationTests pid 14374, macOS 26.6.1 (25G76), x86_64, runtime 10.0.14 (installed by the job);
+#   libmscordbi UUID 750BF5FA-99FF-3893-A708-29B5E787B2D4, libmscordaccore UUID 8DCAD3F8-99F7-36EB-824F-EC0A383E7412
+# Host launched 2026-11-05 08:12:15.8 UTC. Record 1 at 08:13:52 (shown here); record 2 at 08:16 (counts at the end).
+# Excerpt: the session left inside the DAC (event thread + its transport thread) and the next session's attach
+# (event thread + transport thread). Addresses removed. The full records were the run's artifact drhook-hang-macos-26-intel
+# (created 2026-11-05 08:44:35, GitHub retention).
+
+## Native stacks, record 1 (sample, 3 s at 1 ms; 2400 samples each)
+
+### The session left inside the DAC: Win32 event thread, stuck in a transport WRITE
+    2400 Thread_43587
+    + 2400 thread_start  (in libsystem_pthread.dylib) + 15
+    +   2400 _pthread_start  (in libsystem_pthread.dylib) + 115
+    +     2400 CorUnix::CPalThread::ThreadEntry(void*)  (in libmscordaccore.dylib) + 376
+    +       2400 CordbWin32EventThread::ThreadProc(void*)  (in libmscordbi.dylib) + 29
+    +         2400 CordbWin32EventThread::Win32EventLoop()  (in libmscordbi.dylib) + 389
+    +           2400 ShimProcess::HandleWin32DebugEvent(_DEBUG_EVENT const*)  (in libmscordbi.dylib) + 186
+    +             2400 CordbProcess::Filter(unsigned char const*, unsigned int, CorDebugRecordFormat, unsigned int, unsigned int, ICorDebugManagedCallback*, unsigned int*)  (in libmscordbi.dylib) + 434
+    +               2400 CordbProcess::HandleRCEvent(DebuggerIPCEvent*, Holder<RSLock*, &RSLock::HolderEnter(RSLock*), &RSLock::HolderLeave(RSLock*), 0ul, &int CompareDefault<RSLock*>(RSLock*, RSLock*), true>*, ICorDebugManagedCallback*)  (in libmscordbi.dylib) + 487
+    +                 2400 CordbProcess::RawDispatchEvent(DebuggerIPCEvent*, Holder<RSLock*, &RSLock::HolderEnter(RSLock*), &RSLock::HolderLeave(RSLock*), 0ul, &int CompareDefault<RSLock*>(RSLock*, RSLock*), true>*, ICorDebugManagedCallback*, ICorDebugManagedCallback2*, ICorDebugManagedCallback3*, ICorDebugManagedCallback4*)  (in libmscordbi.dylib) + 5415
+    +                   2400 ShimProxyCallback::LoadAssembly(ICorDebugAppDomain*, ICorDebugAssembly*)  (in libmscordbi.dylib) + 34
+    +                     2400 DacDbiInterfaceImpl::RequestSyncAtEvent()  (in libmscordaccore.dylib) + 230
+    +                       2400 DbgTransportSession::WriteMemory(unsigned char*, unsigned char*, unsigned long)  (in libmscordbi.dylib) + 96
+    +                         2400 DbgTransportSession::SendRequestMessageAndWait(DbgTransportSession::Message*)  (in libmscordbi.dylib) + 192
+    +                           2400 WaitForMultipleObjectsEx  (in libmscordaccore.dylib) + 84
+    +                             2400 CorUnix::InternalWaitForMultipleObjectsEx(CorUnix::CPalThread*, unsigned int, void* const*, int, unsigned int, int, int)  (in libmscordaccore.dylib) + 1834
+    +                               2400 CorUnix::CPalSynchronizationManager::BlockThread(CorUnix::CPalThread*, unsigned int, bool, bool, CorUnix::ThreadWakeupReason*, unsigned int*)  (in libmscordaccore.dylib) + 290
+    +                                 2400 CorUnix::CPalSynchronizationManager::ThreadNativeWait(CorUnix::_ThreadNativeWaitData*, unsigned int, CorUnix::ThreadWakeupReason*, unsigned int*)  (in libmscordaccore.dylib) + 322
+    +                                   2400 _pthread_cond_wait  (in libsystem_pthread.dylib) + 1044
+    +                                     2400 __psynch_cvwait  (in libsystem_kernel.dylib) + 10
+
+### Its transport thread
+    2400 Thread_43588: .NET DebugPipe
+    + 2400 thread_start  (in libsystem_pthread.dylib) + 15
+    +   2400 _pthread_start  (in libsystem_pthread.dylib) + 115
+    +     2400 CorUnix::CPalThread::ThreadEntry(void*)  (in libmscordaccore.dylib) + 376
+    +       2400 DbgTransportSession::TransportWorkerStatic(void*)  (in libmscordbi.dylib) + 37
+    +         2399 DbgTransportSession::TransportWorker()  (in libmscordbi.dylib) + 106
+    +         ! 2399 Sleep  (in libmscordaccore.dylib) + 83
+    +         !   2399 CorUnix::CPalSynchronizationManager::BlockThread(CorUnix::CPalThread*, unsigned int, bool, bool, CorUnix::ThreadWakeupReason*, unsigned int*)  (in libmscordaccore.dylib) + 290
+    +         !     2399 CorUnix::CPalSynchronizationManager::ThreadNativeWait(CorUnix::_ThreadNativeWaitData*, unsigned int, CorUnix::ThreadWakeupReason*, unsigned int*)  (in libmscordaccore.dylib) + 245
+    +         !       2399 _pthread_cond_wait  (in libsystem_pthread.dylib) + 1044
+    +         !         2399 __psynch_cvwait  (in libsystem_kernel.dylib) + 10
+    +         1 DbgTransportSession::TransportWorker()  (in libmscordbi.dylib) + 144
+    +           1 TwoWayPipe::Connect(ProcessDescriptor const&)  (in libmscordbi.dylib) + 64
+    +             1 PAL_GetTransportName  (in libmscordaccore.dylib) + 197
+    +               1 sysctl  (in libsystem_c.dylib) + 102
+    +                 1 __sysctl  (in libsystem_kernel.dylib) + 10
+
+### The next attach (AttachAndOwn_VstestTestHost_GetLocalsExcessiveDepth): its Win32 event thread waits for the DAC lock
+    2400 Thread_43858
+    + 2400 thread_start  (in libsystem_pthread.dylib) + 15
+    +   2400 _pthread_start  (in libsystem_pthread.dylib) + 115
+    +     2400 CorUnix::CPalThread::ThreadEntry(void*)  (in libmscordaccore.dylib) + 376
+    +       2400 CordbWin32EventThread::ThreadProc(void*)  (in libmscordbi.dylib) + 29
+    +         2400 CordbWin32EventThread::Win32EventLoop()  (in libmscordbi.dylib) + 330
+    +           2400 CordbWin32EventThread::AttachProcess()  (in libmscordbi.dylib) + 144
+    +             2400 CordbProcess::OpenVirtualProcess(unsigned long long, IUnknown*, void*, Cordb*, ProcessDescriptor const*, ShimProcess*, CordbProcess**)  (in libmscordbi.dylib) + 331
+    +               2400 CordbProcess::Init()  (in libmscordbi.dylib) + 569
+    +                 2400 CordbProcess::ForceDacFlush()  (in libmscordbi.dylib) + 197
+    +                   2400 DacDbiInterfaceImpl::FlushCache()  (in libmscordaccore.dylib) + 39
+    +                     2400 _pthread_mutex_firstfit_lock_slow  (in libsystem_pthread.dylib) + 215
+    +                       2400 _pthread_mutex_firstfit_lock_wait  (in libsystem_pthread.dylib) + 78
+    +                         2400 __psynch_mutexwait  (in libsystem_kernel.dylib) + 10
+
+### Its transport thread (connected; the target, testhost pid 14585, is alive and waiting for a debugger)
+    2400 Thread_43859: .NET DebugPipe
+    + 2400 thread_start  (in libsystem_pthread.dylib) + 15
+    +   2400 _pthread_start  (in libsystem_pthread.dylib) + 115
+    +     2400 CorUnix::CPalThread::ThreadEntry(void*)  (in libmscordaccore.dylib) + 376
+    +       2400 DbgTransportSession::TransportWorkerStatic(void*)  (in libmscordbi.dylib) + 37
+    +         2400 DbgTransportSession::TransportWorker()  (in libmscordbi.dylib) + 1634
+    +           2400 TwoWayPipe::Read(void*, unsigned int)  (in libmscordbi.dylib) + 33
+    +             2400 __read_nocancel  (in libsystem_kernel.dylib) + 10
+
+## Managed stack of the test thread, record 1 (dotnet-stack)
+
+Thread (0xA96E):
+  [Native Frames]
+  SkyOmega.DrHook.Engine!<SkyOmega_DrHook_Engine_Interop_ICorDebug>F20C5E5520BE5C70D839AB1131C7AD71F46910EE37FF2B9B862F14DB74F5F824C__InterfaceImplementation.global::SkyOmega.DrHook.Engine.Interop.ICorDebug.DebugActiveProcess(unsigned int32,int32,int&)
+  SkyOmega.DrHook.Engine!SkyOmega.DrHook.Engine.DebugSession.FromCordbg(class SkyOmega.DrHook.Engine.Interop.DbgShim,class SkyOmega.DrHook.Engine.IDebugEventSink,int32,int,bool,class System.Diagnostics.Process,value class System.TimeSpan,class System.String,class System.String,value class System.Nullable`1<int32>)
+  SkyOmega.DrHook.Engine!SkyOmega.DrHook.Engine.DebugSession.AttachAndOwn(int32,class SkyOmega.DrHook.Engine.IDebugEventSink,value class System.Nullable`1<value class System.TimeSpan>)
+  DrHook.Engine.IntegrationTests!DrHook.Engine.IntegrationTests.AnomalyInjectionTest.AttachAndOwn_VstestTestHost_GetLocalsExcessiveDepth_DepthClampedAnomalyFires()
+  System.Private.CoreLib!System.Reflection.MethodBaseInvoker.InterpretedInvoke_Method(class System.Object,int*)
+  System.Private.CoreLib!System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(class System.Object,value class System.Reflection.BindingFlags)
+  System.Private.CoreLib!System.Reflection.RuntimeMethodInfo.Invoke(class System.Object,value class System.Reflection.BindingFlags,class System.Reflection.Binder,class System.Object[],class System.Globalization.CultureInfo)
+  MSTestAdapter.PlatformServices!Microsoft.VisualStudio.TestPlatform.MSTest.TestAdapter.Extensions.MethodInfoExtensions.GetInvokeResultWithParametersAsync(class System.Reflection.MethodInfo,class System.Object,class System.Reflection.ParameterInfo[],class System.Object[])
+  MSTestAdapter.PlatformServices!Microsoft.VisualStudio.TestPlatform.MSTest.TestAdapter.Execution.TestMethodInfo+<ExecuteInternalAsync>d__63.MoveNext()
+  System.Private.CoreLib!System.Runtime.CompilerServices.AsyncMethodBuilderCore.Start(!!0&)
+  System.Private.CoreLib!System.Runtime.CompilerServices.AsyncTaskMethodBuilder`1[System.__Canon].Start(!!0&)
+  MSTestAdapter.PlatformServices!Microsoft.VisualStudio.TestPlatform.MSTest.TestAdapter.Execution.TestMethodInfo.ExecuteInternalAsync(class System.Object[],class System.Threading.CancellationTokenSource,class TestInvocationState)
+  MSTestAdapter.PlatformServices!Microsoft.VisualStudio.TestPlatform.MSTest.TestAdapter.Execution.TestMethodInfo+<>c__DisplayClass67_0.<ExecuteInternalWithTimeoutAsync>g__ExecuteAsyncAction|1()
+  System.Private.CoreLib!System.Threading.ExecutionContext.RunFromThreadPoolDispatchLoop(class System.Threading.Thread,class System.Threading.ExecutionContext,class System.Threading.ContextCallback,class System.Object)
+  System.Private.CoreLib!System.Threading.Tasks.Task.ExecuteWithThreadLocal(class System.Threading.Tasks.Task&,class System.Threading.Thread)
+  System.Private.CoreLib!System.Threading.ThreadPoolWorkQueue.Dispatch()
+  System.Private.CoreLib!System.Threading.PortableThreadPool+WorkerThread.WorkerThreadStart()
+  System.Private.CoreLib!System.Threading.Thread.StartCallback()
+
+
+## Record 2 (08:16): lines in the native sample naming each frame (each frame appears once per thread here)
+
+    DacDbiInterfaceImpl::RequestSyncAtEvent       1
+    DacDbiInterfaceImpl::FlushCache               3
+    TwoWayPipe::Read                              3
+    UnrecoverableError                            0
+    DacDbiInterfaceImpl::IsThreadMarkedDead       0
+
+    Managed test threads in DebugSession.FromCordbg -> ICorDebug.DebugActiveProcess (record 2):
+      AnomalyInjectionTest.AttachAndOwn_VstestTestHost_GetLocalsExcessiveDepth_DepthClampedAnomalyFires()
+      BorrowedIdleDetachTest.Attach_PauseStop_Dispose_DetachesCleanly_AndTargetExitLeavesHostAlive()
+      AttachDisposeTest.AttachAndOwn_MtpTarget_BriefWork_NaturalExit()

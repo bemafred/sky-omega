@@ -3,7 +3,9 @@
 **Date:** 2026-10-30
 **Status:** Mechanism **PROVEN**: located from stacks of the hung process on a GitHub macOS runner and the runtime
 source (`release/10.0`), then reproduced on omega by probe 100. **Not fixed.** A defect in mscordbi's design that
-DrHook's owned teardown runs into. **What made it frequent on CI is not established** (Symptom).
+DrHook's owned teardown runs into. **What made it frequent on CI is not established** (Symptom). On 2026-11-05 the
+same state was recorded with the event thread in a **write** to the target, not a read (Where it hung); the
+mechanism below covers both, but probe 100 has reproduced only the read.
 
 ## Symptom
 
@@ -26,6 +28,10 @@ every run, and DrHook's own code did not change in this period.
   macOS arm64, run with GitHub's debug logging) and both jobs of run 41174461744 (d529267, documentation only, no
   debug logging), 2026-10-31. So the cascade does not need the printing; whether the printing made it more
   frequent, counts this small do not show.
+- **A cascade that did not follow a flood test.** Run 41889846674's attempt 2 (`f4bd82e`, macOS x64, 2026-11-05):
+  16 tests timed out, starting with `AttachAndOwn_VstestTestHost_GetLocalsExcessiveDepth`, 3 s into the suite. The
+  session left in the DAC belongs to a test that ran in those 3 s and passed (Where it hung). The other three jobs
+  rerun in that attempt (macOS arm64, Windows x64, Windows arm64) passed.
 
 The tests pass on omega in about a second.
 
@@ -60,6 +66,22 @@ into the suite, with `sample` (native stacks) and `dotnet-stack` (managed stacks
   second, and seven transport threads in `TwoWayPipe::Connect`. Run 41174461744 recorded it on both macOS runners:
   the same read, one attach waiting in `FlushCache` and then two (x64) or three (arm64), and six (x64) or eight
   (arm64) transport threads in `TwoWayPipe::Connect`.
+- **With a write, 2026-11-05.** Run 41889846674's attempt 2, macOS x64 (runtime 10.0.14), recorded the host 97 s
+  and about 4 min after it started. An excerpt is in
+  [`100-orphaned-transport-read-holds-dac-lock/`](100-orphaned-transport-read-holds-dac-lock/macos-x64-host-14374-write-excerpt.txt).
+  - The thread inside the DAC is again a Win32 event thread dispatching a runtime event, here an assembly load:
+    `HandleWin32DebugEvent` → `Filter` → `HandleRCEvent` → `RawDispatchEvent` → `ShimProxyCallback::LoadAssembly`
+    → `DacDbiInterfaceImpl::RequestSyncAtEvent` → `DbgTransportSession::WriteMemory` → `SendRequestMessageAndWait`.
+    It is a **write**; the earlier records were a read (`IsThreadMarkedDead` → `ReadMemory`).
+  - Its transport thread is not blocked in `open()` as before. It sleeps between connect attempts (2,399 of 2,400
+    samples in `Sleep`, one in `TwoWayPipe::Connect`). Why it differs is not known.
+  - Every later attach waits in `FlushCache`: the first VSTest-target test's in the first record, and two more in the
+    second (`BorrowedIdleDetachTest`, `AttachDisposeTest`). Their targets were alive and waiting for a debugger.
+  - The suite runs one test at a time (`[assembly: DoNotParallelize]`). The stuck session belongs to a test that ran
+    between the host's start (08:12:16.9) and the hung test's start (08:12:19.8), and passed: no managed thread is
+    still in its code, so its `Dispose` returned. Which test it was is not recorded, because the log lists only
+    failed tests. The test declared just before the hung one is its MTP twin,
+    `AttachAndOwn_MtpTarget_GetLocalsExcessiveDepth`, which resumes its target and lets it run to the end.
 
 ## Mechanism (runtime source, `release/10.0`)
 
@@ -88,6 +110,17 @@ into the suite, with `sample` (native stacks) and `dotnet-stack` (managed stacks
 - So a read made by any other thread is released when the target dies, and a read made by the Win32 event thread
   itself, mid-dispatch, never is: the only thread that would handle the exit is the one waiting. It keeps the DAC's
   lock, and the target's pipes stay, so its transport thread blocks reopening them.
+- A write waits the same way. `DbgTransportSession::WriteMemory` sends its request through the same
+  `SendRequestMessageAndWait`, so a write made by the Win32 event thread mid-dispatch is never released either (the
+  2026-11-05 record). What `RequestSyncAtEvent` writes is not read here: the DAC's source
+  (`debug/daccess/dacdbiimpl.cpp`) was not part of this reading.
+- **Why the stuck session's `Dispose` returned.** A hypothesis from `Cordb::Terminate` (`debug/di/rsmain.cpp`), not
+  tested. `Terminate` refuses to run while a process is still in its list, is safe to send events to, and has no
+  unrecoverable error. It then returns `CORDBG_E_ILLEGAL_SHUTDOWN_ORDER` at once, without stopping the event
+  threads. A successful `Detach` removes the process from that list, so this needs the stuck session's `Detach` to
+  have failed. Then `Dispose` would return and leave the event thread, and the DAC's lock, as they were. DrHook would report that HRESULT as an `UnexpectedHResult` anomaly,
+  which a passing test does not print. [Finding 103](103-terminate-waits-on-error-write.md) is the other branch: an
+  unrecoverable error was marked first, so `Terminate` passed this check and blocked waiting for the event thread.
 
 ## Probe 100 (`poc/drhook-engine/100-orphaned-read-smoke.cs`)
 
