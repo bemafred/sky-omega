@@ -95,6 +95,33 @@ public class AtomStoreRecoveryTests : IDisposable
     }
 
     [Fact]
+    public void AStoreThatRefusesAtoms_RefusesABatchBeforeItWritesTheWal()
+    {
+        // A refused write must not touch the store at all. Before the fix, BeginBatch appended its
+        // WAL begin record and only the first AddBatched refused, so every refused INSERT grew the
+        // WAL by one record (seen on a copy of elite's store, 2026-11-05).
+        var storeDir = Path.Combine(_dir, "quadstore");
+        using (var store = new QuadStore(storeDir))
+            store.AddCurrent("<urn:s>", "<urn:p>", "\"o\"", "<urn:g>");
+
+        var atoms = Path.Combine(storeDir, "atoms");
+        ResetHeaderToNew(atoms);
+        WriteOffset(3, DataStart + 5, atoms);
+        var wal = Path.Combine(storeDir, "wal.log");
+
+        using var reopened = new QuadStore(storeDir);
+        var walBefore = new FileInfo(wal).Length;
+
+        var ex = Assert.Throws<InvalidOperationException>(() => reopened.BeginBatch());
+        Assert.Contains("damaged", ex.Message);
+        Assert.Equal(walBefore, new FileInfo(wal).Length);
+
+        // The write lock was released: a second attempt gets the same refusal, not a lock error.
+        ex = Assert.Throws<InvalidOperationException>(() => reopened.BeginBatch());
+        Assert.Contains("damaged", ex.Message);
+    }
+
+    [Fact]
     public void ALeftoverOffsetPastTheHeader_IsIgnored()
     {
         // Clear before ADR-058 left offset entries in place. An entry right after the header that

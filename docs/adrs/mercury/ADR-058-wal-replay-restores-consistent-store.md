@@ -439,6 +439,12 @@ Done, on zbook (Linux x64), with every test in the solution passing (6,676):
   anywhere in `Dispose` loses nothing. The `dispose-killed` tests check it.
 - **D7**, with tests on edited files (`AtomStoreRecoveryTests.cs`): a header behind
   the data, a chain that breaks, a leftover offset, and `Clear` then reopen.
+- **A refused write writes nothing** (2026-11-05). Found on a copy of elite's store:
+  `BeginBatch` appended its begin record before the first `AddBatched` checked
+  `WriteRefusal`, so each refused `INSERT` left an 80-byte begin record with no commit.
+  Replay ignored it, but a read-only store should not write. `BeginBatch` now refuses
+  first; `AtomStoreRecoveryTests` checks that the WAL keeps its length and that the write
+  lock is released.
 
 Cost, measured on zbook (NVMe, `/data`, Release, 1,000 single `AddCurrent` with new
 terms and 200 `CommitBatch` of 50): a single write went from 4.0–4.3 ms to 6.5–6.8 ms
@@ -459,9 +465,6 @@ Not done yet:
   `FlushViewOfFile`, which does not reach the disk without `FlushFileBuffers`. This
   holds for every mmap'd file Mercury writes, not only the atoms.
 - **Q6** (repair). Q7 is answered and fixed (see Q7).
-- **A refused write still writes the WAL.** `BeginBatch` appends its begin record before
-  the first `AddBatched` checks `WriteRefusal`, so each refused `INSERT` leaves an 80-byte
-  begin record with no commit. Replay ignores it, but a read-only store should not write.
 
 Validation 9, on elite, 2026-11-05 (tools 1.8.39 from `f6464c74`, Claude Code 2.0.76,
 scratch store `/data/shutdown-test/r9`, script `bin/v9.sh`). The same `claude -p` call

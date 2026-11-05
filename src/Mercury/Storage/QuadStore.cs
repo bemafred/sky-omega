@@ -843,6 +843,11 @@ public sealed class QuadStore : IDisposable
             if (_activeBatchTxId >= 0 || _referenceBulkActive || _minimalBulkActive)
                 throw new InvalidOperationException("A batch is already active.");
 
+            // ADR-058 D7: a damaged store refuses the batch here, before the WAL begin record is
+            // written, so a refused write leaves the store's files as they were.
+            if (_atoms.WriteRefusal is { } refusal)
+                throw new InvalidOperationException($"Operation '{nameof(BeginBatch)}' refused. {refusal}");
+
             // ADR-029 Minimal profile: same shape as Reference but with a single GSPO
             // index and no graph dimension. No WAL, no sorter (Minimal is mid-scale,
             // not Wikidata-scale), no SortedAtomBulkBuilder. Writes go straight into
