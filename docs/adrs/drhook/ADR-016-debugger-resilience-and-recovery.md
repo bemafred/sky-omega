@@ -532,6 +532,18 @@ target vanishes, and whether one whose bound expired ever completes later; wheth
 sessions; which level each consequence reaches; whether DrHook
 can detect it; and whether finding 100's fault is the target's abrupt disappearance rather than the signal that
 caused it.
+*Kill and FailFast run 2026-11-05* ([finding 104](../../../poc/drhook-engine/findings/104-crash-boundary.md); probe
+100 at `f072f0c` on omega, and on omega-ubuntu with both builds; 10 runs per mode per machine and build; Martin
+approved the omega runs, which hang only the probe's own child process).
+- A target that ends itself with `Environment.FailFast`, every stop continued, left the debugger unusable 2 of 10 on
+  omega and 8 of 20 on omega-ubuntu. So the fault follows the disappearance, not DrHook's signal.
+- Ending the session at the `Exception(Unhandled)` stop that precedes the crash was clean 60 of 60: kill 30, detach 30.
+- So was a kill after a Pause, 30 of 30.
+- Later sessions in the process were contaminated whenever it hung.
+- DrHook detected none of the hangs.
+
+Not yet run: a stack overflow, a native fault, a `DebuggerError`, Linux x64, Windows, and whether a bounded
+operation completes later.
 
 **Step 5 — A minimal process-isolation proof of concept.** A supervisor and one worker. Induce finding 100's exact
 failure in the worker; the supervisor must detect it, discard the worker, and conduct a fresh session that succeeds.

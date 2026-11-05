@@ -1,0 +1,885 @@
+2026-11-05T19:22:16Z
+== Ubuntu build
+Microsoft.NETCore.App 10.0.14 [/usr/lib/dotnet/shared/Microsoft.NETCore.App]
+platform: Ubuntu 26.04.1 LTS Arm64
+flood-sync-kill run 1: sync-kill-attach-ok
+    target=2164020
+    attached; the target floods thread events [1020 ms]
+    stop: Pause [2021 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [2021 ms]
+    target killed (SIGKILL) while synchronized [2022 ms]
+    target gone [2042 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [12053 ms]
+    the dead target's pipes: absent [12054 ms]
+    second=2181344
+    second attach finished: attached [13072 ms]
+flood-sync-kill run 2: sync-kill-attach-ok
+    target=2181375
+    attached; the target floods thread events [1024 ms]
+    stop: Pause [2025 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [2025 ms]
+    target killed (SIGKILL) while synchronized [2025 ms]
+    target gone [2045 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [12049 ms]
+    the dead target's pipes: absent [12050 ms]
+    second=2198977
+    second attach finished: attached [13070 ms]
+flood-sync-kill run 3: sync-kill-attach-ok
+    target=2199008
+    attached; the target floods thread events [1026 ms]
+    stop: Pause [2027 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [2027 ms]
+    target killed (SIGKILL) while synchronized [2027 ms]
+    target gone [2048 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [12054 ms]
+    the dead target's pipes: absent [12055 ms]
+    second=2216248
+    second attach finished: attached [13075 ms]
+flood-sync-kill run 4: sync-kill-attach-ok
+    target=2216279
+    attached; the target floods thread events [1025 ms]
+    stop: Pause [2026 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [2026 ms]
+    target killed (SIGKILL) while synchronized [2026 ms]
+    target gone [2047 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [12051 ms]
+    the dead target's pipes: absent [12053 ms]
+    second=2233094
+    second attach finished: attached [13064 ms]
+flood-sync-kill run 5: sync-kill-attach-ok
+    target=2233126
+    attached; the target floods thread events [1025 ms]
+    stop: Pause [2026 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [2026 ms]
+    target killed (SIGKILL) while synchronized [2026 ms]
+    target gone [2050 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [12059 ms]
+    the dead target's pipes: absent [12060 ms]
+    second=2250203
+    second attach finished: attached [13079 ms]
+flood-sync-kill run 6: sync-kill-attach-ok
+    target=2250234
+    attached; the target floods thread events [1024 ms]
+    stop: Pause [2025 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [2025 ms]
+    target killed (SIGKILL) while synchronized [2026 ms]
+    target gone [2046 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [12050 ms]
+    the dead target's pipes: absent [12051 ms]
+    second=2267712
+    second attach finished: attached [13066 ms]
+flood-sync-kill run 7: sync-kill-attach-ok
+    target=2267743
+    attached; the target floods thread events [1025 ms]
+    stop: Pause [2026 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [2026 ms]
+    target killed (SIGKILL) while synchronized [2026 ms]
+    target gone [2046 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [12048 ms]
+    the dead target's pipes: absent [12049 ms]
+    second=2284944
+    second attach finished: attached [13061 ms]
+flood-sync-kill run 8: sync-kill-attach-ok
+    target=2284976
+    attached; the target floods thread events [1025 ms]
+    stop: Pause [2026 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [2026 ms]
+    target killed (SIGKILL) while synchronized [2026 ms]
+    target gone [2046 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [12053 ms]
+    the dead target's pipes: absent [12054 ms]
+    second=2302327
+    second attach finished: attached [13074 ms]
+flood-sync-kill run 9: sync-kill-attach-ok
+    target=2302359
+    attached; the target floods thread events [1025 ms]
+    stop: Pause [2026 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [2026 ms]
+    target killed (SIGKILL) while synchronized [2026 ms]
+    target gone [2046 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [12050 ms]
+    the dead target's pipes: absent [12051 ms]
+    second=2319706
+    second attach finished: attached [13060 ms]
+flood-sync-kill run 10: sync-kill-attach-ok
+    target=2319738
+    attached; the target floods thread events [1027 ms]
+    stop: Pause [2028 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [2028 ms]
+    target killed (SIGKILL) while synchronized [2028 ms]
+    target gone [2048 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [12053 ms]
+    the dead target's pipes: absent [12054 ms]
+    second=2336968
+    second attach finished: attached [13075 ms]
+flood-crash run 1: crash-attach-ok
+    target=2337000
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1025 ms]
+    stops seen before the end: Exception(Unhandled) [5224 ms]
+    target gone (FailFast) [5224 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [15239 ms]
+    the dead target's pipes: absent [15240 ms]
+    second=2357162
+    second attach finished: attached [16255 ms]
+flood-crash run 2: crash-attach-hung
+    target=2357194
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1019 ms]
+    stops seen before the end: Exception(Unhandled) [4307 ms]
+    target gone (FailFast) [4307 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [14397 ms]
+    the dead target's pipes: absent [14397 ms]
+    second=2374744
+    second attach still pending after 30 s [45406 ms]
+flood-crash run 3: crash-attach-hung
+    target=2374864
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1027 ms]
+    stops seen before the end: Exception(Unhandled) [3040 ms]
+    target gone (FailFast) [3040 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [13167 ms]
+    the dead target's pipes: absent [13169 ms]
+    second=2391889
+    second attach still pending after 30 s [44183 ms]
+flood-crash run 4: crash-attach-ok
+    target=2392008
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1027 ms]
+    stops seen before the end: Exception(Unhandled), ProcessExited [3658 ms]
+    target gone (FailFast) [3658 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [13873 ms]
+    the dead target's pipes: absent [13874 ms]
+    second=2410330
+    second attach finished: attached [14887 ms]
+flood-crash run 5: crash-attach-ok
+    target=2410362
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1024 ms]
+    stops seen before the end: Exception(Unhandled) [5029 ms]
+    target gone (FailFast) [5029 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [15031 ms]
+    the dead target's pipes: absent [15032 ms]
+    second=2431789
+    second attach finished: attached [16042 ms]
+flood-crash run 6: crash-attach-ok
+    target=2431821
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1027 ms]
+    stops seen before the end: Exception(Unhandled), ProcessExited [4383 ms]
+    target gone (FailFast) [4383 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [14582 ms]
+    the dead target's pipes: absent [14583 ms]
+    second=2451609
+    second attach finished: attached [15602 ms]
+flood-crash run 7: crash-attach-ok
+    target=2451641
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1025 ms]
+    stops seen before the end: Exception(Unhandled) [4540 ms]
+    target gone (FailFast) [4540 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [14563 ms]
+    the dead target's pipes: absent [14564 ms]
+    second=2472262
+    second attach finished: attached [15580 ms]
+flood-crash run 8: crash-attach-hung
+    target=2472294
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1025 ms]
+    stops seen before the end: Exception(Unhandled) [3541 ms]
+    target gone (FailFast) [3541 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [13712 ms]
+    the dead target's pipes: absent [13713 ms]
+    second=2490611
+    second attach still pending after 30 s [44730 ms]
+flood-crash run 9: crash-attach-ok
+    target=2490730
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1025 ms]
+    stops seen before the end: Exception(Unhandled) [4367 ms]
+    target gone (FailFast) [4367 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [14395 ms]
+    the dead target's pipes: absent [14396 ms]
+    second=2510866
+    second attach finished: attached [15408 ms]
+flood-crash run 10: crash-attach-ok
+    target=2510898
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1024 ms]
+    stops seen before the end: Exception(Unhandled) [3796 ms]
+    target gone (FailFast) [3796 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [13807 ms]
+    the dead target's pipes: absent [13808 ms]
+    second=2530108
+    second attach finished: attached [14820 ms]
+flood-crash-kill run 1: crash-kill-attach-ok
+    target=2530140
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1026 ms]
+    stops seen: Exception(Unhandled) [3913 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [3915 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [3915 ms]
+    target killed (SIGKILL) at the unhandled-exception stop [3915 ms]
+    target gone [3936 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [13938 ms]
+    the dead target's pipes: absent [13939 ms]
+    second=2551629
+    second attach finished: attached [14958 ms]
+flood-crash-kill run 2: crash-kill-attach-ok
+    target=2551660
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1025 ms]
+    stops seen: Exception(Unhandled) [3746 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [3748 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [3748 ms]
+    target killed (SIGKILL) at the unhandled-exception stop [3749 ms]
+    target gone [3770 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [13781 ms]
+    the dead target's pipes: absent [13782 ms]
+    second=2572707
+    second attach finished: attached [14794 ms]
+flood-crash-kill run 3: crash-kill-attach-ok
+    target=2572739
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1025 ms]
+    stops seen: Exception(Unhandled) [2511 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [2513 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [2513 ms]
+    target killed (SIGKILL) at the unhandled-exception stop [2513 ms]
+    target gone [2534 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [12545 ms]
+    the dead target's pipes: absent [12546 ms]
+    second=2590972
+    second attach finished: attached [13565 ms]
+flood-crash-kill run 4: crash-kill-attach-ok
+    target=2591004
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1024 ms]
+    stops seen: Exception(Unhandled) [2136 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [2138 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [2138 ms]
+    target killed (SIGKILL) at the unhandled-exception stop [2138 ms]
+    target gone [2159 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [12162 ms]
+    the dead target's pipes: absent [12163 ms]
+    second=2609274
+    second attach finished: attached [13182 ms]
+flood-crash-kill run 5: crash-kill-attach-ok
+    target=2609306
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1025 ms]
+    stops seen: Exception(Unhandled) [3701 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [3703 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [3703 ms]
+    target killed (SIGKILL) at the unhandled-exception stop [3703 ms]
+    target gone [3723 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [13729 ms]
+    the dead target's pipes: absent [13730 ms]
+    second=2630288
+    second attach finished: attached [14745 ms]
+flood-crash-kill run 6: crash-kill-attach-ok
+    target=2630320
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1025 ms]
+    stops seen: Exception(Unhandled) [1596 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [1598 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [1598 ms]
+    target killed (SIGKILL) at the unhandled-exception stop [1598 ms]
+    target gone [1619 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [11630 ms]
+    the dead target's pipes: absent [11631 ms]
+    second=2646725
+    second attach finished: attached [12650 ms]
+flood-crash-kill run 7: crash-kill-attach-ok
+    target=2646757
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1025 ms]
+    stops seen: Exception(Unhandled) [3341 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [3343 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [3343 ms]
+    target killed (SIGKILL) at the unhandled-exception stop [3343 ms]
+    target gone [3363 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [13373 ms]
+    the dead target's pipes: absent [13374 ms]
+    second=2667033
+    second attach finished: attached [14384 ms]
+flood-crash-kill run 8: crash-kill-attach-ok
+    target=2667065
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1025 ms]
+    stops seen: Exception(Unhandled) [2071 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [2073 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [2073 ms]
+    target killed (SIGKILL) at the unhandled-exception stop [2073 ms]
+    target gone [2095 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [12098 ms]
+    the dead target's pipes: absent [12099 ms]
+    second=2684715
+    second attach finished: attached [13118 ms]
+flood-crash-kill run 9: crash-kill-attach-ok
+    target=2684747
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1024 ms]
+    stops seen: Exception(Unhandled) [2926 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [2928 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [2928 ms]
+    target killed (SIGKILL) at the unhandled-exception stop [2928 ms]
+    target gone [2949 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [12959 ms]
+    the dead target's pipes: absent [12960 ms]
+    second=2704067
+    second attach finished: attached [13974 ms]
+flood-crash-kill run 10: crash-kill-attach-ok
+    target=2704099
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1025 ms]
+    stops seen: Exception(Unhandled) [3881 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [3883 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [3883 ms]
+    target killed (SIGKILL) at the unhandled-exception stop [3884 ms]
+    target gone [3904 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [13911 ms]
+    the dead target's pipes: absent [13912 ms]
+    second=2725069
+    second attach finished: attached [14926 ms]
+flood-crash-detach run 1: crash-detach-attach-ok
+    target=2725101
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1025 ms]
+    stops seen: Exception(Unhandled) [3120 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [3121 ms]
+    detached at the unhandled-exception stop [3150 ms]
+    target gone (FailFast, no debugger attached) [4194 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [14206 ms]
+    the dead target's pipes: absent [14207 ms]
+    second=2744917
+    second attach finished: attached [15220 ms]
+flood-crash-detach run 2: crash-detach-attach-ok
+    target=2744949
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1025 ms]
+    stops seen: Exception(Unhandled) [2933 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [2935 ms]
+    detached at the unhandled-exception stop [2963 ms]
+    target gone (FailFast, no debugger attached) [4022 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [14024 ms]
+    the dead target's pipes: absent [14025 ms]
+    second=2764286
+    second attach finished: attached [15044 ms]
+flood-crash-detach run 3: crash-detach-attach-ok
+    target=2764318
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1025 ms]
+    stops seen: Exception(Unhandled) [2235 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [2237 ms]
+    detached at the unhandled-exception stop [2260 ms]
+    target gone (FailFast, no debugger attached) [3315 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [13321 ms]
+    the dead target's pipes: absent [13322 ms]
+    second=2782406
+    second attach finished: attached [14341 ms]
+flood-crash-detach run 4: crash-detach-attach-ok
+    target=2782439
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1025 ms]
+    stops seen: Exception(Unhandled) [3116 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [3117 ms]
+    detached at the unhandled-exception stop [3140 ms]
+    target gone (FailFast, no debugger attached) [4195 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [14200 ms]
+    the dead target's pipes: absent [14201 ms]
+    second=2802201
+    second attach finished: attached [15213 ms]
+flood-crash-detach run 5: crash-detach-attach-ok
+    target=2802233
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1025 ms]
+    stops seen: Exception(Unhandled) [3671 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [3673 ms]
+    detached at the unhandled-exception stop [3696 ms]
+    target gone (FailFast, no debugger attached) [4765 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [14767 ms]
+    the dead target's pipes: absent [14768 ms]
+    second=2822968
+    second attach finished: attached [15781 ms]
+flood-crash-detach run 6: crash-detach-attach-ok
+    target=2822998
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1025 ms]
+    stops seen: Exception(Unhandled) [2048 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [2050 ms]
+    detached at the unhandled-exception stop [2078 ms]
+    target gone (FailFast, no debugger attached) [3125 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [13127 ms]
+    the dead target's pipes: absent [13128 ms]
+    second=2840293
+    second attach finished: attached [14148 ms]
+flood-crash-detach run 7: crash-detach-attach-ok
+    target=2840325
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1025 ms]
+    stops seen: Exception(Unhandled) [1576 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [1577 ms]
+    detached at the unhandled-exception stop [1600 ms]
+    target gone (FailFast, no debugger attached) [2664 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [12669 ms]
+    the dead target's pipes: absent [12670 ms]
+    second=2856664
+    second attach finished: attached [13684 ms]
+flood-crash-detach run 8: crash-detach-attach-ok
+    target=2856696
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1024 ms]
+    stops seen: Exception(Unhandled) [2638 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [2640 ms]
+    detached at the unhandled-exception stop [2663 ms]
+    target gone (FailFast, no debugger attached) [3720 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [13723 ms]
+    the dead target's pipes: absent [13724 ms]
+    second=2875669
+    second attach finished: attached [14736 ms]
+flood-crash-detach run 9: crash-detach-attach-ok
+    target=2875700
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1026 ms]
+    stops seen: Exception(Unhandled) [2256 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [2257 ms]
+    detached at the unhandled-exception stop [2283 ms]
+    target gone (FailFast, no debugger attached) [3334 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [13336 ms]
+    the dead target's pipes: absent [13337 ms]
+    second=2893710
+    second attach finished: attached [14346 ms]
+flood-crash-detach run 10: crash-detach-attach-ok
+    target=2893741
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1026 ms]
+    stops seen: Exception(Unhandled) [4002 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [4004 ms]
+    detached at the unhandled-exception stop [4029 ms]
+    target gone (FailFast, no debugger attached) [5094 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [15105 ms]
+    the dead target's pipes: absent [15107 ms]
+    second=2915015
+    second attach finished: attached [16124 ms]
+flood-sync-kill sync-kill-attach-ok: 10; flood-crash crash-attach-ok: 7; flood-crash crash-attach-hung: 3; flood-crash-kill crash-kill-attach-ok: 10; flood-crash-detach crash-detach-attach-ok: 10
+flood-sync-kill: predicted sync-kill-attach-ok, 10 of 10
+flood-crash: predicted crash-attach-ok, 7 of 10
+flood-crash-kill: predicted crash-kill-attach-ok, 10 of 10
+flood-crash-detach: predicted crash-detach-attach-ok, 10 of 10
+RESULT(1): not confirmed as stated (see the outcomes above)
+exit 1
+2026-11-05T19:33:24Z
+== Microsoft build
+Microsoft.NETCore.App 10.0.13 [/home/bemafred/.dotnet/shared/Microsoft.NETCore.App]
+Microsoft.NETCore.App 10.0.14 [/home/bemafred/.dotnet/shared/Microsoft.NETCore.App]
+platform: Ubuntu 26.04.1 LTS Arm64
+flood-sync-kill run 1: sync-kill-attach-ok
+    target=2915126
+    attached; the target floods thread events [1016 ms]
+    stop: Pause [2017 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [2017 ms]
+    target killed (SIGKILL) while synchronized [2017 ms]
+    target gone [2038 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [12041 ms]
+    the dead target's pipes: absent [12042 ms]
+    second=2932531
+    second attach finished: attached [13061 ms]
+flood-sync-kill run 2: sync-kill-attach-ok
+    target=2932558
+    attached; the target floods thread events [1022 ms]
+    stop: Pause [2023 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [2023 ms]
+    target killed (SIGKILL) while synchronized [2023 ms]
+    target gone [2044 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [12045 ms]
+    the dead target's pipes: absent [12047 ms]
+    second=2950438
+    second attach finished: attached [13066 ms]
+flood-sync-kill run 3: sync-kill-attach-ok
+    target=2950465
+    attached; the target floods thread events [1023 ms]
+    stop: Pause [2024 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [2024 ms]
+    target killed (SIGKILL) while synchronized [2024 ms]
+    target gone [2045 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [12049 ms]
+    the dead target's pipes: absent [12051 ms]
+    second=2967777
+    second attach finished: attached [13067 ms]
+flood-sync-kill run 4: sync-kill-attach-ok
+    target=2967805
+    attached; the target floods thread events [1024 ms]
+    stop: Pause [2024 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [2024 ms]
+    target killed (SIGKILL) while synchronized [2025 ms]
+    target gone [2045 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [12046 ms]
+    the dead target's pipes: absent [12048 ms]
+    second=2985401
+    second attach finished: attached [13068 ms]
+flood-sync-kill run 5: sync-kill-attach-ok
+    target=2985429
+    attached; the target floods thread events [1023 ms]
+    stop: Pause [2024 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [2024 ms]
+    target killed (SIGKILL) while synchronized [2024 ms]
+    target gone [2045 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [12048 ms]
+    the dead target's pipes: absent [12049 ms]
+    second=3002843
+    second attach finished: attached [13057 ms]
+flood-sync-kill run 6: sync-kill-attach-ok
+    target=3002870
+    attached; the target floods thread events [1023 ms]
+    stop: Pause [2024 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [2024 ms]
+    target killed (SIGKILL) while synchronized [2024 ms]
+    target gone [2044 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [12055 ms]
+    the dead target's pipes: absent [12057 ms]
+    second=3020072
+    second attach finished: attached [13073 ms]
+flood-sync-kill run 7: sync-kill-attach-ok
+    target=3020100
+    attached; the target floods thread events [1023 ms]
+    stop: Pause [2024 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [2024 ms]
+    target killed (SIGKILL) while synchronized [2024 ms]
+    target gone [2044 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [12055 ms]
+    the dead target's pipes: absent [12057 ms]
+    second=3037909
+    second attach finished: attached [13067 ms]
+flood-sync-kill run 8: sync-kill-attach-ok
+    target=3037937
+    attached; the target floods thread events [1023 ms]
+    stop: Pause [2024 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [2024 ms]
+    target killed (SIGKILL) while synchronized [2025 ms]
+    target gone [2045 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [12052 ms]
+    the dead target's pipes: absent [12054 ms]
+    second=3055281
+    second attach finished: attached [13068 ms]
+flood-sync-kill run 9: sync-kill-attach-ok
+    target=3055309
+    attached; the target floods thread events [1023 ms]
+    stop: Pause [2024 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [2024 ms]
+    target killed (SIGKILL) while synchronized [2024 ms]
+    target gone [2045 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [12047 ms]
+    the dead target's pipes: absent [12049 ms]
+    second=3072464
+    second attach finished: attached [13068 ms]
+flood-sync-kill run 10: sync-kill-attach-ok
+    target=3072492
+    attached; the target floods thread events [1023 ms]
+    stop: Pause [2024 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [2024 ms]
+    target killed (SIGKILL) while synchronized [2024 ms]
+    target gone [2044 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [12052 ms]
+    the dead target's pipes: absent [12053 ms]
+    second=3090131
+    second attach finished: attached [13069 ms]
+flood-crash run 1: crash-attach-hung
+    target=3090159
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1023 ms]
+    stops seen before the end: Exception(Unhandled) [2760 ms]
+    target gone (FailFast) [2760 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [12929 ms]
+    the dead target's pipes: absent [12931 ms]
+    second=3106849
+    second attach still pending after 30 s [43937 ms]
+flood-crash run 2: crash-attach-hung
+    target=3106962
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1025 ms]
+    stops seen before the end: Exception(Unhandled) [3271 ms]
+    target gone (FailFast) [3271 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [13441 ms]
+    the dead target's pipes: absent [13443 ms]
+    second=3124461
+    second attach still pending after 30 s [44463 ms]
+flood-crash run 3: crash-attach-hung
+    target=3124579
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1025 ms]
+    stops seen before the end: Exception(Unhandled) [3593 ms]
+    target gone (FailFast) [3593 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [13773 ms]
+    the dead target's pipes: absent [13775 ms]
+    second=3142555
+    second attach still pending after 30 s [44792 ms]
+flood-crash run 4: crash-attach-ok
+    target=3142671
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1025 ms]
+    stops seen before the end: Exception(Unhandled), ProcessExited [4083 ms]
+    target gone (FailFast) [4083 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [14283 ms]
+    the dead target's pipes: absent [14285 ms]
+    second=3162266
+    second attach finished: attached [15294 ms]
+flood-crash run 5: crash-attach-ok
+    target=3162295
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1023 ms]
+    stops seen before the end: Exception(Unhandled) [3724 ms]
+    target gone (FailFast) [3724 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [13732 ms]
+    the dead target's pipes: absent [13734 ms]
+    second=3181142
+    second attach finished: attached [14750 ms]
+flood-crash run 6: crash-attach-ok
+    target=3181170
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1024 ms]
+    stops seen before the end: Exception(Unhandled) [4831 ms]
+    target gone (FailFast) [4831 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [14838 ms]
+    the dead target's pipes: absent [14839 ms]
+    second=3201620
+    second attach finished: attached [15854 ms]
+flood-crash run 7: crash-attach-ok
+    target=3201660
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1023 ms]
+    stops seen before the end: Exception(Unhandled), ProcessExited [4406 ms]
+    target gone (FailFast) [4406 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [14607 ms]
+    the dead target's pipes: absent [14608 ms]
+    second=3221790
+    second attach finished: attached [15627 ms]
+flood-crash run 8: crash-attach-hung
+    target=3221818
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1023 ms]
+    stops seen before the end: Exception(Unhandled) [2946 ms]
+    target gone (FailFast) [2946 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [13082 ms]
+    the dead target's pipes: absent [13084 ms]
+    second=3238911
+    second attach still pending after 30 s [44107 ms]
+flood-crash run 9: crash-attach-hung
+    target=3239029
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1025 ms]
+    stops seen before the end: Exception(Unhandled) [2819 ms]
+    target gone (FailFast) [2819 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [12970 ms]
+    the dead target's pipes: absent [12972 ms]
+    second=3255571
+    second attach still pending after 30 s [43978 ms]
+flood-crash run 10: crash-attach-ok
+    target=3255687
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1025 ms]
+    stops seen before the end: Exception(Unhandled) [4347 ms]
+    target gone (FailFast) [4347 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [14384 ms]
+    the dead target's pipes: absent [14386 ms]
+    second=3275773
+    second attach finished: attached [15398 ms]
+flood-crash-kill run 1: crash-kill-attach-ok
+    target=3275801
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1020 ms]
+    stops seen: Exception(Unhandled) [3729 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [3735 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [3735 ms]
+    target killed (SIGKILL) at the unhandled-exception stop [3735 ms]
+    target gone [3756 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [13767 ms]
+    the dead target's pipes: absent [13768 ms]
+    second=3297075
+    second attach finished: attached [14787 ms]
+flood-crash-kill run 2: crash-kill-attach-ok
+    target=3297102
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1024 ms]
+    stops seen: Exception(Unhandled) [3297 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [3298 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [3298 ms]
+    target killed (SIGKILL) at the unhandled-exception stop [3299 ms]
+    target gone [3319 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [13330 ms]
+    the dead target's pipes: absent [13332 ms]
+    second=3316876
+    second attach finished: attached [14343 ms]
+flood-crash-kill run 3: crash-kill-attach-ok
+    target=3316904
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1024 ms]
+    stops seen: Exception(Unhandled) [2538 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [2539 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [2539 ms]
+    target killed (SIGKILL) at the unhandled-exception stop [2539 ms]
+    target gone [2560 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [12568 ms]
+    the dead target's pipes: absent [12570 ms]
+    second=3335195
+    second attach finished: attached [13579 ms]
+flood-crash-kill run 4: crash-kill-attach-ok
+    target=3335223
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1023 ms]
+    stops seen: Exception(Unhandled) [2040 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [2042 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [2042 ms]
+    target killed (SIGKILL) at the unhandled-exception stop [2042 ms]
+    target gone [2064 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [12075 ms]
+    the dead target's pipes: absent [12077 ms]
+    second=3352210
+    second attach finished: attached [13087 ms]
+flood-crash-kill run 5: crash-kill-attach-ok
+    target=3352238
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1024 ms]
+    stops seen: Exception(Unhandled) [2116 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [2118 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [2118 ms]
+    target killed (SIGKILL) at the unhandled-exception stop [2118 ms]
+    target gone [2138 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [12140 ms]
+    the dead target's pipes: absent [12142 ms]
+    second=3369537
+    second attach finished: attached [13154 ms]
+flood-crash-kill run 6: crash-kill-attach-ok
+    target=3369565
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1023 ms]
+    stops seen: Exception(Unhandled) [3146 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [3147 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [3147 ms]
+    target killed (SIGKILL) at the unhandled-exception stop [3147 ms]
+    target gone [3169 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [13179 ms]
+    the dead target's pipes: absent [13181 ms]
+    second=3389447
+    second attach finished: attached [14194 ms]
+flood-crash-kill run 7: crash-kill-attach-ok
+    target=3389475
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1024 ms]
+    stops seen: Exception(Unhandled) [3871 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [3873 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [3873 ms]
+    target killed (SIGKILL) at the unhandled-exception stop [3873 ms]
+    target gone [3893 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [13904 ms]
+    the dead target's pipes: absent [13906 ms]
+    second=3410533
+    second attach finished: attached [14923 ms]
+flood-crash-kill run 8: crash-kill-attach-ok
+    target=3410561
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1024 ms]
+    stops seen: Exception(Unhandled) [2669 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [2671 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [2671 ms]
+    target killed (SIGKILL) at the unhandled-exception stop [2671 ms]
+    target gone [2692 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [12696 ms]
+    the dead target's pipes: absent [12698 ms]
+    second=3429366
+    second attach finished: attached [13707 ms]
+flood-crash-kill run 9: crash-kill-attach-ok
+    target=3429394
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1024 ms]
+    stops seen: Exception(Unhandled) [3239 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [3241 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [3241 ms]
+    target killed (SIGKILL) at the unhandled-exception stop [3241 ms]
+    target gone [3262 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [13266 ms]
+    the dead target's pipes: absent [13268 ms]
+    second=3449715
+    second attach finished: attached [14281 ms]
+flood-crash-kill run 10: crash-kill-attach-ok
+    target=3449743
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1025 ms]
+    stops seen: Exception(Unhandled) [3358 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [3360 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [3360 ms]
+    target killed (SIGKILL) at the unhandled-exception stop [3361 ms]
+    target gone [3381 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [13384 ms]
+    the dead target's pipes: absent [13385 ms]
+    second=3469860
+    second attach finished: attached [14394 ms]
+flood-crash-detach run 1: crash-detach-attach-ok
+    target=3469888
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1023 ms]
+    stops seen: Exception(Unhandled) [1616 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [1618 ms]
+    detached at the unhandled-exception stop [1641 ms]
+    target gone (FailFast, no debugger attached) [2697 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [12708 ms]
+    the dead target's pipes: absent [12710 ms]
+    second=3486035
+    second attach finished: attached [13720 ms]
+flood-crash-detach run 2: crash-detach-attach-ok
+    target=3486063
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1023 ms]
+    stops seen: Exception(Unhandled) [2496 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [2498 ms]
+    detached at the unhandled-exception stop [2523 ms]
+    target gone (FailFast, no debugger attached) [3575 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [13580 ms]
+    the dead target's pipes: absent [13582 ms]
+    second=3504242
+    second attach finished: attached [14590 ms]
+flood-crash-detach run 3: crash-detach-attach-ok
+    target=3504270
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1025 ms]
+    stops seen: Exception(Unhandled) [2282 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [2283 ms]
+    detached at the unhandled-exception stop [2307 ms]
+    target gone (FailFast, no debugger attached) [3371 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [13382 ms]
+    the dead target's pipes: absent [13384 ms]
+    second=3521881
+    second attach finished: attached [14396 ms]
+flood-crash-detach run 4: crash-detach-attach-ok
+    target=3521908
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1024 ms]
+    stops seen: Exception(Unhandled) [1890 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [1891 ms]
+    detached at the unhandled-exception stop [1917 ms]
+    target gone (FailFast, no debugger attached) [2975 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [12986 ms]
+    the dead target's pipes: absent [12988 ms]
+    second=3538884
+    second attach finished: attached [14005 ms]
+flood-crash-detach run 5: crash-detach-attach-ok
+    target=3538912
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1024 ms]
+    stops seen: Exception(Unhandled) [1590 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [1592 ms]
+    detached at the unhandled-exception stop [1615 ms]
+    target gone (FailFast, no debugger attached) [2674 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [12685 ms]
+    the dead target's pipes: absent [12686 ms]
+    second=3555390
+    second attach finished: attached [13706 ms]
+flood-crash-detach run 6: crash-detach-attach-ok
+    target=3555417
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1023 ms]
+    stops seen: Exception(Unhandled) [3547 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [3548 ms]
+    detached at the unhandled-exception stop [3575 ms]
+    target gone (FailFast, no debugger attached) [4633 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [14640 ms]
+    the dead target's pipes: absent [14642 ms]
+    second=3575764
+    second attach finished: attached [15659 ms]
+flood-crash-detach run 7: crash-detach-attach-ok
+    target=3575792
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1024 ms]
+    stops seen: Exception(Unhandled) [1675 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [1677 ms]
+    detached at the unhandled-exception stop [1700 ms]
+    target gone (FailFast, no debugger attached) [2761 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [12767 ms]
+    the dead target's pipes: absent [12769 ms]
+    second=3591960
+    second attach finished: attached [13779 ms]
+flood-crash-detach run 8: crash-detach-attach-ok
+    target=3591988
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1023 ms]
+    stops seen: Exception(Unhandled) [1954 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [1955 ms]
+    detached at the unhandled-exception stop [1981 ms]
+    target gone (FailFast, no debugger attached) [3044 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [13051 ms]
+    the dead target's pipes: absent [13052 ms]
+    second=3608951
+    second attach finished: attached [14063 ms]
+flood-crash-detach run 9: crash-detach-attach-ok
+    target=3608978
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1023 ms]
+    stops seen: Exception(Unhandled) [1876 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [1877 ms]
+    detached at the unhandled-exception stop [1901 ms]
+    target gone (FailFast, no debugger attached) [2961 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [12963 ms]
+    the dead target's pipes: absent [12965 ms]
+    second=3626045
+    second attach finished: attached [13975 ms]
+flood-crash-detach run 10: crash-detach-attach-ok
+    target=3626072
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1023 ms]
+    stops seen: Exception(Unhandled) [2171 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [2173 ms]
+    detached at the unhandled-exception stop [2197 ms]
+    target gone (FailFast, no debugger attached) [3266 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [13277 ms]
+    the dead target's pipes: absent [13278 ms]
+    second=3643311
+    second attach finished: attached [14298 ms]
+flood-sync-kill sync-kill-attach-ok: 10; flood-crash crash-attach-hung: 5; flood-crash crash-attach-ok: 5; flood-crash-kill crash-kill-attach-ok: 10; flood-crash-detach crash-detach-attach-ok: 10
+flood-sync-kill: predicted sync-kill-attach-ok, 10 of 10
+flood-crash: predicted crash-attach-ok, 5 of 10
+flood-crash-kill: predicted crash-kill-attach-ok, 10 of 10
+flood-crash-detach: predicted crash-detach-attach-ok, 10 of 10
+RESULT(1): not confirmed as stated (see the outcomes above)
+exit 1
+2026-11-05T19:45:18Z
+160

@@ -1,0 +1,235 @@
+platform: macOS 27.0.1 Arm64
+flood-crash-kill run 1: crash-kill-attach-ok
+    target=32443
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1050 ms]
+    stops seen: Exception(Unhandled) [3491 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [3496 ms]
+    synchronized; the Win32 event thread is not inside a transport request [4688 ms]
+    target killed (SIGKILL) at the unhandled-exception stop [4688 ms]
+    target gone [4717 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [15909 ms]
+    the dead target's pipes: absent [15909 ms]
+    second=32488
+    second attach finished: attached [16954 ms]
+flood-crash-kill run 2: crash-kill-attach-ok
+    target=32492
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1051 ms]
+    stops seen: Exception(Unhandled) [1956 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [1960 ms]
+    synchronized; the Win32 event thread is not inside a transport request [3125 ms]
+    target killed (SIGKILL) at the unhandled-exception stop [3125 ms]
+    target gone [3154 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [14328 ms]
+    the dead target's pipes: absent [14329 ms]
+    second=32511
+    second attach finished: attached [15377 ms]
+flood-crash-kill run 3: crash-kill-attach-ok
+    target=32515
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1042 ms]
+    stops seen: Exception(Unhandled) [2148 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [2153 ms]
+    synchronized; the Win32 event thread is not inside a transport request [3319 ms]
+    target killed (SIGKILL) at the unhandled-exception stop [3319 ms]
+    target gone [3342 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [14529 ms]
+    the dead target's pipes: absent [14530 ms]
+    second=32535
+    second attach finished: attached [15577 ms]
+flood-crash-kill run 4: crash-kill-attach-ok
+    target=32539
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1048 ms]
+    stops seen: Exception(Unhandled) [3564 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [3568 ms]
+    synchronized; the Win32 event thread is not inside a transport request [4721 ms]
+    target killed (SIGKILL) at the unhandled-exception stop [4721 ms]
+    target gone [4750 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [15942 ms]
+    the dead target's pipes: absent [15943 ms]
+    second=32562
+    second attach finished: attached [16983 ms]
+flood-crash-kill run 5: crash-kill-attach-ok
+    target=32566
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1053 ms]
+    stops seen: Exception(Unhandled) [1710 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [1714 ms]
+    synchronized; the Win32 event thread is not inside a transport request [2880 ms]
+    target killed (SIGKILL) at the unhandled-exception stop [2880 ms]
+    target gone [2909 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [14104 ms]
+    the dead target's pipes: absent [14105 ms]
+    second=32584
+    second attach finished: attached [15150 ms]
+flood-crash-kill run 6: crash-kill-attach-ok
+    target=32589
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1054 ms]
+    stops seen: Exception(Unhandled) [2264 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [2268 ms]
+    synchronized; the Win32 event thread is not inside a transport request [3433 ms]
+    target killed (SIGKILL) at the unhandled-exception stop [3433 ms]
+    target gone [3462 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [14653 ms]
+    the dead target's pipes: absent [14654 ms]
+    second=32608
+    second attach finished: attached [15693 ms]
+flood-crash-kill run 7: crash-kill-attach-ok
+    target=32612
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1044 ms]
+    stops seen: Exception(Unhandled) [3920 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [3924 ms]
+    synchronized; the Win32 event thread is not inside a transport request [5087 ms]
+    target killed (SIGKILL) at the unhandled-exception stop [5087 ms]
+    target gone [5116 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [16290 ms]
+    the dead target's pipes: absent [16291 ms]
+    second=32634
+    second attach finished: attached [17334 ms]
+flood-crash-kill run 8: crash-kill-attach-ok
+    target=32638
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1053 ms]
+    stops seen: Exception(Unhandled) [2801 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [2806 ms]
+    synchronized; the Win32 event thread is not inside a transport request [3972 ms]
+    target killed (SIGKILL) at the unhandled-exception stop [3972 ms]
+    target gone [4001 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [15186 ms]
+    the dead target's pipes: absent [15187 ms]
+    second=32660
+    second attach finished: attached [16223 ms]
+flood-crash-kill run 9: crash-kill-attach-ok
+    target=32664
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1040 ms]
+    stops seen: Exception(Unhandled) [3336 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [3341 ms]
+    synchronized; the Win32 event thread is not inside a transport request [4496 ms]
+    target killed (SIGKILL) at the unhandled-exception stop [4496 ms]
+    target gone [4524 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [15702 ms]
+    the dead target's pipes: absent [15703 ms]
+    second=32684
+    second attach finished: attached [16739 ms]
+flood-crash-kill run 10: crash-kill-attach-ok
+    target=32688
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1053 ms]
+    stops seen: Exception(Unhandled) [1902 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [1906 ms]
+    synchronized; the Win32 event thread is not inside a transport request [3072 ms]
+    target killed (SIGKILL) at the unhandled-exception stop [3072 ms]
+    target gone [3101 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [14299 ms]
+    the dead target's pipes: absent [14300 ms]
+    second=32708
+    second attach finished: attached [15339 ms]
+flood-crash-detach run 1: crash-detach-attach-ok
+    target=32712
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1052 ms]
+    stops seen: Exception(Unhandled) [4084 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [4089 ms]
+    detached at the unhandled-exception stop [4118 ms]
+    target gone (FailFast, no debugger attached) [4118 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [15310 ms]
+    the dead target's pipes: absent [15311 ms]
+    second=32734
+    second attach finished: attached [16350 ms]
+flood-crash-detach run 2: crash-detach-attach-ok
+    target=32738
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1052 ms]
+    stops seen: Exception(Unhandled) [2595 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [2600 ms]
+    detached at the unhandled-exception stop [2629 ms]
+    target gone (FailFast, no debugger attached) [2630 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [13828 ms]
+    the dead target's pipes: absent [13829 ms]
+    second=32764
+    second attach finished: attached [14879 ms]
+flood-crash-detach run 3: crash-detach-attach-ok
+    target=32768
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1046 ms]
+    stops seen: Exception(Unhandled) [3082 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [3086 ms]
+    detached at the unhandled-exception stop [3116 ms]
+    target gone (FailFast, no debugger attached) [3116 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [14311 ms]
+    the dead target's pipes: absent [14312 ms]
+    second=32787
+    second attach finished: attached [15353 ms]
+flood-crash-detach run 4: crash-detach-attach-ok
+    target=32792
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1047 ms]
+    stops seen: Exception(Unhandled) [2170 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [2174 ms]
+    detached at the unhandled-exception stop [2204 ms]
+    target gone (FailFast, no debugger attached) [2204 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [13395 ms]
+    the dead target's pipes: absent [13396 ms]
+    second=32810
+    second attach finished: attached [14432 ms]
+flood-crash-detach run 5: crash-detach-attach-ok
+    target=32814
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1043 ms]
+    stops seen: Exception(Unhandled) [4008 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [4012 ms]
+    detached at the unhandled-exception stop [4036 ms]
+    target gone (FailFast, no debugger attached) [4037 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [15222 ms]
+    the dead target's pipes: absent [15223 ms]
+    second=32838
+    second attach finished: attached [16262 ms]
+flood-crash-detach run 6: crash-detach-attach-ok
+    target=32842
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1048 ms]
+    stops seen: Exception(Unhandled) [3507 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [3511 ms]
+    detached at the unhandled-exception stop [3537 ms]
+    target gone (FailFast, no debugger attached) [3538 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [14726 ms]
+    the dead target's pipes: absent [14727 ms]
+    second=32861
+    second attach finished: attached [15766 ms]
+flood-crash-detach run 7: crash-detach-attach-ok
+    target=32865
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1048 ms]
+    stops seen: Exception(Unhandled) [2318 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [2322 ms]
+    detached at the unhandled-exception stop [2352 ms]
+    target gone (FailFast, no debugger attached) [2352 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [13533 ms]
+    the dead target's pipes: absent [13534 ms]
+    second=32884
+    second attach finished: attached [14581 ms]
+flood-crash-detach run 8: crash-detach-attach-ok
+    target=32888
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1035 ms]
+    stops seen: Exception(Unhandled) [2640 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [2644 ms]
+    detached at the unhandled-exception stop [2674 ms]
+    target gone (FailFast, no debugger attached) [2674 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [13857 ms]
+    the dead target's pipes: absent [13857 ms]
+    second=32907
+    second attach finished: attached [14901 ms]
+flood-crash-detach run 9: crash-detach-attach-ok
+    target=32911
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1047 ms]
+    stops seen: Exception(Unhandled) [2735 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [2739 ms]
+    detached at the unhandled-exception stop [2769 ms]
+    target gone (FailFast, no debugger attached) [2769 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [13946 ms]
+    the dead target's pipes: absent [13947 ms]
+    second=32931
+    second attach finished: attached [14988 ms]
+flood-crash-detach run 10: crash-detach-attach-ok
+    target=32935
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1049 ms]
+    stops seen: Exception(Unhandled) [1828 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [1832 ms]
+    detached at the unhandled-exception stop [1862 ms]
+    target gone (FailFast, no debugger attached) [1862 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [13048 ms]
+    the dead target's pipes: absent [13049 ms]
+    second=32953
+    second attach finished: attached [14092 ms]
+flood-crash-kill crash-kill-attach-ok: 10; flood-crash-detach crash-detach-attach-ok: 10
+flood-crash-kill: predicted crash-kill-attach-ok, 10 of 10
+flood-crash-detach: predicted crash-detach-attach-ok, 10 of 10
+RESULT(0): confirmed — every mode run gave its predicted outcome every time (see the header for each hypothesis)

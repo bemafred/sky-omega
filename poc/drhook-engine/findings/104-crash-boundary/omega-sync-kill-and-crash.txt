@@ -1,0 +1,205 @@
+platform: macOS 27.0.1 Arm64
+flood-sync-kill run 1: sync-kill-attach-ok
+    target=24552
+    attached; the target floods thread events [1118 ms]
+    stop: Pause [2122 ms]
+    synchronized; the Win32 event thread is not inside a transport request [3404 ms]
+    target killed (SIGKILL) while synchronized [3404 ms]
+    target gone [3429 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [14620 ms]
+    the dead target's pipes: absent [14621 ms]
+    second=24597
+    second attach finished: attached [15664 ms]
+flood-sync-kill run 2: sync-kill-attach-ok
+    target=24601
+    attached; the target floods thread events [1048 ms]
+    stop: Pause [2053 ms]
+    synchronized; the Win32 event thread is not inside a transport request [3219 ms]
+    target killed (SIGKILL) while synchronized [3219 ms]
+    target gone [3240 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [14413 ms]
+    the dead target's pipes: absent [14414 ms]
+    second=24622
+    second attach finished: attached [15458 ms]
+flood-sync-kill run 3: sync-kill-attach-ok
+    target=24626
+    attached; the target floods thread events [1043 ms]
+    stop: Pause [2049 ms]
+    synchronized; the Win32 event thread is not inside a transport request [3212 ms]
+    target killed (SIGKILL) while synchronized [3212 ms]
+    target gone [3235 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [14423 ms]
+    the dead target's pipes: absent [14424 ms]
+    second=24645
+    second attach finished: attached [15467 ms]
+flood-sync-kill run 4: sync-kill-attach-ok
+    target=24649
+    attached; the target floods thread events [1047 ms]
+    stop: Pause [2053 ms]
+    synchronized; the Win32 event thread is not inside a transport request [3219 ms]
+    target killed (SIGKILL) while synchronized [3220 ms]
+    target gone [3244 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [14440 ms]
+    the dead target's pipes: absent [14441 ms]
+    second=24670
+    second attach finished: attached [15480 ms]
+flood-sync-kill run 5: sync-kill-attach-ok
+    target=24674
+    attached; the target floods thread events [1042 ms]
+    stop: Pause [2047 ms]
+    synchronized; the Win32 event thread is not inside a transport request [3211 ms]
+    target killed (SIGKILL) while synchronized [3211 ms]
+    target gone [3234 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [14412 ms]
+    the dead target's pipes: absent [14413 ms]
+    second=24693
+    second attach finished: attached [15451 ms]
+flood-sync-kill run 6: sync-kill-attach-ok
+    target=24697
+    attached; the target floods thread events [1043 ms]
+    stop: Pause [2045 ms]
+    synchronized; the Win32 event thread is not inside a transport request [3205 ms]
+    target killed (SIGKILL) while synchronized [3206 ms]
+    target gone [3230 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [14415 ms]
+    the dead target's pipes: absent [14416 ms]
+    second=24720
+    second attach finished: attached [15453 ms]
+flood-sync-kill run 7: sync-kill-attach-ok
+    target=24724
+    attached; the target floods thread events [1050 ms]
+    stop: Pause [2056 ms]
+    synchronized; the Win32 event thread is not inside a transport request [3226 ms]
+    target killed (SIGKILL) while synchronized [3226 ms]
+    target gone [3251 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [14445 ms]
+    the dead target's pipes: absent [14446 ms]
+    second=24746
+    second attach finished: attached [15492 ms]
+flood-sync-kill run 8: sync-kill-attach-ok
+    target=24750
+    attached; the target floods thread events [1048 ms]
+    stop: Pause [2054 ms]
+    synchronized; the Win32 event thread is not inside a transport request [3220 ms]
+    target killed (SIGKILL) while synchronized [3220 ms]
+    target gone [3245 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [14436 ms]
+    the dead target's pipes: absent [14437 ms]
+    second=24771
+    second attach finished: attached [15480 ms]
+flood-sync-kill run 9: sync-kill-attach-ok
+    target=24775
+    attached; the target floods thread events [1043 ms]
+    stop: Pause [2049 ms]
+    synchronized; the Win32 event thread is not inside a transport request [3208 ms]
+    target killed (SIGKILL) while synchronized [3208 ms]
+    target gone [3233 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [14413 ms]
+    the dead target's pipes: absent [14414 ms]
+    second=24796
+    second attach finished: attached [15448 ms]
+flood-sync-kill run 10: sync-kill-attach-ok
+    target=24800
+    attached; the target floods thread events [1044 ms]
+    stop: Pause [2049 ms]
+    synchronized; the Win32 event thread is not inside a transport request [3212 ms]
+    target killed (SIGKILL) while synchronized [3212 ms]
+    target gone [3236 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [14421 ms]
+    the dead target's pipes: absent [14422 ms]
+    second=24820
+    second attach finished: attached [15463 ms]
+flood-crash run 1: crash-attach-ok
+    target=24824
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1046 ms]
+    stops seen before the end: Exception(Unhandled) [3154 ms]
+    target gone (FailFast) [3154 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [14339 ms]
+    the dead target's pipes: absent [14340 ms]
+    second=24845
+    second attach finished: attached [15378 ms]
+flood-crash run 2: crash-attach-ok
+    target=24849
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1044 ms]
+    stops seen before the end: Exception(Unhandled) [2634 ms]
+    target gone (FailFast) [2634 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [13851 ms]
+    the dead target's pipes: absent [13852 ms]
+    second=24870
+    second attach finished: attached [14894 ms]
+flood-crash run 3: crash-attach-ok
+    target=24875
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1049 ms]
+    stops seen before the end: Exception(Unhandled) [3081 ms]
+    target gone (FailFast) [3081 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [14293 ms]
+    the dead target's pipes: absent [14294 ms]
+    second=24895
+    second attach finished: attached [15327 ms]
+flood-crash run 4: crash-attach-ok
+    target=24899
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1045 ms]
+    stops seen before the end: Exception(Unhandled) [2052 ms]
+    target gone (FailFast) [2052 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [13250 ms]
+    the dead target's pipes: absent [13251 ms]
+    second=24917
+    second attach finished: attached [14288 ms]
+flood-crash run 5: crash-orphaned-and-attach-hung
+    target=24921
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1049 ms]
+    stops seen before the end: Exception(Unhandled) [2248 ms]
+    target gone (FailFast) [2248 ms]
+    10 s after the end the Win32 event thread is inside a transport request [13647 ms]
+    the dead target's pipes: absent [13648 ms]
+    second=24942
+    second attach still pending after 30 s [44676 ms]
+flood-crash run 6: crash-orphaned-and-attach-hung
+    target=24980
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1045 ms]
+    stops seen before the end: Exception(Unhandled) [1655 ms]
+    target gone (FailFast) [1655 ms]
+    10 s after the end the Win32 event thread is inside a transport request [13048 ms]
+    the dead target's pipes: absent [13049 ms]
+    second=24998
+    second attach still pending after 30 s [44068 ms]
+flood-crash run 7: crash-attach-ok
+    target=25038
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1045 ms]
+    stops seen before the end: Exception(Unhandled) [4008 ms]
+    target gone (FailFast) [4008 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [15202 ms]
+    the dead target's pipes: absent [15203 ms]
+    second=25060
+    second attach finished: attached [16242 ms]
+flood-crash run 8: crash-attach-ok
+    target=25064
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1038 ms]
+    stops seen before the end: Exception(Unhandled) [2485 ms]
+    target gone (FailFast) [2485 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [13629 ms]
+    the dead target's pipes: absent [13630 ms]
+    second=25083
+    second attach finished: attached [14657 ms]
+flood-crash run 9: crash-attach-ok
+    target=25087
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1044 ms]
+    stops seen before the end: Exception(Unhandled) [2600 ms]
+    target gone (FailFast) [2600 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [13822 ms]
+    the dead target's pipes: absent [13823 ms]
+    second=25111
+    second attach finished: attached [14870 ms]
+flood-crash run 10: crash-attach-ok
+    target=25115
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1042 ms]
+    stops seen before the end: Exception(Unhandled) [2725 ms]
+    target gone (FailFast) [2725 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [13940 ms]
+    the dead target's pipes: absent [13941 ms]
+    second=25134
+    second attach finished: attached [14984 ms]
+flood-sync-kill sync-kill-attach-ok: 10; flood-crash crash-attach-ok: 8; flood-crash crash-orphaned-and-attach-hung: 2
+flood-sync-kill: predicted sync-kill-attach-ok, 10 of 10
+flood-crash: predicted crash-attach-ok, 8 of 10
+RESULT(1): not confirmed as stated (see the outcomes above)
