@@ -35,7 +35,7 @@
 // A read that returns while the target is frozen did not go over the transport (task_for_pid succeeded: direct
 // reads), and the mode's outcome is no-wait.
 //
-// ADR-016 Step 4 adds two modes (run only when named; drafted 2026-11-05, not yet run). Together they decide whether
+// ADR-016 Step 4 adds two modes (run only when named; drafted and run 2026-11-05). Together they decide whether
 // DrHook can stay dependable with simpler means, or needs its debugger in a worker process it can discard (Step 5):
 // a deliberate kill is sometimes needed (a program that won't end), and a crash can happen at any moment.
 //   flood-sync-kill — Hypothesis: a kill made while the debugger holds the target synchronized leaves no transport
@@ -63,6 +63,33 @@
 //             after 30 s. The dead target's pipes were absent in all 10, unlike flood-kill. Falsified: a crash can
 //             leave the debugger unusable even though the runtime tells the debugger first. Which transport request
 //             it was is not recorded (the probe checks SendRequestMessageAndWait, not the frame above it).
+// Two more modes test acting at the unhandled-exception stop instead of continuing it (drafted 2026-11-05, not yet
+// run). Both use the flood-crash target. Every stop before that one is continued; at it the target is synchronized.
+// The exception type the debugger reads there is recorded. If no such stop comes within 30 s, the run is no-stop.
+// Neither mode covers a crash the debugger is not told about (a native fault; possibly stack overflow).
+//   flood-crash-kill — Hypothesis: at the unhandled-exception stop no transport request of the Win32 event thread
+//             is outstanding, so a kill there is as clean as flood-sync-kill. Construction: on macOS, sample and
+//             record whether the event thread is inside SendRequestMessageAndWait (if it is: crash-not-idle);
+//             SIGKILL; wait for the target to be gone; then AfterTheEnd as above. Predicted: crash-kill-attach-ok,
+//             N of N.
+//   flood-crash-detach — Hypothesis: a Detach at that stop succeeds and removes the process from mscordbi before the
+//             target dies, so mscordbi makes no request to the dead target; the target goes on to die (FailFast with
+//             no debugger), and a second attach succeeds. Construction: Detach on its own thread, bounded at 30 s
+//             (crash-detach-hung); a failed Detach shows as an anomaly line; wait up to 30 s for the target to be gone
+//             (crash-detach-no-exit); then AfterTheEnd. Predicted: crash-detach-attach-ok, N of N. Unverified: whether
+//             ICorDebug allows a Detach while an unhandled exception is pending, and what the runtime does then.
+//   Usage: dotnet run --no-cache 100-orphaned-read-smoke.cs 10 flood-crash-kill flood-crash-detach
+// Observed 2026-11-05 18:39-18:44 UTC, omega (macOS 27.0.1, arm64, SDK 10.0.301), 10 runs each, RESULT(0):
+//   flood-crash-kill 10/10 crash-kill-attach-ok: an Exception(Unhandled) stop came first every time, the event thread
+//             was idle at it, the target was gone within ~30 ms of the kill, the pipes were absent, the second attach
+//             succeeded.
+//   flood-crash-detach 10/10 crash-detach-attach-ok: Detach returned within ~30 ms each time and the target was gone
+//             within 1 ms of it; no anomaly line, so Detach gave S_OK or a gone-target code (which one is not
+//             recorded); pipes absent; the second attach succeeded.
+//   The exception type read at the stop was System.ExecutionEngineException in all 20 runs: FailFast surfaces to
+//   the debugger as an unhandled ExecutionEngineException.
+//   Weight: if acting at the stop changed nothing (flood-crash hung 2/10), 10 clean runs in one mode would still
+//   come up about 11% of the time (0.8^10), and 20 of 20 across both about 1%. Supported on omega, not proven.
 //
 // Observed 2026-10-30, omega (macOS 27, arm64): control 3/3 completed after SIGCONT and kill 3/3 returned within
 // ~20 ms of the kill (the dead target's pipes removed), refuting the first form of the hypothesis (any pending read
@@ -72,11 +99,14 @@
 //
 // Result codes: 0 confirmed: every mode run gave its predicted outcome every time (control-completed;
 // kill-read-returned; flood-kill: flood-orphaned-and-attach-hung; flood-sync-kill: sync-kill-attach-ok; flood-crash:
-// crash-attach-ok); 1 otherwise; 2 target build failed.
+// crash-attach-ok; flood-crash-kill: crash-kill-attach-ok; flood-crash-detach: crash-detach-attach-ok); 1 otherwise;
+// 2 target build failed.
 // Child results: control-completed, kill-read-returned, kill-orphaned-and-attach-hung, kill-orphaned-attach-ok,
 // flood-orphaned-and-attach-hung, flood-orphaned-attach-ok, flood-read-returned, flood-not-caught, sync-kill-attach-ok,
 // sync-kill-attach-hung, sync-kill-orphaned-and-attach-hung, sync-not-idle, crash-attach-ok, crash-attach-hung,
-// crash-orphaned-and-attach-hung, crash-no-exit, no-wait, no-stop, setup-failed. "orphaned" means the sample showed the
+// crash-orphaned-and-attach-hung, crash-no-exit, crash-kill-attach-ok, crash-kill-attach-hung,
+// crash-kill-orphaned-and-attach-hung, crash-not-idle, crash-detach-attach-ok, crash-detach-attach-hung,
+// crash-detach-orphaned-and-attach-hung, crash-detach-hung, crash-detach-no-exit, no-wait, no-stop, setup-failed. "orphaned" means the sample showed the
 // Win32 event thread still in a transport request 10 s after the target was gone (macOS only).
 //
 // Usage (from poc/drhook-engine):  dotnet run --no-cache 100-orphaned-read-smoke.cs [runs] [mode ...]
@@ -100,6 +130,8 @@ if (args.Length == 3 && args[0] == "child")
         "flood-kill" => ChildFlood(args[2]),
         "flood-sync-kill" => ChildSyncKill(args[2]),
         "flood-crash" => ChildCrash(args[2]),
+        "flood-crash-kill" => ChildCrashKill(args[2]),
+        "flood-crash-detach" => ChildCrashDetach(args[2]),
         _ => Child(args[1], args[2]),
     };
 
@@ -110,6 +142,8 @@ var predicted = new Dictionary<string, string>
     ["flood-kill"] = "flood-orphaned-and-attach-hung",
     ["flood-sync-kill"] = "sync-kill-attach-ok",
     ["flood-crash"] = "crash-attach-ok",
+    ["flood-crash-kill"] = "crash-kill-attach-ok",
+    ["flood-crash-detach"] = "crash-detach-attach-ok",
 };
 int runs = args.Length > 0 ? int.Parse(args[0]) : 3;
 string[] modes = args.Length > 1 ? args[1..] : OperatingSystem.IsMacOS() ? ["control", "kill", "flood-kill"] : ["control", "kill"];
@@ -391,6 +425,96 @@ static int ChildCrash(string dll)
     Say("target gone (FailFast)");
     resumer.Join(TimeSpan.FromSeconds(2));
     return AfterTheEnd("crash", pid, dll, Say, Result);
+}
+
+// flood-crash-kill: the same crashing target; every stop before the unhandled-exception stop is continued, and at that
+// stop, while the target is synchronized, it is killed.
+[System.Runtime.Versioning.UnsupportedOSPlatform("windows")]
+static int ChildCrashKill(string dll)
+{
+    var clock = Stopwatch.StartNew();
+    void Say(string text) { Console.WriteLine($"child: {text} [{clock.ElapsedMilliseconds} ms]"); Console.Out.Flush(); }
+    int Result(string outcome) { Console.WriteLine($"child: result={outcome}"); Console.Out.Flush(); return 0; }
+
+    int pid = StartTarget(dll, "flood-crash");
+    Console.WriteLine($"child: target={pid}");
+    Console.Out.Flush();
+    DebugSession session;
+    try { session = DebugSession.AttachAndOwn(pid, new Sink()); }
+    catch (Exception e) { Say($"attach failed: {e.Message}"); return Result("setup-failed"); }
+    Say("attached; the target floods thread events and will call FailFast within 0.5 to 3 s");
+
+    var stops = new List<string>();
+    var waiting = Stopwatch.StartNew();
+    StopInfo? unhandled = null;
+    while (unhandled is null && waiting.Elapsed < TimeSpan.FromSeconds(30))
+    {
+        StopInfo? s = session.WaitForStop(TimeSpan.FromMilliseconds(200));
+        if (s is null) continue;
+        stops.Add(s.Reason == StopReason.Exception ? $"Exception({s.ExceptionKind})" : s.Reason.ToString());
+        if (s.Reason == StopReason.Exception && s.ExceptionKind == ExceptionStopKind.Unhandled) unhandled = s;
+        else if (s.Reason == StopReason.ProcessExited) break;
+        else session.Resume();
+    }
+    Say($"stops seen: {(stops.Count == 0 ? "none" : string.Join(", ", stops))}");
+    if (unhandled is null) { kill(pid, SIGKILL); Say("no unhandled-exception stop within 30 s of the attach"); return Result("no-stop"); }
+    Say($"at the unhandled-exception stop; exception type: {session.GetCurrentExceptionTypeName() ?? "none read"}");
+
+    if (OperatingSystem.IsMacOS())
+    {
+        bool busy = Win32EventThreadIn("DbgTransportSession::SendRequestMessageAndWait");
+        Say(busy ? "synchronized, but the Win32 event thread is inside a transport request" : "synchronized; the Win32 event thread is not inside a transport request");
+        if (busy) { kill(pid, SIGKILL); return Result("crash-not-idle"); }
+    }
+    else Say("the Win32 event thread's state before the kill: not checked (macOS only)");
+
+    kill(pid, SIGKILL);
+    Say("target killed (SIGKILL) at the unhandled-exception stop");
+    Say(WaitUntilGone(pid, TimeSpan.FromSeconds(10)) ? "target gone" : "target still present 10 s after the kill");
+    return AfterTheEnd("crash-kill", pid, dll, Say, Result);
+}
+
+// flood-crash-detach: the same crashing target; every stop before the unhandled-exception stop is continued, and at
+// that stop the debugger detaches. The target then goes on to its death with no debugger attached.
+[System.Runtime.Versioning.UnsupportedOSPlatform("windows")]
+static int ChildCrashDetach(string dll)
+{
+    var clock = Stopwatch.StartNew();
+    void Say(string text) { Console.WriteLine($"child: {text} [{clock.ElapsedMilliseconds} ms]"); Console.Out.Flush(); }
+    int Result(string outcome) { Console.WriteLine($"child: result={outcome}"); Console.Out.Flush(); return 0; }
+
+    int pid = StartTarget(dll, "flood-crash");
+    Console.WriteLine($"child: target={pid}");
+    Console.Out.Flush();
+    DebugSession session;
+    try { session = DebugSession.AttachAndOwn(pid, new Sink()); }
+    catch (Exception e) { Say($"attach failed: {e.Message}"); return Result("setup-failed"); }
+    Say("attached; the target floods thread events and will call FailFast within 0.5 to 3 s");
+
+    var stops = new List<string>();
+    var waiting = Stopwatch.StartNew();
+    StopInfo? unhandled = null;
+    while (unhandled is null && waiting.Elapsed < TimeSpan.FromSeconds(30))
+    {
+        StopInfo? s = session.WaitForStop(TimeSpan.FromMilliseconds(200));
+        if (s is null) continue;
+        stops.Add(s.Reason == StopReason.Exception ? $"Exception({s.ExceptionKind})" : s.Reason.ToString());
+        if (s.Reason == StopReason.Exception && s.ExceptionKind == ExceptionStopKind.Unhandled) unhandled = s;
+        else if (s.Reason == StopReason.ProcessExited) break;
+        else session.Resume();
+    }
+    Say($"stops seen: {(stops.Count == 0 ? "none" : string.Join(", ", stops))}");
+    if (unhandled is null) { kill(pid, SIGKILL); Say("no unhandled-exception stop within 30 s of the attach"); return Result("no-stop"); }
+    Say($"at the unhandled-exception stop; exception type: {session.GetCurrentExceptionTypeName() ?? "none read"}");
+
+    // Detach reports a failure only as an anomaly; the Sink prints it as a child line.
+    var detachDone = new ManualResetEventSlim();
+    new Thread(() => { session.Detach(); detachDone.Set(); }) { IsBackground = true, Name = "probe100-detach" }.Start();
+    if (!detachDone.Wait(TimeSpan.FromSeconds(30))) { kill(pid, SIGKILL); Say("Detach still pending after 30 s"); return Result("crash-detach-hung"); }
+    Say("detached at the unhandled-exception stop");
+    if (!WaitUntilGone(pid, TimeSpan.FromSeconds(30))) { kill(pid, SIGKILL); Say("target still present 30 s after the detach"); return Result("crash-detach-no-exit"); }
+    Say("target gone (FailFast, no debugger attached)");
+    return AfterTheEnd("crash-detach", pid, dll, Say, Result);
 }
 
 // After the target is gone: let mscordbi handle the exit, record the event thread and the pipes, then attach again.
