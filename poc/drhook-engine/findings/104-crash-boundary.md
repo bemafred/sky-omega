@@ -4,7 +4,7 @@
 **Status:** **OBSERVED** on omega (macOS 27.0.1 arm64, SDK 10.0.301) and omega-ubuntu (Linux arm64 VM, Ubuntu's and
 Microsoft's .NET 10.0.14), 10 runs per mode on each. Not run on Linux x64 or Windows. **Not fixed:**
 DrHook continues every stop it is asked to, including the unhandled-exception one. ADR-016 Step 4, probe 100
-(`poc/drhook-engine/100-orphaned-read-smoke.cs`, modes added in `5984ad0` and `f072f0c`).
+(`poc/drhook-engine/100-orphaned-read-smoke.cs`, modes added in `5984ad0` and `04aff45`).
 
 ## The question
 
@@ -49,7 +49,7 @@ The raw output is in [`104-crash-boundary/`](104-crash-boundary/): `flood-sync-k
 
 ## Results on omega-ubuntu
 
-Ubuntu 26.04.1 arm64 (Parallels VM, 4 vCPU), `ptrace_scope=1`, at `f072f0c`, 2026-11-05 19:22–19:45 UTC. The same
+Ubuntu 26.04.1 arm64 (Parallels VM, 4 vCPU), `ptrace_scope=1`, at `f072f0c` (the same probe as `04aff45`, before a rebase), 2026-11-05 19:22–19:45 UTC. The same
 probe, first with Ubuntu's .NET (`/usr/lib/dotnet`, runtime 10.0.14), then with Microsoft's (`~/.dotnet`, runtime
 10.0.14); raw output in `104-crash-boundary/omega-ubuntu-all-modes.txt`. The event thread's state is not read on Linux, so an unusable debugger shows only as the second attach
 hanging (`*-attach-hung`), not as `orphaned`.

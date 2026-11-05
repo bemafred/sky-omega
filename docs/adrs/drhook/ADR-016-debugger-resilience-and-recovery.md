@@ -533,7 +533,7 @@ sessions; which level each consequence reaches; whether DrHook
 can detect it; and whether finding 100's fault is the target's abrupt disappearance rather than the signal that
 caused it.
 *Kill and FailFast run 2026-11-05* ([finding 104](../../../poc/drhook-engine/findings/104-crash-boundary.md); probe
-100 at `f072f0c` on omega, and on omega-ubuntu with both builds; 10 runs per mode per machine and build; Martin
+100 at `04aff45` on omega, and on omega-ubuntu with both builds; 10 runs per mode per machine and build; Martin
 approved the omega runs, which hang only the probe's own child process).
 - A target that ends itself with `Environment.FailFast`, every stop continued, left the debugger unusable 2 of 10 on
   omega and 8 of 20 on omega-ubuntu. So the fault follows the disappearance, not DrHook's signal.
