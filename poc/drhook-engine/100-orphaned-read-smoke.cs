@@ -111,6 +111,36 @@
 // ending the session at that stop; ten usable runs falsify (2).
 // On macOS each of these crashes leaves a crash report in ~/Library/Logs/DiagnosticReports (flood-crash's did too).
 //   Usage: dotnet run --no-cache 100-orphaned-read-smoke.cs 10 flood-stackoverflow flood-segv flood-abort
+// Observed 2026-11-06 (finding 104): a stack overflow is warned (an Exception(Unhandled) stop, 30 of 30), falsifying
+// (1) for it; a native fault and abort() were unwarned every run and hung the debugger in some. Construction detail
+// found afterwards: the resumer stopped looking as soon as the target was seen gone (its loop checks the flag every
+// 200 ms), so a ProcessExited stop was caught only within about 200 ms of the end, not the 2 s the join allowed.
+//
+// The rest of Step 4 (drafted and approved 2026-11-06, Martin: "All five as drafted"):
+//   flood-stackoverflow-kill, flood-stackoverflow-detach — flood-crash-kill's and flood-crash-detach's constructions
+//             with the stack-overflow target. Hypothesis: as with FailFast, at the unhandled-exception stop no transport
+//             request of the Win32 event thread is outstanding, so ending the session there is clean. Predicted:
+//             stackoverflow-kill-attach-ok and stackoverflow-detach-attach-ok, N of N. Only omega can falsify it:
+//             continued, the stack overflow hung there 5 of 10 and never on Linux.
+//   measure-crash, measure-stackoverflow, measure-segv, measure-abort — the continued crashes (FailFast, stack overflow,
+//             native fault, abort()), one construction for all four: every stop continued and recorded with its time;
+//             after the target is gone the resumer goes on waiting up to 30 s for ProcessExited, and its delay after
+//             the end is recorded; the time from continuing the unhandled-exception stop to the target being seen gone
+//             is recorded; a second attach still pending after 30 s is given 90 s more (all modes now do this; the
+//             result code still says attach-hung for one pending at 120 s, and attach-late for one that finished
+//             after 30 s). Hypotheses: (a) a ProcessExited stop never comes in a run whose second attach hangs, so its
+//             delay in usable runs calibrates a detector; (b) a second attach that misses 30 s never finishes, since it
+//             waits on a lock held by a wait with no timeout; (c) on macOS a stack overflow takes longer from the
+//             continued stop to the end than on Linux, which would explain why only macOS hung (falsified if macOS's
+//             time is no longer). Predicted, (a) and (b): no run both has ProcessExited and a hung second attach, and
+//             no attach finishes late. (c) is read across machines, not tested by a run.
+//   Windows (all modes but control, kill and flood-kill, which need SIGSTOP): the target is the probe child's own
+//             process child (no bash, no second reaper on Windows), killed with TerminateProcess; flood-segv and
+//             flood-abort use ucrtbase's memset and abort(). There is no debug transport: mscordbi reads the target's
+//             memory directly and learns of its death from its process handle. Hypothesis: nothing waits on a dead
+//             target, so no crash leaves the debugger unusable. Predicted: a usable second attach, N of N, every mode.
+//   Usage: dotnet run --no-cache 100-orphaned-read-smoke.cs 10 flood-stackoverflow-kill flood-stackoverflow-detach
+//             measure-crash measure-stackoverflow measure-segv measure-abort
 //
 // Observed 2026-10-30, omega (macOS 27, arm64): control 3/3 completed after SIGCONT and kill 3/3 returned within
 // ~20 ms of the kill (the dead target's pipes removed), refuting the first form of the hypothesis (any pending read
@@ -128,8 +158,11 @@
 // crash-orphaned-and-attach-hung, crash-no-exit, crash-kill-attach-ok, crash-kill-attach-hung,
 // crash-kill-orphaned-and-attach-hung, crash-not-idle, crash-detach-attach-ok, crash-detach-attach-hung,
 // crash-detach-orphaned-and-attach-hung, crash-detach-hung, crash-detach-no-exit, no-wait, no-stop, setup-failed;
-// for kind stackoverflow, segv or abort: <kind>-unwarned- or <kind>-warned- followed by attach-ok, attach-hung or
-// orphaned-and-attach-hung, and <kind>-no-exit. "orphaned" means the sample showed the Win32 event thread still in a
+// stackoverflow-kill-* and stackoverflow-detach-* as their crash-* counterparts; for the continued crashes (kind crash,
+// stackoverflow, segv or abort, modes flood-<kind> and measure-<kind>): <kind>-unwarned- or <kind>-warned-, then
+// exited- or not-exited- (a ProcessExited stop within the mode's wait), then attach-ok, attach-late, attach-hung or
+// orphaned-and-attach-hung; and <kind>-no-exit. "attach-late" means the second attach finished between 30 and 120 s
+// (the result codes before 2026-11-06 lacked the exited token and the 90 s). "orphaned" means the sample showed the Win32 event thread still in a
 // transport request 10 s after the target was gone (macOS only).
 //
 // Usage (from poc/drhook-engine):  dotnet run --no-cache 100-orphaned-read-smoke.cs [runs] [mode ...]
@@ -146,23 +179,35 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using SkyOmega.DrHook.Engine;
 
-if (OperatingSystem.IsWindows()) { Console.WriteLine("SKIP: Windows has no debug transport pipes; reads are direct."); return 0; }
 if (args.Length == 3 && args[0] == "child")
     return args[1] switch
     {
         "flood-kill" => ChildFlood(args[2]),
         "flood-sync-kill" => ChildSyncKill(args[2]),
         "flood-crash" => ChildCrash(args[2]),
-        "flood-crash-kill" => ChildCrashKill(args[2]),
-        "flood-crash-detach" => ChildCrashDetach(args[2]),
-        "flood-stackoverflow" => ChildUnwarnedCrash(args[2], "flood-stackoverflow", "stackoverflow"),
-        "flood-segv" => ChildUnwarnedCrash(args[2], "flood-segv", "segv"),
-        "flood-abort" => ChildUnwarnedCrash(args[2], "flood-abort", "abort"),
+        "flood-crash-kill" => ChildCrashKill(args[2], "flood-crash", "crash"),
+        "flood-crash-detach" => ChildCrashDetach(args[2], "flood-crash", "crash"),
+        "flood-stackoverflow-kill" => ChildCrashKill(args[2], "flood-stackoverflow", "stackoverflow"),
+        "flood-stackoverflow-detach" => ChildCrashDetach(args[2], "flood-stackoverflow", "stackoverflow"),
+        "flood-stackoverflow" => ChildContinuedCrash(args[2], "flood-stackoverflow", "stackoverflow", TimeSpan.FromSeconds(2)),
+        "flood-segv" => ChildContinuedCrash(args[2], "flood-segv", "segv", TimeSpan.FromSeconds(2)),
+        "flood-abort" => ChildContinuedCrash(args[2], "flood-abort", "abort", TimeSpan.FromSeconds(2)),
+        "measure-crash" => ChildContinuedCrash(args[2], "flood-crash", "crash", TimeSpan.FromSeconds(30)),
+        "measure-stackoverflow" => ChildContinuedCrash(args[2], "flood-stackoverflow", "stackoverflow", TimeSpan.FromSeconds(30)),
+        "measure-segv" => ChildContinuedCrash(args[2], "flood-segv", "segv", TimeSpan.FromSeconds(30)),
+        "measure-abort" => ChildContinuedCrash(args[2], "flood-abort", "abort", TimeSpan.FromSeconds(30)),
         _ => Child(args[1], args[2]),
     };
 
 // Each mode's prediction, in words, and the test it puts to the mode's outcomes. Most predict one outcome every run;
-// the unwarned crashes predict a pattern over the runs.
+// the unwarned crashes predict a pattern over the runs. On Windows, where nothing waits on the target over a transport,
+// every crash mode predicts a usable debugger every run.
+Func<List<string>, bool> usableEveryRun = rs => rs.All(r => r.EndsWith("-attach-ok", StringComparison.Ordinal));
+Func<List<string>, bool> measuredHolds = rs =>
+    rs.All(r => !(r.Contains("warned-exited-", StringComparison.Ordinal) && r.EndsWith("attach-hung", StringComparison.Ordinal))) // not "-exited-": "not-exited-" contains it
+    && rs.All(r => !r.EndsWith("-attach-late", StringComparison.Ordinal));
+const string measuredText = "no run both had a ProcessExited stop and a hung second attach, and no second attach finished late";
+bool windows = OperatingSystem.IsWindows();
 var predicted = new Dictionary<string, (string Text, Func<List<string>, bool> Holds)>
 {
     ["control"] = ("control-completed every run", rs => rs.All(r => r == "control-completed")),
@@ -172,12 +217,18 @@ var predicted = new Dictionary<string, (string Text, Func<List<string>, bool> Ho
     ["flood-crash"] = ("crash-attach-ok every run", rs => rs.All(r => r == "crash-attach-ok")),
     ["flood-crash-kill"] = ("crash-kill-attach-ok every run", rs => rs.All(r => r == "crash-kill-attach-ok")),
     ["flood-crash-detach"] = ("crash-detach-attach-ok every run", rs => rs.All(r => r == "crash-detach-attach-ok")),
-    ["flood-stackoverflow"] = ("stackoverflow-unwarned every run, attach-hung in at least one",
+    ["flood-stackoverflow-kill"] = ("stackoverflow-kill-attach-ok every run", rs => rs.All(r => r == "stackoverflow-kill-attach-ok")),
+    ["flood-stackoverflow-detach"] = ("stackoverflow-detach-attach-ok every run", rs => rs.All(r => r == "stackoverflow-detach-attach-ok")),
+    ["flood-stackoverflow"] = windows ? ("a usable debugger every run", usableEveryRun) : ("stackoverflow-unwarned every run, attach-hung in at least one",
         rs => rs.All(r => r.StartsWith("stackoverflow-unwarned-", StringComparison.Ordinal)) && rs.Any(r => r.EndsWith("attach-hung", StringComparison.Ordinal))),
-    ["flood-segv"] = ("segv-unwarned every run, attach-hung in at least one",
+    ["flood-segv"] = windows ? ("a usable debugger every run", usableEveryRun) : ("segv-unwarned every run, attach-hung in at least one",
         rs => rs.All(r => r.StartsWith("segv-unwarned-", StringComparison.Ordinal)) && rs.Any(r => r.EndsWith("attach-hung", StringComparison.Ordinal))),
-    ["flood-abort"] = ("abort-unwarned every run, attach-hung in at least one",
+    ["flood-abort"] = windows ? ("a usable debugger every run", usableEveryRun) : ("abort-unwarned every run, attach-hung in at least one",
         rs => rs.All(r => r.StartsWith("abort-unwarned-", StringComparison.Ordinal)) && rs.Any(r => r.EndsWith("attach-hung", StringComparison.Ordinal))),
+    ["measure-crash"] = windows ? ("a usable debugger every run", usableEveryRun) : (measuredText, measuredHolds),
+    ["measure-stackoverflow"] = windows ? ("a usable debugger every run", usableEveryRun) : (measuredText, measuredHolds),
+    ["measure-segv"] = windows ? ("a usable debugger every run", usableEveryRun) : (measuredText, measuredHolds),
+    ["measure-abort"] = windows ? ("a usable debugger every run", usableEveryRun) : (measuredText, measuredHolds),
 };
 int runs = args.Length > 0 ? int.Parse(args[0]) : 3;
 string[] modes = args.Length > 1 ? args[1..] : OperatingSystem.IsMacOS() ? ["control", "kill", "flood-kill"] : ["control", "kill"];
@@ -185,6 +236,7 @@ foreach (string mode in modes)
 {
     if (!predicted.ContainsKey(mode)) { Console.WriteLine($"unknown mode '{mode}'; modes: {string.Join(", ", predicted.Keys)}"); return 1; }
     if (mode == "flood-kill" && !OperatingSystem.IsMacOS()) { Console.WriteLine("flood-kill needs macOS (it catches the event thread with sample)"); return 1; }
+    if (windows && mode is "control" or "kill" or "flood-kill") { Console.WriteLine($"{mode} freezes the target with SIGSTOP, which Windows does not have"); return 1; }
 }
 string? dll = BuildTarget(Path.GetFullPath("100-orphaned-read-target.cs"));
 if (dll is null) { Console.WriteLine("FAIL(2): could not build 100-orphaned-read-target.cs"); return 2; }
@@ -216,7 +268,7 @@ foreach (string mode in modes)
             }
         }) { IsBackground = true };
         reader.Start();
-        reader.Join(TimeSpan.FromSeconds(120));
+        reader.Join(TimeSpan.FromSeconds(240)); // a measured run that hangs takes up to ~200 s
         if (!child.WaitForExit(5000)) child.Kill(entireProcessTree: true);
         lock (lines)
         {
@@ -240,7 +292,7 @@ Console.WriteLine(confirmed
     : "RESULT(1): not confirmed as stated (see the outcomes above)");
 return confirmed ? 0 : 1;
 
-[System.Runtime.Versioning.UnsupportedOSPlatform("windows")]
+// Unix only: it freezes the target with SIGSTOP (the parent rejects the mode on Windows).
 static int Child(string mode, string dll)
 {
     var clock = Stopwatch.StartNew();
@@ -328,7 +380,7 @@ static int Child(string mode, string dll)
 }
 
 // flood-kill: catch mscordbi's Win32 event thread inside a transport read, then kill the target.
-[System.Runtime.Versioning.UnsupportedOSPlatform("windows")]
+// Unix only, as Child.
 static int ChildFlood(string dll)
 {
     var clock = Stopwatch.StartNew();
@@ -382,7 +434,6 @@ static int ChildFlood(string dll)
 }
 
 // flood-sync-kill: synchronize the flooding target through the debugger, then kill it.
-[System.Runtime.Versioning.UnsupportedOSPlatform("windows")]
 static int ChildSyncKill(string dll)
 {
     var clock = Stopwatch.StartNew();
@@ -401,24 +452,23 @@ static int ChildSyncKill(string dll)
     session.Pause();
     StopInfo? stop = session.WaitForStop(TimeSpan.FromSeconds(10));
     Say($"stop: {stop?.Reason.ToString() ?? "none"}");
-    if (stop?.Reason != StopReason.Pause) { kill(pid, SIGKILL); return Result("no-stop"); }
+    if (stop?.Reason != StopReason.Pause) { KillTarget(pid); return Result("no-stop"); }
 
     if (OperatingSystem.IsMacOS())
     {
         bool busy = Win32EventThreadIn("DbgTransportSession::SendRequestMessageAndWait");
         Say(busy ? "synchronized, but the Win32 event thread is inside a transport request" : "synchronized; the Win32 event thread is not inside a transport request");
-        if (busy) { kill(pid, SIGKILL); return Result("sync-not-idle"); }
+        if (busy) { KillTarget(pid); return Result("sync-not-idle"); }
     }
     else Say("the Win32 event thread's state before the kill: not checked (macOS only)");
 
-    kill(pid, SIGKILL);
-    Say("target killed (SIGKILL) while synchronized");
+    KillTarget(pid);
+    Say($"target killed ({KillName}) while synchronized");
     Say(WaitUntilGone(pid, TimeSpan.FromSeconds(10)) ? "target gone" : "target still present 10 s after the kill");
     return AfterTheEnd("sync-kill", pid, dll, Say, Result);
 }
 
 // flood-crash: the flooding target calls Environment.FailFast at a moment of its own; every stop is continued.
-[System.Runtime.Versioning.UnsupportedOSPlatform("windows")]
 static int ChildCrash(string dll)
 {
     var clock = Stopwatch.StartNew();
@@ -455,28 +505,28 @@ static int ChildCrash(string dll)
     bool gone = WaitUntilGone(pid, TimeSpan.FromSeconds(30));
     Volatile.Write(ref resuming, false);
     lock (stops) Say($"stops seen before the end: {(stops.Count == 0 ? "none" : string.Join(", ", stops))}");
-    if (!gone) { kill(pid, SIGKILL); Say("target still present 30 s after the attach"); return Result("crash-no-exit"); }
+    if (!gone) { KillTarget(pid); Say("target still present 30 s after the attach"); return Result("crash-no-exit"); }
     Say("target gone (FailFast)");
     resumer.Join(TimeSpan.FromSeconds(2));
     return AfterTheEnd("crash", pid, dll, Say, Result);
 }
 
-// flood-crash-kill: the same crashing target; every stop before the unhandled-exception stop is continued, and at that
-// stop, while the target is synchronized, it is killed.
-[System.Runtime.Versioning.UnsupportedOSPlatform("windows")]
-static int ChildCrashKill(string dll)
+// flood-crash-kill, flood-stackoverflow-kill: the crashing target (FailFast, or a stack overflow); every stop before
+// the unhandled-exception stop is continued, and at that stop, while the target is synchronized, it is killed.
+static int ChildCrashKill(string dll, string targetMode, string kind)
 {
     var clock = Stopwatch.StartNew();
     void Say(string text) { Console.WriteLine($"child: {text} [{clock.ElapsedMilliseconds} ms]"); Console.Out.Flush(); }
     int Result(string outcome) { Console.WriteLine($"child: result={outcome}"); Console.Out.Flush(); return 0; }
+    string crash = targetMode == "flood-crash" ? "call FailFast" : "overflow its stack";
 
-    int pid = StartTarget(dll, "flood-crash");
+    int pid = StartTarget(dll, targetMode);
     Console.WriteLine($"child: target={pid}");
     Console.Out.Flush();
     DebugSession session;
     try { session = DebugSession.AttachAndOwn(pid, new Sink()); }
     catch (Exception e) { Say($"attach failed: {e.Message}"); return Result("setup-failed"); }
-    Say("attached; the target floods thread events and will call FailFast within 0.5 to 3 s");
+    Say($"attached; the target floods thread events and will {crash} within 0.5 to 3 s");
 
     var stops = new List<string>();
     var waiting = Stopwatch.StartNew();
@@ -491,39 +541,39 @@ static int ChildCrashKill(string dll)
         else session.Resume();
     }
     Say($"stops seen: {(stops.Count == 0 ? "none" : string.Join(", ", stops))}");
-    if (unhandled is null) { kill(pid, SIGKILL); Say("no unhandled-exception stop within 30 s of the attach"); return Result("no-stop"); }
+    if (unhandled is null) { KillTarget(pid); Say("no unhandled-exception stop within 30 s of the attach"); return Result("no-stop"); }
     Say($"at the unhandled-exception stop; exception type: {session.GetCurrentExceptionTypeName() ?? "none read"}");
 
     if (OperatingSystem.IsMacOS())
     {
         bool busy = Win32EventThreadIn("DbgTransportSession::SendRequestMessageAndWait");
         Say(busy ? "synchronized, but the Win32 event thread is inside a transport request" : "synchronized; the Win32 event thread is not inside a transport request");
-        if (busy) { kill(pid, SIGKILL); return Result("crash-not-idle"); }
+        if (busy) { KillTarget(pid); return Result($"{kind}-not-idle"); }
     }
     else Say("the Win32 event thread's state before the kill: not checked (macOS only)");
 
-    kill(pid, SIGKILL);
-    Say("target killed (SIGKILL) at the unhandled-exception stop");
+    KillTarget(pid);
+    Say($"target killed ({KillName}) at the unhandled-exception stop");
     Say(WaitUntilGone(pid, TimeSpan.FromSeconds(10)) ? "target gone" : "target still present 10 s after the kill");
-    return AfterTheEnd("crash-kill", pid, dll, Say, Result);
+    return AfterTheEnd($"{kind}-kill", pid, dll, Say, Result);
 }
 
-// flood-crash-detach: the same crashing target; every stop before the unhandled-exception stop is continued, and at
-// that stop the debugger detaches. The target then goes on to its death with no debugger attached.
-[System.Runtime.Versioning.UnsupportedOSPlatform("windows")]
-static int ChildCrashDetach(string dll)
+// flood-crash-detach, flood-stackoverflow-detach: the crashing target; every stop before the unhandled-exception stop
+// is continued, and at that stop the debugger detaches. The target then goes on to its death with no debugger attached.
+static int ChildCrashDetach(string dll, string targetMode, string kind)
 {
     var clock = Stopwatch.StartNew();
     void Say(string text) { Console.WriteLine($"child: {text} [{clock.ElapsedMilliseconds} ms]"); Console.Out.Flush(); }
     int Result(string outcome) { Console.WriteLine($"child: result={outcome}"); Console.Out.Flush(); return 0; }
+    string crash = targetMode == "flood-crash" ? "call FailFast" : "overflow its stack";
 
-    int pid = StartTarget(dll, "flood-crash");
+    int pid = StartTarget(dll, targetMode);
     Console.WriteLine($"child: target={pid}");
     Console.Out.Flush();
     DebugSession session;
     try { session = DebugSession.AttachAndOwn(pid, new Sink()); }
     catch (Exception e) { Say($"attach failed: {e.Message}"); return Result("setup-failed"); }
-    Say("attached; the target floods thread events and will call FailFast within 0.5 to 3 s");
+    Say($"attached; the target floods thread events and will {crash} within 0.5 to 3 s");
 
     var stops = new List<string>();
     var waiting = Stopwatch.StartNew();
@@ -538,24 +588,26 @@ static int ChildCrashDetach(string dll)
         else session.Resume();
     }
     Say($"stops seen: {(stops.Count == 0 ? "none" : string.Join(", ", stops))}");
-    if (unhandled is null) { kill(pid, SIGKILL); Say("no unhandled-exception stop within 30 s of the attach"); return Result("no-stop"); }
+    if (unhandled is null) { KillTarget(pid); Say("no unhandled-exception stop within 30 s of the attach"); return Result("no-stop"); }
     Say($"at the unhandled-exception stop; exception type: {session.GetCurrentExceptionTypeName() ?? "none read"}");
 
     // Detach reports a failure only as an anomaly; the Sink prints it as a child line.
     var detachDone = new ManualResetEventSlim();
     new Thread(() => { session.Detach(); detachDone.Set(); }) { IsBackground = true, Name = "probe100-detach" }.Start();
-    if (!detachDone.Wait(TimeSpan.FromSeconds(30))) { kill(pid, SIGKILL); Say("Detach still pending after 30 s"); return Result("crash-detach-hung"); }
+    if (!detachDone.Wait(TimeSpan.FromSeconds(30))) { KillTarget(pid); Say("Detach still pending after 30 s"); return Result($"{kind}-detach-hung"); }
     Say("detached at the unhandled-exception stop");
-    if (!WaitUntilGone(pid, TimeSpan.FromSeconds(30))) { kill(pid, SIGKILL); Say("target still present 30 s after the detach"); return Result("crash-detach-no-exit"); }
-    Say("target gone (FailFast, no debugger attached)");
-    return AfterTheEnd("crash-detach", pid, dll, Say, Result);
+    if (!WaitUntilGone(pid, TimeSpan.FromSeconds(30))) { KillTarget(pid); Say("target still present 30 s after the detach"); return Result($"{kind}-detach-no-exit"); }
+    Say("target gone, no debugger attached");
+    return AfterTheEnd($"{kind}-detach", pid, dll, Say, Result);
 }
 
-// flood-stackoverflow, flood-segv, flood-abort: the flooding target crashes by a means that skips HandleFatalError.
-// flood-crash's construction (every stop continued, its reason recorded), with no assumption that a stop comes: the
-// result is <kind>-unwarned-... when no stop surfaced before the end, <kind>-warned-... when one did.
-[System.Runtime.Versioning.UnsupportedOSPlatform("windows")]
-static int ChildUnwarnedCrash(string dll, string targetMode, string kind)
+// flood-stackoverflow, flood-segv, flood-abort, and the measure-* modes: the flooding target crashes (FailFast, a stack
+// overflow, a native fault or abort()); every stop is continued, and recorded with the moment it surfaced. Nothing
+// assumes a stop comes: the result is <kind>-unwarned-... when no stop but ProcessExited surfaced before the end,
+// <kind>-warned-... when one did. After the target is gone the resumer goes on waiting, up to exitedWait, for the
+// ProcessExited stop: <kind>-<warned>-exited-... when it came, -not-exited-... when it did not. Recorded too: the time
+// from continuing the unhandled-exception stop to the target being seen gone (polled every 20 ms).
+static int ChildContinuedCrash(string dll, string targetMode, string kind, TimeSpan exitedWait)
 {
     var clock = Stopwatch.StartNew();
     void Say(string text) { Console.WriteLine($"child: {text} [{clock.ElapsedMilliseconds} ms]"); Console.Out.Flush(); }
@@ -570,6 +622,9 @@ static int ChildUnwarnedCrash(string dll, string targetMode, string kind)
     Say($"attached; the target floods thread events and will crash ({kind}) within 0.5 to 3 s");
 
     var stops = new List<string>();
+    bool warned = false;
+    long continuedUnhandledAt = -1; // when the unhandled-exception stop was continued, in clock ms
+    long exitedAt = -1;             // when the ProcessExited stop surfaced, in clock ms
     bool resuming = true;
     var resumer = new Thread(() =>
     {
@@ -579,33 +634,46 @@ static int ChildUnwarnedCrash(string dll, string targetMode, string kind)
             {
                 StopInfo? s = session.WaitForStop(TimeSpan.FromMilliseconds(200));
                 if (s is null) continue;
+                long at = clock.ElapsedMilliseconds;
                 string reason = s.Reason == StopReason.Exception ? $"Exception({s.ExceptionKind}, {session.GetCurrentExceptionTypeName() ?? "type not read"})" : s.Reason.ToString();
-                lock (stops) stops.Add(reason);
-                if (s.Reason == StopReason.ProcessExited) return;
+                lock (stops) stops.Add($"{reason} at {at} ms");
+                // A ProcessExited stop is the debugger noticing the end, not a warning before it.
+                if (s.Reason == StopReason.ProcessExited) { Volatile.Write(ref exitedAt, at); return; }
+                Volatile.Write(ref warned, true);
                 session.Resume();
+                if (s.Reason == StopReason.Exception && s.ExceptionKind == ExceptionStopKind.Unhandled)
+                    Volatile.Write(ref continuedUnhandledAt, clock.ElapsedMilliseconds);
             }
-            catch (Exception e) { lock (stops) stops.Add($"threw {e.GetType().Name}"); return; }
+            catch (Exception e) { lock (stops) stops.Add($"threw {e.GetType().Name} at {clock.ElapsedMilliseconds} ms"); return; }
         }
     }) { IsBackground = true, Name = "probe100-resumer" };
     resumer.Start();
 
     bool gone = WaitUntilGone(pid, TimeSpan.FromSeconds(30));
-    Volatile.Write(ref resuming, false);
-    resumer.Join(TimeSpan.FromSeconds(2));
-    // A ProcessExited stop is the debugger noticing the end, not a warning before it.
-    bool warned;
-    lock (stops)
+    long goneAt = clock.ElapsedMilliseconds;
+    if (!gone)
     {
-        Say($"stops seen before the end: {(stops.Count == 0 ? "none" : string.Join(", ", stops))}");
-        warned = stops.Any(s => s != nameof(StopReason.ProcessExited));
+        Volatile.Write(ref resuming, false);
+        lock (stops) Say($"stops seen: {(stops.Count == 0 ? "none" : string.Join(", ", stops))}");
+        KillTarget(pid);
+        Say("target still present 30 s after the attach");
+        return Result($"{kind}-no-exit");
     }
-    if (!gone) { kill(pid, SIGKILL); Say("target still present 30 s after the attach"); return Result($"{kind}-no-exit"); }
     Say($"target gone ({kind})");
-    return AfterTheEnd($"{kind}-{(warned ? "warned" : "unwarned")}", pid, dll, Say, Result);
+    // The resumer returns when the ProcessExited stop surfaces; until then it goes on waiting for one.
+    resumer.Join(exitedWait);
+    Volatile.Write(ref resuming, false);
+    resumer.Join(TimeSpan.FromSeconds(1));
+    long exited = Volatile.Read(ref exitedAt);
+    long continued = Volatile.Read(ref continuedUnhandledAt);
+    lock (stops) Say($"stops seen: {(stops.Count == 0 ? "none" : string.Join(", ", stops))}");
+    if (continued >= 0) Say($"from continuing the unhandled-exception stop to the target seen gone: {goneAt - continued} ms");
+    Say(exited >= 0 ? $"ProcessExited came {exited - goneAt} ms after the target was seen gone" : $"no ProcessExited stop within {exitedWait.TotalSeconds:0} s of the end");
+    return AfterTheEnd($"{kind}-{(Volatile.Read(ref warned) ? "warned" : "unwarned")}-{(exited >= 0 ? "exited" : "not-exited")}", pid, dll, Say, Result);
 }
 
 // After the target is gone: let mscordbi handle the exit, record the event thread and the pipes, then attach again.
-[System.Runtime.Versioning.UnsupportedOSPlatform("windows")]
+// An attach still pending after 30 s is given 90 s more, to record whether it ever finishes (-attach-late).
 static int AfterTheEnd(string prefix, int pid, string dll, Action<string> say, Func<string, int> result)
 {
     Thread.Sleep(10_000);
@@ -616,13 +684,14 @@ static int AfterTheEnd(string prefix, int pid, string dll, Action<string> say, F
         false => "10 s after the end the Win32 event thread is not inside a transport request",
         null => "10 s after the end the Win32 event thread's state: not checked (macOS only)",
     });
-    say($"the dead target's pipes: {(PipesExist(pid) ? "present" : "absent")}");
+    say(OperatingSystem.IsWindows() ? "the dead target's pipes: none on Windows (no debug transport)" : $"the dead target's pipes: {(PipesExist(pid) ? "present" : "absent")}");
 
     int second = StartTarget(dll);
     Console.WriteLine($"child: second={second}");
     Console.Out.Flush();
     string? attachOutcome = null;
     var attachDone = new ManualResetEventSlim();
+    var attaching = Stopwatch.StartNew();
     new Thread(() =>
     {
         try { DebugSession.AttachAndOwn(second, new Sink()); attachOutcome = "attached"; }
@@ -633,13 +702,24 @@ static int AfterTheEnd(string prefix, int pid, string dll, Action<string> say, F
     say(attached ? $"second attach finished: {attachOutcome}" : "second attach still pending after 30 s");
     if (attached && attachOutcome == "attached") return result($"{prefix}-attach-ok");
     if (attached) return result("setup-failed");
+    if (attachDone.Wait(TimeSpan.FromSeconds(90)))
+    {
+        say($"second attach finished {attaching.ElapsedMilliseconds} ms after it began: {attachOutcome}");
+        return result($"{prefix}-attach-late");
+    }
+    say("second attach still pending 120 s after it began");
     return result(stuck == true ? $"{prefix}-orphaned-and-attach-hung" : $"{prefix}-attach-hung");
 }
 
-// Polls with signal 0 until the process is gone (bash, its parent, reaps it). True once kill(pid, 0) fails.
-[System.Runtime.Versioning.UnsupportedOSPlatform("windows")]
+// Unix: polls with signal 0 until the process is gone (bash, its parent, reaps it). True once kill(pid, 0) fails.
+// Windows: waits on the process itself.
 static bool WaitUntilGone(int pid, TimeSpan bound)
 {
+    if (OperatingSystem.IsWindows())
+    {
+        try { using Process p = Process.GetProcessById(pid); return p.WaitForExit(bound); }
+        catch (ArgumentException) { return true; }
+    }
     var waited = Stopwatch.StartNew();
     while (waited.Elapsed < bound)
     {
@@ -647,6 +727,16 @@ static bool WaitUntilGone(int pid, TimeSpan bound)
         Thread.Sleep(20);
     }
     return false;
+}
+
+// SIGKILL on Unix; TerminateProcess (Process.Kill) on Windows.
+static void KillTarget(int pid)
+{
+    if (!OperatingSystem.IsWindows()) { kill(pid, SIGKILL); return; }
+    try { using Process p = Process.GetProcessById(pid); p.Kill(); }
+    catch (ArgumentException) { }                          // already gone
+    catch (InvalidOperationException) { }                  // exited between the lookup and the kill
+    catch (System.ComponentModel.Win32Exception) { }       // already terminating
 }
 
 // macOS: samples this process for a second and reports whether one thread is both in mscordbi's Win32 event loop and
@@ -670,11 +760,24 @@ static bool Win32EventThreadIn(string frame)
                && t.Contains(frame, StringComparison.Ordinal));
 }
 
-// The target runs under bash, so it is bash's child and not this process's (finding 87: an attached child of the
-// debugger host has two reapers). bash prints the target's PID and waits for it.
-[System.Runtime.Versioning.UnsupportedOSPlatform("windows")]
+// Unix: the target runs under bash, so it is bash's child and not this process's (finding 87: an attached child of the
+// debugger host has two reapers). bash prints the target's PID and waits for it. Windows has no second reaper, so the
+// target is this process's own child; its output is read and dropped, as bash's redirection drops it on Unix.
 static int StartTarget(string dll, string? targetArgument = null)
 {
+    if (OperatingSystem.IsWindows())
+    {
+        var direct = new ProcessStartInfo("dotnet") { UseShellExecute = false, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true };
+        direct.ArgumentList.Add(dll);
+        if (targetArgument is not null) direct.ArgumentList.Add(targetArgument);
+        Process target = Process.Start(direct)!;
+        target.OutputDataReceived += (_, _) => { };
+        target.ErrorDataReceived += (_, _) => { };
+        target.BeginOutputReadLine();
+        target.BeginErrorReadLine();
+        Thread.Sleep(1000);
+        return target.Id;
+    }
     var psi = new ProcessStartInfo("bash") { UseShellExecute = false, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true };
     psi.ArgumentList.Add("-c");
     psi.ArgumentList.Add("dotnet \"$0\" \"$@\" >/dev/null 2>&1 </dev/null & echo $!; wait");
@@ -720,6 +823,7 @@ static extern int kill(int pid, int sig);
 partial class Program
 {
     static int SIGKILL => 9;
+    static string KillName => OperatingSystem.IsWindows() ? "TerminateProcess" : "SIGKILL";
     static int SIGSTOP => OperatingSystem.IsMacOS() ? 17 : 19;
     static int SIGCONT => OperatingSystem.IsMacOS() ? 19 : 18;
 }

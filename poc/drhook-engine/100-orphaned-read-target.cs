@@ -11,7 +11,8 @@
 // abruptly, at a moment nobody outside it chose. Three more crash the same way, at the same moments, by means that
 // skip EEPolicy::HandleFatalError (the path by which FailFast tells the debugger, then calls PROCAbort):
 // "flood-stackoverflow" recurses on that thread until its stack is exhausted; "flood-segv" writes through a bad
-// address inside libc's memset, a fault in native code; "flood-abort" calls libc's abort() directly.
+// address inside libc's memset, a fault in native code; "flood-abort" calls libc's abort() directly. On Windows the
+// last two use ucrtbase's memset (an access violation) and abort().
 
 using System;
 using System.Diagnostics;
@@ -32,7 +33,9 @@ if (mode is "flood-crash" or "flood-stackoverflow" or "flood-segv" or "flood-abo
         {
             case "flood-crash": Environment.FailFast("probe100 flood-crash: the target ends itself"); break;
             case "flood-stackoverflow": Console.WriteLine(Recurse(0)); break;
+            case "flood-segv" when OperatingSystem.IsWindows(): ucrt_memset(16, 0, 1); break;
             case "flood-segv": memset(16, 0, 1); break;
+            case "flood-abort" when OperatingSystem.IsWindows(): ucrt_abort(); break;
             case "flood-abort": abort(); break;
         }
     }) { IsBackground = true, Name = "probe100-crasher" }.Start();
@@ -74,3 +77,10 @@ static extern nint memset(nint destination, int value, nuint count);
 
 [DllImport("libc")]
 static extern void abort();
+
+// Windows has no libc; the C runtime's memset and abort live in ucrtbase.
+[DllImport("ucrtbase", EntryPoint = "memset")]
+static extern nint ucrt_memset(nint destination, int value, nuint count);
+
+[DllImport("ucrtbase", EntryPoint = "abort")]
+static extern void ucrt_abort();
