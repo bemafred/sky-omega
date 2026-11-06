@@ -17,6 +17,10 @@ public enum ExecutionState
 
     /// <summary>The debuggee has exited (<see cref="StopReason.ProcessExited"/>); no further stops occur.</summary>
     Exited,
+
+    /// <summary>The debugger lost the process (<see cref="StopReason.DebuggerLost"/>, mscordbi's <c>DebuggerError</c>):
+    /// debugging services for it are disabled. No position is read; the target's own state is not known from here.</summary>
+    DebuggerLost,
 }
 
 /// <summary>Session / lifecycle facet of a <see cref="DebugStateSnapshot"/> — enough for a view that

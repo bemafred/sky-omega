@@ -25,6 +25,7 @@ public sealed partial class DebugSession
     /// "posted").</summary>
     public EvalStatus TryEvalPostLivenessJob(in UiLivenessPlan plan, string sentinelPath, TimeSpan timeout, out string trace)
     {
+        RefuseIfDebuggerLost(nameof(TryEvalPostLivenessJob));
         trace = "start";
         nint coreLib = RuntimeNavigation.FindModule(_pProcess, "System.Private.CoreLib");
         nint uiModule = RuntimeNavigation.FindModule(_pProcess, plan.DispatcherModule);

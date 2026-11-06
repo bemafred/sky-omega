@@ -33,7 +33,18 @@ public enum StopReason
     EntryModuleLoaded,
     /// <summary>The debuggee exited; no further stops will occur.</summary>
     ProcessExited,
+    /// <summary>mscordbi sent <c>ICorDebugManagedCallback.DebuggerError</c>: debugging services for the process are
+    /// disabled, and the debugger is unusable for it. Documented: only <c>ICorDebugProcess::GetID</c> may be called
+    /// afterwards. The session makes no further native call (it refuses every operation that would), and its
+    /// teardown calls nothing on mscordbi's objects, not even <c>Release</c>. <see cref="StopInfo.DebuggerError"/>
+    /// carries the error. Every later <see cref="DebugSession.WaitForStop"/> returns this same stop.</summary>
+    DebuggerLost,
 }
+
+/// <summary>The two values <c>ICorDebugManagedCallback.DebuggerError</c> reports: <paramref name="ErrorHResult"/>
+/// ("the HRESULT value that was returned from the event handler") and <paramref name="ErrorCode"/> ("an integer that
+/// specifies the CLR error").</summary>
+public sealed record DebuggerErrorInfo(int ErrorHResult, uint ErrorCode);
 
 /// <summary>The phase at which an exception stop was raised — the
 /// <c>CorDebugExceptionCallbackType</c> from <c>ICorDebugManagedCallback2.Exception</c> (values
@@ -54,5 +65,11 @@ public enum ExceptionStopKind
 
 /// <summary>A synchronized stop surfaced to the caller. While stopped, the debuggee is frozen;
 /// call <see cref="DebugSession.Resume"/> to continue it. <see cref="ExceptionKind"/> is meaningful
-/// only when <see cref="Reason"/> is <see cref="StopReason.Exception"/>.</summary>
-public sealed record StopInfo(StopReason Reason, ExceptionStopKind ExceptionKind = ExceptionStopKind.None);
+/// only when <see cref="Reason"/> is <see cref="StopReason.Exception"/>; <see cref="DebuggerError"/> only when it is
+/// <see cref="StopReason.DebuggerLost"/>.</summary>
+public sealed record StopInfo(StopReason Reason, ExceptionStopKind ExceptionKind = ExceptionStopKind.None, DebuggerErrorInfo? DebuggerError = null)
+{
+    /// <summary>True when no further stop can come and the session is over: the debuggee exited
+    /// (<see cref="StopReason.ProcessExited"/>), or the debugger lost it (<see cref="StopReason.DebuggerLost"/>).</summary>
+    public bool EndsSession => Reason is StopReason.ProcessExited or StopReason.DebuggerLost;
+}

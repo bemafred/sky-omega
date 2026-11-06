@@ -32,13 +32,15 @@ public sealed unsafe class ManagedCallbackHostTests
         public List<nint> Threads { get; } = new();
         public List<int> Details { get; } = new();
         public List<nint> Breakpoints { get; } = new();
-        public void OnCallback(CallbackKind kind, string name, nint appDomain, nint thread, int detail, nint breakpoint = 0)
+        public List<uint> ErrorCodes { get; } = new();
+        public void OnCallback(CallbackKind kind, string name, nint appDomain, nint thread, int detail, nint breakpoint = 0, uint errorCode = 0)
         {
             Events.Add(name);
             Kinds.Add(kind);
             Threads.Add(thread);
             Details.Add(detail);
             Breakpoints.Add(breakpoint);
+            ErrorCodes.Add(errorCode);
         }
     }
 
@@ -109,6 +111,27 @@ public sealed unsafe class ManagedCallbackHostTests
         Assert.Equal(new[] { "Breakpoint" }, sink.Events.ToArray());
         Assert.Equal(new[] { CallbackKind.BreakpointHit }, sink.Kinds.ToArray()); // not auto-continued downstream
         Assert.Equal(new nint[] { 0xBB }, sink.Threads.ToArray());                // pThread forwarded for stepping
+    }
+
+    [Fact]
+    public void DebuggerErrorThunk_ClassifiesAsDebuggerError_WithBothCodes_AndLeavesTheProcessPointerAlone()
+    {
+        var sink = new RecordingSink();
+        using var host = new ManagedCallbackHost(sink);
+        nint p = host.NativePointer;
+
+        // ICorDebugManagedCallback slot 17 = DebuggerError(pThis, pProcess, errorHR, errorCode). Until 2026-11-06 the thunk
+        // forwarded it as Informational with neither code, and the pump continued it. pProcess is an address nothing is
+        // mapped at: only ICorDebugProcess::GetID may be called after DebuggerError, so the thunk must not touch it
+        // (not even AddRef); a dereference would crash this test.
+        var debuggerError = (delegate* unmanaged[Cdecl]<nint, nint, int, uint, int>)Slot(p, 17);
+        int hr = debuggerError(p, 0x10, unchecked((int)0x8013FFFF), 42);
+
+        Assert.Equal(S_OK, hr);
+        Assert.Equal(new[] { "DebuggerError" }, sink.Events.ToArray());
+        Assert.Equal(new[] { CallbackKind.DebuggerError }, sink.Kinds.ToArray());
+        Assert.Equal(new[] { unchecked((int)0x8013FFFF) }, sink.Details.ToArray()); // errorHR
+        Assert.Equal(new[] { 42u }, sink.ErrorCodes.ToArray());                     // errorCode
     }
 
     [Fact]

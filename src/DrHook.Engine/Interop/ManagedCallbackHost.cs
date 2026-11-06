@@ -187,7 +187,16 @@ internal sealed unsafe class ManagedCallbackHost : IDisposable
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })] private static int UnloadModule(nint p, nint a, nint m) => Fire(p, "UnloadModule");
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })] private static int LoadClass(nint p, nint a, nint c) => Fire(p, "LoadClass");
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })] private static int UnloadClass(nint p, nint a, nint c) => Fire(p, "UnloadClass");
-    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })] private static int DebuggerError(nint p, nint proc, int hr, uint code) => Fire(p, "DebuggerError");
+    // DebuggerError: debugging services for the process are disabled. Only ICorDebugProcess::GetID may be called
+    // afterwards, so the process pointer is not touched here (not even AddRef). errorHR and errorCode are kept: the
+    // documentation says the error should be made available to the user. No S_OK-and-continue: the pump never
+    // continues it (CallbackKind.DebuggerError).
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
+    private static int DebuggerError(nint p, nint proc, int hr, uint code)
+    {
+        HostOf(p)?._sink.OnCallback(CallbackKind.DebuggerError, "DebuggerError", 0, 0, hr, 0, code);
+        return S_OK;
+    }
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })] private static int LogMessage(nint p, nint a, nint t, int lvl, nint sw, nint msg) => Fire(p, "LogMessage");
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })] private static int LogSwitch(nint p, nint a, nint t, int lvl, uint reason, nint sw, nint parent) => Fire(p, "LogSwitch");
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })] private static int CreateAppDomain(nint p, nint proc, nint a) => Fire(p, "CreateAppDomain");

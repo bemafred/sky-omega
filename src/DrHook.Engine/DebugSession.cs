@@ -29,6 +29,13 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
 
     private static readonly ComWrappers Wrappers = new StrategyBasedComWrappers();
 
+    // Sessions whose debugger was lost (DebuggerError), kept reachable for the rest of this process. Their ICorDebug
+    // and controller wrappers each hold a reference to an mscordbi object and call Release when the GC collects them;
+    // after DebuggerError only ICorDebugProcess::GetID may be called, so they must never be collected. The session's
+    // callback object stays alive too, since mscordbi still holds it and we may not Detach or Terminate to take it back.
+    // Never cleared: only ending the process (a debugger worker process, ADR-016 Step 5) frees them.
+    private static readonly List<DebugSession> s_lostSessions = new();
+
     private readonly DbgShim _dbgShim;
     private readonly CallbackPump _pump;
     private readonly ManagedCallbackHost _callback;
@@ -173,6 +180,25 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
     /// before Dispose); false when the substrate attached to an existing target (Attached —
     /// Dispose does detach-leave-running). Probe 44 design.</summary>
     public bool OwnsTarget => _ownsTarget;
+
+    /// <summary>True once mscordbi has sent <c>ICorDebugManagedCallback.DebuggerError</c>: debugging services for the
+    /// process are disabled and the debugger is unusable for it. From then on every operation that would call
+    /// ICorDebug throws <see cref="DebuggerLostException"/>, <see cref="WaitForStop"/> returns
+    /// <see cref="StopReason.DebuggerLost"/>, and <see cref="Dispose"/> calls nothing on mscordbi's objects.</summary>
+    public bool IsDebuggerLost => _pump.LostStop is not null;
+
+    /// <summary>The error <c>DebuggerError</c> reported, or null while the debugger is usable.</summary>
+    public DebuggerErrorInfo? DebuggerError => _pump.LostStop?.DebuggerError;
+
+    /// <summary>Refuse an operation that would call ICorDebug once the debugger is lost. Documented for
+    /// <c>DebuggerError</c>: only <c>ICorDebugProcess::GetID</c> may be called afterwards. A loss published after this
+    /// check, while the operation is already inside mscordbi, cannot be stopped from here (ADR-016's worker process
+    /// contains that case).</summary>
+    private void RefuseIfDebuggerLost(string operation)
+    {
+        if (_pump.LostStop?.DebuggerError is { } error)
+            throw new DebuggerLostException(operation, error);
+    }
 
     /// <summary>Attach the native ICorDebug engine to a running .NET process and register the
     /// managed callback. On macOS/ARM64 this needs no debug entitlement (finding 13).</summary>
@@ -647,7 +673,11 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
     }
 
     /// <summary>Resume a stopped debuggee so it runs to the next stop or exit.</summary>
-    public void Resume() => _pump.Resume();
+    public void Resume()
+    {
+        RefuseIfDebuggerLost(nameof(Resume));
+        _pump.Resume();
+    }
 
     /// <summary>Send a graceful-termination request to the Owned target (SIGTERM on Unix;
     /// Windows path is deferred to ADR-007 Phase 9 / GenerateConsoleCtrlEvent). Wait up to
@@ -771,7 +801,11 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
     /// <see cref="StopReason.Pause"/> stop. Resume via <see cref="Resume"/> like any other stop.
     /// If a callback-driven stop is already in flight, that stop surfaces first and the requested
     /// pause queues behind it (will fire after the user resumes the prior stop).</summary>
-    public void Pause() => _pump.RequestPause();
+    public void Pause()
+    {
+        RefuseIfDebuggerLost(nameof(Pause));
+        _pump.RequestPause();
+    }
 
     private enum PolicyOutcome { Resume, Surface, ConditionFault }
 
@@ -823,20 +857,36 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
 
     /// <summary>Step into calls from the current stop. Completion surfaces as a
     /// <see cref="StopReason.Step"/> from <see cref="WaitForStop"/>. Valid only while stopped.</summary>
-    public void StepInto() => _pump.StepInto();
+    public void StepInto()
+    {
+        RefuseIfDebuggerLost(nameof(StepInto));
+        _pump.StepInto();
+    }
 
     /// <summary>Step over calls from the current stop. Completion surfaces as a
     /// <see cref="StopReason.Step"/> from <see cref="WaitForStop"/>. Valid only while stopped.</summary>
-    public void StepOver() => _pump.StepOver();
+    public void StepOver()
+    {
+        RefuseIfDebuggerLost(nameof(StepOver));
+        _pump.StepOver();
+    }
 
     /// <summary>Step out of the current frame. Completion surfaces as a
     /// <see cref="StopReason.Step"/> from <see cref="WaitForStop"/>. Valid only while stopped.</summary>
-    public void StepOut() => _pump.StepOut();
+    public void StepOut()
+    {
+        RefuseIfDebuggerLost(nameof(StepOut));
+        _pump.StepOut();
+    }
 
     /// <summary>Names of the modules loaded in the target (process → app domains → assemblies →
     /// modules). Valid only while the debuggee is stopped (after <see cref="WaitForStop"/>) —
     /// ICorDebug enumeration requires the process to be synchronized.</summary>
-    public IReadOnlyList<string> EnumerateModules() => RuntimeNavigation.ModuleNames(_pProcess);
+    public IReadOnlyList<string> EnumerateModules()
+    {
+        RefuseIfDebuggerLost(nameof(EnumerateModules));
+        return RuntimeNavigation.ModuleNames(_pProcess);
+    }
 
     /// <summary>The managed call stack at the current stop, top frame first, as
     /// "Type.Method @ file:line" when a Portable PDB is available (else "Type.Method";
@@ -844,6 +894,7 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
     /// (after <see cref="WaitForStop"/>).</summary>
     public IReadOnlyList<string> GetStackFrames()
     {
+        RefuseIfDebuggerLost(nameof(GetStackFrames));
         IReadOnlyList<FrameLocation> frames = GetStackFrameLocations();
         List<string> result = new(frames.Count);
         foreach (FrameLocation f in frames) result.Add(f.Display);
@@ -859,6 +910,7 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
     /// Valid only while the debuggee is stopped (after <see cref="WaitForStop"/>).</summary>
     public IReadOnlyList<FrameLocation> GetStackFrameLocations()
     {
+        RefuseIfDebuggerLost(nameof(GetStackFrameLocations));
         List<FrameLocation> result = new();
         foreach (Interop.FrameInfo frame in Frames.WalkManagedFrames(_pump.StopThread))
         {
@@ -911,6 +963,7 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
     /// runtime's unwinder at scale (ADR-007). Valid only while stopped.</summary>
     public IReadOnlyList<ArgumentValue> GetArguments(int depth = 0)
     {
+        RefuseIfDebuggerLost(nameof(GetArguments));
         if (depth > MaxInspectionDepth)
         {
             _sink.OnAnomaly(new EngineAnomaly(
@@ -958,6 +1011,7 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
     /// while stopped.</summary>
     public IReadOnlyList<LocalValue> GetLocals(int depth = 0)
     {
+        RefuseIfDebuggerLost(nameof(GetLocals));
         if (depth > MaxInspectionDepth)
         {
             _sink.OnAnomaly(new EngineAnomaly(
@@ -985,6 +1039,7 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
     /// not stopped, the local is absent, or the path doesn't resolve. Valid only while stopped.</summary>
     public IReadOnlyList<FieldValue> ExpandLocal(string localName, IReadOnlyList<string> childPath)
     {
+        RefuseIfDebuggerLost(nameof(ExpandLocal));
         List<Interop.FrameInfo> frames = Frames.WalkManagedFrames(_pump.StopThread);
         if (frames.Count == 0) return Array.Empty<FieldValue>();
 
@@ -1002,13 +1057,20 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
     /// <c>this</c>) at the current stop, after walking down <paramref name="childPath"/>. One bounded
     /// level per call; see <see cref="ExpandLocal"/>. Valid only while stopped.</summary>
     public IReadOnlyList<FieldValue> ExpandArgument(int argIndex, IReadOnlyList<string> childPath)
-        => Variables.ExpandArgumentChildren(_pump.StopThread, argIndex, childPath);
+    {
+        RefuseIfDebuggerLost(nameof(ExpandArgument));
+        return Variables.ExpandArgumentChildren(_pump.StopThread, argIndex, childPath);
+    }
 
     /// <summary>The fully-qualified type name of the exception in flight at the current stop (e.g.
     /// "System.InvalidOperationException"), or null if none. Meaningful at a
     /// <see cref="StopReason.Exception"/> stop; reads <c>ICorDebugThread.GetCurrentException</c> on
     /// the stop thread. Valid only while stopped.</summary>
-    public string? GetCurrentExceptionTypeName() => ExceptionInspector.CurrentExceptionTypeName(_pump.StopThread);
+    public string? GetCurrentExceptionTypeName()
+    {
+        RefuseIfDebuggerLost(nameof(GetCurrentExceptionTypeName));
+        return ExceptionInspector.CurrentExceptionTypeName(_pump.StopThread);
+    }
 
     /// <summary>Capture one self-contained <see cref="DebugStateSnapshot"/> — the unified "snapshot" face of
     /// the ADR-012 surface-agnostic debug-state model. Promotes this session's piecemeal queryable state
@@ -1039,9 +1101,13 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
         ArgumentNullException.ThrowIfNull(logs);
         ArgumentNullException.ThrowIfNull(anomalies);
 
-        bool exited = currentStop?.Reason == StopReason.ProcessExited;
-        bool stopped = currentStop is not null && !exited;
-        ExecutionState execution = exited ? ExecutionState.Exited
+        // A lost debugger is reported as lost whatever stop the driver holds: no frame may be walked (only
+        // ICorDebugProcess::GetID may be called after DebuggerError).
+        bool lost = IsDebuggerLost;
+        bool exited = !lost && currentStop?.Reason == StopReason.ProcessExited;
+        bool stopped = !lost && currentStop is not null && !exited;
+        ExecutionState execution = lost ? ExecutionState.DebuggerLost
+                                 : exited ? ExecutionState.Exited
                                  : stopped ? ExecutionState.Stopped
                                  : ExecutionState.Running;
 
@@ -1084,6 +1150,7 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
     public EvalStatus TryEvalStaticCall(string moduleNameSubstring, string typeName, string methodName,
                                         TimeSpan timeout, out ArgumentValue result)
     {
+        RefuseIfDebuggerLost(nameof(TryEvalStaticCall));
         result = default;
         nint pModule = RuntimeNavigation.FindModule(_pProcess, moduleNameSubstring);
         if (pModule == 0) return EvalStatus.SetupFailed;
@@ -1125,6 +1192,7 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
     public EvalStatus TryEvalStaticCallInt(string moduleNameSubstring, string typeName, string methodName,
                                            int argument, TimeSpan timeout, out ArgumentValue result)
     {
+        RefuseIfDebuggerLost(nameof(TryEvalStaticCallInt));
         result = default;
         nint pModule = RuntimeNavigation.FindModule(_pProcess, moduleNameSubstring);
         if (pModule == 0) return EvalStatus.SetupFailed;
@@ -1176,6 +1244,7 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
                                           string declaringTypeName, string methodName,
                                           TimeSpan timeout, out ArgumentValue result)
     {
+        RefuseIfDebuggerLost(nameof(TryEvalInstanceCall));
         result = default;
 
         // 1. Resolve the receiver (`this`) by name to its value — a named local or an argument.
@@ -1229,6 +1298,7 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
                                                 string staticFactory, string instanceMethod,
                                                 TimeSpan timeout, out ArgumentValue result)
     {
+        RefuseIfDebuggerLost(nameof(TryEvalStaticThenInstance));
         result = default;
         nint pModule = RuntimeNavigation.FindModule(_pProcess, moduleSubstring);
         if (pModule == 0) return EvalStatus.SetupFailed;
@@ -1314,6 +1384,7 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
     public EvalStatus TryEvalStaticGetterChain(string moduleSubstring, string typeName, string staticGetter,
                                                string[] memberChain, TimeSpan timeout, out ArgumentValue result)
     {
+        RefuseIfDebuggerLost(nameof(TryEvalStaticGetterChain));
         result = default;
         nint pModule = RuntimeNavigation.FindModule(_pProcess, moduleSubstring);
         if (pModule == 0) return EvalStatus.SetupFailed;
@@ -1385,6 +1456,7 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
     public EvalStatus TryEvalStaticThenInstanceInt(string moduleSubstring, string typeName, string staticFactory,
                                                    string instanceMethod, int arg, TimeSpan timeout, out ArgumentValue result)
     {
+        RefuseIfDebuggerLost(nameof(TryEvalStaticThenInstanceInt));
         result = default;
         nint pModule = RuntimeNavigation.FindModule(_pProcess, moduleSubstring);
         if (pModule == 0) return EvalStatus.SetupFailed;
@@ -1457,6 +1529,7 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
     public EvalStatus TryEvalNewObjectThenGetter(string moduleSubstring, string typeName, int ctorArg,
                                                  string getterMember, TimeSpan timeout, out ArgumentValue result)
     {
+        RefuseIfDebuggerLost(nameof(TryEvalNewObjectThenGetter));
         result = default;
         nint pModule = RuntimeNavigation.FindModule(_pProcess, moduleSubstring);
         if (pModule == 0) return EvalStatus.SetupFailed;
@@ -1526,6 +1599,7 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
     public EvalStatus TryEvalNewStringThenStaticCall(string moduleSubstring, string typeName, string staticMethod,
                                                      string text, TimeSpan timeout, out ArgumentValue result)
     {
+        RefuseIfDebuggerLost(nameof(TryEvalNewStringThenStaticCall));
         result = default;
         nint pModule = RuntimeNavigation.FindModule(_pProcess, moduleSubstring);
         if (pModule == 0) return EvalStatus.SetupFailed;
@@ -1586,6 +1660,7 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
                                                               int[] ctorArgs, string consumerType,
                                                               string consumerMethod, TimeSpan timeout, out ArgumentValue result)
     {
+        RefuseIfDebuggerLost(nameof(TryEvalConstructValueTypeViaCtorAndPass));
         result = default;
         nint pModule = RuntimeNavigation.FindModule(_pProcess, moduleSubstring);
         if (pModule == 0) return EvalStatus.SetupFailed;
@@ -1664,6 +1739,7 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
     /// <see cref="Expressions.CSharpCondition"/> and by all conditional / logpoint policy paths.</summary>
     public EvalStatus TryEvalMemberCall(string thisLocalName, string memberName, TimeSpan timeout, out ArgumentValue result)
     {
+        RefuseIfDebuggerLost(nameof(TryEvalMemberCall));
         result = default;
         nint thisValue = ResolveReceiverValue(thisLocalName);
         if (thisValue == 0) return EvalStatus.SetupFailed;
@@ -1710,6 +1786,7 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
     /// (<c>ex.Code == 42</c>). Valid only at an exception stop.</summary>
     public EvalStatus TryEvalCurrentExceptionMember(string memberName, TimeSpan timeout, out ArgumentValue result)
     {
+        RefuseIfDebuggerLost(nameof(TryEvalCurrentExceptionMember));
         result = default;
         nint thisValue = Interop.ExceptionInspector.CurrentExceptionValue(_pump.StopThread);
         if (thisValue == 0) return EvalStatus.SetupFailed;
@@ -1781,7 +1858,10 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
     /// (0 if not found). Valid only while the debuggee is stopped. The token feeds breakpoint
     /// creation (<c>GetFunctionFromToken</c>).</summary>
     public uint ResolveMethodToken(string moduleNameSubstring, string typeName, string methodName)
-        => RuntimeNavigation.ResolveMethodToken(_pProcess, moduleNameSubstring, typeName, methodName);
+    {
+        RefuseIfDebuggerLost(nameof(ResolveMethodToken));
+        return RuntimeNavigation.ResolveMethodToken(_pProcess, moduleNameSubstring, typeName, methodName);
+    }
 
     /// <summary>Lift a <see cref="BreakpointPolicySpec"/> (string data) into a
     /// <see cref="BreakpointPolicy"/> (engine domain form) by compiling its Condition and
@@ -1825,6 +1905,7 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
     /// <see cref="WaitForStop"/>.</summary>
     public int SetBreakpoint(string moduleNameSubstring, string typeName, string methodName, BreakpointPolicy? policy = null)
     {
+        RefuseIfDebuggerLost(nameof(SetBreakpoint));
         nint pModule = RuntimeNavigation.FindModule(_pProcess, moduleNameSubstring);
         if (pModule == 0) return 0;
         try
@@ -1853,6 +1934,7 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
     /// <see cref="StopReason.Breakpoint"/>.</summary>
     public int SetBreakpointAtLine(string moduleNameSubstring, string fileHint, int line, BreakpointPolicy? policy = null)
     {
+        RefuseIfDebuggerLost(nameof(SetBreakpointAtLine));
         nint pModule = RuntimeNavigation.FindModule(_pProcess, moduleNameSubstring);
         if (pModule == 0) return 0;
         try
@@ -1882,6 +1964,7 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
     /// <c>0</c> if none does. Binds to the nearest sequence point at or after the line.</summary>
     public int SetBreakpointAtLine(string fileHint, int line, BreakpointPolicy? policy = null)
     {
+        RefuseIfDebuggerLost(nameof(SetBreakpointAtLine));
         foreach (string moduleName in EnumerateModules())
         {
             nint pModule = RuntimeNavigation.FindModule(_pProcess, moduleName);
@@ -1959,6 +2042,7 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
     /// <c>false</c> otherwise. Valid only while stopped.</summary>
     public bool RemoveBreakpoint(int id)
     {
+        RefuseIfDebuggerLost(nameof(RemoveBreakpoint));
         for (int i = 0; i < _breakpoints.Count; i++)
         {
             if (_breakpoints[i].Info.Id == id)
@@ -1999,6 +2083,7 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
     /// has been terminated, so deactivation is moot).</summary>
     public int ClearBreakpoints()
     {
+        RefuseIfDebuggerLost(nameof(ClearBreakpoints));
         int count = _breakpoints.Count;
         foreach (BreakpointEntry e in _breakpoints)
         {
@@ -2076,6 +2161,7 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
         const int CORDBG_E_PROCESS_TERMINATED = unchecked((int)0x80131301);
         const int CORDBG_E_OBJECT_NEUTERED = unchecked((int)0x8013134F);
 
+        RefuseIfDebuggerLost(nameof(Detach));
         // Atomic idempotence gate (ENG-DS-1) — concurrent Detach calls don't double-invoke
         // ICorDebugController.Detach (whose behavior on already-detached is undefined per docs).
         if (Interlocked.Exchange(ref _detached, 1) != 0) return;
@@ -2273,67 +2359,89 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
         // the target halted at its stop, released below by the explicit resume.
         _pump.Dispose();
 
-        bool targetDead = _targetProcess?.HasExited == true;
-        if (targetDead)
+        if (IsDebuggerLost)
         {
-            // Target died between the stop and this call — nothing to leave running. Settle and Detach
-            // so the CCW is released before _callback.Dispose frees it (finding 66 ordering).
-            Thread.Sleep(ExitWorkSettleMs);
-            Detach();
+            // DebuggerError: only ICorDebugProcess::GetID may be called, so the debugger cannot be detached and the
+            // target cannot be resumed through it; nothing on mscordbi's objects is called or released (see Dispose),
+            // and the session is rooted so the ComWrappers wrappers are never collected. The target is left as it is,
+            // still attached to a debugger that has disabled its services; whether it runs on or stays held is not
+            // known. Not killed: the caller asked for it to keep running.
+            lock (s_lostSessions) s_lostSessions.Add(this);
         }
         else
         {
-            // Detach must run against a SYNCHRONIZED target with NO outstanding ICorDebug breakpoints:
-            //   - Probe 62 v1: a pre-resume (Borrowed exit-race recipe TryResumeForDetach → running →
-            //     Detach) left the target running and Detach returned CORDBG_E_PROCESS_NOT_SYNCHRONIZED
-            //     (0x80131302). A leave-running target is NOT exiting, so the stopped-state exit-race
-            //     the Borrowed pre-resume guards against (probe 12) does not apply — drop the pre-resume.
-            //   - Probe 62b: with an armed breakpoint, Detach returned
-            //     CORDBG_E_DETACH_FAILED_OUTSTANDING_BREAKPOINTS (0x80131C21) and the target hung at the
-            //     breakpoint (the Terminate that followed then failed CORDBG_E_ILLEGAL_SHUTDOWN_ORDER
-            //     0x80131C15). ICorDebug refuses to detach while breakpoints are active, so deactivate
-            //     them first (ClearBreakpoints → ICorDebugBreakpoint.Activate(FALSE)). The sibling
-            //     OUTSTANDING_* errors — evals (0x1c18) and steppers (0x1c19) — cannot be in flight at
-            //     a stop: a func-eval is synchronous, and a stepper is consumed by the StepComplete
-            //     that produced the stop.
-            // The target is synchronized at the stop we were called from; DetachSynchronized keeps it
-            // synchronized (finding 14: RC thread not mid-flush) and Detach then detaches fully — mscordbi
-            // implicit-resumes the target on Detach, so it runs free un-debugged.
-            DetachSynchronized();
+            try
+            {
+                bool targetDead = _targetProcess?.HasExited == true;
+                if (targetDead)
+                {
+                    // Target died between the stop and this call — nothing to leave running. Settle and Detach
+                    // so the CCW is released before _callback.Dispose frees it (finding 66 ordering).
+                    Thread.Sleep(ExitWorkSettleMs);
+                    Detach();
+                }
+                else
+                {
+                    // Detach must run against a SYNCHRONIZED target with NO outstanding ICorDebug breakpoints:
+                    //   - Probe 62 v1: a pre-resume (Borrowed exit-race recipe TryResumeForDetach → running →
+                    //     Detach) left the target running and Detach returned CORDBG_E_PROCESS_NOT_SYNCHRONIZED
+                    //     (0x80131302). A leave-running target is NOT exiting, so the stopped-state exit-race
+                    //     the Borrowed pre-resume guards against (probe 12) does not apply — drop the pre-resume.
+                    //   - Probe 62b: with an armed breakpoint, Detach returned
+                    //     CORDBG_E_DETACH_FAILED_OUTSTANDING_BREAKPOINTS (0x80131C21) and the target hung at the
+                    //     breakpoint (the Terminate that followed then failed CORDBG_E_ILLEGAL_SHUTDOWN_ORDER
+                    //     0x80131C15). ICorDebug refuses to detach while breakpoints are active, so deactivate
+                    //     them first (ClearBreakpoints → ICorDebugBreakpoint.Activate(FALSE)). The sibling
+                    //     OUTSTANDING_* errors — evals (0x1c18) and steppers (0x1c19) — cannot be in flight at
+                    //     a stop: a func-eval is synchronous, and a stepper is consumed by the StepComplete
+                    //     that produced the stop.
+                    // The target is synchronized at the stop we were called from; DetachSynchronized keeps it
+                    // synchronized (finding 14: RC thread not mid-flush) and Detach then detaches fully — mscordbi
+                    // implicit-resumes the target on Detach, so it runs free un-debugged.
+                    DetachSynchronized();
+                }
+
+                int terminateHr = _cordbg.Terminate();
+                if (terminateHr < 0)
+                {
+                    _sink.OnAnomaly(new EngineAnomaly(
+                        DateTimeOffset.UtcNow, AnomalyKind.UnexpectedHResult, "mcp-request", "Terminate (DetachLeaveRunning)",
+                        Observed: $"HRESULT 0x{terminateHr:X8}",
+                        Expected: "S_OK (ICorDebug fully torn down)",
+                        Context: new Dictionary<string, string> { ["hresult"] = $"0x{terminateHr:X8}" }));
+                }
+
+                // Ref-release tail — identical ordering to Dispose (Detach already released the CCW, so freeing
+                // _callback below is safe). Kept inline rather than shared with Dispose so this new path does
+                // not modify the validated Dispose teardown; DRY-ing via a shared private teardown is a
+                // follow-up once probe 62 confirms the path.
+                foreach (BreakpointEntry e in _breakpoints)
+                {
+                    RuntimeNavigation.Release(e.Breakpoint);
+                    RuntimeNavigation.Release(e.Function);
+                    RuntimeNavigation.Release(e.Module);
+                }
+                _breakpoints.Clear();
+
+                if (_pProcess != 0) { Marshal.Release(_pProcess); _pProcess = 0; }
+                if (_pUnknown != 0) { Marshal.Release(_pUnknown); _pUnknown = 0; }
+
+                _callback.Dispose();
+                _dbgShim.Dispose();
+                GC.KeepAlive(_cordbg);
+                GC.KeepAlive(_controller);
+            }
+            catch (DebuggerLostException)
+            {
+                // The loss arrived during this teardown and a guarded step (ClearBreakpoints, Detach) refused:
+                // nothing more is called or released. Root the session so its wrappers are never collected.
+                lock (s_lostSessions) s_lostSessions.Add(this);
+            }
         }
 
-        int terminateHr = _cordbg.Terminate();
-        if (terminateHr < 0)
-        {
-            _sink.OnAnomaly(new EngineAnomaly(
-                DateTimeOffset.UtcNow, AnomalyKind.UnexpectedHResult, "mcp-request", "Terminate (DetachLeaveRunning)",
-                Observed: $"HRESULT 0x{terminateHr:X8}",
-                Expected: "S_OK (ICorDebug fully torn down)",
-                Context: new Dictionary<string, string> { ["hresult"] = $"0x{terminateHr:X8}" }));
-        }
-
-        // Ref-release tail — identical ordering to Dispose (Detach already released the CCW, so freeing
-        // _callback below is safe). Kept inline rather than shared with Dispose so this new path does
-        // not modify the validated Dispose teardown; DRY-ing via a shared private teardown is a
-        // follow-up once probe 62 confirms the path.
-        foreach (BreakpointEntry e in _breakpoints)
-        {
-            RuntimeNavigation.Release(e.Breakpoint);
-            RuntimeNavigation.Release(e.Function);
-            RuntimeNavigation.Release(e.Module);
-        }
-        _breakpoints.Clear();
-
+        // Managed resources only: the PDB readers.
         foreach (SymbolReader? reader in _symbols.Values) reader?.Dispose();
         _symbols.Clear();
-
-        if (_pProcess != 0) { Marshal.Release(_pProcess); _pProcess = 0; }
-        if (_pUnknown != 0) { Marshal.Release(_pUnknown); _pUnknown = 0; }
-
-        _callback.Dispose();
-        _dbgShim.Dispose();
-        GC.KeepAlive(_cordbg);
-        GC.KeepAlive(_controller);
 
         // Disown-and-reap (POSIX; dogfood finding 2026-06-03): detaching the debugger does NOT
         // reparent the OS child — the target stays a child of this (potentially long-lived) process,
@@ -2367,147 +2475,185 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
         // we touch the controller for the quiescent detach.
         _pump.Dispose();
 
-        // ADR-008 / finding 68: for OWNED sessions, two-stage discipline-aligned termination.
-        // Stage 1: SIGTERM (graceful request, catchable). Wait NaturalExitTimeout for natural
-        //          exit. Well-behaved targets exit in tens of ms; tight CPU loops in ~15 ms via
-        //          CoreCLR default disposition. Only targets that explicitly ignore SIGTERM
-        //          (Cancel=true handler) will survive to Stage 2.
-        // Stage 2: TargetStuckAtDispose anomaly + SIGKILL (non-catchable, via existing
-        //          TryKillTargetAndSettle / Process.Kill / kernel-mandated exit). The anomaly
-        //          surfaces the target's discipline violation as an actionable upstream signal.
-        //
-        // Finding 64 closed the structural dispose-then-kill race (MCH-RE-2) by making the
-        // substrate own the kill operation. Finding 68's empirical SIGTERM evidence motivates
-        // the two-stage discipline — substrate trusts well-implemented targets to exit
-        // naturally, and only forces the kernel-mandated kill against violators.
-        if (_ownsTarget && _targetProcess is not null && !_targetProcess.HasExited)
+        if (IsDebuggerLost)
         {
-            // ADR-008 Increment 1b: release any pending mscordbi stop before SIGTERM.
-            // The substrate KNOWS from session activity whether the target is currently
-            // halted by mscordbi (pump worker parked at _resume.Take until _pump.Dispose's
-            // CompleteAdding fired and unparked it via WorkerSilentBreak). Even after the
-            // pump worker exits, mscordbi continues to hold the target halted at the
-            // hit/break point. SIGTERM against a halted target may be queued but blocked
-            // by mscordbi's halt mechanism (probe 56 + Phase 8b AnomalyInjectionTest
-            // evidence). Releasing the stop via controller.Continue moves target back to
-            // running state — SIGTERM's signal-delivery thread then completes cleanly via
-            // CoreCLR default disposition.
-            //
-            // Reuses TryResumeForDetach (Borrowed-path helper from finding 59/65): if
-            // target is already running, first Continue returns S_FALSE — no-op (~50ms
-            // for final settle). If halted, Continue releases the stop, target runs, then
-            // SIGTERM lands cleanly. Substrate acts on its knowledge of target state.
-            TryResumeForDetach();
+            // DebuggerError: "ICorDebugProcess::GetID will be safe to call, but all other methods, including
+            // ICorDebug::Terminate, should not be called. The debugger should use operating-system facilities for
+            // terminating processes." So none of the native teardown (the else branch): no Stop, Continue, Detach or Terminate, no Release
+            // of any pointer mscordbi handed us (IUnknown::Release is one of "all other methods"), and the callback
+            // object mscordbi holds stays allocated. The session is rooted for the process's life so the ComWrappers
+            // wrappers are never collected (collection would Release).
+            lock (s_lostSessions) s_lostSessions.Add(this);
 
-            bool exitedNaturally = false;
-            try { exitedNaturally = RequestExit(_naturalExitTimeout); }
-            catch { exitedNaturally = _targetProcess.HasExited; }
-
-            if (!exitedNaturally)
+            // An owned target is ended with the OS, as documented. A borrowed one is not ours to end and is left as it is.
+            if (_ownsTarget && _targetProcess is not null && !_targetProcess.HasExited)
             {
-                _sink.OnAnomaly(new EngineAnomaly(
-                    DateTimeOffset.UtcNow, AnomalyKind.TargetStuckAtDispose, "mcp-request",
-                    "DebugSession.Dispose (Stage 1 SIGTERM timeout)",
-                    Observed: $"target {_targetProcess.Id} did not exit within NaturalExitTimeout={_naturalExitTimeout.TotalMilliseconds}ms after SIGTERM",
-                    Expected: "target completes its work and exits naturally on SIGTERM (well-implemented process lifecycle)",
-                    Context: new Dictionary<string, string>
-                    {
-                        ["pid"] = _targetProcess.Id.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                        ["timeoutMs"] = _naturalExitTimeout.TotalMilliseconds.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                    }));
-                TryKillTargetAndSettle();
+                try { _targetProcess.Kill(entireProcessTree: true); }
+                catch (Exception ex)
+                {
+                    _sink.OnAnomaly(new EngineAnomaly(
+                        DateTimeOffset.UtcNow, AnomalyKind.UnexpectedCleanupException, "mcp-request",
+                        "DebugSession.Dispose (debugger lost: OS kill of the owned target)",
+                        Observed: $"{ex.GetType().Name}: {ex.Message}",
+                        Expected: "Process.Kill ends the owned target, or it has already exited",
+                        Context: new Dictionary<string, string> { ["exceptionType"] = ex.GetType().FullName ?? ex.GetType().Name }));
+                }
             }
-        }
-        else if (!_ownsTarget)
-        {
-            // FINDING 66 follow-up: for Borrowed sessions, the target may have been killed
-            // externally microseconds before this Dispose ran. Process.HasExited can lag the
-            // actual death by tens of milliseconds (OS hasn't reaped yet / waitpid not
-            // collected). A small pre-check settle lets HasExited propagate so the death-
-            // detection below makes the correct routing decision. For Owned, KillSettleMs
-            // already covered this window in TryKillTargetAndSettle above.
-            Thread.Sleep(BorrowedDeathCheckSettleMs);
-        }
-
-        // FINDING 66 — target-death detection: if the target has exited (external Kill,
-        // user force-quit, OOM killer, target crash, container shutdown; OR substrate's own
-        // kill-first above for OWNED), mscordbi's RC event thread is mid-processing the
-        // exit-work-item (delivering ExitProcess, dispatching final callbacks, releasing RC
-        // state). The substrate's Quiesce/Continue calls from the main thread would race
-        // that exit-work and SIGSEGV mscordbi on macOS-arm64 (Probe 44 phase C / Probe 47
-        // evidence). Skip the active protocol pushes (Quiesce + TryResumeForDetach) and
-        // add an explicit exit-work-completion settle before Detach. Detach itself is still
-        // necessary: it releases the CCW reference from mscordbi's side, which is the
-        // safety precondition for the later _callback.Dispose (which frees the CCW's
-        // native vtable + GCHandle backing memory). Without Detach, a dispatch in flight
-        // when _callback.Dispose runs would UAF the freed CCW memory.
-        bool targetDead = _targetProcess?.HasExited == true;
-
-        if (targetDead)
-        {
-            // Dead-target path: let mscordbi's RC event thread complete exit-work-item
-            // processing before our Detach unwinds the same internal state. 200 ms is
-            // empirically comfortable on macOS-arm64; well above mscordbi's exit-work
-            // duration (sub-millisecond for typical processes) and well inside Dispose
-            // budget. The KillSettleMs for OWNED above already covered 100 ms of this
-            // window; this is additive belt-and-braces for external-death scenarios that
-            // bypass that path.
-            Thread.Sleep(ExitWorkSettleMs);
-            Detach();
         }
         else
         {
-            // Live-target path: synchronize before Detach so mscordbi's RC event thread is
-            // not mid-flush of queued callbacks when Detach tears down the shim (finding 14).
-            // Stop() synchronizes the process: it blocks until any in-flight dispatch
-            // completes and the debuggee is halted; Detach from the synchronized state is
-            // the probe-05-validated safe path.
-            //
-            // FINDING 89: the Borrowed branch used to pre-resume here (TryResumeForDetach) so Detach would
-            // unwind against a RUNNING target (probe 12's exit-race recipe). But Detach REQUIRES a
-            // synchronized process: once the Continue counter reaches zero an idle target really is running
-            // (mscordbi answers the extra Continue with CORDBG_E_SUPERFLOUS_CONTINUE, not S_FALSE), Detach
-            // fails CORDBG_E_PROCESS_NOT_SYNCHRONIZED, the CordbProcess leaks, and when the target later
-            // exits mscordbi's ExitProcessWorkItem runs against our freed callback — SEGV of the HOST. It
-            // only "worked" for targets busy enough to re-synchronize on a fresh callback before Detach.
-            // Probe 62 found the same failure for the Owned leave-running path and fixed it THERE; this
-            // branch was the drifted copy. One sequence now serves both. A target that exits at the very
-            // instant of Detach is the residual narrow race; an already-exited target takes the dead-target
-            // branch above (finding 66).
-            DetachSynchronized();
-        }
-        int terminateHr = _cordbg.Terminate();
-        if (terminateHr < 0)
-        {
-            // EA capture (UnexpectedHResult): Terminate failed. Continuing teardown — refs still
-            // get released, but the anomaly signals mscordbi state may be inconsistent post-Dispose.
-            _sink.OnAnomaly(new EngineAnomaly(
-                DateTimeOffset.UtcNow, AnomalyKind.UnexpectedHResult, "mcp-request", "Terminate",
-                Observed: $"HRESULT 0x{terminateHr:X8}",
-                Expected: "S_OK (ICorDebug fully torn down)",
-                Context: new Dictionary<string, string> { ["hresult"] = $"0x{terminateHr:X8}" }));
+            try
+            {
+                // ADR-008 / finding 68: for OWNED sessions, two-stage discipline-aligned termination.
+                // Stage 1: SIGTERM (graceful request, catchable). Wait NaturalExitTimeout for natural
+                //          exit. Well-behaved targets exit in tens of ms; tight CPU loops in ~15 ms via
+                //          CoreCLR default disposition. Only targets that explicitly ignore SIGTERM
+                //          (Cancel=true handler) will survive to Stage 2.
+                // Stage 2: TargetStuckAtDispose anomaly + SIGKILL (non-catchable, via existing
+                //          TryKillTargetAndSettle / Process.Kill / kernel-mandated exit). The anomaly
+                //          surfaces the target's discipline violation as an actionable upstream signal.
+                //
+                // Finding 64 closed the structural dispose-then-kill race (MCH-RE-2) by making the
+                // substrate own the kill operation. Finding 68's empirical SIGTERM evidence motivates
+                // the two-stage discipline — substrate trusts well-implemented targets to exit
+                // naturally, and only forces the kernel-mandated kill against violators.
+                if (_ownsTarget && _targetProcess is not null && !_targetProcess.HasExited)
+                {
+                    // ADR-008 Increment 1b: release any pending mscordbi stop before SIGTERM.
+                    // The substrate KNOWS from session activity whether the target is currently
+                    // halted by mscordbi (pump worker parked at _resume.Take until _pump.Dispose's
+                    // CompleteAdding fired and unparked it via WorkerSilentBreak). Even after the
+                    // pump worker exits, mscordbi continues to hold the target halted at the
+                    // hit/break point. SIGTERM against a halted target may be queued but blocked
+                    // by mscordbi's halt mechanism (probe 56 + Phase 8b AnomalyInjectionTest
+                    // evidence). Releasing the stop via controller.Continue moves target back to
+                    // running state — SIGTERM's signal-delivery thread then completes cleanly via
+                    // CoreCLR default disposition.
+                    //
+                    // Reuses TryResumeForDetach (Borrowed-path helper from finding 59/65): if
+                    // target is already running, first Continue returns S_FALSE — no-op (~50ms
+                    // for final settle). If halted, Continue releases the stop, target runs, then
+                    // SIGTERM lands cleanly. Substrate acts on its knowledge of target state.
+                    TryResumeForDetach();
+
+                    bool exitedNaturally = false;
+                    try { exitedNaturally = RequestExit(_naturalExitTimeout); }
+                    catch { exitedNaturally = _targetProcess.HasExited; }
+
+                    if (!exitedNaturally)
+                    {
+                        _sink.OnAnomaly(new EngineAnomaly(
+                            DateTimeOffset.UtcNow, AnomalyKind.TargetStuckAtDispose, "mcp-request",
+                            "DebugSession.Dispose (Stage 1 SIGTERM timeout)",
+                            Observed: $"target {_targetProcess.Id} did not exit within NaturalExitTimeout={_naturalExitTimeout.TotalMilliseconds}ms after SIGTERM",
+                            Expected: "target completes its work and exits naturally on SIGTERM (well-implemented process lifecycle)",
+                            Context: new Dictionary<string, string>
+                            {
+                                ["pid"] = _targetProcess.Id.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                                ["timeoutMs"] = _naturalExitTimeout.TotalMilliseconds.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                            }));
+                        TryKillTargetAndSettle();
+                    }
+                }
+                else if (!_ownsTarget)
+                {
+                    // FINDING 66 follow-up: for Borrowed sessions, the target may have been killed
+                    // externally microseconds before this Dispose ran. Process.HasExited can lag the
+                    // actual death by tens of milliseconds (OS hasn't reaped yet / waitpid not
+                    // collected). A small pre-check settle lets HasExited propagate so the death-
+                    // detection below makes the correct routing decision. For Owned, KillSettleMs
+                    // already covered this window in TryKillTargetAndSettle above.
+                    Thread.Sleep(BorrowedDeathCheckSettleMs);
+                }
+
+                // FINDING 66 — target-death detection: if the target has exited (external Kill,
+                // user force-quit, OOM killer, target crash, container shutdown; OR substrate's own
+                // kill-first above for OWNED), mscordbi's RC event thread is mid-processing the
+                // exit-work-item (delivering ExitProcess, dispatching final callbacks, releasing RC
+                // state). The substrate's Quiesce/Continue calls from the main thread would race
+                // that exit-work and SIGSEGV mscordbi on macOS-arm64 (Probe 44 phase C / Probe 47
+                // evidence). Skip the active protocol pushes (Quiesce + TryResumeForDetach) and
+                // add an explicit exit-work-completion settle before Detach. Detach itself is still
+                // necessary: it releases the CCW reference from mscordbi's side, which is the
+                // safety precondition for the later _callback.Dispose (which frees the CCW's
+                // native vtable + GCHandle backing memory). Without Detach, a dispatch in flight
+                // when _callback.Dispose runs would UAF the freed CCW memory.
+                bool targetDead = _targetProcess?.HasExited == true;
+
+                if (targetDead)
+                {
+                    // Dead-target path: let mscordbi's RC event thread complete exit-work-item
+                    // processing before our Detach unwinds the same internal state. 200 ms is
+                    // empirically comfortable on macOS-arm64; well above mscordbi's exit-work
+                    // duration (sub-millisecond for typical processes) and well inside Dispose
+                    // budget. The KillSettleMs for OWNED above already covered 100 ms of this
+                    // window; this is additive belt-and-braces for external-death scenarios that
+                    // bypass that path.
+                    Thread.Sleep(ExitWorkSettleMs);
+                    Detach();
+                }
+                else
+                {
+                    // Live-target path: synchronize before Detach so mscordbi's RC event thread is
+                    // not mid-flush of queued callbacks when Detach tears down the shim (finding 14).
+                    // Stop() synchronizes the process: it blocks until any in-flight dispatch
+                    // completes and the debuggee is halted; Detach from the synchronized state is
+                    // the probe-05-validated safe path.
+                    //
+                    // FINDING 89: the Borrowed branch used to pre-resume here (TryResumeForDetach) so Detach would
+                    // unwind against a RUNNING target (probe 12's exit-race recipe). But Detach REQUIRES a
+                    // synchronized process: once the Continue counter reaches zero an idle target really is running
+                    // (mscordbi answers the extra Continue with CORDBG_E_SUPERFLOUS_CONTINUE, not S_FALSE), Detach
+                    // fails CORDBG_E_PROCESS_NOT_SYNCHRONIZED, the CordbProcess leaks, and when the target later
+                    // exits mscordbi's ExitProcessWorkItem runs against our freed callback — SEGV of the HOST. It
+                    // only "worked" for targets busy enough to re-synchronize on a fresh callback before Detach.
+                    // Probe 62 found the same failure for the Owned leave-running path and fixed it THERE; this
+                    // branch was the drifted copy. One sequence now serves both. A target that exits at the very
+                    // instant of Detach is the residual narrow race; an already-exited target takes the dead-target
+                    // branch above (finding 66).
+                    DetachSynchronized();
+                }
+                int terminateHr = _cordbg.Terminate();
+                if (terminateHr < 0)
+                {
+                    // EA capture (UnexpectedHResult): Terminate failed. Continuing teardown — refs still
+                    // get released, but the anomaly signals mscordbi state may be inconsistent post-Dispose.
+                    _sink.OnAnomaly(new EngineAnomaly(
+                        DateTimeOffset.UtcNow, AnomalyKind.UnexpectedHResult, "mcp-request", "Terminate",
+                        Observed: $"HRESULT 0x{terminateHr:X8}",
+                        Expected: "S_OK (ICorDebug fully torn down)",
+                        Context: new Dictionary<string, string> { ["hresult"] = $"0x{terminateHr:X8}" }));
+                }
+
+                // Release our breakpoint refs now that the runtime has dropped the breakpoints. No need to
+                // deactivate first — Terminate already invalidated them; ClearBreakpoints is for live removal.
+                foreach (BreakpointEntry e in _breakpoints)
+                {
+                    RuntimeNavigation.Release(e.Breakpoint);
+                    RuntimeNavigation.Release(e.Function);
+                    RuntimeNavigation.Release(e.Module);
+                }
+                _breakpoints.Clear();
+
+                if (_pProcess != 0) { Marshal.Release(_pProcess); _pProcess = 0; }
+                if (_pUnknown != 0) { Marshal.Release(_pUnknown); _pUnknown = 0; }
+
+                _callback.Dispose();
+                _dbgShim.Dispose();
+                GC.KeepAlive(_cordbg);
+                GC.KeepAlive(_controller);
+            }
+            catch (DebuggerLostException)
+            {
+                // The loss arrived during this teardown and a guarded step (ClearBreakpoints, Detach) refused:
+                // nothing more is called or released. Root the session so its wrappers are never collected.
+                lock (s_lostSessions) s_lostSessions.Add(this);
+            }
         }
 
-        // Release our breakpoint refs now that the runtime has dropped the breakpoints. No need to
-        // deactivate first — Terminate already invalidated them; ClearBreakpoints is for live removal.
-        foreach (BreakpointEntry e in _breakpoints)
-        {
-            RuntimeNavigation.Release(e.Breakpoint);
-            RuntimeNavigation.Release(e.Function);
-            RuntimeNavigation.Release(e.Module);
-        }
-        _breakpoints.Clear();
-
+        // Managed resources only: the PDB readers.
         foreach (SymbolReader? reader in _symbols.Values) reader?.Dispose();
         _symbols.Clear();
-
-        if (_pProcess != 0) { Marshal.Release(_pProcess); _pProcess = 0; }
-        if (_pUnknown != 0) { Marshal.Release(_pUnknown); _pUnknown = 0; }
-
-        _callback.Dispose();
-        _dbgShim.Dispose();
-        GC.KeepAlive(_cordbg);
-        GC.KeepAlive(_controller);
 
         // ADR-011 D2: close the console-drain pipes and join the discard threads. The Owned target is
         // dead by now (kill-first above), so the threads have already hit EOF; closing unblocks any
@@ -2538,6 +2684,27 @@ public sealed class DebugEngineException : Exception
     public DebugEngineException(string operation, int hresult)
         : base($"{operation} failed (HRESULT 0x{hresult:X8}).")
         => HResult = hresult;
+}
+
+/// <summary>Raised when an operation that would call ICorDebug is asked of a session whose debugger is lost:
+/// mscordbi sent <c>ICorDebugManagedCallback.DebuggerError</c>, after which only <c>ICorDebugProcess::GetID</c> may be
+/// called. The operation was not attempted.</summary>
+public sealed class DebuggerLostException : InvalidOperationException
+{
+    public DebuggerLostException(string operation, DebuggerErrorInfo error)
+        : base($"{operation} refused: the debugger lost the process (DebuggerError errorHR 0x{error.ErrorHResult:X8}, " +
+               $"errorCode {error.ErrorCode}). Debugging services for it are disabled; only ICorDebugProcess::GetID may be called. " +
+               "End the session.")
+    {
+        Operation = operation;
+        Error = error;
+    }
+
+    /// <summary>The refused operation.</summary>
+    public string Operation { get; }
+
+    /// <summary>What <c>DebuggerError</c> reported.</summary>
+    public DebuggerErrorInfo Error { get; }
 }
 
 /// <summary>Outcome of a function evaluation.</summary>

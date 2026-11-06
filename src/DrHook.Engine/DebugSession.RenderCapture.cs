@@ -24,6 +24,7 @@ public sealed partial class DebugSession
     /// question: does the framework's render run during a func-eval).</summary>
     public EvalStatus TryEvalRenderCapture(in RenderCapturePlan plan, TimeSpan timeout, out string trace, string stopAfter = "")
     {
+        RefuseIfDebuggerLost(nameof(TryEvalRenderCapture));
         trace = "start";
         nint appModule = RuntimeNavigation.FindModule(_pProcess, plan.AppModule);
         nint gfxModule = RuntimeNavigation.FindModule(_pProcess, plan.GfxModule);

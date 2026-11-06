@@ -353,8 +353,8 @@ public sealed class EngineSteppingSession : IDisposable
                 return Task.FromResult(Error(
                     $"The attached process did not reach a synchronized stop within 10s, so the breakpoint at {sourceFile}:{line} could not be armed safely. The target may be running without yielding a debugger stop."));
             }
-            if (setup.Reason == StopReason.ProcessExited)
-                return Task.FromResult(RenderProcessExited("attach",
+            if (setup.EndsSession)
+                return Task.FromResult(RenderSessionEnd("attach", setup,
                     $"The process exited during attach setup, before the breakpoint at {sourceFile}:{line} could be armed. Drain drhook_drain_log / drhook_drain_console for any output; start the next session with drhook_launch or drhook_attach.",
                     hypothesis));
 
@@ -366,8 +366,8 @@ public sealed class EngineSteppingSession : IDisposable
             _session.Resume();
             StopInfo? stop = _session.WaitForStop(TimeSpan.FromMinutes(2));
             if (stop is null) return Task.FromResult(Error("Timed out waiting for the breakpoint to hit."));
-            if (stop.Reason == StopReason.ProcessExited)
-                return Task.FromResult(RenderProcessExited("attach",
+            if (stop.EndsSession)
+                return Task.FromResult(RenderSessionEnd("attach", stop,
                     $"The process exited before reaching the breakpoint at {sourceFile}:{line} — it completed or threw before that line executed. Drain drhook_drain_log / drhook_drain_console for any output; start the next session with drhook_launch or drhook_attach.",
                     hypothesis));
 
@@ -436,8 +436,8 @@ public sealed class EngineSteppingSession : IDisposable
                 return Task.FromResult(Error(
                     $"The launched process did not stop before the breakpoint at {sourceFile}:{line} could be armed — it ran past the 10s setup window without an early stop (e.g. Debugger.Break, or a breakpoint armed at the initial stop). Arming a breakpoint at the attach-before-main stop for any target is pending substrate work; for now launch a target that halts early."));
             }
-            if (setup.Reason == StopReason.ProcessExited)
-                return Task.FromResult(RenderProcessExited("launch",
+            if (setup.EndsSession)
+                return Task.FromResult(RenderSessionEnd("launch", setup,
                     $"The process exited during launch setup, before the breakpoint at {sourceFile}:{line} could be armed — it completed or threw within the 10s setup window. Drain drhook_drain_log / drhook_drain_console for any output; start the next session with drhook_launch or drhook_attach.",
                     hypothesis));
 
@@ -448,8 +448,8 @@ public sealed class EngineSteppingSession : IDisposable
             _session.Resume();
             StopInfo? stop = _session.WaitForStop(TimeSpan.FromMinutes(2));
             if (stop is null) { CleanupSession(); return Task.FromResult(Error("Timed out waiting for the breakpoint to hit.")); }
-            if (stop.Reason == StopReason.ProcessExited)
-                return Task.FromResult(RenderProcessExited("launch",
+            if (stop.EndsSession)
+                return Task.FromResult(RenderSessionEnd("launch", stop,
                     $"The process exited before reaching the breakpoint at {sourceFile}:{line} — it completed or threw before that line executed. Drain drhook_drain_log / drhook_drain_console for any output; start the next session with drhook_launch or drhook_attach.",
                     hypothesis));
 
@@ -607,8 +607,8 @@ public sealed class EngineSteppingSession : IDisposable
             // The debuggee can run to completion during continue (e.g. a suspend=none logpoint that
             // fires to the end of the program) — report the exit + tear down rather than walk a dead
             // process for a frame (finding 77).
-            if (stop.Reason == StopReason.ProcessExited)
-                return Task.FromResult(RenderProcessExited("continue",
+            if (stop.EndsSession)
+                return Task.FromResult(RenderSessionEnd("continue", stop,
                     "The debuggee exited (ran to completion) — no further stops, the session is over. Drain drhook_drain_log / drhook_drain_console for any final output; start the next session with drhook_launch or drhook_attach.",
                     hypothesis));
 
@@ -641,8 +641,8 @@ public sealed class EngineSteppingSession : IDisposable
             _session.Pause();
             StopInfo? stop = _session.WaitForStop(TimeSpan.FromSeconds(10));
             if (stop is null) return Task.FromResult(Error("Pause timed out — the engine did not surface a stop within budget."));
-            if (stop.Reason == StopReason.ProcessExited)
-                return Task.FromResult(RenderProcessExited("pause",
+            if (stop.EndsSession)
+                return Task.FromResult(RenderSessionEnd("pause", stop,
                     "The debuggee exited before the pause could synchronize — no stop to report; the session is over. Drain drhook_drain_log / drhook_drain_console for any final output; start the next session with drhook_launch or drhook_attach.",
                     hypothesis));
 
@@ -674,8 +674,8 @@ public sealed class EngineSteppingSession : IDisposable
             step(_session);
             StopInfo? stop = _session.WaitForStop(TimeSpan.FromMinutes(2));
             if (stop is null) return Task.FromResult(Error("Step did not complete within budget."));
-            if (stop.Reason == StopReason.ProcessExited)
-                return Task.FromResult(RenderProcessExited(operationName,
+            if (stop.EndsSession)
+                return Task.FromResult(RenderSessionEnd(operationName, stop,
                     $"The debuggee exited (ran to completion) during {operationName} — no further stops, the session is over. Drain drhook_drain_log / drhook_drain_console for any final output; start the next session with drhook_launch or drhook_attach.",
                     hypothesis));
 
@@ -1168,19 +1168,47 @@ public sealed class EngineSteppingSession : IDisposable
     /// launch/attach works) while the adapter-level log / console / anomaly buffers survive for a
     /// final drain. No frame is read; there is none after exit (finding 77). <paramref name="note"/>
     /// is the per-operation prompt; <paramref name="operation"/> labels which call surfaced the exit.</summary>
-    private string RenderProcessExited(string operation, string note, string? hypothesis)
+    /// <summary>Report a stop that ends the session (<see cref="StopInfo.EndsSession"/>) and tear the session down.
+    /// <paramref name="exitNote"/> is the operation's own wording for <see cref="StopReason.ProcessExited"/>. For
+    /// <see cref="StopReason.DebuggerLost"/> the report carries DebuggerError's codes, and the target's state as the OS
+    /// sees it after teardown (an owned target is killed by it; a borrowed one is left as it is).</summary>
+    private string RenderSessionEnd(string operation, StopInfo stop, string exitNote, string? hypothesis)
     {
         string version = _targetVersion;
+        int pid = _session?.ProcessId ?? 0;
+        bool owned = _session?.OwnsTarget ?? false;
         CleanupSession();
-        JsonObject exited = new()
+        JsonObject ended = new()
         {
             ["operation"] = operation,
             ["assemblyVersion"] = version,
-            ["stoppedReason"] = "processExited",
-            ["prompt"] = note,
+            ["stoppedReason"] = MapStopReason(stop),
         };
-        if (hypothesis is not null) exited["hypothesis"] = hypothesis;
-        return Render(exited);
+        if (stop.Reason == StopReason.DebuggerLost && stop.DebuggerError is { } error)
+        {
+            string targetState;
+            try { targetState = System.Diagnostics.Process.GetProcessById(pid).HasExited ? "exited" : "running"; }
+            catch (ArgumentException) { targetState = "exited"; }
+            ended["debuggerError"] = new JsonObject
+            {
+                ["errorHR"] = $"0x{error.ErrorHResult:X8}",
+                ["errorCode"] = error.ErrorCode,
+            };
+            ended["target"] = new JsonObject { ["pid"] = pid, ["owned"] = owned, ["state"] = targetState };
+            ended["prompt"] =
+                $"The debugger lost the process: mscordbi sent DebuggerError (errorHR 0x{error.ErrorHResult:X8}, errorCode {error.ErrorCode}), " +
+                "so debugging services for it are disabled and the session is over. Per the ICorDebug documentation nothing but " +
+                "ICorDebugProcess::GetID was called afterwards: no Detach, no Terminate, no Release (the debugger's references are kept for " +
+                $"the life of this server). The target (pid {pid}) is {targetState}" +
+                (owned ? ", ended with the OS since DrHook owned it." : ", left as it is since DrHook only attached to it.") +
+                " Drain drhook_drain_anomalies for the DebuggerError record.";
+        }
+        else
+        {
+            ended["prompt"] = exitNote;
+        }
+        if (hypothesis is not null) ended["hypothesis"] = hypothesis;
+        return Render(ended);
     }
 
     private JsonObject BuildCurrentState()
@@ -1205,6 +1233,7 @@ public sealed class EngineSteppingSession : IDisposable
         StopReason.Pause => "pause",
         StopReason.ConditionError => "conditionError",
         StopReason.ProcessExited => "processExited",
+        StopReason.DebuggerLost => "debuggerLost",
         _ => stop.Reason.ToString().ToLowerInvariant(),
     };
 

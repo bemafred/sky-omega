@@ -65,7 +65,7 @@ well in both roles.
 |------------------------------|--------------|
 | [`ExitProcess`](https://learn.microsoft.com/dotnet/framework/unmanaged-api/debugging/icordebugmanagedcallback-exitprocess-method) "may fire asynchronously to other events while the process appears to be stopped", usually when an external force terminates it; while another callback is being dispatched, it is delayed until that callback returns | DebugSession's own comment names a residual race: a target that exits at the very instant of a detach. A natural end narrows the races; it is not shown to remove them |
 | [`ICorDebugController::Stop`](https://learn.microsoft.com/dotnet/framework/unmanaged-api/debugging/icordebugcontroller-stop-method) is synchronous; the debugger keeps a stop counter that each `Stop` and each dispatched callback increments and each `Continue` decrements | [Finding 89](../../../poc/drhook-engine/findings/89-borrowed-detach-leak.md): a resume before the detach brought the stop counter to zero, so the process was running; the detach failed, the debugger's process object leaked, and the host crashed when the target later exited |
-| [`DebuggerError`](https://learn.microsoft.com/dotnet/framework/unmanaged-api/debugging/icordebugmanagedcallback-debuggererror-method): debugging services are disabled; only `ICorDebugProcess::GetID` is safe to call, not even `ICorDebug::Terminate`; the process is to be ended with operating-system facilities | forwarded as an ordinary informational event (`ManagedCallbackHost.cs`); nothing marks the debugger unusable, and Dispose would still call `Terminate` |
+| [`DebuggerError`](https://learn.microsoft.com/dotnet/framework/unmanaged-api/debugging/icordebugmanagedcallback-debuggererror-method): debugging services are disabled; only `ICorDebugProcess::GetID` is safe to call, not even `ICorDebug::Terminate`; the process is to be ended with operating-system facilities | until 2026-11-06 forwarded as an ordinary informational event and continued, its codes dropped, with nothing marking the debugger unusable, and Dispose would still call `Terminate`. Since then handled to the documented contract (brought forward from Step 6, below) |
 | [`ICorDebug::Terminate`](https://learn.microsoft.com/dotnet/framework/unmanaged-api/debugging/icordebug-terminate-method) "should not be called until an `ExitProcess` callback has been received for all processes being debugged" | Dispose calls it unconditionally (`DebugSession.cs`), also after a kill whose `ExitProcess` never arrived |
 | `ICorDebugEval` runs target code; an evaluation can deadlock or never finish, and can be aborted | each evaluation is bounded and aborted when it times out (`Eval.Abort`); not modelled: the difference between observing and intervening, or an abort that itself does not finish |
 
@@ -390,6 +390,26 @@ evaluation and termination each need explicit authorization; isolating the host 
   path, under the operation contracts above. ADR-008's Decision 1 is revisited: SIGTERM remains a cancellation
   request for a program that declares it, and is not counted as a natural exit.
 - `DebuggerError` marks the debugger unusable; `Terminate` is called only when its documented precondition holds.
+  **Brought forward and done, 2026-11-06** (Martin: a flawed implementation in place could be us introducing "ghost
+  errors"; get it right to the documentation first). The contract, verbatim: "ICorDebugProcess::GetID will be safe
+  to call, but all other methods, including ICorDebug::Terminate, should not be called. The debugger should use
+  operating-system facilities for terminating processes." `IUnknown::Release` is one of "all other methods". So:
+  - The callback thunk keeps `errorHR` and `errorCode` and does not touch `pProcess`.
+  - The pump publishes the loss on mscordbi's thread at once (the worker may be parked at the stop whose command
+    timed out), raises a `DebuggerError` anomaly with both codes, never continues, and makes no native call again;
+    every later `WaitForStop` returns `StopReason.DebuggerLost` with the codes.
+  - Every session operation that would reach ICorDebug refuses with `DebuggerLostException`; `CaptureState` reports
+    `ExecutionState.DebuggerLost` and reads no frame.
+  - Teardown calls nothing on mscordbi's objects, releases nothing, keeps the callback object mscordbi holds, and roots
+    the session for the process's life, because its two `ComWrappers` wrappers would `Release` when collected. An
+    owned target is killed with the OS; a borrowed one is left as it is. The MCP layer ends the session and reports
+    the codes and the target's state.
+  - Tested in-process (the thunk through its vtable slot, the pump with injected callbacks); each new test fails with
+    the handling disabled. Not yet seen with a real `DebuggerError`: that is what the Step 4 construction would show.
+  - A loss that arrives during an ordinary teardown makes its next guarded step refuse; the teardown then stops
+    calling and roots the session.
+  - Residual: an operation already inside mscordbi when the loss arrives cannot be stopped from inside the process;
+    the worker contains it.
 - Waits without a bound get one (the attach that hangs in finding 100), and the state they detect is reported.
 - `OwnsTarget` gives way to the three ownership facts; the target's outcome, the session's outcome and the
   debugger's health are recorded separately.

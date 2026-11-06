@@ -39,6 +39,7 @@ internal sealed class CallbackPump : IManagedCallbackSink, IDisposable
     private nint _stopThread;            // ICorDebugThread at the current stop — handed to the resume handler (for stepping)
     private nint _lastBreakpointPointer; // ICorDebugBreakpoint at the most recent BreakpointHit (0 otherwise) — for caller-thread policy lookup
     private int _disposed;               // 0 = live, 1 = disposed; atomic via Interlocked.Exchange (ENG-CP-1)
+    private StopInfo? _lostStop;         // set once, by the worker, when DebuggerError arrives; never cleared
 
     public CallbackPump(IDebugEventSink userSink) => _userSink = userSink;
 
@@ -55,13 +56,52 @@ internal sealed class CallbackPump : IManagedCallbackSink, IDisposable
     /// conditions can themselves trigger func-eval without deadlocking the pump worker).</summary>
     public nint LastBreakpointPointer => _lastBreakpointPointer;
 
+    /// <summary>The <see cref="StopReason.DebuggerLost"/> stop once mscordbi has sent <c>DebuggerError</c>, else null.
+    /// Set once by the worker and never cleared: from then on the debugger is unusable for this process, and no native
+    /// call may be made on it (only <c>ICorDebugProcess::GetID</c> is documented as safe).</summary>
+    public StopInfo? LostStop => Volatile.Read(ref _lostStop);
+
     /// <summary>Enqueue side — invoked by the callback thunks on mscordbi's event thread.
     /// Returns immediately so the event thread is never blocked.</summary>
-    public void OnCallback(CallbackKind kind, string name, nint appDomain, nint thread, int detail, nint breakpoint = 0)
+    public void OnCallback(CallbackKind kind, string name, nint appDomain, nint thread, int detail, nint breakpoint = 0, uint errorCode = 0)
     {
+        if (kind == CallbackKind.DebuggerError)
+        {
+            // ICorDebugManagedCallback.DebuggerError: "debugging services have been disabled due to an error". Only
+            // ICorDebugProcess::GetID may be called afterwards; "all other methods, including ICorDebug::Terminate,
+            // should not be called". That overrides the general rule that each callback must Continue.
+            // Published here, on mscordbi's thread, not by the worker: the worker may be parked at a stop (a command at
+            // a stop is what times out into DebuggerError) and would not read the queue until the caller resumes, and
+            // its resume is a Continue. Managed work only, O(1): no native call.
+            if (Volatile.Read(ref _lostStop) is not null) return; // only the first is kept; nothing more is done
+            var error = new DebuggerErrorInfo(detail, errorCode);
+            var lost = new StopInfo(StopReason.DebuggerLost, DebuggerError: error);
+            Volatile.Write(ref _lostStop, lost);
+            _userSink.OnEvent(name);
+            _userSink.OnAnomaly(new EngineAnomaly(
+                DateTimeOffset.UtcNow, AnomalyKind.DebuggerError, "mscordbi", "OnCallback (DebuggerError)",
+                Observed: $"DebuggerError errorHR 0x{detail:X8}, errorCode {errorCode}: debugging services for the process are disabled",
+                Expected: "no DebuggerError (mscordbi keeps debugging services enabled)",
+                Context: new Dictionary<string, string>
+                {
+                    ["errorHR"] = $"0x{detail:X8}",
+                    ["errorCode"] = errorCode.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                }));
+            try
+            {
+                _stops.Add(lost);                      // wake a caller blocked in WaitForStop
+                _resume.Add(ResumeKind.Continue);      // unpark a worker held at a stop; it sees the loss and ends without continuing
+                _events.Add(new CallbackEvent(kind, name, appDomain, thread, detail, breakpoint, errorCode)); // wake an idle worker
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or ObjectDisposedException)
+            {
+                // Pump already torn down: the loss is still recorded in _lostStop, which is all a later caller reads.
+            }
+            return;
+        }
         try
         {
-            _events.Add(new CallbackEvent(kind, name, appDomain, thread, detail, breakpoint));
+            _events.Add(new CallbackEvent(kind, name, appDomain, thread, detail, breakpoint, errorCode));
         }
         catch (Exception ex) when (ex is InvalidOperationException or ObjectDisposedException)
         {
@@ -100,16 +140,19 @@ internal sealed class CallbackPump : IManagedCallbackSink, IDisposable
 
     /// <summary>Block until the next stop (or process exit), up to <paramref name="timeout"/>.
     /// Returns null on timeout (the debuggee is still running). A <see cref="StopReason.ProcessExited"/>
-    /// result means the session is over.</summary>
+    /// result means the session is over. Once the debugger is lost (<see cref="LostStop"/>), returns that stop at
+    /// once, every time: nothing else can come.</summary>
     public StopInfo? WaitForStop(TimeSpan timeout)
     {
+        if (Volatile.Read(ref _lostStop) is { } lost) return lost;
         try
         {
-            return _stops.TryTake(out StopInfo? stop, (int)timeout.TotalMilliseconds) ? stop : null;
+            if (!_stops.TryTake(out StopInfo? stop, (int)timeout.TotalMilliseconds)) return Volatile.Read(ref _lostStop);
+            return Volatile.Read(ref _lostStop) ?? stop; // a stop taken just as the loss was published yields to it
         }
         catch (ObjectDisposedException)
         {
-            return null; // session torn down
+            return Volatile.Read(ref _lostStop); // session torn down; null unless the debugger was lost
         }
     }
 
@@ -168,6 +211,10 @@ internal sealed class CallbackPump : IManagedCallbackSink, IDisposable
         {
             foreach (CallbackEvent e in _events.GetConsumingEnumerable())
             {
+                // The debugger is lost (DebuggerError, published by OnCallback): end without another native call.
+                // Checked before every event and again before every handler call below, since the loss can be
+                // published on mscordbi's thread at any moment.
+                if (Volatile.Read(ref _lostStop) is not null) break;
                 if (e.Kind == CallbackKind.Informational)
                 {
                     _userSink.OnEvent(e.Name);
@@ -179,6 +226,7 @@ internal sealed class CallbackPump : IManagedCallbackSink, IDisposable
                         // guard, dereferencing a released thread → NRE (finding 77).
                         _stopThread = 0;
                         _stops.TryAdd(new StopInfo(StopReason.ProcessExited)); // wake any waiter
+                        if (Volatile.Read(ref _lostStop) is not null) break;
                         _resumeHandler!(ResumeKind.Continue, 0);
                     }
                     else if (e.Name == "LoadModule")
@@ -186,6 +234,7 @@ internal sealed class CallbackPump : IManagedCallbackSink, IDisposable
                         // Full pending-breakpoints: bind any pending breakpoint whose module just
                         // loaded, before auto-continuing — so a breakpoint in a lazily-loaded module is
                         // armed the instant its module appears, before the process runs past the code.
+                        if (Volatile.Read(ref _lostStop) is not null) break;
                         _moduleLoadHandler?.Invoke(e.Breakpoint);
                         // ADR-011 Layer 2 hold-gate: one-shot hold at the launch entry assembly's load
                         // — modules loaded, before main — so the caller can arm breakpoints (bound or
@@ -205,15 +254,18 @@ internal sealed class CallbackPump : IManagedCallbackSink, IDisposable
                                     Expected: "caller arms the launch breakpoint and resumes"));
                                 break;
                             }
+                            if (Volatile.Read(ref _lostStop) is not null) break;
                             _resumeHandler!(kind, 0);
                         }
                         else
                         {
+                            if (Volatile.Read(ref _lostStop) is not null) break;
                             _resumeHandler!(ResumeKind.Continue, 0);
                         }
                     }
                     else
                     {
+                        if (Volatile.Read(ref _lostStop) is not null) break;
                         _resumeHandler!(ResumeKind.Continue, 0);
                     }
                 }
@@ -222,6 +274,7 @@ internal sealed class CallbackPump : IManagedCallbackSink, IDisposable
                     // Caller-initiated synchronization. We synchronize the running debuggee here
                     // (the controller's Stop is the sole counterpart of Continue, both owned by this
                     // worker), then surface a Pause stop and park at _resume.Take like any other stop.
+                    if (Volatile.Read(ref _lostStop) is not null) break;
                     _pauseHandler!();
                     _stopThread = 0;
                     _stops.Add(new StopInfo(StopReason.Pause));
@@ -238,6 +291,7 @@ internal sealed class CallbackPump : IManagedCallbackSink, IDisposable
                             Expected: "caller consumes Pause stop and Resumes"));
                         break;
                     }
+                    if (Volatile.Read(ref _lostStop) is not null) break;
                     _resumeHandler!(kind, _stopThread);
                 }
                 else
@@ -271,6 +325,7 @@ internal sealed class CallbackPump : IManagedCallbackSink, IDisposable
                     }
                     // For a step, the handler creates the stepper on _stopThread before Continuing;
                     // its completion arrives as a StepComplete stop.
+                    if (Volatile.Read(ref _lostStop) is not null) break;
                     _resumeHandler!(kind, _stopThread);
                 }
             }

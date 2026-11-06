@@ -18,6 +18,7 @@
 //   - TargetIsHostChild        — Attach/AttachAndOwn target is a direct OS child of the debugger host (finding 87)
 //   - UiThreadUnresponsive     — after a visual capture + detach, the target's UI thread did not drain a queued job
 //   - GoneTargetAlive          — Detach said the target is gone (terminated / neutered), but it is still running
+//   - DebuggerError            — mscordbi disabled debugging services for the process (ICorDebugManagedCallback.DebuggerError)
 //
 // New kinds are added as new substrate surprises surface. The discipline rule: each kind is a
 // named concept, not "Generic / Other" — and each emission site documents what would have to be
@@ -114,6 +115,15 @@ public enum AnomalyKind
     /// TERMINATED and the target ran on). The debugger is disconnected; the target's state is not known to be
     /// right. Actionable: check that the target is running normally, not held.</summary>
     GoneTargetAlive,
+
+    /// <summary>mscordbi sent <c>ICorDebugManagedCallback.DebuggerError</c>: "debugging services have been disabled
+    /// due to an error". Documented: only <c>ICorDebugProcess::GetID</c> may be called afterwards, "all other methods,
+    /// including ICorDebug::Terminate, should not be called", and the process is ended with operating-system
+    /// facilities. The session is lost (<see cref="StopReason.DebuggerLost"/>): it makes no further native call, and
+    /// its teardown keeps every reference mscordbi handed it (no <c>Release</c>) and the callback object mscordbi
+    /// holds, for the rest of this process. Context: <c>errorHR</c>, <c>errorCode</c>. Actionable: the error codes
+    /// name the CLR's reason; an owned target is killed at teardown, a borrowed one is left as it is.</summary>
+    DebuggerError,
 }
 
 /// <summary>A structured record of a substrate-correctness anomaly. Surfaced through

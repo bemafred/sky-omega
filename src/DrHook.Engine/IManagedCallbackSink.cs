@@ -17,6 +17,13 @@ internal enum CallbackKind
     /// ICorDebug. The pump worker calls <c>ICorDebugController.Stop</c> to synchronize the process,
     /// then publishes a <see cref="StopReason.Pause"/> stop and parks like any other stop.</summary>
     PauseRequest,
+    /// <summary><c>ICorDebugManagedCallback.DebuggerError</c>: mscordbi has disabled debugging services for the
+    /// process. Documented: only <c>ICorDebugProcess::GetID</c> may be called afterwards, "all other methods,
+    /// including ICorDebug::Terminate, should not be called", and the process is ended with operating-system
+    /// facilities. Never continued, never informational: the pump makes no native call from then on.
+    /// <see cref="CallbackEvent.Detail"/> carries <c>errorHR</c>, <see cref="CallbackEvent.ErrorCode"/>
+    /// <c>errorCode</c>.</summary>
+    DebuggerError,
 }
 
 /// <summary>The RECEIVE-direction contract from <see cref="Interop.ManagedCallbackHost"/> (the
@@ -24,16 +31,18 @@ internal enum CallbackKind
 /// implementation must enqueue and return promptly — it must never block that thread.</summary>
 internal interface IManagedCallbackSink
 {
-    void OnCallback(CallbackKind kind, string name, nint appDomain, nint thread, int detail, nint breakpoint = 0);
+    void OnCallback(CallbackKind kind, string name, nint appDomain, nint thread, int detail, nint breakpoint = 0, uint errorCode = 0);
 }
 
 /// <summary>A delivered callback queued for the worker. <paramref name="Thread"/> /
 /// <paramref name="AppDomain"/> are raw <c>ICorDebugThread</c>/<c>ICorDebugAppDomain</c>
 /// pointers, captured for stopping events (used by stepping in a later increment).
 /// <paramref name="Detail"/> carries a callback-specific scalar — the
-/// <c>CorDebugExceptionCallbackType</c> for <see cref="CallbackKind.Exception"/>, else 0.
+/// <c>CorDebugExceptionCallbackType</c> for <see cref="CallbackKind.Exception"/>, the <c>errorHR</c> for
+/// <see cref="CallbackKind.DebuggerError"/>, else 0.
 /// <paramref name="Breakpoint"/> is the raw <c>ICorDebugBreakpoint</c> pointer for
 /// <see cref="CallbackKind.BreakpointHit"/> (the specific breakpoint that fired); <c>0</c>
 /// for all other callback kinds. Captured so the substrate can resolve hits back to their
-/// stored <see cref="BreakpointPolicy"/> for evaluation (finding 34 + ADR-010 Increment 2).</summary>
-internal readonly record struct CallbackEvent(CallbackKind Kind, string Name, nint AppDomain, nint Thread, int Detail, nint Breakpoint = 0);
+/// stored <see cref="BreakpointPolicy"/> for evaluation (finding 34 + ADR-010 Increment 2).
+/// <paramref name="ErrorCode"/> is <c>DebuggerError</c>'s <c>errorCode</c> (the CLR error), else 0.</summary>
+internal readonly record struct CallbackEvent(CallbackKind Kind, string Name, nint AppDomain, nint Thread, int Detail, nint Breakpoint = 0, uint ErrorCode = 0);
