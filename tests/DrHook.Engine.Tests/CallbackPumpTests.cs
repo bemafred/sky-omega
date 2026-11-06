@@ -103,9 +103,10 @@ public sealed class CallbackPumpTests
         var sink = new RecordingSink();
         using var pump = new CallbackPump(sink);
 
-        ResumeKind seenKind = ResumeKind.Continue;
-        nint seenThread = 0;
-        pump.Start((kind, thread) => { seenKind = kind; Volatile.Write(ref seenThread, thread); return 0; }, () => { });
+        // The handler runs on the pump's worker thread. Kind and thread are published together, as one object,
+        // so the test never sees the kind of a call without its thread (two separate writes raced on arm64).
+        Tuple<ResumeKind, nint>? seen = null;
+        pump.Start((kind, thread) => { Volatile.Write(ref seen, Tuple.Create(kind, thread)); return 0; }, () => { });
 
         // Park at a stop carrying a specific thread pointer, then step.
         pump.OnCallback(CallbackKind.BreakpointHit, "Breakpoint", 0, 0xABCD, 0);
@@ -113,9 +114,9 @@ public sealed class CallbackPumpTests
 
         pump.StepOver();
 
-        Assert.True(SpinWait.SpinUntil(() => seenKind == ResumeKind.StepOver, TimeSpan.FromSeconds(2)),
+        Assert.True(SpinWait.SpinUntil(() => Volatile.Read(ref seen)?.Item1 == ResumeKind.StepOver, TimeSpan.FromSeconds(2)),
             "the step kind should reach the resume handler");
-        Assert.Equal((nint)0xABCD, Volatile.Read(ref seenThread)); // the stop thread is handed to the handler (for the stepper)
+        Assert.Equal((nint)0xABCD, Volatile.Read(ref seen)!.Item2); // the stop thread is handed to the handler (for the stepper)
     }
 
     [Fact]

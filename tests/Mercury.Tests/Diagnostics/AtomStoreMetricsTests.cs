@@ -217,7 +217,10 @@ public class AtomStoreMetricsTests : IDisposable
         for (int i = 0; i < 30; i++) store.AddCurrent("s" + i, "p", "o" + i);
 
         await Task.Delay(250, TestContext.Current.CancellationToken);
-        jsonl.Flush();
+        // Dispose, not Flush: the 50 ms timer keeps writing, and a record written after the rewind below lands at
+        // position 0 over the start of an older one. After Dispose the listener writes nothing, even from a tick
+        // already running.
+        jsonl.Dispose();
 
         buffer.Position = 0;
         using var reader = new StreamReader(buffer, leaveOpen: true);

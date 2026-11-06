@@ -479,7 +479,10 @@ public class MetricsListenerTests : IDisposable
 
         // Wait for the timer to fire several times.
         System.Threading.Thread.Sleep(300);
-        jsonl.Flush();
+        // Dispose, not Flush: the 50 ms timer keeps writing, and a record written after the rewind below lands at
+        // position 0 over the start of an older one. After Dispose the listener writes nothing, even from a tick
+        // already running.
+        jsonl.Dispose();
 
         Assert.True(producerInvocations >= 2,
             $"expected at least 2 timer fires in 300ms; saw {producerInvocations}");
