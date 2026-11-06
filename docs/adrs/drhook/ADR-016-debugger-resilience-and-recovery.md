@@ -2,7 +2,8 @@
 
 **Status:** Proposed — 2026-10-31 (Emergence). Accepted as the experimental charter: the research direction, the
 principles and Steps 0 to 5 are approved; the production architecture is not decided, and the status stays Proposed
-until Step 6 (Martin's assessments, 2026-10-31). Reframes the 2026-10-30 draft, "Deterministic Target Teardown
+until Step 6 (Martin's assessments, 2026-10-31). The worker process is decided, and designed for from the start
+(Martin, 2026-11-06; see the containment boundary below). Reframes the 2026-10-30 draft, "Deterministic Target Teardown
 Across Platforms"; titled "How a Debugged Program Ends" until 2026-10-31, when the title moved from the question it
 started from to the rule it serves.
 
@@ -136,7 +137,7 @@ one.
 | **Natural completion:** the work is done, main returns | the program | end its own side in order: receive the exit, or detach cleanly first and let the program finish | the clean detach works on macOS under a flood (probe 08, 3 of 3) | whether a program ending on its own, debugger attached, ever leaves the debugger unusable; whether a program that exits during or right after a detach is safe (finding 66's fix covers a target already dead when Dispose runs; finding 63's crashes involved a kill) |
 | **Cancellation:** a stop request the program honours | the client asks; the program chooses when | send the request through a declared mechanism, keep observing, wait | without a debugger: with a handler the program cleans up and exits 0; without one the same signal is an abort, exit 143 (finding 68) | behaviour under a debugger; Windows (a console control event, never built) |
 | **Won't end:** a loop missing its exit condition, a deadlock | nobody; it is a bug | observe it, which is what debugging is; a kill only as a separate, deliberate, authorized and recorded decision | on macOS a kill while mscordbi was still busy with the target has left the debugger unusable (finding 100) and crashed the debugger's host process (2026-05-25; finding 63) | a kill whose consequence is bounded on each platform; what each platform's consequence is |
-| **Crashes itself:** runaway recursion and stack overflow, `Environment.FailFast`, an unhandled exception, a native fault | nobody | report the crash; survive it | nothing; not tested | everything. A crash lands at a moment nobody chose, like a kill, and discipline cannot prevent it. It can leave mscordbi as finding 100 does: FailFast, stack overflow, a native fault and `abort()` all did on macOS and Linux arm64 (finding 104) |
+| **Crashes itself:** runaway recursion and stack overflow, `Environment.FailFast`, an unhandled exception, a native fault | nobody | report the crash; survive it | nothing; not tested | everything. A crash lands at a moment nobody chose, like a kill, and discipline cannot prevent it. It can leave mscordbi as finding 100 does: FailFast, stack overflow, a native fault and `abort()` all did on macOS and Linux arm64, and none did on Windows arm64 (findings 104, 105) |
 | **Machine catastrophe:** a freeze that needs a hard reset | nobody | keep every known path to it inside enforced limits and isolation | none observed under DrHook | the paths to it. Plausible ones: a program held at a breakpoint while it holds something the whole system waits on; unbounded growth (finding 100 leaves one blocked thread and two pipe files per killed target; omega's `$TMPDIR` held 954 such files); runaway work started through function evaluation |
 
 A hard reset is the one end nothing can be recovered from: no session survives it, only what was persisted before.
@@ -221,7 +222,7 @@ other debuggers (Rider is the reference for correctness). It must behave well in
     finding. Each construction is reviewed with Martin before it runs, and each step's result goes into a finding
     and into Mercury before the next.
 
-### A candidate containment boundary: the debugger in a worker process
+### The containment boundary: the debugger in a worker process
 
 As concepts, not a proposed class structure: the MCP service stays in its own process as a supervisor, and the
 native debugger (dbgshim, mscordbi, the DAC) runs in a worker process. The supervisor watches the worker, reports an
@@ -238,9 +239,19 @@ unhealthy worker and the session it affects, and starts a fresh worker.
   recovering the target stay separate obligations.
 - **What it needs.** A minimal protocol between supervisor and worker. DrHook.Wire (NDJSON over a socket, ADR-012)
   is an existing candidate, not a decision.
-- **How it earns its place.** This is not yet evidence that a worker is needed on any platform. It is tested
-  explicitly (Step 5), and built only if simpler means cannot meet principle 1, as the minimum protocol, lifecycle
-  state and supervision required, with no general-purpose worker framework.
+- **Decided: the worker is needed, and designed for from the start** (Martin, 2026-11-06). Relaunching the debugger
+  is done by process indirection. The grounds:
+  - Some crashes cannot be avoided. A native fault or `abort()` gives no stop at which to end the session, and such
+    a crash during a request leaves the debugger hung (finding 104).
+  - No recovery is possible inside the process. A request the target dies under is never woken: mscordbi's PAL has
+    no thread that re-checks a waited process, and nothing exported starts one (finding 105). The blocked thread
+    holds the DAC lock, so every later attach in that process hangs (finding 100).
+  - Avoidance (end at a stop) and detection (the target is gone and a request has not returned) stay; they make the
+    worker's discard rare and its cause known, they do not replace it.
+
+  It is built as the minimum protocol, lifecycle state and supervision required, with no general-purpose worker
+  framework, and as the one path on every platform, not a variant for some. Step 5 proves the design; it no longer
+  tests the need.
 
 ### State: the target, the session, and the debugger's health
 
@@ -384,7 +395,7 @@ evaluation and termination each need explicit authorization; isolating the host 
   debugger's health are recorded separately.
 - The kill path (`Abandon`, `drhook_kill`) stays, authorized, with each platform's consequence characterized and
   reported.
-- If Step 5 shows it is needed: the minimal worker and supervisor.
+- The minimal worker and supervisor (decided 2026-11-06), proved first by Step 5.
 - The integration tests follow the same discipline (below).
 
 ### Tests that fit the problem
@@ -551,20 +562,34 @@ builds, every stop continued).
 - A `ProcessExited` stop after the end came in 74 runs, all usable; without one, 15 of 16 hung. A one-sided
   detection candidate, not yet used by DrHook.
 
-Not yet run: ending the session at a stack overflow's stop, a `DebuggerError`, Linux x64, Windows, and whether a
-bounded operation completes later.
+*Ending at a stack overflow's stop, how long `ProcessExited` takes, and Windows, run 2026-11-06* (finding 104,
+second batch; [finding 105](../../../poc/drhook-engine/findings/105-dll-pal-never-rechecks-a-waited-process.md);
+omega, omega-ubuntu with both builds, omega-windows; 10 runs per mode).
+- Ending the session at a stack overflow's stop was clean, 60 of 60 on omega and omega-ubuntu.
+- On those two, `ProcessExited` came within 34 ms of the end in every usable run (92) and not within 30 s in any hung
+  one (28); no second attach that missed 30 s finished within 120 s. A detector with both sides.
+- The cause (finding 105): a request in flight when the target dies is never woken, because mscordbi's PAL checks a
+  waited process only when the wait starts and starts no thread to check it again. Nothing exported starts one.
+- omega-windows, which has no PAL and no transport: usable in all 130 runs, every crash continued included;
+  `ProcessExited` came in every one, 13 to 172 ms after the end. A native fault gives a stop there; `abort()` does
+  not.
+- The first batch's `ProcessExited` window was about 200 ms, not the 2 s it stated (corrected in finding 104).
 
-**Step 5 — A minimal process-isolation proof of concept.** A supervisor and one worker. Induce finding 100's exact
+Not yet run: a `DebuggerError`, Linux x64 (zbook), a target DrHook launched, and whether a bounded operation
+completes later.
+
+**Step 5 — A minimal process-isolation proof of concept.** The worker is decided (2026-11-06); this step proves its
+design, not its need. A supervisor and one worker. Induce finding 100's exact
 failure in the worker; the supervisor must detect it, discard the worker, and conduct a fresh session that succeeds.
 Having lost the worker, the supervisor cannot always know what became of the target, so it reports the target's last
 known state, when that was observed and how certain it is, and unknown when nothing establishes it. Also recorded,
 per platform: what happens to a target held stopped when its worker dies.
 
 **Step 6 — Decide (Epistemics).** From Steps 2 to 5: the session end for each scenario; the operation contracts; what
-replaces ADR-008's Decision 1; the bounds, detection and anomalies for the extraordinary ends; whether the worker is
-needed, on which platforms; how DrHook attributes an expired bound. This ADR moves to Accepted with that decision.
+replaces ADR-008's Decision 1; the bounds, detection and anomalies for the extraordinary ends; the worker's lifetime
+(per session or per runtime version) and its protocol; how DrHook attributes an expired bound. This ADR moves to Accepted with that decision.
 
-**Step 7 — Engineering.** Implement only what Step 6 decided: if the worker is needed, the minimum protocol,
+**Step 7 — Engineering.** Implement only what Step 6 decided: for the worker, the minimum protocol,
 lifecycle state and supervision, and no general-purpose framework. Rewrite the tests in the kinds above, with
 recovery validated as rigorously as prevention. Update ADR-007, ADR-008, DRHOOK.md's lifecycle section and the MCP
 tools' descriptions together. The hang watcher, or a permanent regression detector in its place, stays: it is not

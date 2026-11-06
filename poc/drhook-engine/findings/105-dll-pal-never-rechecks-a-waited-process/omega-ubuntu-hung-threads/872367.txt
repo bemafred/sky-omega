@@ -1,0 +1,14 @@
+2026-11-06T12:52:08Z
+/home/bemafred/.local/share/dotnet/runfile/100-orphaned-read-smoke-5eb5560e9a14564415a5c780a214c82be71c1afef10200c0986a32d6c4aa6dd5/bin/debug/100-orphaned-read-smoke child measure-segv /home/bemafred/.local/share/dotnet/runfile/100-orphaned-read-target-e1b3df0d253c00a81aefe3676ca619d30785c64a2bada27fec00461ce90f82d3/bin/debug/100-orphaned-read-target.dll 
+      3 100-orphaned-re
+      2 100-orphane-ust
+      1 DrHook.Callback
+      1 .NET Debugger
+      3 .NET DebugPipe
+      1 .NET EventPipe
+      1 .NET Finalizer
+      1 .NET SigHandler
+      1 .NET Sockets
+      1 .NET SynchManag
+      1 .NET Tiered Com
+      3 probe100-second

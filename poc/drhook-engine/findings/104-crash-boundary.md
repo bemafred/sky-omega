@@ -2,7 +2,9 @@
 
 **Date:** 2026-11-05
 **Status:** **OBSERVED** on omega (macOS 27.0.1 arm64, SDK 10.0.301) and omega-ubuntu (Linux arm64 VM, Ubuntu's and
-Microsoft's .NET 10.0.14), 10 runs per mode on each; crashes without the managed warning added 2026-11-06. Not run on Linux x64 or Windows.
+Microsoft's .NET 10.0.14), 10 runs per mode on each; crashes without the managed warning added 2026-11-06; ending at
+a stack overflow's stop, the `ProcessExited` timing and omega-windows (Windows 11 arm64 VM: no hang in 130 runs)
+added later on 2026-11-06. Not run on Linux x64.
 **Not fixed:** DrHook continues every stop it is asked to, including the unhandled-exception one. ADR-016 Step 4,
 probe 100 (`poc/drhook-engine/100-orphaned-read-smoke.cs`, modes added in `5984ad0`, `04aff45` and `4da7093`).
 
@@ -97,7 +99,8 @@ and they were removed.
   stop as FailFast. The draft's prediction for it did not hold. Ending the session at that stop is not tried here.
 - **A native fault and a direct `abort()` are not announced, and they hang the debugger too:** 6 of 20 on omega, 4 of
   40 on omega-ubuntu. These are the crashes ending the session at a stop cannot avoid, because there is no stop.
-- **Stack overflow hung on macOS (5 of 10) and never on Linux (0 of 20).** Not explained.
+- **Stack overflow hung on macOS (5 of 10) and never on Linux (0 of 20).** Not explained. (The second batch, below,
+  hung it on Linux too, 1 of 20.)
 - **When the crashes came** does not separate the outcomes here: hung runs crashed at 1.9 to 5.2 s, usable ones at
   1.9 to 5.0 s. The earlier observation that the earliest crashes hung is not borne out.
 - **A `ProcessExited` stop after the end went with a usable debugger in all 74 runs that had one** (omega 19,
@@ -106,6 +109,73 @@ and they were removed.
   `ProcessExited`, so a thread stuck in a request cannot. As a detector it would be one-sided: the stop shows the
   debugger is fine; its absence within 2 s suggests, and does not show, that it is not. The 2 s bound was chosen,
   not calibrated.
+
+**Correction (2026-11-06, second batch).** The 2 s wait above was in fact about 200 ms. The construction stopped
+resuming as soon as it saw the target gone, so a `ProcessExited` stop was caught only if it came within the resumer's
+next poll. The counts stand, read as "within about 200 ms".
+
+## Ending at a stack overflow's stop, and how long `ProcessExited` takes (2026-11-06, second batch)
+
+Probe 100 as committed with this update, 10 runs per mode: omega 11:32–12:27 UTC; omega-ubuntu with each build
+12:30–13:30 UTC, one after the other; omega-windows below. Two constructions:
+
+- **`flood-stackoverflow-kill`, `flood-stackoverflow-detach`:** as `flood-crash-kill` and `flood-crash-detach`, at the
+  `StackOverflowException` stop.
+- **`measure-crash`, `measure-stackoverflow`, `measure-segv`, `measure-abort`:** every stop continued, as before.
+  After the target is gone the resumer keeps resuming for up to 30 s, and each stop is recorded with its time. If the
+  second attach is still pending at 30 s, the run waits 90 s more for it. A watcher recorded each probe child that
+  outlived a usable run (45 s): with `sample` on omega, by thread name on omega-ubuntu.
+
+| Mode | omega | omega-ubuntu, Ubuntu's | omega-ubuntu, Microsoft's |
+|------|-------|------------------------|---------------------------|
+| `flood-stackoverflow-kill` | 10 of 10 usable | 10 of 10 usable | 10 of 10 usable |
+| `flood-stackoverflow-detach` | 10 of 10 usable | 10 of 10 usable | 10 of 10 usable |
+| `measure-crash` | **5 of 10 hung** | **1 of 10** | **2 of 10** |
+| `measure-stackoverflow` | **5 of 10** | **1 of 10** | 0 of 10 |
+| `measure-segv` | **2 of 10** | **3 of 10** | **2 of 10** |
+| `measure-abort` | **4 of 10** | **1 of 10** | **2 of 10** |
+
+- **Ending the session at a stack overflow's stop was clean:** 60 of 60. Continued, the same crash hung 5 of 10 on
+  omega and 1 of 20 on omega-ubuntu. Stack overflow does hang on Linux; the first batch's 0 of 20 was not a platform
+  difference.
+- **`ProcessExited` separates the outcomes.** In every usable run it came between 17 ms before and 34 ms after the
+  probe saw the target gone (omega 24 runs, −1 to 34 ms; omega-ubuntu 68 runs, −17 to 25 ms; before means the probe's
+  poll saw the end later than the debugger did). In every hung run (omega 16, omega-ubuntu 12) none came within 30 s.
+- **A second attach that misses 30 s never finishes:** all 28 were still pending 120 s after they began.
+- **How long the target takes to die does not decide it.** From continuing the unhandled-exception stop to the target
+  seen gone: omega 1 to 29 ms, hung and usable alike; omega-ubuntu 1,056 to 1,090 ms, hung and usable alike. The
+  guess that a slower death explained macOS's stack-overflow hangs is wrong: Linux's is slower and hung less. Why
+  Linux takes a second is not known.
+- **Which request.** In the 16 omega samples the waiting threads were in `DbgTransportSession::ReadMemory` in 11,
+  `WriteMemory` in 3, and both in 2, all in `SendRequestMessageAndWait`
+  ([summary](105-dll-pal-never-rechecks-a-waited-process/omega-hung-samples-summary.txt)). Why the wait never ends is
+  [finding 105](105-dll-pal-never-rechecks-a-waited-process.md).
+
+The prediction, that no run both had a `ProcessExited` stop and a hung second attach and no attach finished late,
+held on every machine. omega printed RESULT(1) because the probe's check matched `-exited-` inside `not-exited-`;
+the check is fixed. Raw output: `104-crash-boundary/omega-stop-and-measure.txt` and
+`104-crash-boundary/omega-ubuntu-stop-and-measure.txt`.
+
+## Results on omega-windows (2026-11-06)
+
+Windows 11 arm64 (build 26200, Parallels VM, 4 vCPU), runtime 10.0 (10.0.14 the newest installed), 14:46–15:20 UTC,
+10 runs of every mode but the three that need SIGSTOP. Windows has no debugger transport: mscordbi reads the
+target's memory directly and its process handle is a kernel object that signals at the target's death. The target is
+the probe child's own child, killed with `TerminateProcess`; `flood-segv` and `flood-abort` use ucrtbase's `memset`
+and `abort()`. Predicted: a usable second attach every run. Raw output: `104-crash-boundary/omega-windows-all-modes.txt`.
+
+- **Usable every run: 130 of 130**, in all 13 modes, including every crash continued past its stop (`flood-crash`,
+  `flood-stackoverflow`, `flood-segv`, `flood-abort` and the four `measure-*`), which hung on macOS and Linux.
+- **`ProcessExited` came in all 70 continued-crash runs,** 13 to 172 ms after the probe saw the target gone; slower
+  than on macOS and Linux, and always there.
+- **A native fault is announced on Windows.** The access violation in `memset` gave an
+  `Exception(Unhandled, System.ExecutionEngineException)` stop in 20 of 20 runs; on macOS and Linux it gave none.
+  `abort()` gave no stop (20 of 20), as on the other two.
+- **Ending at the stop was clean too:** kill and detach at the FailFast and stack-overflow stops, 40 of 40, and a kill
+  after a Pause, 10 of 10.
+
+So on this machine no way of ending tried here left the debugger unusable, as finding 105's mechanism predicts for a
+platform without a PAL.
 
 ## What this answers
 
@@ -132,14 +202,17 @@ come up about 1% of the time (0.8²⁰). On omega-ubuntu, where 8 in 20 hung, 40
 batch of continued crashes ran apart from the batch that acted at the stop on omega, and in the same batch on
 omega-ubuntu.
 
+For stack overflow, on omega, where 5 in 10 hung, 20 clean runs would come up about once in 10⁶ (0.5²⁰). On
+omega-ubuntu, where 1 in 20 hung, 40 clean runs would come up about 13% of the time (0.95⁴⁰): weak evidence there on
+its own, and consistent with omega's.
+
 ## Not covered
 
-- Ending the session at a stack overflow's `Exception(Unhandled)` stop; and why stack overflow hung only on macOS.
-- Whether the `ProcessExited` stop, waited for longer than 2 s, ever comes in a hung run, or in the one usable run
-  that lacked it.
-- Linux x64 (zbook is on Mercury work; elite is excluded) and Windows (no debugger transport; a different
-  construction).
-- Which transport request the event thread was in, in the hung runs; on Linux, where it was at all.
+- Linux x64 (elite is excluded).
+- On Linux, where the waiting threads were: only thread names were read there.
+- Why the hang rate differs by machine and crash (stack overflow 5 of 10 on omega, 1 of 20 on omega-ubuntu), and why
+  a target on Linux takes about a second to die after its stop is continued.
+- A target DrHook launched, rather than attached to.
 - What an operator loses by not continuing the unhandled-exception stop. Continuing it is how a debugger shows the
   program's own death; the trade-off is for Step 6.
 
@@ -150,9 +223,12 @@ Input to Step 6, not a decision:
 - The hang has a managed-crash route DrHook can avoid: at an unhandled-exception stop of a target it is about to lose,
   end the session (detach, or kill if the target is owned) instead of continuing.
 - The route it cannot avoid that way is real: a native fault or a direct `abort()` gives no stop and still hung the
-  debugger on macOS arm64 and Linux arm64. That keeps the Step 5 worker in question on both.
-- A candidate for detecting it, which DrHook does not do today: the target is gone and no `ProcessExited` stop has
-  come.
+  debugger on macOS arm64 and Linux arm64. With finding 105, nothing in the process can recover from it; the worker
+  process is decided (Martin, 2026-11-06; ADR-016).
+- Avoidance covers a stack overflow too: end the session at its stop (60 of 60).
+- Detection, which DrHook does not do today: once the target is gone, a `ProcessExited` stop came within 34 ms or
+  not within 30 s. The detector should check the stuck state itself (a request outstanding to a target that is gone)
+  rather than a time bound alone, so that a runtime that notices the death later is not taken for a hung one.
 
 Where the probes ran: ADR-016 keeps anything that could freeze a machine off omega and zbook. These modes hang only
 the probe's own child process, which the parent ends from outside; Martin approved running them on omega on

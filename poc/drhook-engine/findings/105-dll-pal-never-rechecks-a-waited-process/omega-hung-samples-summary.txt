@@ -1,0 +1,36 @@
+# omega, 2026-11-06: the 16 hung probe-100 children, each sampled once with 'sample' (log below).
+# Per sample: PAL worker threads by library, and the transport request(s) above SendRequestMessageAndWait.
+14718 worker(libcoreclr)=1 worker(libmscordaccore)=0 requests=ReadMemory x1
+15465 worker(libcoreclr)=1 worker(libmscordaccore)=0 requests=WriteMemory x1
+16142 worker(libcoreclr)=1 worker(libmscordaccore)=0 requests=ReadMemory x1
+16623 worker(libcoreclr)=1 worker(libmscordaccore)=0 requests=ReadMemory x1
+17109 worker(libcoreclr)=1 worker(libmscordaccore)=0 requests=WriteMemory x1
+17639 worker(libcoreclr)=1 worker(libmscordaccore)=0 requests=ReadMemory x2,WriteMemory x1
+18127 worker(libcoreclr)=1 worker(libmscordaccore)=0 requests=ReadMemory x1
+18678 worker(libcoreclr)=1 worker(libmscordaccore)=0 requests=ReadMemory x1
+19352 worker(libcoreclr)=1 worker(libmscordaccore)=0 requests=ReadMemory x1,WriteMemory x1
+20052 worker(libcoreclr)=1 worker(libmscordaccore)=0 requests=WriteMemory x1
+20786 worker(libcoreclr)=1 worker(libmscordaccore)=0 requests=ReadMemory x1
+21260 worker(libcoreclr)=1 worker(libmscordaccore)=0 requests=ReadMemory x1
+22008 worker(libcoreclr)=1 worker(libmscordaccore)=0 requests=ReadMemory x2
+22547 worker(libcoreclr)=1 worker(libmscordaccore)=0 requests=ReadMemory x1
+23035 worker(libcoreclr)=1 worker(libmscordaccore)=0 requests=ReadMemory x1
+23560 worker(libcoreclr)=1 worker(libmscordaccore)=0 requests=ReadMemory x1
+
+# sample log
+2026-11-06T11:38:27Z sampled 14718 at 48s
+2026-11-06T11:41:12Z sampled 15465 at 46s
+2026-11-06T11:44:58Z sampled 16142 at 48s
+2026-11-06T11:47:43Z sampled 16623 at 49s
+2026-11-06T11:50:28Z sampled 17109 at 49s
+2026-11-06T11:53:23Z sampled 17639 at 45s
+2026-11-06T11:56:13Z sampled 18127 at 48s
+2026-11-06T11:59:14Z sampled 18678 at 49s
+2026-11-06T12:02:24Z sampled 19352 at 45s
+2026-11-06T12:05:14Z sampled 20052 at 48s
+2026-11-06T12:09:15Z sampled 20786 at 47s
+2026-11-06T12:12:00Z sampled 21260 at 48s
+2026-11-06T12:16:01Z sampled 22008 at 45s
+2026-11-06T12:19:02Z sampled 22547 at 45s
+2026-11-06T12:21:47Z sampled 23035 at 46s
+2026-11-06T12:24:47Z sampled 23560 at 47s
