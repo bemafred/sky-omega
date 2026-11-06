@@ -90,6 +90,27 @@
 //   the debugger as an unhandled ExecutionEngineException.
 //   Weight: if acting at the stop changed nothing (flood-crash hung 2/10), 10 clean runs in one mode would still
 //   come up about 11% of the time (0.8^10), and 20 of 20 across both about 1%. Supported on omega, not proven.
+// On omega-ubuntu (both .NET builds), the same day: finding 104.
+//
+// Three more modes ask what happens when a target dies without the warning that ending at the stop needs (drafted
+// 2026-11-05, not yet run). FailFast warns the debugger through EEPolicy::HandleFatalError, which then calls
+// TerminateProcess -> PROCAbort -> abort() (omega's crash report of a flood-crash target, 2026-11-05). These three crash
+// the same flooding target, at the same random moment after the attach, by means that skip HandleFatalError:
+//   flood-stackoverflow — recursion on the crasher thread until its stack is exhausted.
+//   flood-segv — a write through address 16 inside libc's memset: a fault in native code, which the runtime does not
+//             turn into a managed exception.
+//   flood-abort — libc's abort(), called directly.
+// Hypotheses, each per mode: (1) no stop surfaces before the end (unwarned), since none of the three passes through
+// HandleFatalError; (2) as in flood-crash, the death sometimes lands while the Win32 event thread is mid-request, so
+// the second attach hangs in at least one of N runs. Unverified, not read in the runtime source: whether the runtime
+// sends the debugger anything on a stack overflow, and which of these runs the runtime's own shutdown work (the
+// signal handlers' PROCNotifyProcessShutdown) before the process ends. Construction: flood-crash's (every stop
+// continued and recorded, with the exception type when it is one), without assuming a stop comes; a ProcessExited
+// stop is not a warning. Result: <kind>-unwarned-... or <kind>-warned-..., then AfterTheEnd as above. Predicted:
+// <kind>-unwarned every run, attach-hung in at least one. A warned result falsifies (1), and opens the question of
+// ending the session at that stop; ten usable runs falsify (2).
+// On macOS each of these crashes leaves a crash report in ~/Library/Logs/DiagnosticReports (flood-crash's did too).
+//   Usage: dotnet run --no-cache 100-orphaned-read-smoke.cs 10 flood-stackoverflow flood-segv flood-abort
 //
 // Observed 2026-10-30, omega (macOS 27, arm64): control 3/3 completed after SIGCONT and kill 3/3 returned within
 // ~20 ms of the kill (the dead target's pipes removed), refuting the first form of the hypothesis (any pending read
@@ -97,17 +118,19 @@
 // in a read on the first or second attempt; still in it 10 s after the kill; pipes left; the second attach pending
 // after 30 s). RESULT(0) both times.
 //
-// Result codes: 0 confirmed: every mode run gave its predicted outcome every time (control-completed;
-// kill-read-returned; flood-kill: flood-orphaned-and-attach-hung; flood-sync-kill: sync-kill-attach-ok; flood-crash:
-// crash-attach-ok; flood-crash-kill: crash-kill-attach-ok; flood-crash-detach: crash-detach-attach-ok); 1 otherwise;
-// 2 target build failed.
+// Result codes: 0 confirmed: every mode's prediction held over its runs (control-completed; kill-read-returned;
+// flood-kill: flood-orphaned-and-attach-hung; flood-sync-kill: sync-kill-attach-ok; flood-crash: crash-attach-ok;
+// flood-crash-kill: crash-kill-attach-ok; flood-crash-detach: crash-detach-attach-ok, each every run; the three
+// unwarned crashes: <kind>-unwarned every run and attach-hung in at least one); 1 otherwise; 2 target build failed.
 // Child results: control-completed, kill-read-returned, kill-orphaned-and-attach-hung, kill-orphaned-attach-ok,
 // flood-orphaned-and-attach-hung, flood-orphaned-attach-ok, flood-read-returned, flood-not-caught, sync-kill-attach-ok,
 // sync-kill-attach-hung, sync-kill-orphaned-and-attach-hung, sync-not-idle, crash-attach-ok, crash-attach-hung,
 // crash-orphaned-and-attach-hung, crash-no-exit, crash-kill-attach-ok, crash-kill-attach-hung,
 // crash-kill-orphaned-and-attach-hung, crash-not-idle, crash-detach-attach-ok, crash-detach-attach-hung,
-// crash-detach-orphaned-and-attach-hung, crash-detach-hung, crash-detach-no-exit, no-wait, no-stop, setup-failed. "orphaned" means the sample showed the
-// Win32 event thread still in a transport request 10 s after the target was gone (macOS only).
+// crash-detach-orphaned-and-attach-hung, crash-detach-hung, crash-detach-no-exit, no-wait, no-stop, setup-failed;
+// for kind stackoverflow, segv or abort: <kind>-unwarned- or <kind>-warned- followed by attach-ok, attach-hung or
+// orphaned-and-attach-hung, and <kind>-no-exit. "orphaned" means the sample showed the Win32 event thread still in a
+// transport request 10 s after the target was gone (macOS only).
 //
 // Usage (from poc/drhook-engine):  dotnet run --no-cache 100-orphaned-read-smoke.cs [runs] [mode ...]
 // With no modes: control, kill, and on macOS flood-kill (the set recorded above). Step 4:
@@ -132,18 +155,29 @@ if (args.Length == 3 && args[0] == "child")
         "flood-crash" => ChildCrash(args[2]),
         "flood-crash-kill" => ChildCrashKill(args[2]),
         "flood-crash-detach" => ChildCrashDetach(args[2]),
+        "flood-stackoverflow" => ChildUnwarnedCrash(args[2], "flood-stackoverflow", "stackoverflow"),
+        "flood-segv" => ChildUnwarnedCrash(args[2], "flood-segv", "segv"),
+        "flood-abort" => ChildUnwarnedCrash(args[2], "flood-abort", "abort"),
         _ => Child(args[1], args[2]),
     };
 
-var predicted = new Dictionary<string, string>
+// Each mode's prediction, in words, and the test it puts to the mode's outcomes. Most predict one outcome every run;
+// the unwarned crashes predict a pattern over the runs.
+var predicted = new Dictionary<string, (string Text, Func<List<string>, bool> Holds)>
 {
-    ["control"] = "control-completed",
-    ["kill"] = "kill-read-returned",
-    ["flood-kill"] = "flood-orphaned-and-attach-hung",
-    ["flood-sync-kill"] = "sync-kill-attach-ok",
-    ["flood-crash"] = "crash-attach-ok",
-    ["flood-crash-kill"] = "crash-kill-attach-ok",
-    ["flood-crash-detach"] = "crash-detach-attach-ok",
+    ["control"] = ("control-completed every run", rs => rs.All(r => r == "control-completed")),
+    ["kill"] = ("kill-read-returned every run", rs => rs.All(r => r == "kill-read-returned")),
+    ["flood-kill"] = ("flood-orphaned-and-attach-hung every run", rs => rs.All(r => r == "flood-orphaned-and-attach-hung")),
+    ["flood-sync-kill"] = ("sync-kill-attach-ok every run", rs => rs.All(r => r == "sync-kill-attach-ok")),
+    ["flood-crash"] = ("crash-attach-ok every run", rs => rs.All(r => r == "crash-attach-ok")),
+    ["flood-crash-kill"] = ("crash-kill-attach-ok every run", rs => rs.All(r => r == "crash-kill-attach-ok")),
+    ["flood-crash-detach"] = ("crash-detach-attach-ok every run", rs => rs.All(r => r == "crash-detach-attach-ok")),
+    ["flood-stackoverflow"] = ("stackoverflow-unwarned every run, attach-hung in at least one",
+        rs => rs.All(r => r.StartsWith("stackoverflow-unwarned-", StringComparison.Ordinal)) && rs.Any(r => r.EndsWith("attach-hung", StringComparison.Ordinal))),
+    ["flood-segv"] = ("segv-unwarned every run, attach-hung in at least one",
+        rs => rs.All(r => r.StartsWith("segv-unwarned-", StringComparison.Ordinal)) && rs.Any(r => r.EndsWith("attach-hung", StringComparison.Ordinal))),
+    ["flood-abort"] = ("abort-unwarned every run, attach-hung in at least one",
+        rs => rs.All(r => r.StartsWith("abort-unwarned-", StringComparison.Ordinal)) && rs.Any(r => r.EndsWith("attach-hung", StringComparison.Ordinal))),
 };
 int runs = args.Length > 0 ? int.Parse(args[0]) : 3;
 string[] modes = args.Length > 1 ? args[1..] : OperatingSystem.IsMacOS() ? ["control", "kill", "flood-kill"] : ["control", "kill"];
@@ -199,8 +233,8 @@ foreach (string mode in modes)
 
 Console.WriteLine(string.Join("; ", results.SelectMany(kv => kv.Value.GroupBy(r => r).Select(g => $"{kv.Key} {g.Key}: {g.Count()}"))));
 foreach ((string mode, List<string> outcomes) in results)
-    Console.WriteLine($"{mode}: predicted {predicted[mode]}, {outcomes.Count(r => r == predicted[mode])} of {outcomes.Count}");
-bool confirmed = results.All(kv => kv.Value.All(r => r == predicted[kv.Key]));
+    Console.WriteLine($"{mode}: predicted {predicted[mode].Text}: {(predicted[mode].Holds(outcomes) ? "holds" : "does not hold")} over {outcomes.Count} runs");
+bool confirmed = results.All(kv => predicted[kv.Key].Holds(kv.Value));
 Console.WriteLine(confirmed
     ? "RESULT(0): confirmed — every mode run gave its predicted outcome every time (see the header for each hypothesis)"
     : "RESULT(1): not confirmed as stated (see the outcomes above)");
@@ -515,6 +549,59 @@ static int ChildCrashDetach(string dll)
     if (!WaitUntilGone(pid, TimeSpan.FromSeconds(30))) { kill(pid, SIGKILL); Say("target still present 30 s after the detach"); return Result("crash-detach-no-exit"); }
     Say("target gone (FailFast, no debugger attached)");
     return AfterTheEnd("crash-detach", pid, dll, Say, Result);
+}
+
+// flood-stackoverflow, flood-segv, flood-abort: the flooding target crashes by a means that skips HandleFatalError.
+// flood-crash's construction (every stop continued, its reason recorded), with no assumption that a stop comes: the
+// result is <kind>-unwarned-... when no stop surfaced before the end, <kind>-warned-... when one did.
+[System.Runtime.Versioning.UnsupportedOSPlatform("windows")]
+static int ChildUnwarnedCrash(string dll, string targetMode, string kind)
+{
+    var clock = Stopwatch.StartNew();
+    void Say(string text) { Console.WriteLine($"child: {text} [{clock.ElapsedMilliseconds} ms]"); Console.Out.Flush(); }
+    int Result(string outcome) { Console.WriteLine($"child: result={outcome}"); Console.Out.Flush(); return 0; }
+
+    int pid = StartTarget(dll, targetMode);
+    Console.WriteLine($"child: target={pid}");
+    Console.Out.Flush();
+    DebugSession session;
+    try { session = DebugSession.AttachAndOwn(pid, new Sink()); }
+    catch (Exception e) { Say($"attach failed: {e.Message}"); return Result("setup-failed"); }
+    Say($"attached; the target floods thread events and will crash ({kind}) within 0.5 to 3 s");
+
+    var stops = new List<string>();
+    bool resuming = true;
+    var resumer = new Thread(() =>
+    {
+        while (Volatile.Read(ref resuming))
+        {
+            try
+            {
+                StopInfo? s = session.WaitForStop(TimeSpan.FromMilliseconds(200));
+                if (s is null) continue;
+                string reason = s.Reason == StopReason.Exception ? $"Exception({s.ExceptionKind}, {session.GetCurrentExceptionTypeName() ?? "type not read"})" : s.Reason.ToString();
+                lock (stops) stops.Add(reason);
+                if (s.Reason == StopReason.ProcessExited) return;
+                session.Resume();
+            }
+            catch (Exception e) { lock (stops) stops.Add($"threw {e.GetType().Name}"); return; }
+        }
+    }) { IsBackground = true, Name = "probe100-resumer" };
+    resumer.Start();
+
+    bool gone = WaitUntilGone(pid, TimeSpan.FromSeconds(30));
+    Volatile.Write(ref resuming, false);
+    resumer.Join(TimeSpan.FromSeconds(2));
+    // A ProcessExited stop is the debugger noticing the end, not a warning before it.
+    bool warned;
+    lock (stops)
+    {
+        Say($"stops seen before the end: {(stops.Count == 0 ? "none" : string.Join(", ", stops))}");
+        warned = stops.Any(s => s != nameof(StopReason.ProcessExited));
+    }
+    if (!gone) { kill(pid, SIGKILL); Say("target still present 30 s after the attach"); return Result($"{kind}-no-exit"); }
+    Say($"target gone ({kind})");
+    return AfterTheEnd($"{kind}-{(warned ? "warned" : "unwarned")}", pid, dll, Say, Result);
 }
 
 // After the target is gone: let mscordbi handle the exit, record the event thread and the pipes, then attach again.
