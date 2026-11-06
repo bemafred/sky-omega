@@ -7,6 +7,7 @@ using System.Text;
 using ModelContextProtocol.Server;
 using SkyOmega.Mercury;
 using SkyOmega.Mercury.Abstractions;
+using SkyOmega.Mercury.Sparql.Results;
 using SkyOmega.Mercury.Storage;
 
 namespace SkyOmega.Mercury.Mcp;
@@ -31,7 +32,7 @@ public sealed class MercuryTools
         _storePath = storePath;
     }
 
-    [McpServerTool(Name = "mercury_query"), Description("Execute a SPARQL SELECT, ASK, CONSTRUCT, or DESCRIBE query against the Mercury triple store. Supports text:match(?var, \"term\") in FILTER clauses for case-insensitive full-text search.")]
+    [McpServerTool(Name = "mercury_query"), Description("Execute a SPARQL SELECT, ASK, CONSTRUCT, or DESCRIBE query against the Mercury triple store. Supports text:match(?var, \"term\") in FILTER clauses for case-insensitive full-text search. SELECT returns SPARQL 1.1 TSV (literals escaped: \\\", \\\\, \\n, \\t, \\r); CONSTRUCT and DESCRIBE return N-Triples. Both end with a count line.")]
     public string Query([Description("The SPARQL query to execute")] string query)
     {
         if (string.IsNullOrWhiteSpace(query))
@@ -48,24 +49,19 @@ public sealed class MercuryTools
             switch (result.Kind)
             {
                 case ExecutionResultKind.Select:
-                    var variables = result.Variables ?? [];
+                    // SPARQL 1.1 TSV, through the writer the CLI and the HTTP endpoint use: a ?var header, terms in
+                    // SPARQL syntax with tab, line feed, CR, quote and backslash escaped. Joining the stored terms by
+                    // hand let a line break in a literal start a new row and a tab start a new column.
                     var rows = result.Rows ?? [];
-                    if (variables.Length > 0 && rows.Count > 0)
+                    using (var writer = new StringWriter(sb))
+                    using (var tsv = new SparqlCsvResultWriter(writer, useTsv: true))
                     {
-                        sb.AppendLine(string.Join("\t", variables));
+                        tsv.WriteHead(result.Variables ?? []);
                         foreach (var row in rows)
-                        {
-                            var values = new string[variables.Length];
-                            for (int i = 0; i < variables.Length; i++)
-                                values[i] = row.TryGetValue(variables[i], out var v) ? v : "";
-                            sb.AppendLine(string.Join("\t", values));
-                        }
-                        sb.AppendLine($"\n{rows.Count} result(s)");
+                            tsv.WriteResult(row);
+                        tsv.WriteEnd();
                     }
-                    else
-                    {
-                        sb.AppendLine("No results");
-                    }
+                    sb.AppendLine($"\n{rows.Count} result(s)");
                     break;
 
                 case ExecutionResultKind.Ask:

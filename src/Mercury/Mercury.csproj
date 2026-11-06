@@ -16,6 +16,9 @@
         <InternalsVisibleTo Include="SkyOmega.Mercury.Pruning" />
         <InternalsVisibleTo Include="Mercury.Turtle.Tool" />
         <InternalsVisibleTo Include="Mercury.Sparql.Tool" />
+        <!-- The MCP server writes SELECT results through SparqlCsvResultWriter; its tests read them back. -->
+        <InternalsVisibleTo Include="mercury-mcp" />
+        <InternalsVisibleTo Include="Mercury.Mcp.Tests" />
     </ItemGroup>
 
     <ItemGroup>
