@@ -136,7 +136,7 @@ one.
 | **Natural completion:** the work is done, main returns | the program | end its own side in order: receive the exit, or detach cleanly first and let the program finish | the clean detach works on macOS under a flood (probe 08, 3 of 3) | whether a program ending on its own, debugger attached, ever leaves the debugger unusable; whether a program that exits during or right after a detach is safe (finding 66's fix covers a target already dead when Dispose runs; finding 63's crashes involved a kill) |
 | **Cancellation:** a stop request the program honours | the client asks; the program chooses when | send the request through a declared mechanism, keep observing, wait | without a debugger: with a handler the program cleans up and exits 0; without one the same signal is an abort, exit 143 (finding 68) | behaviour under a debugger; Windows (a console control event, never built) |
 | **Won't end:** a loop missing its exit condition, a deadlock | nobody; it is a bug | observe it, which is what debugging is; a kill only as a separate, deliberate, authorized and recorded decision | on macOS a kill while mscordbi was still busy with the target has left the debugger unusable (finding 100) and crashed the debugger's host process (2026-05-25; finding 63) | a kill whose consequence is bounded on each platform; what each platform's consequence is |
-| **Crashes itself:** runaway recursion and stack overflow, `Environment.FailFast`, an unhandled exception, a native fault | nobody | report the crash; survive it | nothing; not tested | everything. A crash lands at a moment nobody chose, like a kill, and discipline cannot prevent it. Whether it can leave mscordbi as finding 100 does is unknown |
+| **Crashes itself:** runaway recursion and stack overflow, `Environment.FailFast`, an unhandled exception, a native fault | nobody | report the crash; survive it | nothing; not tested | everything. A crash lands at a moment nobody chose, like a kill, and discipline cannot prevent it. It can leave mscordbi as finding 100 does: FailFast, stack overflow, a native fault and `abort()` all did on macOS and Linux arm64 (finding 104) |
 | **Machine catastrophe:** a freeze that needs a hard reset | nobody | keep every known path to it inside enforced limits and isolation | none observed under DrHook | the paths to it. Plausible ones: a program held at a breakpoint while it holds something the whole system waits on; unbounded growth (finding 100 leaves one blocked thread and two pipe files per killed target; omega's `$TMPDIR` held 954 such files); runaway work started through function evaluation |
 
 A hard reset is the one end nothing can be recovered from: no session survives it, only what was persisted before.
@@ -155,7 +155,7 @@ natural end and its own hazards, and DrHook and its client must know which scena
 | **Debugging a failing test,** instead of writing a probe that logs | the test executable launched (MTP), or `dotnet test` started with `VSTEST_HOST_DEBUG=1` and its test host attached to (VSTest) | DrHook's for a test executable it launched; otherwise the test runner's | the test run finishes and reports | remove the breakpoints and continue to the end | the runner waits for its host: a host killed mid-handshake leaves vstest.console waiting 90 s (finding 94); an early attach can skip the host's debug hold (finding 91); a host left waiting for a debugger is orphaned (finding 90); a test framework's timeout may expire while the test is paused (NUnit does not enforce its timeouts under a debugger; MSTest and xunit v3 not established) |
 | **Attaching to a running program,** a debug build, to learn the context of a reported bug | `drhook_attach` | its owner's: a user, a service manager, or another Sky Omega component | none on DrHook's side: the program goes on after the session | detach and leave it running; never kill it implicitly | a breakpoint stops the program for everyone using it: their requests time out, health checks fail, a watchdog may restart it and end the session; a program started with `DOTNET_EnableDiagnostics=0` refuses the attach |
 | **Diagnosing a hang** | attach; or a launched program stops making progress | its owner's, or DrHook's | none: it does not end | a stack snapshot first (`drhook_snapshot`, through EventPipe like `dotnet-stack`), which does not stop it at a breakpoint; then pause and inspect; detach, or, where a kill is authorized, a kill as the extraordinary act | the "won't end" row above |
-| **Catching a crash** | launch, with exception breakpoints to stop before the crash | DrHook's | the crash | — | the "crashes itself" row above; whether a stack overflow gives the debugger a chance to stop is unknown |
+| **Catching a crash** | launch, with exception breakpoints to stop before the crash | DrHook's | the crash | — | the "crashes itself" row above; a stack overflow gives an `Exception(Unhandled)` stop, as FailFast does; a native fault and `abort()` give none (finding 104) |
 | **Hunting an intermittent failure** ([ADR-015](ADR-015-run-until-anomaly.md), run until an anomaly) | many launches in a row in one debugger process | DrHook's | each run ends on its own | — | each end must leave the debugger clean, and nothing may pile up: finding 100 leaves a blocked thread and two pipe files per killed target |
 | **A program with a window** (Avalonia) | launch or attach | either | the user closes it, or the app quits on its own terms | detach and leave it running | a UI thread held at a breakpoint freezes the window; after a visual capture, the detach reports `uiLiveness`, whether the window recovered |
 | **A server or a service** (the Generic Host, ASP.NET Core) | launch or attach | either | a stop request: the host's `ConsoleLifetime` turns SIGINT or SIGTERM into `StopApplication`, and shutdown gets `HostOptions.ShutdownTimeout` (30 s by default) | a stop request | a program held at a breakpoint cannot shut down: continue it before asking it to stop |
@@ -542,8 +542,17 @@ approved the omega runs, which hang only the probe's own child process).
 - Later sessions in the process were contaminated whenever it hung.
 - DrHook detected none of the hangs.
 
-Not yet run: a stack overflow, a native fault, a `DebuggerError`, Linux x64, Windows, and whether a bounded
-operation completes later.
+*Stack overflow, native fault and `abort()` run 2026-11-06* (finding 104; probe 100 at `4da7093`, same machines and
+builds, every stop continued).
+- A stack overflow gives the same `Exception(Unhandled)` stop as FailFast (30 of 30, via
+  `EEPolicy::HandleFatalStackOverflow`). Continued, it hung the debugger 5 of 10 on omega, 0 of 20 on omega-ubuntu.
+- A native fault and a direct `abort()` give no stop (60 of 60), and still hung the debugger: 6 of 20 on omega, 4 of
+  40 on omega-ubuntu. Ending the session at a stop cannot avoid these.
+- A `ProcessExited` stop after the end came in 74 runs, all usable; without one, 15 of 16 hung. A one-sided
+  detection candidate, not yet used by DrHook.
+
+Not yet run: ending the session at a stack overflow's stop, a `DebuggerError`, Linux x64, Windows, and whether a
+bounded operation completes later.
 
 **Step 5 — A minimal process-isolation proof of concept.** A supervisor and one worker. Induce finding 100's exact
 failure in the worker; the supervisor must detect it, discard the worker, and conduct a fresh session that succeeds.

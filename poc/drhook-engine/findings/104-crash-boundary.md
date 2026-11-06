@@ -2,9 +2,9 @@
 
 **Date:** 2026-11-05
 **Status:** **OBSERVED** on omega (macOS 27.0.1 arm64, SDK 10.0.301) and omega-ubuntu (Linux arm64 VM, Ubuntu's and
-Microsoft's .NET 10.0.14), 10 runs per mode on each. Not run on Linux x64 or Windows. **Not fixed:**
-DrHook continues every stop it is asked to, including the unhandled-exception one. ADR-016 Step 4, probe 100
-(`poc/drhook-engine/100-orphaned-read-smoke.cs`, modes added in `5984ad0` and `04aff45`).
+Microsoft's .NET 10.0.14), 10 runs per mode on each; crashes without the managed warning added 2026-11-06. Not run on Linux x64 or Windows.
+**Not fixed:** DrHook continues every stop it is asked to, including the unhandled-exception one. ADR-016 Step 4,
+probe 100 (`poc/drhook-engine/100-orphaned-read-smoke.cs`, modes added in `5984ad0`, `04aff45` and `4da7093`).
 
 ## The question
 
@@ -74,6 +74,39 @@ hung on Linux crashed at 2.8 to 4.3 s, and the 12 that stayed usable at 3.7 to 5
 hung. On omega the two hung runs crashed at 1.7 and 2.2 s, among the three earliest of ten. An observation, not
 established: an earlier crash, closer to the attach, may be likelier to catch the event thread mid-request.
 
+## Crashes without the managed warning (2026-11-06)
+
+Three more target modes crash at the same moments by other means; probe 100 at `4da7093`, every stop continued, 10
+runs per mode on omega (05:15–05:29 UTC) and on omega-ubuntu with each build (05:29–05:46 UTC). The VM shares omega's
+CPU, so the two ran one after the other. The resumer now waits up to 2 s after the target is gone for a
+`ProcessExited` stop before the stops are printed; `flood-crash`'s construction printed them at once.
+
+| Mode | How the target ends (macOS crash report) | Stop before the end | omega | omega-ubuntu, Ubuntu's | omega-ubuntu, Microsoft's |
+|------|------------------------------------------|---------------------|-------|------------------------|---------------------------|
+| `flood-stackoverflow` | recursion on one thread; `HandleHardwareException` → `EEPolicy::HandleFatalStackOverflow` → `TerminateProcess` → `PROCAbort` → `abort` | `Exception(Unhandled, System.StackOverflowException)`, 30 of 30 | **5 of 10 hung** (runs 1, 3, 7, 8, 9) | 0 of 10 hung | 0 of 10 hung |
+| `flood-segv` | a write through address 16 in libc `memset`: `EXC_BAD_ACCESS`, SIGSEGV in `_platform_memset` | none, 30 of 30 | **3 of 10 hung** (2, 3, 9) | **1 of 10** (4) | **2 of 10** (7, 10) |
+| `flood-abort` | libc `abort()`: SIGABRT in `__abort`, no `PROCAbort` | none, 30 of 30 | **3 of 10 hung** (1, 4, 6) | **1 of 10** (10) | 0 of 10 |
+
+On omega every hung run also had the event thread inside `SendRequestMessageAndWait` 10 s after the end. macOS
+wrote crash reports for all 10 stack-overflow and 10 segv runs and for 5 of the 10 abort runs (not checked why). The
+VM's `/tmp` held 120 pipe files of second targets afterwards, as in the first batch; none belonged to a live process,
+and they were removed.
+
+- **A stack overflow is announced.** The draft grouped it with the crashes that skip `EEPolicy::HandleFatalError`;
+  it goes through its sibling `HandleFatalStackOverflow`, which gives the debugger the same `Exception(Unhandled)`
+  stop as FailFast. The draft's prediction for it did not hold. Ending the session at that stop is not tried here.
+- **A native fault and a direct `abort()` are not announced, and they hang the debugger too:** 6 of 20 on omega, 4 of
+  40 on omega-ubuntu. These are the crashes ending the session at a stop cannot avoid, because there is no stop.
+- **Stack overflow hung on macOS (5 of 10) and never on Linux (0 of 20).** Not explained.
+- **When the crashes came** does not separate the outcomes here: hung runs crashed at 1.9 to 5.2 s, usable ones at
+  1.9 to 5.0 s. The earlier observation that the earliest crashes hung is not borne out.
+- **A `ProcessExited` stop after the end went with a usable debugger in all 74 runs that had one** (omega 19,
+  Ubuntu's 28, Microsoft's 27). Without one, 15 of 16 runs hung; the exception is omega-ubuntu Microsoft's `flood-abort`
+  run 9, usable with no `ProcessExited` within the 2 s. Inferred, not shown: the event thread is what delivers
+  `ProcessExited`, so a thread stuck in a request cannot. As a detector it would be one-sided: the stop shows the
+  debugger is fine; its absence within 2 s suggests, and does not show, that it is not. The 2 s bound was chosen,
+  not calibrated.
+
 ## What this answers
 
 - **The disappearance, not the signal.** In `flood-crash` DrHook sent no signal; the target ended itself. On omega,
@@ -101,8 +134,9 @@ omega-ubuntu.
 
 ## Not covered
 
-- Crashes the debugger is not told about: a native fault, possibly a stack overflow. Ending the session at the stop
-  needs a stop.
+- Ending the session at a stack overflow's `Exception(Unhandled)` stop; and why stack overflow hung only on macOS.
+- Whether the `ProcessExited` stop, waited for longer than 2 s, ever comes in a hung run, or in the one usable run
+  that lacked it.
 - Linux x64 (zbook is on Mercury work; elite is excluded) and Windows (no debugger transport; a different
   construction).
 - Which transport request the event thread was in, in the hung runs; on Linux, where it was at all.
@@ -115,8 +149,10 @@ Input to Step 6, not a decision:
 
 - The hang has a managed-crash route DrHook can avoid: at an unhandled-exception stop of a target it is about to lose,
   end the session (detach, or kill if the target is owned) instead of continuing.
-- The route it cannot avoid that way, a crash with no warning, keeps the Step 5 worker in question on macOS and
-  Linux.
+- The route it cannot avoid that way is real: a native fault or a direct `abort()` gives no stop and still hung the
+  debugger on macOS arm64 and Linux arm64. That keeps the Step 5 worker in question on both.
+- A candidate for detecting it, which DrHook does not do today: the target is gone and no `ProcessExited` stop has
+  come.
 
 Where the probes ran: ADR-016 keeps anything that could freeze a machine off omega and zbook. These modes hang only
 the probe's own child process, which the parent ends from outside; Martin approved running them on omega on
