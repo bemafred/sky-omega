@@ -1,0 +1,239 @@
+pid 250147 mode measure-crash age 6.8s sampled 15:25:57.009Z
+
+## thread names (/proc/250147/task/*/comm)
+250147 100-orphaned-re
+250152 .NET SynchManag
+250153 .NET EventPipe
+250154 .NET DebugPipe
+250155 .NET Debugger
+250156 .NET Finalizer
+250157 .NET Tiered Com
+250158 .NET SigHandler
+250161 .NET Sockets
+257615 100-orphaned-re
+257680 DrHook.Callback
+
+## info sharedlibrary
+From                To                  Syms Read   Shared Object Library
+0x00007b3b59295000  0x00007b3b5929a000  Yes         /usr/lib/x86_64-linux-gnu/libdl.so.2
+0x00007b3b59290000  0x00007b3b59295000  Yes         /usr/lib/x86_64-linux-gnu/libpthread.so.0
+0x00007b3b58e00000  0x00007b3b590a0000  Yes (*)     /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+0x00007b3b5916a000  0x00007b3b59290000  Yes         /usr/lib/x86_64-linux-gnu/libm.so.6
+0x00007b3b5913c000  0x00007b3b5916a000  Yes (*)     /usr/lib/x86_64-linux-gnu/libgcc_s.so.1
+0x00007b3b58a00000  0x00007b3b58c21000  Yes         /usr/lib/x86_64-linux-gnu/libc.so.6
+0x00007b3b592b7000  0x00007b3b592f6000  Yes         /lib64/ld-linux-x86-64.so.2
+0x00007b3b590e3000  0x00007b3b59136000  Yes (*)     /home/bemafred/.dotnet/host/fxr/10.0.14/libhostfxr.so
+0x00007b3b58db0000  0x00007b3b58e00000  Yes (*)     /home/bemafred/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libhostpolicy.so
+0x00007b3b58200000  0x00007b3b58920000  Yes (*)     /home/bemafred/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.so
+0x00007b3b590de000  0x00007b3b590e3000  Yes         /usr/lib/x86_64-linux-gnu/librt.so.1
+0x00007b3b58ca8000  0x00007b3b58cc2000  Yes (*)     /home/bemafred/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libSystem.Native.so
+0x00007b3ad0600000  0x00007b3ad0ad4000  Yes (*)     /home/bemafred/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libclrjit.so
+0x00007b3ad0200000  0x00007b3ad042c000  Yes (*)     /usr/lib/x86_64-linux-gnu/libicuuc.so.78
+0x00007b1c2e000000  0x00007b1c2ff97000  Yes (*)     /usr/lib/x86_64-linux-gnu/libicudata.so.78
+0x00007b1c3d200000  0x00007b1c3d5af000  Yes (*)     /usr/lib/x86_64-linux-gnu/libicui18n.so.78
+0x00007b3ad2732000  0x00007b3ad2783000  Yes (*)     /home/bemafred/.local/share/dotnet/runfile/100-orphaned-read-smoke-5eb5560e9a14564415a5c780a214c82be71c1afef10200c0986a32d6c4aa6dd5/bin/debug/runtimes/linux-x64/native/libdbgshim.so
+0x00007b3ad006e000  0x00007b3ad0200000  Yes (*)     /home/bemafred/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libmscordbi.so
+0x00007b1c3ce00000  0x00007b1c3d098000  Yes (*)     /home/bemafred/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libmscordaccore.so
+(*): Shared library is missing debugging information.
+
+## info threads
+  Id   Target Id                                            Frame 
+* 1    Thread 0x7b3b59138bc0 (LWP 250147) "100-orphaned-re" __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+  2    Thread 0x7b1c3d73e6c0 (LWP 257680) "DrHook.Callback" __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+  3    Thread 0x7b1c3cdff6c0 (LWP 257615) "100-orphaned-re" __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+  4    Thread 0x7b1c3df3f6c0 (LWP 250161) ".NET Sockets"    __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+  5    Thread 0x7b1c3e7406c0 (LWP 250158) ".NET SigHandler" __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+  6    Thread 0x7b3ad13ff6c0 (LWP 250157) ".NET Tiered Com" __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+  7    Thread 0x7b3ad2ffd6c0 (LWP 250156) ".NET Finalizer"  __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+  8    Thread 0x7b3ad37fe6c0 (LWP 250155) ".NET Debugger"   __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+  9    Thread 0x7b3ad3fff6c0 (LWP 250154) ".NET DebugPipe"  __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+  10   Thread 0x7b3ad8a0e6c0 (LWP 250153) ".NET EventPipe"  __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+  11   Thread 0x7b3ad920f6c0 (LWP 250152) ".NET SynchManag" __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+
+## thread apply all bt
+
+Thread 11 (Thread 0x7b3ad920f6c0 (LWP 250152) ".NET SynchManag"):
+#0  __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+#1  0x00007b3b58aa039c in __internal_syscall_cancel (a1=<optimized out>, a2=<optimized out>, a3=<optimized out>, a4=0, a5=0, a6=0, nr=7) at ./nptl/cancellation.c:49
+#2  __syscall_cancel (a1=<optimized out>, a2=<optimized out>, a3=<optimized out>, a4=a4@entry=0, a5=a5@entry=0, a6=a6@entry=0, nr=7) at ./nptl/cancellation.c:75
+#3  0x00007b3b58b27c0e in __GI___poll (fds=<optimized out>, nfds=<optimized out>, timeout=<optimized out>) at ../sysdeps/unix/sysv/linux/poll.c:29
+#4  0x00007b3b58834080 in ?? () from /home/bemafred/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.so
+#5  0x00007b3b58833a33 in ?? () from /home/bemafred/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.so
+#6  0x00007b3b5883daf1 in ?? () from /home/bemafred/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.so
+#7  0x00007b3b58aa3dfa in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#8  0x00007b3b58b375cc in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 10 (Thread 0x7b3ad8a0e6c0 (LWP 250153) ".NET EventPipe"):
+#0  __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+#1  0x00007b3b58aa039c in __internal_syscall_cancel (a1=<optimized out>, a2=<optimized out>, a3=<optimized out>, a4=0, a5=0, a6=0, nr=7) at ./nptl/cancellation.c:49
+#2  __syscall_cancel (a1=<optimized out>, a2=<optimized out>, a3=<optimized out>, a4=a4@entry=0, a5=a5@entry=0, a6=a6@entry=0, nr=7) at ./nptl/cancellation.c:75
+#3  0x00007b3b58b27c0e in __GI___poll (fds=<optimized out>, nfds=<optimized out>, timeout=<optimized out>) at ../sysdeps/unix/sysv/linux/poll.c:29
+#4  0x00007b3b5847c1b8 in ?? () from /home/bemafred/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.so
+#5  0x00007b3b583f5e79 in ?? () from /home/bemafred/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.so
+#6  0x00007b3b583facc2 in ?? () from /home/bemafred/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.so
+#7  0x00007b3b5883daf1 in ?? () from /home/bemafred/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.so
+#8  0x00007b3b58aa3dfa in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#9  0x00007b3b58b375cc in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 9 (Thread 0x7b3ad3fff6c0 (LWP 250154) ".NET DebugPipe"):
+#0  __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+#1  0x00007b3b58aa039c in __internal_syscall_cancel (a1=-100, a2=-100, a3=<optimized out>, a4=<optimized out>, a5=0, a6=0, nr=257) at ./nptl/cancellation.c:49
+#2  __syscall_cancel (a1=a1@entry=-100, a2=<optimized out>, a3=<optimized out>, a4=<optimized out>, a5=a5@entry=0, a6=a6@entry=0, nr=257) at ./nptl/cancellation.c:75
+#3  0x00007b3b58b279e7 in __libc_open64 (file=<optimized out>, oflag=<optimized out>) at ../sysdeps/unix/sysv/linux/open64.c:41
+#4  0x00007b3b5847bbdf in ?? () from /home/bemafred/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.so
+#5  0x00007b3b58476977 in ?? () from /home/bemafred/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.so
+#6  0x00007b3b58475a45 in ?? () from /home/bemafred/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.so
+#7  0x00007b3b5883daf1 in ?? () from /home/bemafred/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.so
+#8  0x00007b3b58aa3dfa in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#9  0x00007b3b58b375cc in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 8 (Thread 0x7b3ad37fe6c0 (LWP 250155) ".NET Debugger"):
+#0  __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+#1  0x00007b3b58aa030c in __internal_syscall_cancel (a1=a1@entry=110245434148472, a2=<optimized out>, a3=a3@entry=0, a4=a4@entry=0, a5=a5@entry=0, a6=a6@entry=4294967295, nr=202) at ./nptl/cancellation.c:49
+#2  0x00007b3b58aa06e7 in __futex_abstimed_wait_common64 (private=0, futex_word=0x644483f0c678, expected=0, op=393, abstime=0x0, cancel=true) at ./nptl/futex-internal.c:57
+#3  __futex_abstimed_wait_common (futex_word=0x644483f0c678, expected=0, clockid=0, abstime=0x0, private=0, cancel=true) at ./nptl/futex-internal.c:87
+#4  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x644483f0c678, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#5  0x00007b3b58aa30c7 in __pthread_cond_wait_common (cond=<optimized out>, mutex=0x644483f0c630, clockid=0, abstime=0x0) at ./nptl/pthread_cond_wait.c:421
+#6  ___pthread_cond_wait (cond=<optimized out>, mutex=0x644483f0c630) at ./nptl/pthread_cond_wait.c:453
+#7  0x00007b3b588321b2 in ?? () from /home/bemafred/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.so
+#8  0x00007b3b58831ddf in ?? () from /home/bemafred/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.so
+#9  0x00007b3b58836870 in ?? () from /home/bemafred/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.so
+#10 0x00007b3b58836b53 in ?? () from /home/bemafred/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.so
+#11 0x00007b3b58474274 in ?? () from /home/bemafred/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.so
+#12 0x00007b3b584740d0 in ?? () from /home/bemafred/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.so
+#13 0x00007b3b58473dd5 in ?? () from /home/bemafred/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.so
+#14 0x00007b3b5883daf1 in ?? () from /home/bemafred/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.so
+#15 0x00007b3b58aa3dfa in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#16 0x00007b3b58b375cc in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 7 (Thread 0x7b3ad2ffd6c0 (LWP 250156) ".NET Finalizer"):
+#0  __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+#1  0x00007b3b58aa030c in __internal_syscall_cancel (a1=a1@entry=110245434311308, a2=<optimized out>, a3=a3@entry=3, a4=a4@entry=135489038319623, a5=a5@entry=0, a6=a6@entry=4294967295, nr=202) at ./nptl/cancellation.c:49
+#2  0x00007b3b58aa06e7 in __futex_abstimed_wait_common64 (private=31546, futex_word=0x644483f3428c, expected=3, op=8077747, abstime=0x7b3a00000007, cancel=true) at ./nptl/futex-internal.c:57
+#3  __futex_abstimed_wait_common (futex_word=0x644483f3428c, expected=3, clockid=31547, abstime=0x7b3a00000007, private=31546, cancel=true) at ./nptl/futex-internal.c:87
+#4  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x644483f3428c, expected=expected@entry=0, clockid=clockid@entry=1, abstime=abstime@entry=0x7b3ad2ffc7c0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#5  0x00007b3b58aa3382 in __pthread_cond_wait_common (cond=0x644483f34268, mutex=0x644483f34240, clockid=<optimized out>, abstime=0x7b3ad2ffc7c0) at ./nptl/pthread_cond_wait.c:421
+#6  ___pthread_cond_timedwait64 (cond=0x644483f34268, mutex=0x644483f34240, abstime=0x7b3ad2ffc7c0) at ./nptl/pthread_cond_wait.c:478
+#7  0x00007b3b58832155 in ?? () from /home/bemafred/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.so
+#8  0x00007b3b58831ddf in ?? () from /home/bemafred/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.so
+#9  0x00007b3b58836870 in ?? () from /home/bemafred/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.so
+#10 0x00007b3b58836b53 in ?? () from /home/bemafred/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.so
+#11 0x00007b3b58692231 in ?? () from /home/bemafred/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.so
+#12 0x00007b3b58692327 in ?? () from /home/bemafred/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.so
+#13 0x00007b3b5862493c in ?? () from /home/bemafred/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.so
+#14 0x00007b3b586928aa in ?? () from /home/bemafred/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.so
+#15 0x00007b3b5883daf1 in ?? () from /home/bemafred/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.so
+#16 0x00007b3b58aa3dfa in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#17 0x00007b3b58b375cc in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 6 (Thread 0x7b3ad13ff6c0 (LWP 250157) ".NET Tiered Com"):
+#0  __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+#1  0x00007b3b58aa030c in __internal_syscall_cancel (a1=a1@entry=110245434346680, a2=<optimized out>, a3=a3@entry=3510626208, a4=a4@entry=135492548946552, a5=a5@entry=0, a6=a6@entry=4294967295, nr=202) at ./nptl/cancellation.c:49
+#2  0x00007b3b58aa06e7 in __futex_abstimed_wait_common64 (private=31546, futex_word=0x644483f3ccb8, expected=3510626208, op=31411, abstime=0x7b3ad13fea78, cancel=true) at ./nptl/futex-internal.c:57
+#3  __futex_abstimed_wait_common (futex_word=0x644483f3ccb8, expected=3510626208, clockid=0, abstime=0x7b3ad13fea78, private=31546, cancel=true) at ./nptl/futex-internal.c:87
+#4  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x644483f3ccb8, expected=expected@entry=17, clockid=clockid@entry=1, abstime=abstime@entry=0x7b3ad13fe910, private=private@entry=0) at ./nptl/futex-internal.c:139
+#5  0x00007b3b58aa3382 in __pthread_cond_wait_common (cond=0x644483f3cc98, mutex=0x644483f3cc70, clockid=<optimized out>, abstime=0x7b3ad13fe910) at ./nptl/pthread_cond_wait.c:421
+#6  ___pthread_cond_timedwait64 (cond=0x644483f3cc98, mutex=0x644483f3cc70, abstime=0x7b3ad13fe910) at ./nptl/pthread_cond_wait.c:478
+#7  0x00007b3b58832155 in ?? () from /home/bemafred/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.so
+#8  0x00007b3b58831ddf in ?? () from /home/bemafred/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.so
+#9  0x00007b3b58836870 in ?? () from /home/bemafred/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.so
+#10 0x00007b3b58836a79 in ?? () from /home/bemafred/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.so
+#11 0x00007b3b58710f9b in ?? () from /home/bemafred/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.so
+#12 0x00007b3b586282b4 in ?? () from /home/bemafred/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.so
+#13 0x00007b3b586280d8 in ?? () from /home/bemafred/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.so
+#14 0x00007b3b5862493c in ?? () from /home/bemafred/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.so
+#15 0x00007b3b58628000 in ?? () from /home/bemafred/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.so
+#16 0x00007b3b5883daf1 in ?? () from /home/bemafred/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.so
+#17 0x00007b3b58aa3dfa in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#18 0x00007b3b58b375cc in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 5 (Thread 0x7b1c3e7406c0 (LWP 250158) ".NET SigHandler"):
+#0  __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+#1  0x00007b3b58aa039c in __internal_syscall_cancel (a1=<optimized out>, a2=<optimized out>, a3=<optimized out>, a4=0, a5=0, a6=0, nr=0) at ./nptl/cancellation.c:49
+#2  __syscall_cancel (a1=<optimized out>, a2=<optimized out>, a3=<optimized out>, a4=a4@entry=0, a5=a5@entry=0, a6=a6@entry=0, nr=0) at ./nptl/cancellation.c:75
+#3  0x00007b3b58b2816e in __GI___libc_read (fd=<optimized out>, buf=<optimized out>, nbytes=<optimized out>) at ../sysdeps/unix/sysv/linux/read.c:26
+#4  0x00007b3b58cbcb1f in ?? () from /home/bemafred/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libSystem.Native.so
+#5  0x00007b3b58aa3dfa in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#6  0x00007b3b58b375cc in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 4 (Thread 0x7b1c3df3f6c0 (LWP 250161) ".NET Sockets"):
+#0  __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+#1  0x00007b3b58aa039c in __internal_syscall_cancel (a1=<optimized out>, a2=<optimized out>, a3=<optimized out>, a4=<optimized out>, a5=0, a6=0, nr=232) at ./nptl/cancellation.c:49
+#2  __syscall_cancel (a1=<optimized out>, a2=<optimized out>, a3=<optimized out>, a4=<optimized out>, a5=a5@entry=0, a6=a6@entry=0, nr=232) at ./nptl/cancellation.c:75
+#3  0x00007b3b58b378b5 in epoll_wait (epfd=<optimized out>, events=<optimized out>, maxevents=<optimized out>, timeout=<optimized out>) at ../sysdeps/unix/sysv/linux/epoll_wait.c:30
+#4  0x00007b3b58cba032 in SystemNative_WaitForSocketEvents () from /home/bemafred/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libSystem.Native.so
+#5  0x00007b3ada9bd4c3 in ?? ()
+#6  0x0000000000000000 in ?? ()
+
+Thread 3 (Thread 0x7b1c3cdff6c0 (LWP 257615) "100-orphaned-re"):
+#0  __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+#1  0x00007b3b58aa030c in __internal_syscall_cancel (a1=a1@entry=110245436485464, a2=<optimized out>, a3=a3@entry=2215931704, a4=a4@entry=4927, a5=a5@entry=0, a6=a6@entry=4294967295, nr=202) at ./nptl/cancellation.c:49
+#2  0x00007b3b58aa06e7 in __futex_abstimed_wait_common64 (private=25668, futex_word=0x644484146f58, expected=2215931704, op=26061, abstime=0x133f, cancel=true) at ./nptl/futex-internal.c:57
+#3  __futex_abstimed_wait_common (futex_word=0x644484146f58, expected=2215931704, clockid=0, abstime=0x133f, private=25668, cancel=true) at ./nptl/futex-internal.c:87
+#4  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x644484146f58, expected=expected@entry=2462, clockid=clockid@entry=1, abstime=abstime@entry=0x7b1c3cdfe730, private=private@entry=0) at ./nptl/futex-internal.c:139
+#5  0x00007b3b58aa3382 in __pthread_cond_wait_common (cond=0x644484146f38, mutex=0x644484146f10, clockid=<optimized out>, abstime=0x7b1c3cdfe730) at ./nptl/pthread_cond_wait.c:421
+#6  ___pthread_cond_timedwait64 (cond=0x644484146f38, mutex=0x644484146f10, abstime=0x7b1c3cdfe730) at ./nptl/pthread_cond_wait.c:478
+#7  0x00007b1c3d016f45 in ?? () from /home/bemafred/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libmscordaccore.so
+#8  0x00007b1c3d016bcf in ?? () from /home/bemafred/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libmscordaccore.so
+#9  0x00007b1c3d01b660 in ?? () from /home/bemafred/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libmscordaccore.so
+#10 0x00007b1c3d01b943 in ?? () from /home/bemafred/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libmscordaccore.so
+#11 0x00007b3ad0103039 in ?? () from /home/bemafred/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libmscordbi.so
+#12 0x00007b3ad01034a9 in ?? () from /home/bemafred/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libmscordbi.so
+#13 0x00007b1c3d0228e1 in ?? () from /home/bemafred/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libmscordaccore.so
+#14 0x00007b3b58aa3dfa in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:454
+#15 0x00007b3b58b375cc in __GI___clone3 () at ../sysdeps/unix/sysv/linux/x86_64/clone3.S:78
+
+Thread 2 (Thread 0x7b1c3d73e6c0 (LWP 257680) "DrHook.Callback"):
+#0  __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+#1  0x00007b3b58aa030c in __internal_syscall_cancel (a1=a1@entry=110245436407656, a2=<optimized out>, a3=a3@entry=0, a4=a4@entry=0, a5=a5@entry=0, a6=a6@entry=4294967295, nr=202) at ./nptl/cancellation.c:49
+#2  0x00007b3b58aa06e7 in __futex_abstimed_wait_common64 (private=0, futex_word=0x644484133f68, expected=0, op=393, abstime=0x0, cancel=true) at ./nptl/futex-internal.c:57
+#3  __futex_abstimed_wait_common (futex_word=0x644484133f68, expected=0, clockid=0, abstime=0x0, private=0, cancel=true) at ./nptl/futex-internal.c:87
+#4  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x644484133f68, expected=expected@entry=1214, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#5  0x00007b3b58aa30c7 in __pthread_cond_wait_common (cond=<optimized out>, mutex=0x644484133f20, clockid=0, abstime=0x0) at ./nptl/pthread_cond_wait.c:421
+#6  ___pthread_cond_wait (cond=<optimized out>, mutex=0x644484133f20) at ./nptl/pthread_cond_wait.c:453
+#7  0x00007b3b588321b2 in ?? () from /home/bemafred/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.so
+#8  0x00007b3b58831ddf in ?? () from /home/bemafred/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.so
+#9  0x00007b3b58836870 in ?? () from /home/bemafred/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.so
+#10 0x00007b3b58836b53 in ?? () from /home/bemafred/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.so
+#11 0x00007b3b586212c2 in ?? () from /home/bemafred/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.so
+#12 0x00007b3b5861ca34 in ?? () from /home/bemafred/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.so
+#13 0x00007b3b58710f19 in ?? () from /home/bemafred/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.so
+#14 0x00007b3b5862232d in ?? () from /home/bemafred/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.so
+#15 0x00007b3b5861b343 in ?? () from /home/bemafred/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.so
+#16 0x00007b3b584e4e59 in ?? () from /home/bemafred/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.so
+#17 0x00007b3ada2bf331 in ?? ()
+#18 0x0000000000000001 in ?? ()
+#19 0x00007b1c3d73dd40 in ?? ()
+#20 0x00007b3ada298228 in ?? ()
+#21 0x00007b1c3d73d5a0 in ?? ()
+#22 0x00007b3ada2bf331 in ?? ()
+#23 0x00007b1c3d73d610 in ?? ()
+#24 0x00000000064264df in ?? ()
+#25 0x00007b3ada298228 in ?? ()
+#26 0x00007b1c3d73d5f0 in ?? ()
+#27 0x00007b1c874566e8 in ?? ()
+#28 0x0000000000000000 in ?? ()
+
+Thread 1 (Thread 0x7b3b59138bc0 (LWP 250147) "100-orphaned-re"):
+#0  __syscall_cancel_arch () at ../sysdeps/unix/sysv/linux/x86_64/syscall_cancel.S:56
+#1  0x00007b3b58aa030c in __internal_syscall_cancel (a1=a1@entry=110245433849228, a2=<optimized out>, a3=a3@entry=1482655004, a4=a4@entry=140725176762464, a5=a5@entry=0, a6=a6@entry=4294967295, nr=202) at ./nptl/cancellation.c:49
+#2  0x00007b3b58aa06e7 in __futex_abstimed_wait_common64 (private=0, futex_word=0x644483ec358c, expected=1482655004, op=393, abstime=0x7ffd222c0060, cancel=true) at ./nptl/futex-internal.c:57
+#3  __futex_abstimed_wait_common (futex_word=0x644483ec358c, expected=1482655004, clockid=0, abstime=0x7ffd222c0060, private=0, cancel=true) at ./nptl/futex-internal.c:87
+#4  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x644483ec358c, expected=expected@entry=0, clockid=clockid@entry=1, abstime=abstime@entry=0x7ffd222c0120, private=private@entry=0) at ./nptl/futex-internal.c:139
+#5  0x00007b3b58aa3382 in __pthread_cond_wait_common (cond=0x644483ec3568, mutex=0x644483ec3540, clockid=<optimized out>, abstime=0x7ffd222c0120) at ./nptl/pthread_cond_wait.c:421
+#6  ___pthread_cond_timedwait64 (cond=0x644483ec3568, mutex=0x644483ec3540, abstime=0x7ffd222c0120) at ./nptl/pthread_cond_wait.c:478
+#7  0x00007b3b58832155 in ?? () from /home/bemafred/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.so
+#8  0x00007b3b58831ddf in ?? () from /home/bemafred/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.so
+#9  0x00007b3b58837009 in ?? () from /home/bemafred/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.so
+#10 0x00007b3b58622938 in ?? () from /home/bemafred/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.so
+#11 0x00007b3b5866ee9b in ?? () from /home/bemafred/.dotnet/shared/Microsoft.NETCore.App/10.0.14/libcoreclr.so
+#12 0x00007b3ada2bb821 in ?? ()
+#13 0x0000000000000001 in ?? ()
+#14 0xffffffffffffffff in ?? ()
+#15 0x00007b3ada290f58 in ?? ()
+#16 0x00007ffd222c02f0 in ?? ()
+#17 0x00007b3ada2bb821 in ?? ()
+#18 0x00007ffd222c0350 in ?? ()
+#19 0x00007ffd222c0060 in ?? ()
+#20 0x00007ffd222c1a40 in ?? ()
+#21 0x0000000000000000 in ?? ()

@@ -2,7 +2,8 @@
 
 **Date:** 2026-11-06
 **Status:** **Mechanism located** in the runtime source (`release/10.0`) and consistent with every hung process
-sampled on omega (macOS 27.0.1 arm64, runtime 10.0.9) and omega-ubuntu (Ubuntu 26.04.1 arm64, runtime 10.0.14);
+sampled on omega (macOS 27.0.1 arm64, runtime 10.0.9) and omega-ubuntu (Ubuntu 26.04.1 arm64, runtime 10.0.14),
+and with the named stacks of every thread on zbook (Ubuntu 26.04.1 x64, runtime 10.0.14);
 Windows, which has no PAL, did not hang. **Not reproduced as
 a minimal case. Not fixed**, here or upstream. It explains the hangs of findings
 [100](100-orphaned-transport-read-holds-dac-lock.md), [103](103-terminate-waits-on-error-write.md) and
@@ -60,6 +61,40 @@ target's process handle, which should wake it when the target dies (read below).
   `WriteMemory` in 3 and both in 2 ([summary](105-dll-pal-never-rechecks-a-waited-process/omega-hung-samples-summary.txt),
   with one full sample beside it). On omega-ubuntu only the thread names were read
   ([`omega-ubuntu-hung-threads/`](105-dll-pal-never-rechecks-a-waited-process/omega-ubuntu-hung-threads/)).
+- **On Linux x64, with named stacks.** zbook (bare metal, Ubuntu 26.04.1 x64, Microsoft's runtime 10.0.14),
+  2026-11-06 15:25–16:00 UTC. ptrace_scope was 1, so the probe ran as a child of gdb (`gdb-holder.py`), which may
+  attach to its descendants; it sampled every probe child at 45 s (`thread apply all bt`, shared libraries, thread
+  names) and then detached. 5 children hung: 4 of the 60 runs of the second batch ([finding 104](104-crash-boundary.md))
+  and 1 of 15 in a rerun without apport. As a control it sampled the 3 children of a short `measure-crash` run at 6 s,
+  after the target's death, all of which stayed usable. The runtime's libraries are stripped; the frames were named
+  afterwards with Microsoft's symbol files for the same build ids (`dotnet-symbol`), and the offsets are the same in
+  every sample ([`zbook-linux-x64/stack-symbolized.txt`](105-dll-pal-never-rechecks-a-waited-process/zbook-linux-x64/stack-symbolized.txt),
+  [`stack-summary.txt`](105-dll-pal-never-rechecks-a-waited-process/zbook-linux-x64/stack-summary.txt)).
+  - **The one worker belongs to the host runtime.** In all 8 samples, hung and control, the single `.NET SynchManag`
+    thread was `libcoreclr`'s, in `CPalSynchronizationManager::ReadCmdFromProcessPipe` → `ReadBytesFromProcessPipe`
+    → `poll`, as on omega. `libmscordaccore` contains `CPalSynchronizationManager::WorkerThread` and `StartWorker`,
+    but no thread ran them. So the debugger's PAL had no worker, in the hung runs and in the usable ones, as the
+    mechanism predicts.
+  - **The Win32 event thread waits forever on a write.** In each hung child, mscordbi's `CordbWin32EventThread` of the
+    first session was in `pthread_cond_wait` with no deadline: `Win32EventLoop` → `ShimProcess::HandleWin32DebugEvent`
+    → `CordbProcess::Filter` → `HandleRCEvent` → `RawDispatchEvent` → (a frame addr2line places in
+    `ShimProxyCallback::CreateThread`) → the DAC's `DacDbiInterfaceImpl::RequestSyncAtEvent` →
+    `DbgTransportSession::WriteMemory` → `SendRequestMessageAndWait` (`dbgtransportsession.cpp:743`, the two-handle
+    wait) → `WaitForMultipleObjectsEx` → `InternalWaitForMultipleObjectsEx` → `BlockThread` → `ThreadNativeWait`.
+    The same frames in all 5, after a native fault and after `abort()` alike: the debugger was writing into the target its
+    request to synchronize at the next event (the flooding target's thread events) when the target died. On omega the hung threads were
+    in `ReadMemory` in 11 of 16; on zbook all 5 were this write. In the controls the Win32 event thread had ended,
+    and the only first-session mscordbi thread left was `CordbRCEventThread::ThreadProc`, in a wait with a timeout.
+  - **The second attach waits on `g_dacMutex`.** In the 4 hung children whose second attach had begun, that attach's
+    Win32 event thread was in `CordbWin32EventThread::AttachProcess` → `CordbProcess::OpenVirtualProcess` →
+    `CordbProcess::Init` → `CordbProcess::ForceDacFlush` → the DAC's `DacDbiInterfaceImpl::FlushCache` → `DDHolder`,
+    in `pthread_mutex_lock` on `g_dacMutex` (`libmscordaccore`, `.bss`), held by the first session's event thread
+    inside `RequestSyncAtEvent`. The caller of the attach waited on it in
+    `CordbWin32EventThread::SendDebugActiveProcessEvent` → `WaitForSingleObject`. That is finding 100's macOS chain
+    (`Init` → `ForceDacFlush` → `FlushCache`, waiting on the DAC's mutex), on Linux.
+  - **The transport thread was alive and retrying:** the first session's `DbgTransportSession::TransportWorker` was in
+    the PAL's `Sleep` (a wait with a timeout), where finding 100's macOS stack had it in `TwoWayPipe::Connect` →
+    `open`.
 - **Windows, which has no PAL, never hung.** omega-windows (Windows 11 arm64), the same probe, 130 runs including
   70 crashes continued past their stop: the debugger was usable every time, and `ProcessExited` came every time, 13
   to 172 ms after the probe saw the target gone ([finding 104](104-crash-boundary.md)). There mscordbi reads the
@@ -85,9 +120,9 @@ Not tested.
 
 - That no other path in mscordbi re-checks a waited process (only the paths above were read).
 - A minimal reproduction outside DrHook (a request held in flight while the target is killed).
-- The threads of a usable run's process, on any platform (the mechanism predicts the same missing worker there).
-- On Linux, the waiting threads' stacks and which library owns the one worker; Linux x64.
-- Which request each hung run was in.
+- The threads of a usable run's process on macOS (on Linux x64: 3 samples, no worker in the DAC's PAL, as predicted).
+- Linux arm64's stacks (omega-ubuntu: thread names only).
+- Which request each hung run on omega-ubuntu was in. On zbook: all 5 in `WriteMemory` from `RequestSyncAtEvent`.
 
 ## For ADR-016
 

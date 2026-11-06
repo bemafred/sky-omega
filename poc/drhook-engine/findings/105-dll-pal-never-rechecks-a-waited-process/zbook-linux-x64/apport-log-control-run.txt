@@ -1,0 +1,9 @@
+INFO: apport (pid 258290) 2026-11-06 16:25:53,066: called for global pid 250160, signal 6, core limit 0, dump mode 1
+INFO: apport (pid 258290) 2026-11-06 16:25:54,070: executable: /home/bemafred/.dotnet/dotnet (command line "dotnet /home/bemafred/.local/share/dotnet/runfile/100-orphaned-read-target-e1b3df0d253c00a81aefe3676ca619d30785c64a2bada27fec00461ce90f82d3/bin/debug/100-orphaned-read-target.dll flood-crash")
+ERROR: apport (pid 258290) 2026-11-06 16:25:54,071: executable does not belong to a package, ignoring
+INFO: apport (pid 267342) 2026-11-06 16:26:08,842: called for global pid 258348, signal 6, core limit 0, dump mode 1
+INFO: apport (pid 267342) 2026-11-06 16:26:09,850: executable: /home/bemafred/.dotnet/dotnet (command line "dotnet /home/bemafred/.local/share/dotnet/runfile/100-orphaned-read-target-e1b3df0d253c00a81aefe3676ca619d30785c64a2bada27fec00461ce90f82d3/bin/debug/100-orphaned-read-target.dll flood-crash")
+ERROR: apport (pid 267342) 2026-11-06 16:26:09,850: executable does not belong to a package, ignoring
+INFO: apport (pid 275856) 2026-11-06 16:26:23,787: called for global pid 267391, signal 6, core limit 0, dump mode 1
+INFO: apport (pid 275856) 2026-11-06 16:26:24,793: executable: /home/bemafred/.dotnet/dotnet (command line "dotnet /home/bemafred/.local/share/dotnet/runfile/100-orphaned-read-target-e1b3df0d253c00a81aefe3676ca619d30785c64a2bada27fec00461ce90f82d3/bin/debug/100-orphaned-read-target.dll flood-crash")
+ERROR: apport (pid 275856) 2026-11-06 16:26:24,794: executable does not belong to a package, ignoring

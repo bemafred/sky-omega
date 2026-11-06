@@ -1,0 +1,37 @@
+platform: Ubuntu 26.04.1 LTS X64
+measure-crash run 1: crash-warned-exited-attach-ok
+    target=250160
+    attached; the target floods thread events and will crash (crash) within 0.5 to 3 s [1080 ms]
+    target gone (crash) [3914 ms]
+    stops seen: Exception(Unhandled, System.ExecutionEngineException) at 2737 ms, ProcessExited at 3917 ms [3917 ms]
+    from continuing the unhandled-exception stop to the target seen gone: 1168 ms [3917 ms]
+    ProcessExited came 3 ms after the target was seen gone [3917 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [13919 ms]
+    the dead target's pipes: absent [13922 ms]
+    second=258322
+    second attach finished: attached [14934 ms]
+measure-crash run 2: crash-warned-exited-attach-ok
+    target=258348
+    attached; the target floods thread events and will crash (crash) within 0.5 to 3 s [1056 ms]
+    target gone (crash) [4716 ms]
+    stops seen: Exception(Unhandled, System.ExecutionEngineException) at 3524 ms, ProcessExited at 4706 ms [4716 ms]
+    from continuing the unhandled-exception stop to the target seen gone: 1183 ms [4716 ms]
+    ProcessExited came -10 ms after the target was seen gone [4716 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [14717 ms]
+    the dead target's pipes: absent [14720 ms]
+    second=267365
+    second attach finished: attached [15734 ms]
+measure-crash run 3: crash-warned-exited-attach-ok
+    target=267391
+    attached; the target floods thread events and will crash (crash) within 0.5 to 3 s [1056 ms]
+    target gone (crash) [3874 ms]
+    stops seen: Exception(Unhandled, System.ExecutionEngineException) at 2681 ms, ProcessExited at 3864 ms [3874 ms]
+    from continuing the unhandled-exception stop to the target seen gone: 1184 ms [3874 ms]
+    ProcessExited came -10 ms after the target was seen gone [3874 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [13875 ms]
+    the dead target's pipes: absent [13877 ms]
+    second=275874
+    second attach finished: attached [14890 ms]
+measure-crash crash-warned-exited-attach-ok: 3
+measure-crash: predicted no run both had a ProcessExited stop and a hung second attach, and no second attach finished late: holds over 3 runs
+RESULT(0): confirmed — every mode run gave its predicted outcome every time (see the header for each hypothesis)

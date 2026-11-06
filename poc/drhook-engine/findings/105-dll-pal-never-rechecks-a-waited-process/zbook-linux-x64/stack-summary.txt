@@ -1,0 +1,171 @@
+# zbook, Linux x64: each debugger thread that touches mscordbi or the DAC, as library+offset (file virtual
+# addresses of runtime 10.0.14: libmscordaccore build id 7a8e48a96dc25e5803f54fe9d1874c768ac0f304, libmscordbi
+# build id 5fb2e555259db6b9ea52460b16ce51d08f0aff7c), with the libc wait it is in. dac = libmscordaccore.so,
+# dbi = libmscordbi.so. Innermost frame first. Made by offsets.py from the gdb samples beside this file.
+
+== hung-661857-measure-segv.txt
+  100-orphaned-re  ___pthread_cond_timedwait64 dac+0x216f45 dac+0x216bcf dac+0x21b660 dac+0x21b943 dbi+0x95039 dbi+0x954a9 dac+0x2228e1
+  100-orphaned-re  ___pthread_cond_wait       dac+0x216fa2 dac+0x216bcf dac+0x21b660 dac+0x21b943 dbi+0x10e77f dbi+0x10e94f dac+0x111b93 dbi+0x9f4f2 dbi+0x8cb8d
+  .NET DebugPipe   ___pthread_cond_timedwait64 dac+0x216f45 dac+0x216bcf dac+0x21bbef dbi+0x10f27a dbi+0x10dca5 dac+0x2228e1
+  probe100-second  ___pthread_cond_wait       dac+0x216fa2 dac+0x216bcf dac+0x21b660 dac+0x21afa4 dbi+0x81d53 dbi+0x81abd dbi+0x786ae dbi+0x789e0
+  probe100-second  ___pthread_cond_timedwait64 dac+0x216f45 dac+0x216bcf dac+0x21b660 dac+0x21b943 dbi+0x95039 dbi+0x954a9 dac+0x2228e1
+  probe100-second  ___pthread_mutex_lock      dac+0x107724 dbi+0x826e2 dbi+0x80426 dbi+0x7efcb dbi+0x9723c dbi+0x95c44 dbi+0x97acd dac+0x2228e1
+  .NET DebugPipe   __GI___libc_read           dbi+0x746a1 dbi+0x10f8c8 dbi+0x10dca5 dac+0x2228e1
+== hung-713577-measure-abort.txt
+  100-orphaned-re  ___pthread_cond_timedwait64 dac+0x216f45 dac+0x216bcf dac+0x21b660 dac+0x21b943 dbi+0x95039 dbi+0x954a9 dac+0x2228e1
+  100-orphaned-re  ___pthread_cond_wait       dac+0x216fa2 dac+0x216bcf dac+0x21b660 dac+0x21b943 dbi+0x10e77f dbi+0x10e94f dac+0x111b93 dbi+0x9f4f2 dbi+0x8cb8d
+  .NET DebugPipe   ___pthread_cond_timedwait64 dac+0x216f45 dac+0x216bcf dac+0x21bbef dbi+0x10f27a dbi+0x10dca5 dac+0x2228e1
+== hung-723063-measure-abort.txt
+  100-orphaned-re  ___pthread_cond_timedwait64 dac+0x216f45 dac+0x216bcf dac+0x21b660 dac+0x21b943 dbi+0x95039 dbi+0x954a9 dac+0x2228e1
+  100-orphaned-re  ___pthread_cond_wait       dac+0x216fa2 dac+0x216bcf dac+0x21b660 dac+0x21b943 dbi+0x10e77f dbi+0x10e94f dac+0x111b93 dbi+0x9f4f2 dbi+0x8cb8d
+  .NET DebugPipe   ___pthread_cond_timedwait64 dac+0x216f45 dac+0x216bcf dac+0x21bbef dbi+0x10f27a dbi+0x10dca5 dac+0x2228e1
+  probe100-second  ___pthread_cond_wait       dac+0x216fa2 dac+0x216bcf dac+0x21b660 dac+0x21afa4 dbi+0x81d53 dbi+0x81abd dbi+0x786ae dbi+0x789e0
+  probe100-second  ___pthread_cond_timedwait64 dac+0x216f45 dac+0x216bcf dac+0x21b660 dac+0x21b943 dbi+0x95039 dbi+0x954a9 dac+0x2228e1
+  probe100-second  ___pthread_mutex_lock      dac+0x107724 dbi+0x826e2 dbi+0x80426 dbi+0x7efcb dbi+0x9723c dbi+0x95c44 dbi+0x97acd dac+0x2228e1
+  .NET DebugPipe   __GI___libc_read           dbi+0x746a1 dbi+0x10f8c8 dbi+0x10dca5 dac+0x2228e1
+== hung-766491-measure-abort.txt
+  100-orphaned-re  ___pthread_cond_timedwait64 dac+0x216f45 dac+0x216bcf dac+0x21b660 dac+0x21b943 dbi+0x95039 dbi+0x954a9 dac+0x2228e1
+  100-orphaned-re  ___pthread_cond_wait       dac+0x216fa2 dac+0x216bcf dac+0x21b660 dac+0x21b943 dbi+0x10e77f dbi+0x10e94f dac+0x111b93 dbi+0x9f4f2 dbi+0x8cb8d
+  .NET DebugPipe   ___pthread_cond_timedwait64 dac+0x216f45 dac+0x216bcf dac+0x21bbef dbi+0x10f27a dbi+0x10dca5 dac+0x2228e1
+  probe100-second  ___pthread_cond_wait       dac+0x216fa2 dac+0x216bcf dac+0x21b660 dac+0x21afa4 dbi+0x81d53 dbi+0x81abd dbi+0x786ae dbi+0x789e0
+  probe100-second  ___pthread_cond_timedwait64 dac+0x216f45 dac+0x216bcf dac+0x21b660 dac+0x21b943 dbi+0x95039 dbi+0x954a9 dac+0x2228e1
+  probe100-second  ___pthread_mutex_lock      dac+0x107724 dbi+0x826e2 dbi+0x80426 dbi+0x7efcb dbi+0x9723c dbi+0x95c44 dbi+0x97acd dac+0x2228e1
+  .NET DebugPipe   __GI___libc_read           dbi+0x746a1 dbi+0x10f8c8 dbi+0x10dca5 dac+0x2228e1
+== hung-887451-measure-abort.txt
+  100-orphaned-re  ___pthread_cond_timedwait64 dac+0x216f45 dac+0x216bcf dac+0x21b660 dac+0x21b943 dbi+0x95039 dbi+0x954a9 dac+0x2228e1
+  100-orphaned-re  ___pthread_cond_wait       dac+0x216fa2 dac+0x216bcf dac+0x21b660 dac+0x21b943 dbi+0x10e77f dbi+0x10e94f dac+0x111b93 dbi+0x9f4f2 dbi+0x8cb8d
+  .NET DebugPipe   ___pthread_cond_timedwait64 dac+0x216f45 dac+0x216bcf dac+0x21bbef dbi+0x10f27a dbi+0x10dca5 dac+0x2228e1
+  probe100-second  ___pthread_cond_wait       dac+0x216fa2 dac+0x216bcf dac+0x21b660 dac+0x21afa4 dbi+0x81d53 dbi+0x81abd dbi+0x786ae dbi+0x789e0
+  probe100-second  ___pthread_cond_timedwait64 dac+0x216f45 dac+0x216bcf dac+0x21b660 dac+0x21b943 dbi+0x95039 dbi+0x954a9 dac+0x2228e1
+  probe100-second  ___pthread_mutex_lock      dac+0x107724 dbi+0x826e2 dbi+0x80426 dbi+0x7efcb dbi+0x9723c dbi+0x95c44 dbi+0x97acd dac+0x2228e1
+  .NET DebugPipe   __GI___libc_read           dbi+0x746a1 dbi+0x10f8c8 dbi+0x10dca5 dac+0x2228e1
+== control-250147-measure-crash.txt
+  100-orphaned-re  ___pthread_cond_timedwait64 dac+0x216f45 dac+0x216bcf dac+0x21b660 dac+0x21b943 dbi+0x95039 dbi+0x954a9 dac+0x2228e1
+== control-258338-measure-crash.txt
+  100-orphaned-re  ___pthread_cond_timedwait64 dac+0x216f45 dac+0x216bcf dac+0x21b660 dac+0x21b943 dbi+0x95039 dbi+0x954a9 dac+0x2228e1
+== control-267381-measure-crash.txt
+  100-orphaned-re  ___pthread_cond_timedwait64 dac+0x216f45 dac+0x216bcf dac+0x21b660 dac+0x21b943 dbi+0x95039 dbi+0x954a9 dac+0x2228e1
+
+# Every thread: name, the library that started it, the libraries on its stack (summarize.py).
+== hung-661857-measure-segv.txt: pid 661857 mode measure-segv age 46.0s sampled 15:39:03.485Z
+  .NET SynchManag  lwp 661860  started by libcoreclr.so          chain libcoreclr.so
+  .NET EventPipe   lwp 661861  started by libcoreclr.so          chain libcoreclr.so
+  .NET DebugPipe   lwp 661862  started by libcoreclr.so          chain libcoreclr.so
+  .NET Debugger    lwp 661863  started by libcoreclr.so          chain libcoreclr.so
+  .NET Finalizer   lwp 661864  started by libcoreclr.so          chain libcoreclr.so
+  .NET SigHandler  lwp 661866  started by libSystem.Native.so    chain libSystem.Native.so
+  .NET Sockets     lwp 661869  started by -                      chain libSystem.Native.so > jit?
+  100-orphaned-re  lwp 669728  started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  100-orphaned-re  lwp 669771  started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  .NET DebugPipe   lwp 669773  started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  DrHook.Callback  lwp 669781  started by -                      chain libcoreclr.so > jit?
+  .NET Tiered Com  lwp 670761  started by libcoreclr.so          chain libcoreclr.so
+  probe100-second  lwp 670778  started by -                      chain libmscordaccore.so > libmscordbi.so > jit? > libmscordbi.so > jit?
+  probe100-second  lwp 670779  started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  probe100-second  lwp 670780  started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  .NET DebugPipe   lwp 670781  started by libmscordaccore.so     chain libmscordbi.so > libmscordaccore.so
+  100-orphaned-re  lwp 661857  started by -                      chain libcoreclr.so > jit?
+== hung-713577-measure-abort.txt: pid 713577 mode measure-abort age 46.0s sampled 15:43:02.002Z
+  .NET SynchManag  lwp 713579  started by libcoreclr.so          chain libcoreclr.so
+  .NET EventPipe   lwp 713580  started by libcoreclr.so          chain libcoreclr.so
+  .NET DebugPipe   lwp 713581  started by libcoreclr.so          chain libcoreclr.so
+  .NET Debugger    lwp 713582  started by libcoreclr.so          chain libcoreclr.so
+  .NET Finalizer   lwp 713583  started by libcoreclr.so          chain libcoreclr.so
+  .NET SigHandler  lwp 713585  started by libSystem.Native.so    chain libSystem.Native.so
+  .NET Sockets     lwp 713588  started by -                      chain libSystem.Native.so > jit?
+  100-orphaned-re  lwp 721361  started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  100-orphaned-re  lwp 721410  started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  .NET DebugPipe   lwp 721413  started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  DrHook.Callback  lwp 721422  started by -                      chain libcoreclr.so > jit?
+  .NET Tiered Com  lwp 722916  started by libcoreclr.so          chain libcoreclr.so
+  100-orphaned-re  lwp 713577  started by -                      chain libcoreclr.so > jit?
+== hung-723063-measure-abort.txt: pid 723063 mode measure-abort age 45.4s sampled 15:45:47.727Z
+  .NET SynchManag  lwp 723066  started by libcoreclr.so          chain libcoreclr.so
+  .NET EventPipe   lwp 723067  started by libcoreclr.so          chain libcoreclr.so
+  .NET DebugPipe   lwp 723068  started by libcoreclr.so          chain libcoreclr.so
+  .NET Debugger    lwp 723069  started by libcoreclr.so          chain libcoreclr.so
+  .NET Finalizer   lwp 723070  started by libcoreclr.so          chain libcoreclr.so
+  .NET SigHandler  lwp 723072  started by libSystem.Native.so    chain libSystem.Native.so
+  .NET Sockets     lwp 723075  started by -                      chain libSystem.Native.so > jit?
+  100-orphaned-re  lwp 730855  started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  100-orphaned-re  lwp 730897  started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  .NET DebugPipe   lwp 730900  started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  DrHook.Callback  lwp 730908  started by -                      chain libcoreclr.so > jit?
+  .NET Tiered Com  lwp 731282  started by libcoreclr.so          chain libcoreclr.so
+  probe100-second  lwp 731293  started by -                      chain libmscordaccore.so > libmscordbi.so > jit? > libmscordbi.so > jit?
+  probe100-second  lwp 731294  started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  probe100-second  lwp 731295  started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  .NET DebugPipe   lwp 731296  started by libmscordaccore.so     chain libmscordbi.so > libmscordaccore.so
+  100-orphaned-re  lwp 723063  started by -                      chain libcoreclr.so > jit?
+== hung-766491-measure-abort.txt: pid 766491 mode measure-abort age 47.0s sampled 15:49:33.933Z
+  .NET SynchManag  lwp 766493  started by libcoreclr.so          chain libcoreclr.so
+  .NET EventPipe   lwp 766494  started by libcoreclr.so          chain libcoreclr.so
+  .NET DebugPipe   lwp 766495  started by libcoreclr.so          chain libcoreclr.so
+  .NET Debugger    lwp 766496  started by libcoreclr.so          chain libcoreclr.so
+  .NET Finalizer   lwp 766497  started by libcoreclr.so          chain libcoreclr.so
+  .NET SigHandler  lwp 766499  started by libSystem.Native.so    chain libSystem.Native.so
+  .NET Sockets     lwp 766502  started by -                      chain libSystem.Native.so > jit?
+  100-orphaned-re  lwp 774181  started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  100-orphaned-re  lwp 774223  started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  .NET DebugPipe   lwp 774226  started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  DrHook.Callback  lwp 774234  started by -                      chain libcoreclr.so > jit?
+  .NET Tiered Com  lwp 774895  started by libcoreclr.so          chain libcoreclr.so
+  probe100-second  lwp 774906  started by -                      chain libmscordaccore.so > libmscordbi.so > jit? > libmscordbi.so > jit?
+  probe100-second  lwp 774907  started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  probe100-second  lwp 774908  started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  .NET DebugPipe   lwp 774909  started by libmscordaccore.so     chain libmscordbi.so > libmscordaccore.so
+  100-orphaned-re  lwp 766491  started by -                      chain libcoreclr.so > jit?
+== hung-887451-measure-abort.txt: pid 887451 mode measure-abort age 46.2s sampled 15:57:44.275Z
+  .NET SynchManag  lwp 887453  started by libcoreclr.so          chain libcoreclr.so
+  .NET EventPipe   lwp 887454  started by libcoreclr.so          chain libcoreclr.so
+  .NET DebugPipe   lwp 887455  started by libcoreclr.so          chain libcoreclr.so
+  .NET Debugger    lwp 887456  started by libcoreclr.so          chain libcoreclr.so
+  .NET Finalizer   lwp 887457  started by libcoreclr.so          chain libcoreclr.so
+  .NET SigHandler  lwp 887459  started by libSystem.Native.so    chain libSystem.Native.so
+  .NET Sockets     lwp 887462  started by -                      chain libSystem.Native.so > jit?
+  100-orphaned-re  lwp 895099  started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  100-orphaned-re  lwp 895138  started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  .NET DebugPipe   lwp 895141  started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  DrHook.Callback  lwp 895149  started by -                      chain libcoreclr.so > jit?
+  .NET Tiered Com  lwp 896020  started by libcoreclr.so          chain libcoreclr.so
+  probe100-second  lwp 896030  started by -                      chain libmscordaccore.so > libmscordbi.so > jit? > libmscordbi.so > jit?
+  probe100-second  lwp 896031  started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  probe100-second  lwp 896032  started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  .NET DebugPipe   lwp 896033  started by libmscordaccore.so     chain libmscordbi.so > libmscordaccore.so
+  100-orphaned-re  lwp 887451  started by -                      chain libcoreclr.so > jit?
+== control-250147-measure-crash.txt: pid 250147 mode measure-crash age 6.8s sampled 15:25:57.009Z
+  .NET SynchManag  lwp 250152  started by libcoreclr.so          chain libcoreclr.so
+  .NET EventPipe   lwp 250153  started by libcoreclr.so          chain libcoreclr.so
+  .NET DebugPipe   lwp 250154  started by libcoreclr.so          chain libcoreclr.so
+  .NET Debugger    lwp 250155  started by libcoreclr.so          chain libcoreclr.so
+  .NET Finalizer   lwp 250156  started by libcoreclr.so          chain libcoreclr.so
+  .NET Tiered Com  lwp 250157  started by libcoreclr.so          chain libcoreclr.so
+  .NET SigHandler  lwp 250158  started by libSystem.Native.so    chain libSystem.Native.so
+  .NET Sockets     lwp 250161  started by -                      chain libSystem.Native.so > jit?
+  100-orphaned-re  lwp 257615  started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  DrHook.Callback  lwp 257680  started by -                      chain libcoreclr.so > jit?
+  100-orphaned-re  lwp 250147  started by -                      chain libcoreclr.so > jit?
+== control-258338-measure-crash.txt: pid 258338 mode measure-crash age 6.2s sampled 15:26:11.425Z
+  .NET SynchManag  lwp 258340  started by libcoreclr.so          chain libcoreclr.so
+  .NET EventPipe   lwp 258341  started by libcoreclr.so          chain libcoreclr.so
+  .NET DebugPipe   lwp 258342  started by libcoreclr.so          chain libcoreclr.so
+  .NET Debugger    lwp 258343  started by libcoreclr.so          chain libcoreclr.so
+  .NET Finalizer   lwp 258344  started by libcoreclr.so          chain libcoreclr.so
+  .NET Tiered Com  lwp 258345  started by libcoreclr.so          chain libcoreclr.so
+  .NET SigHandler  lwp 258346  started by libSystem.Native.so    chain libSystem.Native.so
+  .NET Sockets     lwp 258349  started by -                      chain libSystem.Native.so > jit?
+  100-orphaned-re  lwp 266091  started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  DrHook.Callback  lwp 266147  started by -                      chain libcoreclr.so > jit?
+  100-orphaned-re  lwp 258338  started by -                      chain libcoreclr.so > jit?
+== control-267381-measure-crash.txt: pid 267381 mode measure-crash age 6.8s sampled 15:26:27.765Z
+  .NET SynchManag  lwp 267383  started by libcoreclr.so          chain libcoreclr.so
+  .NET EventPipe   lwp 267384  started by libcoreclr.so          chain libcoreclr.so
+  .NET DebugPipe   lwp 267385  started by libcoreclr.so          chain libcoreclr.so
+  .NET Debugger    lwp 267386  started by libcoreclr.so          chain libcoreclr.so
+  .NET Finalizer   lwp 267387  started by libcoreclr.so          chain libcoreclr.so
+  .NET Tiered Com  lwp 267388  started by libcoreclr.so          chain libcoreclr.so
+  .NET SigHandler  lwp 267389  started by libSystem.Native.so    chain libSystem.Native.so
+  .NET Sockets     lwp 267392  started by -                      chain libSystem.Native.so > jit?
+  100-orphaned-re  lwp 275018  started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  DrHook.Callback  lwp 275072  started by -                      chain libcoreclr.so > jit?
+  100-orphaned-re  lwp 267381  started by -                      chain libcoreclr.so > jit?

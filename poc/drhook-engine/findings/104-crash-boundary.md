@@ -4,7 +4,7 @@
 **Status:** **OBSERVED** on omega (macOS 27.0.1 arm64, SDK 10.0.301) and omega-ubuntu (Linux arm64 VM, Ubuntu's and
 Microsoft's .NET 10.0.14), 10 runs per mode on each; crashes without the managed warning added 2026-11-06; ending at
 a stack overflow's stop, the `ProcessExited` timing and omega-windows (Windows 11 arm64 VM: no hang in 130 runs)
-added later on 2026-11-06. Not run on Linux x64.
+added later on 2026-11-06; Linux x64 (zbook, bare metal, Microsoft's .NET 10.0.14) added the same day.
 **Not fixed:** DrHook continues every stop it is asked to, including the unhandled-exception one. ADR-016 Step 4,
 probe 100 (`poc/drhook-engine/100-orphaned-read-smoke.cs`, modes added in `5984ad0`, `04aff45` and `4da7093`).
 
@@ -145,7 +145,7 @@ Probe 100 as committed with this update, 10 runs per mode: omega 11:32–12:27 U
 - **How long the target takes to die does not decide it.** From continuing the unhandled-exception stop to the target
   seen gone: omega 1 to 29 ms, hung and usable alike; omega-ubuntu 1,056 to 1,090 ms, hung and usable alike. The
   guess that a slower death explained macOS's stack-overflow hangs is wrong: Linux's is slower and hung less. Why
-  Linux takes a second is not known.
+  Linux takes a second was not known then; it is apport (zbook, below).
 - **Which request.** In the 16 omega samples the waiting threads were in `DbgTransportSession::ReadMemory` in 11,
   `WriteMemory` in 3, and both in 2, all in `SendRequestMessageAndWait`
   ([summary](105-dll-pal-never-rechecks-a-waited-process/omega-hung-samples-summary.txt)). Why the wait never ends is
@@ -176,6 +176,47 @@ and `abort()`. Predicted: a usable second attach every run. Raw output: `104-cra
 
 So on this machine no way of ending tried here left the debugger unusable, as finding 105's mechanism predicts for a
 platform without a PAL.
+
+## Results on zbook, Linux x64 (2026-11-06)
+
+zbook: bare metal, Intel Core i7-6700HQ (4 cores, 8 threads), Ubuntu 26.04.1, kernel 7.0.0-42, Microsoft's .NET 10.0.14
+(SDK 10.0.403), probe 100 at `63a26b2`. The second batch's six modes, 10 runs each, 15:27–15:52 UTC. Raw output:
+`104-crash-boundary/zbook-stop-and-measure.txt`. The probe ran as a child of gdb, which sampled every probe child that
+outlived 45 s: the stacks are in [finding 105](105-dll-pal-never-rechecks-a-waited-process.md).
+
+| Mode | zbook |
+|------|-------|
+| `flood-stackoverflow-kill` | 10 of 10 usable |
+| `flood-stackoverflow-detach` | 10 of 10 usable |
+| `measure-crash` | 0 of 10 hung |
+| `measure-stackoverflow` | 0 of 10 |
+| `measure-segv` | **1 of 10** |
+| `measure-abort` | **3 of 10** |
+
+- **Ending the session at a stack overflow's stop was clean,** 20 of 20, as on the other machines.
+- **The continued managed crashes did not hang here** (FailFast 0 of 10, stack overflow 0 of 10); the two crashes
+  without the warning did, 4 of 20. With hang rates near those of omega-ubuntu (1 to 3 of 10 per mode), 0 of 10 is
+  not evidence of a difference between the modes.
+- **`ProcessExited` separates the outcomes,** as before. In the 36 usable `measure-*` runs it came 12 ms before to
+  25 ms after the probe saw the target gone; in the 4 hung runs none came within 30 s, and each second attach was
+  still pending 120 s after it began.
+- **The second the target takes to die is Ubuntu's crash reporter.** From continuing the unhandled-exception stop to
+  the target seen gone: 1,150 to 1,172 ms for FailFast and 1,164 to 1,205 ms for stack overflow, about as on
+  omega-ubuntu. zbook's `core_pattern` pipes every core dump to apport, and `/var/log/apport.log` has an entry for each
+  dying target's pid (signal 6), with "executable does not belong to a package, ignoring" logged 1.004 to 1.008 s
+  after "called for" (`105-dll-pal-never-rechecks-a-waited-process/zbook-linux-x64/apport-log-control-run.txt`, the 3-run
+  control). The kernel ends the process only after the dump has gone to the pipe. Rerun with `prlimit --core=1`, which
+  makes the kernel skip a pipe dump (15:54–16:00 UTC, 5 runs each of `measure-crash`, `measure-stackoverflow`,
+  `measure-abort`; `104-crash-boundary/zbook-measure-no-core-pipe.txt`): 8 to 22 ms for FailFast and 11 to 23 ms for
+  stack overflow, no apport entry, close to macOS's 1 to 29 ms. omega-ubuntu's second is apport too, checked there by
+  sky-omega the same day: its `core_pattern` pipes to apport, and its `apport.log` has an entry for each crashing
+  probe target (signal 6), with the executable line about 1.01 s after "called for".
+- **The hang does not need that second:** with the dump skipped, `measure-abort` still hung 1 of 5, with the same
+  stacks.
+- **Which request, named.** In all 5 hung children (4 here, 1 in the rerun) mscordbi's Win32 event thread was waiting
+  in `DbgTransportSession::WriteMemory` → `SendRequestMessageAndWait`, called by the DAC's
+  `DacDbiInterfaceImpl::RequestSyncAtEvent` while dispatching an event, and the second attach was waiting on the
+  DAC's `g_dacMutex` in `FlushCache` (stacks named with Microsoft's symbol files; finding 105).
 
 ## What this answers
 
@@ -208,10 +249,11 @@ its own, and consistent with omega's.
 
 ## Not covered
 
-- Linux x64 (elite is excluded).
-- On Linux, where the waiting threads were: only thread names were read there.
-- Why the hang rate differs by machine and crash (stack overflow 5 of 10 on omega, 1 of 20 on omega-ubuntu), and why
-  a target on Linux takes about a second to die after its stop is continued.
+- Linux x64 on a second machine (elite is excluded).
+- Which request the waiting thread on Linux arm64 was in: omega-ubuntu recorded thread names only. On zbook it was
+  `WriteMemory` from `RequestSyncAtEvent`, 5 of 5 ([finding 105](105-dll-pal-never-rechecks-a-waited-process.md)).
+- Why the hang rate differs by machine and crash (stack overflow 5 of 10 on omega, 1 of 20 on omega-ubuntu, 0 of 15
+  on zbook). The second a Linux target takes to die is apport (zbook and omega-ubuntu), and the hang does not need it.
 - A target DrHook launched, rather than attached to.
 - What an operator loses by not continuing the unhandled-exception stop. Continuing it is how a debugger shows the
   program's own death; the trade-off is for Step 6.

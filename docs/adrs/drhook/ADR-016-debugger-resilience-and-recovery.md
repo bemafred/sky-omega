@@ -575,8 +575,21 @@ omega, omega-ubuntu with both builds, omega-windows; 10 runs per mode).
   not.
 - The first batch's `ProcessExited` window was about 200 ms, not the 2 s it stated (corrected in finding 104).
 
-Not yet run: a `DebuggerError`, Linux x64 (zbook), a target DrHook launched, and whether a bounded operation
-completes later.
+*The same second batch on Linux x64, run 2026-11-06* (findings 104 and 105; zbook, bare metal, Microsoft's .NET
+10.0.14, probe 100 at `63a26b2`, 10 runs per mode, every probe child sampled with gdb at 45 s).
+- Ending the session at a stack overflow's stop was clean, 20 of 20. Continued: FailFast and stack overflow hung 0 of
+  10 each, a native fault 1 of 10, `abort()` 3 of 10.
+- `ProcessExited` came within 25 ms of the end in all 36 usable runs and not within 30 s in any of the 4 hung ones;
+  every hung second attach was still pending at 120 s. The detector holds on x64.
+- The stacks, named with Microsoft's symbol files, show finding 105's mechanism on Linux: mscordbi's Win32 event
+  thread waiting with no timeout in `DbgTransportSession::WriteMemory` → `SendRequestMessageAndWait`, from the DAC's
+  `RequestSyncAtEvent` (5 of 5); the second attach waiting on the DAC's `g_dacMutex` in `FlushCache`, finding 100's
+  chain; and no PAL worker thread in the debugger's PAL (`libmscordaccore`), in the hung runs and in 3 usable ones.
+- The second a Linux target takes to die after its stop is continued is Ubuntu's apport, which receives the core dump
+  (zbook, and omega-ubuntu checked by sky-omega). With the pipe dump skipped the target died in 8 to 23 ms, and
+  `abort()` still hung 1 of 5. Not a factor in the hang.
+
+Not yet run: a `DebuggerError`, a target DrHook launched, and whether a bounded operation completes later.
 
 **Step 5 — A minimal process-isolation proof of concept.** The worker is decided (2026-11-06); this step proves its
 design, not its need. A supervisor and one worker. Induce finding 100's exact
