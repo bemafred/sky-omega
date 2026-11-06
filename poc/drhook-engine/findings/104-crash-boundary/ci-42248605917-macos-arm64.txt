@@ -1,0 +1,1023 @@
+##[group]Run set -o pipefail
+set -o pipefail
+modes="flood-sync-kill flood-crash-kill flood-crash-detach flood-stackoverflow-kill flood-stackoverflow-detach"
+modes="$modes measure-crash measure-stackoverflow measure-segv measure-abort"
+dotnet run --no-cache 100-orphaned-read-smoke.cs 10 $modes 2>&1 | tee "probe-$PROBE-$FILE.txt"
+shell: /bin/bash --noprofile --norc -e -o pipefail {0}
+env:
+  PROBE: 100-crash-boundary
+  FILE: macos-arm64
+  DOTNET_ROOT: /Users/runner/.dotnet
+##[endgroup]
+platform: macOS 26.7.2 Arm64
+flood-sync-kill run 1: sync-kill-attach-ok
+    target=1439
+    attached; the target floods thread events [1236 ms]
+    stop: Pause [2302 ms]
+    synchronized; the Win32 event thread is not inside a transport request [4157 ms]
+    target killed (SIGKILL) while synchronized [4158 ms]
+    target gone [4242 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [15855 ms]
+    the dead target's pipes: present [15857 ms]
+    second=1699
+    second attach finished: attached [16978 ms]
+flood-sync-kill run 2: sync-kill-attach-ok
+    target=1708
+    attached; the target floods thread events [1168 ms]
+    stop: Pause [2177 ms]
+    synchronized; the Win32 event thread is not inside a transport request [3616 ms]
+    target killed (SIGKILL) while synchronized [3617 ms]
+    target gone [3673 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [15197 ms]
+    the dead target's pipes: present [15199 ms]
+    second=1835
+    second attach finished: attached [16310 ms]
+flood-sync-kill run 3: sync-kill-attach-ok
+    target=1845
+    attached; the target floods thread events [1135 ms]
+    stop: Pause [2139 ms]
+    synchronized; the Win32 event thread is not inside a transport request [3638 ms]
+    target killed (SIGKILL) while synchronized [3638 ms]
+    target gone [3671 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [15077 ms]
+    the dead target's pipes: absent [15078 ms]
+    second=2113
+    second attach finished: attached [16130 ms]
+flood-sync-kill run 4: sync-kill-attach-ok
+    target=2125
+    attached; the target floods thread events [1134 ms]
+    stop: Pause [2142 ms]
+    synchronized; the Win32 event thread is not inside a transport request [3399 ms]
+    target killed (SIGKILL) while synchronized [3399 ms]
+    target gone [3482 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [14905 ms]
+    the dead target's pipes: absent [14907 ms]
+    second=2337
+    second attach finished: attached [16026 ms]
+flood-sync-kill run 5: sync-kill-attach-ok
+    target=2356
+    attached; the target floods thread events [1080 ms]
+    stop: Pause [2145 ms]
+    synchronized; the Win32 event thread is not inside a transport request [3414 ms]
+    target killed (SIGKILL) while synchronized [3415 ms]
+    target gone [3494 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [16936 ms]
+    the dead target's pipes: absent [16939 ms]
+    second=2725
+    second attach finished: attached [18087 ms]
+flood-sync-kill run 6: sync-kill-attach-ok
+    target=2744
+    attached; the target floods thread events [1192 ms]
+    stop: Pause [2267 ms]
+    synchronized; the Win32 event thread is not inside a transport request [3969 ms]
+    target killed (SIGKILL) while synchronized [3970 ms]
+    target gone [4050 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [15471 ms]
+    the dead target's pipes: absent [15473 ms]
+    second=3149
+    second attach finished: attached [16547 ms]
+flood-sync-kill run 7: sync-kill-attach-ok
+    target=3159
+    attached; the target floods thread events [1152 ms]
+    stop: Pause [2157 ms]
+    synchronized; the Win32 event thread is not inside a transport request [3450 ms]
+    target killed (SIGKILL) while synchronized [3450 ms]
+    target gone [3546 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [14898 ms]
+    the dead target's pipes: present [14899 ms]
+    second=3391
+    second attach finished: attached [15997 ms]
+flood-sync-kill run 8: sync-kill-attach-ok
+    target=3397
+    attached; the target floods thread events [1145 ms]
+    stop: Pause [2222 ms]
+    synchronized; the Win32 event thread is not inside a transport request [3485 ms]
+    target killed (SIGKILL) while synchronized [3485 ms]
+    target gone [3567 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [15065 ms]
+    the dead target's pipes: absent [15066 ms]
+    second=3767
+    second attach finished: attached [16147 ms]
+flood-sync-kill run 9: sync-kill-attach-ok
+    target=3773
+    attached; the target floods thread events [1115 ms]
+    stop: Pause [2144 ms]
+    synchronized; the Win32 event thread is not inside a transport request [3413 ms]
+    target killed (SIGKILL) while synchronized [3413 ms]
+    target gone [3442 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [14883 ms]
+    the dead target's pipes: absent [14886 ms]
+    second=4051
+    second attach finished: attached [15991 ms]
+flood-sync-kill run 10: sync-kill-attach-ok
+    target=4057
+    attached; the target floods thread events [1107 ms]
+    stop: Pause [2160 ms]
+    synchronized; the Win32 event thread is not inside a transport request [3427 ms]
+    target killed (SIGKILL) while synchronized [3427 ms]
+    target gone [3449 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [14788 ms]
+    the dead target's pipes: present [14789 ms]
+    second=4577
+    second attach finished: attached [15881 ms]
+flood-crash-kill run 1: crash-kill-attach-ok
+    target=4590
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1156 ms]
+    stops seen: Exception(Unhandled) [2259 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [2272 ms]
+    synchronized; the Win32 event thread is not inside a transport request [3640 ms]
+    target killed (SIGKILL) at the unhandled-exception stop [3641 ms]
+    target gone [3718 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [15316 ms]
+    the dead target's pipes: absent [15318 ms]
+    second=4845
+    second attach finished: attached [16377 ms]
+flood-crash-kill run 2: crash-kill-attach-ok
+    target=4851
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1093 ms]
+    stops seen: Exception(Unhandled) [3164 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [3167 ms]
+    synchronized; the Win32 event thread is not inside a transport request [4476 ms]
+    target killed (SIGKILL) at the unhandled-exception stop [4476 ms]
+    target gone [4513 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [15986 ms]
+    the dead target's pipes: present [15988 ms]
+    second=5320
+    second attach finished: attached [17073 ms]
+flood-crash-kill run 3: crash-kill-attach-ok
+    target=5326
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1110 ms]
+    stops seen: Exception(Unhandled) [4123 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [4128 ms]
+    synchronized; the Win32 event thread is not inside a transport request [5438 ms]
+    target killed (SIGKILL) at the unhandled-exception stop [5439 ms]
+    target gone [5493 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [16886 ms]
+    the dead target's pipes: absent [16887 ms]
+    second=5599
+    second attach finished: attached [17919 ms]
+flood-crash-kill run 4: crash-kill-attach-ok
+    target=5644
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1078 ms]
+    stops seen: Exception(Unhandled) [2947 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [2950 ms]
+    synchronized; the Win32 event thread is not inside a transport request [4274 ms]
+    target killed (SIGKILL) at the unhandled-exception stop [4275 ms]
+    target gone [4430 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [16032 ms]
+    the dead target's pipes: absent [16033 ms]
+    second=6156
+    second attach finished: attached [17187 ms]
+flood-crash-kill run 5: crash-kill-attach-ok
+    target=6167
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1176 ms]
+    stops seen: Exception(Unhandled) [1949 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [1954 ms]
+    synchronized; the Win32 event thread is not inside a transport request [3196 ms]
+    target killed (SIGKILL) at the unhandled-exception stop [3197 ms]
+    target gone [3220 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [14659 ms]
+    the dead target's pipes: absent [14660 ms]
+    second=6417
+    second attach finished: attached [15740 ms]
+flood-crash-kill run 6: crash-kill-attach-ok
+    target=6541
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1214 ms]
+    stops seen: Exception(Unhandled) [3648 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [3651 ms]
+    synchronized; the Win32 event thread is not inside a transport request [4903 ms]
+    target killed (SIGKILL) at the unhandled-exception stop [4904 ms]
+    target gone [4941 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [16370 ms]
+    the dead target's pipes: present [16370 ms]
+    second=6876
+    second attach finished: attached [17594 ms]
+flood-crash-kill run 7: crash-kill-attach-ok
+    target=6882
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1128 ms]
+    stops seen: Exception(Unhandled) [3335 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [3338 ms]
+    synchronized; the Win32 event thread is not inside a transport request [4593 ms]
+    target killed (SIGKILL) at the unhandled-exception stop [4593 ms]
+    target gone [4678 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [16003 ms]
+    the dead target's pipes: absent [16004 ms]
+    second=7353
+    second attach finished: attached [17157 ms]
+flood-crash-kill run 8: crash-kill-attach-ok
+    target=7360
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1188 ms]
+    stops seen: Exception(Unhandled) [3802 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [3806 ms]
+    synchronized; the Win32 event thread is not inside a transport request [5027 ms]
+    target killed (SIGKILL) at the unhandled-exception stop [5027 ms]
+    target gone [5127 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [16479 ms]
+    the dead target's pipes: absent [16480 ms]
+    second=7698
+    second attach finished: attached [17582 ms]
+flood-crash-kill run 9: crash-kill-attach-ok
+    target=7704
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1111 ms]
+    stops seen: Exception(Unhandled) [2842 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [2844 ms]
+    synchronized; the Win32 event thread is not inside a transport request [4054 ms]
+    target killed (SIGKILL) at the unhandled-exception stop [4054 ms]
+    target gone [4094 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [15633 ms]
+    the dead target's pipes: absent [15634 ms]
+    second=8182
+    second attach finished: attached [16684 ms]
+flood-crash-kill run 10: crash-kill-attach-ok
+    target=8188
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1193 ms]
+    stops seen: Exception(Unhandled) [3771 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [3774 ms]
+    synchronized; the Win32 event thread is not inside a transport request [5090 ms]
+    target killed (SIGKILL) at the unhandled-exception stop [5091 ms]
+    target gone [5124 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [16691 ms]
+    the dead target's pipes: absent [16693 ms]
+    second=8461
+    second attach finished: attached [17748 ms]
+flood-crash-detach run 1: crash-detach-attach-ok
+    target=8564
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1219 ms]
+    stops seen: Exception(Unhandled) [2518 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [2521 ms]
+    detached at the unhandled-exception stop [2552 ms]
+    target gone, no debugger attached [2553 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [14039 ms]
+    the dead target's pipes: absent [14040 ms]
+    second=8955
+    second attach finished: attached [15244 ms]
+flood-crash-detach run 2: crash-detach-attach-ok
+    target=8961
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1224 ms]
+    stops seen: Exception(Unhandled) [3993 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [3998 ms]
+    detached at the unhandled-exception stop [4119 ms]
+    target gone, no debugger attached [4120 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [15455 ms]
+    the dead target's pipes: absent [15455 ms]
+    second=9317
+    second attach finished: attached [16588 ms]
+flood-crash-detach run 3: crash-detach-attach-ok
+    target=9323
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1105 ms]
+    stops seen: Exception(Unhandled) [1949 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [1951 ms]
+    detached at the unhandled-exception stop [2086 ms]
+    target gone, no debugger attached [2086 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [13484 ms]
+    the dead target's pipes: absent [13485 ms]
+    second=9836
+    second attach finished: attached [14641 ms]
+flood-crash-detach run 4: crash-detach-attach-ok
+    target=9845
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1110 ms]
+    stops seen: Exception(Unhandled) [3468 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [3482 ms]
+    detached at the unhandled-exception stop [3580 ms]
+    target gone, no debugger attached [3581 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [15287 ms]
+    the dead target's pipes: absent [15288 ms]
+    second=10124
+    second attach finished: attached [16502 ms]
+flood-crash-detach run 5: crash-detach-attach-ok
+    target=10133
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1152 ms]
+    stops seen: Exception(Unhandled) [3692 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [3698 ms]
+    detached at the unhandled-exception stop [3744 ms]
+    target gone, no debugger attached [3745 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [15124 ms]
+    the dead target's pipes: absent [15125 ms]
+    second=10663
+    second attach finished: attached [16245 ms]
+flood-crash-detach run 6: crash-detach-attach-ok
+    target=10669
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1116 ms]
+    stops seen: Exception(Unhandled) [2027 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [2030 ms]
+    detached at the unhandled-exception stop [2055 ms]
+    target gone, no debugger attached [2055 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [13430 ms]
+    the dead target's pipes: absent [13430 ms]
+    second=10962
+    second attach finished: attached [14622 ms]
+flood-crash-detach run 7: crash-detach-attach-ok
+    target=10968
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1141 ms]
+    stops seen: Exception(Unhandled) [3106 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [3110 ms]
+    detached at the unhandled-exception stop [3233 ms]
+    target gone, no debugger attached [3234 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [14617 ms]
+    the dead target's pipes: absent [14618 ms]
+    second=11341
+    second attach finished: attached [15659 ms]
+flood-crash-detach run 8: crash-detach-attach-ok
+    target=11374
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1083 ms]
+    stops seen: Exception(Unhandled) [2776 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [2780 ms]
+    detached at the unhandled-exception stop [2893 ms]
+    target gone, no debugger attached [2893 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [14276 ms]
+    the dead target's pipes: absent [14277 ms]
+    second=11883
+    second attach finished: attached [15404 ms]
+flood-crash-detach run 9: crash-detach-attach-ok
+    target=11889
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1232 ms]
+    stops seen: Exception(Unhandled) [2681 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [2687 ms]
+    detached at the unhandled-exception stop [2824 ms]
+    target gone, no debugger attached [2825 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [14437 ms]
+    the dead target's pipes: absent [14438 ms]
+    second=12179
+    second attach finished: attached [15529 ms]
+flood-crash-detach run 10: crash-detach-attach-ok
+    target=12185
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1207 ms]
+    stops seen: Exception(Unhandled) [3443 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [3448 ms]
+    detached at the unhandled-exception stop [3589 ms]
+    target gone, no debugger attached [3590 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [14967 ms]
+    the dead target's pipes: absent [14968 ms]
+    second=12725
+    second attach finished: attached [16103 ms]
+flood-stackoverflow-kill run 1: stackoverflow-kill-attach-ok
+    target=12732
+    attached; the target floods thread events and will overflow its stack within 0.5 to 3 s [1071 ms]
+    stops seen: Exception(Unhandled) [1958 ms]
+    at the unhandled-exception stop; exception type: System.StackOverflowException [1961 ms]
+    synchronized; the Win32 event thread is not inside a transport request [3195 ms]
+    target killed (SIGKILL) at the unhandled-exception stop [3195 ms]
+    target gone [3288 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [14691 ms]
+    the dead target's pipes: absent [14692 ms]
+    second=13097
+    second attach finished: attached [15761 ms]
+flood-stackoverflow-kill run 2: stackoverflow-kill-attach-ok
+    target=13103
+    attached; the target floods thread events and will overflow its stack within 0.5 to 3 s [1063 ms]
+    stops seen: Exception(Unhandled) [3238 ms]
+    at the unhandled-exception stop; exception type: System.StackOverflowException [3243 ms]
+    synchronized; the Win32 event thread is not inside a transport request [4542 ms]
+    target killed (SIGKILL) at the unhandled-exception stop [4543 ms]
+    target gone [4717 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [16153 ms]
+    the dead target's pipes: absent [16154 ms]
+    second=13650
+    second attach finished: attached [17292 ms]
+flood-stackoverflow-kill run 3: stackoverflow-kill-attach-ok
+    target=13656
+    attached; the target floods thread events and will overflow its stack within 0.5 to 3 s [1115 ms]
+    stops seen: Exception(Unhandled) [3607 ms]
+    at the unhandled-exception stop; exception type: System.StackOverflowException [3616 ms]
+    synchronized; the Win32 event thread is not inside a transport request [4931 ms]
+    target killed (SIGKILL) at the unhandled-exception stop [4933 ms]
+    target gone [5087 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [16493 ms]
+    the dead target's pipes: absent [16494 ms]
+    second=13951
+    second attach finished: attached [17694 ms]
+flood-stackoverflow-kill run 4: stackoverflow-kill-attach-ok
+    target=13960
+    attached; the target floods thread events and will overflow its stack within 0.5 to 3 s [1100 ms]
+    stops seen: Exception(Unhandled) [4375 ms]
+    at the unhandled-exception stop; exception type: System.StackOverflowException [4383 ms]
+    synchronized; the Win32 event thread is not inside a transport request [5621 ms]
+    target killed (SIGKILL) at the unhandled-exception stop [5621 ms]
+    target gone [5697 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [17087 ms]
+    the dead target's pipes: absent [17088 ms]
+    second=14503
+    second attach finished: attached [18291 ms]
+flood-stackoverflow-kill run 5: stackoverflow-kill-attach-ok
+    target=14509
+    attached; the target floods thread events and will overflow its stack within 0.5 to 3 s [1195 ms]
+    stops seen: Exception(Unhandled) [2869 ms]
+    at the unhandled-exception stop; exception type: System.StackOverflowException [2876 ms]
+    synchronized; the Win32 event thread is not inside a transport request [4133 ms]
+    target killed (SIGKILL) at the unhandled-exception stop [4134 ms]
+    target gone [4172 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [15530 ms]
+    the dead target's pipes: present [15534 ms]
+    second=15045
+    second attach finished: attached [16614 ms]
+flood-stackoverflow-kill run 6: stackoverflow-kill-attach-ok
+    target=15126
+    attached; the target floods thread events and will overflow its stack within 0.5 to 3 s [1080 ms]
+    stops seen: Exception(Unhandled) [3626 ms]
+    at the unhandled-exception stop; exception type: System.StackOverflowException [3634 ms]
+    synchronized; the Win32 event thread is not inside a transport request [4958 ms]
+    target killed (SIGKILL) at the unhandled-exception stop [4959 ms]
+    target gone [4992 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [16365 ms]
+    the dead target's pipes: present [16367 ms]
+    second=15425
+    second attach finished: attached [17512 ms]
+flood-stackoverflow-kill run 7: stackoverflow-kill-attach-ok
+    target=15431
+    attached; the target floods thread events and will overflow its stack within 0.5 to 3 s [1178 ms]
+    stops seen: Exception(Unhandled) [2519 ms]
+    at the unhandled-exception stop; exception type: System.StackOverflowException [2524 ms]
+    synchronized; the Win32 event thread is not inside a transport request [3829 ms]
+    target killed (SIGKILL) at the unhandled-exception stop [3830 ms]
+    target gone [3853 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [15187 ms]
+    the dead target's pipes: absent [15190 ms]
+    second=15963
+    second attach finished: attached [16385 ms]
+flood-stackoverflow-kill run 8: stackoverflow-kill-attach-ok
+    target=15969
+    attached; the target floods thread events and will overflow its stack within 0.5 to 3 s [1121 ms]
+    stops seen: Exception(Unhandled) [2733 ms]
+    at the unhandled-exception stop; exception type: System.StackOverflowException [2742 ms]
+    synchronized; the Win32 event thread is not inside a transport request [3967 ms]
+    target killed (SIGKILL) at the unhandled-exception stop [3967 ms]
+    target gone [4138 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [15552 ms]
+    the dead target's pipes: absent [15555 ms]
+    second=16249
+    second attach finished: attached [16644 ms]
+flood-stackoverflow-kill run 9: stackoverflow-kill-attach-ok
+    target=16254
+    attached; the target floods thread events and will overflow its stack within 0.5 to 3 s [1102 ms]
+    stops seen: Exception(Unhandled) [3075 ms]
+    at the unhandled-exception stop; exception type: System.StackOverflowException [3078 ms]
+    synchronized; the Win32 event thread is not inside a transport request [4316 ms]
+    target killed (SIGKILL) at the unhandled-exception stop [4316 ms]
+    target gone [4406 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [15722 ms]
+    the dead target's pipes: absent [15722 ms]
+    second=16787
+    second attach finished: attached [16864 ms]
+flood-stackoverflow-kill run 10: stackoverflow-kill-attach-ok
+    target=16792
+    attached; the target floods thread events and will overflow its stack within 0.5 to 3 s [1098 ms]
+    stops seen: Exception(Unhandled) [2134 ms]
+    at the unhandled-exception stop; exception type: System.StackOverflowException [2141 ms]
+    synchronized; the Win32 event thread is not inside a transport request [3378 ms]
+    target killed (SIGKILL) at the unhandled-exception stop [3378 ms]
+    target gone [3552 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [14792 ms]
+    the dead target's pipes: absent [14792 ms]
+    second=17147
+    second attach finished: attached [15894 ms]
+flood-stackoverflow-detach run 1: stackoverflow-detach-attach-ok
+    target=17152
+    attached; the target floods thread events and will overflow its stack within 0.5 to 3 s [1216 ms]
+    stops seen: Exception(Unhandled) [2850 ms]
+    at the unhandled-exception stop; exception type: System.StackOverflowException [2854 ms]
+    detached at the unhandled-exception stop [2944 ms]
+    target gone, no debugger attached [2944 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [14297 ms]
+    the dead target's pipes: absent [14298 ms]
+    second=17683
+    second attach finished: attached [15407 ms]
+flood-stackoverflow-detach run 2: stackoverflow-detach-attach-ok
+    target=17688
+    attached; the target floods thread events and will overflow its stack within 0.5 to 3 s [1064 ms]
+    stops seen: Exception(Unhandled) [3912 ms]
+    at the unhandled-exception stop; exception type: System.StackOverflowException [3922 ms]
+    detached at the unhandled-exception stop [4031 ms]
+    target gone, no debugger attached [4031 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [15353 ms]
+    the dead target's pipes: absent [15353 ms]
+    second=17972
+    second attach finished: attached [16430 ms]
+flood-stackoverflow-detach run 3: stackoverflow-detach-attach-ok
+    target=17977
+    attached; the target floods thread events and will overflow its stack within 0.5 to 3 s [1204 ms]
+    stops seen: Exception(Unhandled) [3207 ms]
+    at the unhandled-exception stop; exception type: System.StackOverflowException [3210 ms]
+    detached at the unhandled-exception stop [3319 ms]
+    target gone, no debugger attached [3319 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [14647 ms]
+    the dead target's pipes: absent [14647 ms]
+    second=18504
+    second attach finished: attached [15759 ms]
+flood-stackoverflow-detach run 4: stackoverflow-detach-attach-ok
+    target=18509
+    attached; the target floods thread events and will overflow its stack within 0.5 to 3 s [1075 ms]
+    stops seen: Exception(Unhandled) [2136 ms]
+    at the unhandled-exception stop; exception type: System.StackOverflowException [2142 ms]
+    detached at the unhandled-exception stop [2279 ms]
+    target gone, no debugger attached [2279 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [13740 ms]
+    the dead target's pipes: absent [13741 ms]
+    second=18864
+    second attach finished: attached [14871 ms]
+flood-stackoverflow-detach run 5: stackoverflow-detach-attach-ok
+    target=18869
+    attached; the target floods thread events and will overflow its stack within 0.5 to 3 s [1190 ms]
+    stops seen: Exception(Unhandled) [2200 ms]
+    at the unhandled-exception stop; exception type: System.StackOverflowException [2203 ms]
+    detached at the unhandled-exception stop [2372 ms]
+    target gone, no debugger attached [2372 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [13863 ms]
+    the dead target's pipes: absent [13865 ms]
+    second=19146
+    second attach finished: attached [15046 ms]
+flood-stackoverflow-detach run 6: stackoverflow-detach-attach-ok
+    target=19153
+    attached; the target floods thread events and will overflow its stack within 0.5 to 3 s [1201 ms]
+    stops seen: Exception(Unhandled) [2041 ms]
+    at the unhandled-exception stop; exception type: System.StackOverflowException [2045 ms]
+    detached at the unhandled-exception stop [2164 ms]
+    target gone, no debugger attached [2164 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [13525 ms]
+    the dead target's pipes: absent [13525 ms]
+    second=19683
+    second attach finished: attached [14697 ms]
+flood-stackoverflow-detach run 7: stackoverflow-detach-attach-ok
+    target=19688
+    attached; the target floods thread events and will overflow its stack within 0.5 to 3 s [1206 ms]
+    stops seen: Exception(Unhandled) [2118 ms]
+    at the unhandled-exception stop; exception type: System.StackOverflowException [2127 ms]
+    detached at the unhandled-exception stop [2140 ms]
+    target gone, no debugger attached [2141 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [13529 ms]
+    the dead target's pipes: absent [13530 ms]
+    second=19965
+    second attach finished: attached [14699 ms]
+flood-stackoverflow-detach run 8: stackoverflow-detach-attach-ok
+    target=19972
+    attached; the target floods thread events and will overflow its stack within 0.5 to 3 s [1196 ms]
+    stops seen: Exception(Unhandled) [3702 ms]
+    at the unhandled-exception stop; exception type: System.StackOverflowException [3704 ms]
+    detached at the unhandled-exception stop [3726 ms]
+    target gone, no debugger attached [3726 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [15034 ms]
+    the dead target's pipes: absent [15035 ms]
+    second=20454
+    second attach finished: attached [16211 ms]
+flood-stackoverflow-detach run 9: stackoverflow-detach-attach-ok
+    target=20505
+    attached; the target floods thread events and will overflow its stack within 0.5 to 3 s [1066 ms]
+    stops seen: Exception(Unhandled) [3313 ms]
+    at the unhandled-exception stop; exception type: System.StackOverflowException [3318 ms]
+    detached at the unhandled-exception stop [3429 ms]
+    target gone, no debugger attached [3429 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [14839 ms]
+    the dead target's pipes: absent [14839 ms]
+    second=20862
+    second attach finished: attached [15915 ms]
+flood-stackoverflow-detach run 10: stackoverflow-detach-attach-ok
+    target=20867
+    attached; the target floods thread events and will overflow its stack within 0.5 to 3 s [1129 ms]
+    stops seen: Exception(Unhandled) [2114 ms]
+    at the unhandled-exception stop; exception type: System.StackOverflowException [2118 ms]
+    detached at the unhandled-exception stop [2247 ms]
+    target gone, no debugger attached [2248 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [13618 ms]
+    the dead target's pipes: absent [13619 ms]
+    second=21147
+    second attach finished: attached [14680 ms]
+measure-crash run 1: crash-warned-exited-attach-ok
+    target=21152
+    attached; the target floods thread events and will crash (crash) within 0.5 to 3 s [1119 ms]
+    target gone (crash) [4016 ms]
+    stops seen: Exception(Unhandled, System.ExecutionEngineException) at 3963 ms, ProcessExited at 4077 ms [4077 ms]
+    from continuing the unhandled-exception stop to the target seen gone: 49 ms [4077 ms]
+    ProcessExited came 61 ms after the target was seen gone [4077 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [15298 ms]
+    the dead target's pipes: absent [15298 ms]
+    second=21687
+    second attach finished: attached [16487 ms]
+measure-crash run 2: crash-warned-not-exited-orphaned-and-attach-hung
+    target=21693
+    attached; the target floods thread events and will crash (crash) within 0.5 to 3 s [1135 ms]
+    target gone (crash) [3322 ms]
+    stops seen: Exception(Unhandled, System.ExecutionEngineException) at 3317 ms [33430 ms]
+    from continuing the unhandled-exception stop to the target seen gone: 1 ms [33430 ms]
+    no ProcessExited stop within 30 s of the end [33433 ms]
+    10 s after the end the Win32 event thread is inside a transport request [44838 ms]
+    the dead target's pipes: absent [44839 ms]
+    second=22853
+    second attach still pending after 30 s [76055 ms]
+    second attach still pending 120 s after it began [166174 ms]
+measure-crash run 3: crash-warned-exited-attach-ok
+    target=25908
+    attached; the target floods thread events and will crash (crash) within 0.5 to 3 s [1098 ms]
+    target gone (crash) [2408 ms]
+    stops seen: Exception(Unhandled, System.ExecutionEngineException) at 2402 ms, ProcessExited at 2574 ms [2574 ms]
+    from continuing the unhandled-exception stop to the target seen gone: 2 ms [2574 ms]
+    ProcessExited came 166 ms after the target was seen gone [2574 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [14153 ms]
+    the dead target's pipes: absent [14154 ms]
+    second=26264
+    second attach finished: attached [15384 ms]
+measure-crash run 4: crash-warned-exited-attach-ok
+    target=26276
+    attached; the target floods thread events and will crash (crash) within 0.5 to 3 s [1158 ms]
+    target gone (crash) [2150 ms]
+    stops seen: Exception(Unhandled, System.ExecutionEngineException) at 2132 ms, ProcessExited at 2259 ms [2259 ms]
+    from continuing the unhandled-exception stop to the target seen gone: 5 ms [2259 ms]
+    ProcessExited came 109 ms after the target was seen gone [2259 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [13823 ms]
+    the dead target's pipes: absent [13824 ms]
+    second=26798
+    second attach finished: attached [15042 ms]
+measure-crash run 5: crash-warned-not-exited-orphaned-and-attach-hung
+    target=26803
+    attached; the target floods thread events and will crash (crash) within 0.5 to 3 s [1184 ms]
+    target gone (crash) [3707 ms]
+    stops seen: Exception(Unhandled, System.ExecutionEngineException) at 3685 ms [33979 ms]
+    from continuing the unhandled-exception stop to the target seen gone: 5 ms [33980 ms]
+    no ProcessExited stop within 30 s of the end [33987 ms]
+    10 s after the end the Win32 event thread is inside a transport request [45428 ms]
+    the dead target's pipes: absent [45429 ms]
+    second=27891
+    second attach still pending after 30 s [76616 ms]
+    second attach still pending 120 s after it began [166624 ms]
+measure-crash run 6: crash-warned-not-exited-orphaned-and-attach-hung
+    target=31028
+    attached; the target floods thread events and will crash (crash) within 0.5 to 3 s [1139 ms]
+    target gone (crash) [3998 ms]
+    stops seen: Exception(Unhandled, System.ExecutionEngineException) at 3964 ms [34257 ms]
+    from continuing the unhandled-exception stop to the target seen gone: 28 ms [34257 ms]
+    no ProcessExited stop within 30 s of the end [34259 ms]
+    10 s after the end the Win32 event thread is inside a transport request [45663 ms]
+    the dead target's pipes: absent [45664 ms]
+    second=32193
+    second attach still pending after 30 s [76724 ms]
+    second attach still pending 120 s after it began [166775 ms]
+measure-crash run 7: crash-warned-exited-attach-ok
+    target=35326
+    attached; the target floods thread events and will crash (crash) within 0.5 to 3 s [1220 ms]
+    target gone (crash) [3443 ms]
+    stops seen: Exception(Unhandled, System.ExecutionEngineException) at 3436 ms, ProcessExited at 3448 ms [3448 ms]
+    from continuing the unhandled-exception stop to the target seen gone: 3 ms [3448 ms]
+    ProcessExited came 5 ms after the target was seen gone [3448 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [14805 ms]
+    the dead target's pipes: absent [14806 ms]
+    second=35637
+    second attach finished: attached [15945 ms]
+measure-crash run 8: crash-warned-exited-attach-ok
+    target=35861
+    attached; the target floods thread events and will crash (crash) within 0.5 to 3 s [1105 ms]
+    target gone (crash) [3913 ms]
+    stops seen: Exception(Unhandled, System.ExecutionEngineException) at 3907 ms, ProcessExited at 4024 ms [4024 ms]
+    from continuing the unhandled-exception stop to the target seen gone: 1 ms [4024 ms]
+    ProcessExited came 111 ms after the target was seen gone [4024 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [15337 ms]
+    the dead target's pipes: absent [15338 ms]
+    second=36143
+    second attach finished: attached [16409 ms]
+measure-crash run 9: crash-warned-not-exited-attach-ok
+    target=36151
+    attached; the target floods thread events and will crash (crash) within 0.5 to 3 s [1111 ms]
+    target gone (crash) [3084 ms]
+    stops seen: Exception(Unhandled, System.ExecutionEngineException) at 2981 ms [33300 ms]
+    from continuing the unhandled-exception stop to the target seen gone: 98 ms [33300 ms]
+    no ProcessExited stop within 30 s of the end [33300 ms]
+    10 s after the end the Win32 event thread is inside a transport request [44707 ms]
+    the dead target's pipes: absent [44708 ms]
+    second=37313
+    second attach finished: attached [45844 ms]
+measure-crash run 10: crash-warned-not-exited-orphaned-and-attach-hung
+    target=37320
+    attached; the target floods thread events and will crash (crash) within 0.5 to 3 s [1163 ms]
+    target gone (crash) [4176 ms]
+    stops seen: Exception(Unhandled, System.ExecutionEngineException) at 4060 ms [34316 ms]
+    from continuing the unhandled-exception stop to the target seen gone: 112 ms [34317 ms]
+    no ProcessExited stop within 30 s of the end [34317 ms]
+    10 s after the end the Win32 event thread is inside a transport request [45731 ms]
+    the dead target's pipes: absent [45732 ms]
+    second=38646
+    second attach still pending after 30 s [76809 ms]
+    second attach still pending 120 s after it began [166918 ms]
+measure-stackoverflow run 1: stackoverflow-warned-exited-attach-ok
+    target=41794
+    attached; the target floods thread events and will crash (stackoverflow) within 0.5 to 3 s [1232 ms]
+    target gone (stackoverflow) [2890 ms]
+    stops seen: Exception(Unhandled, System.StackOverflowException) at 2871 ms, ProcessExited at 2926 ms [2926 ms]
+    from continuing the unhandled-exception stop to the target seen gone: 2 ms [2926 ms]
+    ProcessExited came 36 ms after the target was seen gone [2926 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [14203 ms]
+    the dead target's pipes: absent [14203 ms]
+    second=42075
+    second attach finished: attached [15284 ms]
+measure-stackoverflow run 2: stackoverflow-warned-exited-attach-ok
+    target=42080
+    attached; the target floods thread events and will crash (stackoverflow) within 0.5 to 3 s [1204 ms]
+    target gone (stackoverflow) [3480 ms]
+    stops seen: Exception(Unhandled, System.StackOverflowException) at 3458 ms, ProcessExited at 3510 ms [3510 ms]
+    from continuing the unhandled-exception stop to the target seen gone: 6 ms [3510 ms]
+    ProcessExited came 30 ms after the target was seen gone [3510 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [14817 ms]
+    the dead target's pipes: absent [14817 ms]
+    second=42364
+    second attach finished: attached [15866 ms]
+measure-stackoverflow run 3: stackoverflow-warned-exited-attach-ok
+    target=42590
+    attached; the target floods thread events and will crash (stackoverflow) within 0.5 to 3 s [1122 ms]
+    target gone (stackoverflow) [2589 ms]
+    stops seen: Exception(Unhandled, System.StackOverflowException) at 2555 ms, ProcessExited at 2697 ms [2697 ms]
+    from continuing the unhandled-exception stop to the target seen gone: 30 ms [2697 ms]
+    ProcessExited came 108 ms after the target was seen gone [2697 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [14069 ms]
+    the dead target's pipes: absent [14069 ms]
+    second=42970
+    second attach finished: attached [15194 ms]
+measure-stackoverflow run 4: stackoverflow-warned-exited-attach-ok
+    target=42977
+    attached; the target floods thread events and will crash (stackoverflow) within 0.5 to 3 s [1099 ms]
+    target gone (stackoverflow) [3442 ms]
+    stops seen: Exception(Unhandled, System.StackOverflowException) at 3436 ms, ProcessExited at 3551 ms [3551 ms]
+    from continuing the unhandled-exception stop to the target seen gone: 2 ms [3551 ms]
+    ProcessExited came 109 ms after the target was seen gone [3551 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [14917 ms]
+    the dead target's pipes: absent [14918 ms]
+    second=43258
+    second attach finished: attached [15971 ms]
+measure-stackoverflow run 5: stackoverflow-warned-exited-attach-ok
+    target=43263
+    attached; the target floods thread events and will crash (stackoverflow) within 0.5 to 3 s [1073 ms]
+    target gone (stackoverflow) [1945 ms]
+    stops seen: Exception(Unhandled, System.StackOverflowException) at 1928 ms, ProcessExited at 2083 ms [2083 ms]
+    from continuing the unhandled-exception stop to the target seen gone: 2 ms [2083 ms]
+    ProcessExited came 138 ms after the target was seen gone [2083 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [13329 ms]
+    the dead target's pipes: absent [13329 ms]
+    second=43793
+    second attach finished: attached [14411 ms]
+measure-stackoverflow run 6: stackoverflow-warned-exited-attach-ok
+    target=43798
+    attached; the target floods thread events and will crash (stackoverflow) within 0.5 to 3 s [1114 ms]
+    target gone (stackoverflow) [3156 ms]
+    stops seen: Exception(Unhandled, System.StackOverflowException) at 3150 ms, ProcessExited at 3329 ms [3330 ms]
+    from continuing the unhandled-exception stop to the target seen gone: 2 ms [3330 ms]
+    ProcessExited came 173 ms after the target was seen gone [3330 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [14631 ms]
+    the dead target's pipes: absent [14631 ms]
+    second=44081
+    second attach finished: attached [15734 ms]
+measure-stackoverflow run 7: stackoverflow-warned-exited-attach-ok
+    target=44086
+    attached; the target floods thread events and will crash (stackoverflow) within 0.5 to 3 s [1213 ms]
+    target gone (stackoverflow) [2606 ms]
+    stops seen: Exception(Unhandled, System.StackOverflowException) at 2594 ms, ProcessExited at 2684 ms [2684 ms]
+    from continuing the unhandled-exception stop to the target seen gone: 2 ms [2684 ms]
+    ProcessExited came 78 ms after the target was seen gone [2684 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [14017 ms]
+    the dead target's pipes: absent [14017 ms]
+    second=44366
+    second attach finished: attached [15188 ms]
+measure-stackoverflow run 8: stackoverflow-warned-exited-attach-ok
+    target=44681
+    attached; the target floods thread events and will crash (stackoverflow) within 0.5 to 3 s [1112 ms]
+    target gone (stackoverflow) [3937 ms]
+    stops seen: Exception(Unhandled, System.StackOverflowException) at 3829 ms, ProcessExited at 3937 ms [3937 ms]
+    from continuing the unhandled-exception stop to the target seen gone: 104 ms [3937 ms]
+    ProcessExited came 0 ms after the target was seen gone [3937 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [15167 ms]
+    the dead target's pipes: absent [15168 ms]
+    second=44981
+    second attach finished: attached [16211 ms]
+measure-stackoverflow run 9: stackoverflow-warned-not-exited-orphaned-and-attach-hung
+    target=44986
+    attached; the target floods thread events and will crash (stackoverflow) within 0.5 to 3 s [1142 ms]
+    target gone (stackoverflow) [3327 ms]
+    stops seen: Exception(Unhandled, System.StackOverflowException) at 3310 ms [33778 ms]
+    from continuing the unhandled-exception stop to the target seen gone: 2 ms [33778 ms]
+    no ProcessExited stop within 30 s of the end [33778 ms]
+    10 s after the end the Win32 event thread is inside a transport request [45180 ms]
+    the dead target's pipes: absent [45180 ms]
+    second=46078
+    second attach still pending after 30 s [76440 ms]
+    second attach still pending 120 s after it began [166565 ms]
+measure-stackoverflow run 10: stackoverflow-warned-exited-attach-ok
+    target=49224
+    attached; the target floods thread events and will crash (stackoverflow) within 0.5 to 3 s [1216 ms]
+    target gone (stackoverflow) [4441 ms]
+    stops seen: Exception(Unhandled, System.StackOverflowException) at 4278 ms, ProcessExited at 4442 ms [4442 ms]
+    from continuing the unhandled-exception stop to the target seen gone: 152 ms [4442 ms]
+    ProcessExited came 1 ms after the target was seen gone [4442 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [15813 ms]
+    the dead target's pipes: absent [15814 ms]
+    second=49761
+    second attach finished: attached [17006 ms]
+measure-segv run 1: segv-unwarned-exited-attach-ok
+    target=49767
+    attached; the target floods thread events and will crash (segv) within 0.5 to 3 s [1183 ms]
+    target gone (segv) [3735 ms]
+    stops seen: ProcessExited at 3870 ms [3871 ms]
+    ProcessExited came 135 ms after the target was seen gone [3871 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [15118 ms]
+    the dead target's pipes: absent [15118 ms]
+    second=50125
+    second attach finished: attached [16262 ms]
+measure-segv run 2: segv-unwarned-exited-attach-ok
+    target=50130
+    attached; the target floods thread events and will crash (segv) within 0.5 to 3 s [1223 ms]
+    target gone (segv) [3574 ms]
+    stops seen: ProcessExited at 3550 ms [3574 ms]
+    ProcessExited came -24 ms after the target was seen gone [3574 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [14938 ms]
+    the dead target's pipes: absent [14938 ms]
+    second=50671
+    second attach finished: attached [16083 ms]
+measure-segv run 3: segv-unwarned-exited-attach-ok
+    target=50676
+    attached; the target floods thread events and will crash (segv) within 0.5 to 3 s [1215 ms]
+    target gone (segv) [2802 ms]
+    stops seen: ProcessExited at 2977 ms [2977 ms]
+    ProcessExited came 175 ms after the target was seen gone [2978 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [14389 ms]
+    the dead target's pipes: absent [14389 ms]
+    second=50957
+    second attach finished: attached [15457 ms]
+measure-segv run 4: segv-unwarned-exited-attach-ok
+    target=50962
+    attached; the target floods thread events and will crash (segv) within 0.5 to 3 s [1089 ms]
+    target gone (segv) [2644 ms]
+    stops seen: ProcessExited at 2800 ms [2801 ms]
+    ProcessExited came 156 ms after the target was seen gone [2801 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [14171 ms]
+    the dead target's pipes: absent [14172 ms]
+    second=51494
+    second attach finished: attached [15296 ms]
+measure-segv run 5: segv-unwarned-not-exited-orphaned-and-attach-hung
+    target=51499
+    attached; the target floods thread events and will crash (segv) within 0.5 to 3 s [1212 ms]
+    target gone (segv) [3863 ms]
+    stops seen: none [34034 ms]
+    no ProcessExited stop within 30 s of the end [34040 ms]
+    10 s after the end the Win32 event thread is inside a transport request [45482 ms]
+    the dead target's pipes: absent [45483 ms]
+    second=52669
+    second attach still pending after 30 s [76802 ms]
+    second attach still pending 120 s after it began [166813 ms]
+measure-segv run 6: segv-unwarned-exited-attach-ok
+    target=55838
+    attached; the target floods thread events and will crash (segv) within 0.5 to 3 s [1167 ms]
+    target gone (segv) [4169 ms]
+    stops seen: ProcessExited at 4215 ms [4216 ms]
+    ProcessExited came 46 ms after the target was seen gone [4216 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [15609 ms]
+    the dead target's pipes: absent [15610 ms]
+    second=56126
+    second attach finished: attached [16811 ms]
+measure-segv run 7: segv-unwarned-not-exited-orphaned-and-attach-hung
+    target=56140
+    attached; the target floods thread events and will crash (segv) within 0.5 to 3 s [1214 ms]
+    target gone (segv) [3106 ms]
+    stops seen: none [33154 ms]
+    no ProcessExited stop within 30 s of the end [33155 ms]
+    10 s after the end the Win32 event thread is inside a transport request [44766 ms]
+    the dead target's pipes: absent [44767 ms]
+    second=57345
+    second attach still pending after 30 s [75925 ms]
+    second attach still pending 120 s after it began [166010 ms]
+measure-segv run 8: segv-unwarned-exited-attach-ok
+    target=60616
+    attached; the target floods thread events and will crash (segv) within 0.5 to 3 s [1132 ms]
+    target gone (segv) [2080 ms]
+    stops seen: ProcessExited at 2172 ms [2172 ms]
+    ProcessExited came 92 ms after the target was seen gone [2172 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [13635 ms]
+    the dead target's pipes: absent [13637 ms]
+    second=60898
+    second attach finished: attached [14851 ms]
+measure-segv run 9: segv-unwarned-not-exited-orphaned-and-attach-hung
+    target=60903
+    attached; the target floods thread events and will crash (segv) within 0.5 to 3 s [1151 ms]
+    target gone (segv) [2650 ms]
+    stops seen: none [33095 ms]
+    no ProcessExited stop within 30 s of the end [33098 ms]
+    10 s after the end the Win32 event thread is inside a transport request [44590 ms]
+    the dead target's pipes: absent [44591 ms]
+    second=62072
+    second attach still pending after 30 s [75726 ms]
+    second attach still pending 120 s after it began [165890 ms]
+measure-segv run 10: segv-unwarned-exited-attach-ok
+    target=65218
+    attached; the target floods thread events and will crash (segv) within 0.5 to 3 s [1214 ms]
+    target gone (segv) [3575 ms]
+    stops seen: ProcessExited at 3623 ms [3625 ms]
+    ProcessExited came 48 ms after the target was seen gone [3625 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [15003 ms]
+    the dead target's pipes: absent [15004 ms]
+    second=65752
+    second attach finished: attached [16069 ms]
+measure-abort run 1: abort-unwarned-exited-attach-ok
+    target=65757
+    attached; the target floods thread events and will crash (abort) within 0.5 to 3 s [1184 ms]
+    target gone (abort) [4004 ms]
+    stops seen: ProcessExited at 3861 ms [4004 ms]
+    ProcessExited came -143 ms after the target was seen gone [4004 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [15237 ms]
+    the dead target's pipes: absent [15238 ms]
+    second=66041
+    second attach finished: attached [16353 ms]
+measure-abort run 2: abort-unwarned-exited-attach-ok
+    target=66048
+    attached; the target floods thread events and will crash (abort) within 0.5 to 3 s [1175 ms]
+    target gone (abort) [3979 ms]
+    stops seen: ProcessExited at 4066 ms [4066 ms]
+    ProcessExited came 87 ms after the target was seen gone [4066 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [15424 ms]
+    the dead target's pipes: absent [15425 ms]
+    second=66586
+    second attach finished: attached [16508 ms]
+measure-abort run 3: abort-unwarned-exited-attach-ok
+    target=66592
+    attached; the target floods thread events and will crash (abort) within 0.5 to 3 s [1123 ms]
+    target gone (abort) [4148 ms]
+    stops seen: ProcessExited at 4224 ms [4224 ms]
+    ProcessExited came 76 ms after the target was seen gone [4224 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [15529 ms]
+    the dead target's pipes: absent [15529 ms]
+    second=66950
+    second attach finished: attached [16573 ms]
+measure-abort run 4: abort-unwarned-exited-attach-ok
+    target=66955
+    attached; the target floods thread events and will crash (abort) within 0.5 to 3 s [1091 ms]
+    target gone (abort) [4115 ms]
+    stops seen: ProcessExited at 4159 ms [4159 ms]
+    ProcessExited came 44 ms after the target was seen gone [4159 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [15523 ms]
+    the dead target's pipes: absent [15524 ms]
+    second=67497
+    second attach finished: attached [16710 ms]
+measure-abort run 5: abort-unwarned-exited-attach-ok
+    target=67504
+    attached; the target floods thread events and will crash (abort) within 0.5 to 3 s [1096 ms]
+    target gone (abort) [4098 ms]
+    stops seen: ProcessExited at 4190 ms [4191 ms]
+    ProcessExited came 92 ms after the target was seen gone [4191 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [15438 ms]
+    the dead target's pipes: absent [15438 ms]
+    second=67787
+    second attach finished: attached [16563 ms]
+measure-abort run 6: abort-unwarned-exited-attach-ok
+    target=68033
+    attached; the target floods thread events and will crash (abort) within 0.5 to 3 s [1114 ms]
+    target gone (abort) [2327 ms]
+    stops seen: ProcessExited at 2373 ms [2373 ms]
+    ProcessExited came 46 ms after the target was seen gone [2373 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [13752 ms]
+    the dead target's pipes: absent [13753 ms]
+    second=68319
+    second attach finished: attached [14942 ms]
+measure-abort run 7: abort-unwarned-not-exited-orphaned-and-attach-hung
+    target=68326
+    attached; the target floods thread events and will crash (abort) within 0.5 to 3 s [1147 ms]
+    target gone (abort) [2967 ms]
+    stops seen: none [33178 ms]
+    no ProcessExited stop within 30 s of the end [33181 ms]
+    10 s after the end the Win32 event thread is inside a transport request [44622 ms]
+    the dead target's pipes: absent [44622 ms]
+    second=69492
+    second attach still pending after 30 s [75908 ms]
+    second attach still pending 120 s after it began [166077 ms]
+measure-abort run 8: abort-unwarned-not-exited-attach-ok
+    target=72636
+    attached; the target floods thread events and will crash (abort) within 0.5 to 3 s [1167 ms]
+    target gone (abort) [3147 ms]
+    stops seen: none [33269 ms]
+    no ProcessExited stop within 30 s of the end [33270 ms]
+    10 s after the end the Win32 event thread is inside a transport request [44691 ms]
+    the dead target's pipes: absent [44691 ms]
+    second=73728
+    second attach finished: attached [45908 ms]
+measure-abort run 9: abort-unwarned-not-exited-orphaned-and-attach-hung
+    target=73758
+    attached; the target floods thread events and will crash (abort) within 0.5 to 3 s [1160 ms]
+    target gone (abort) [2423 ms]
+    stops seen: none [32621 ms]
+    no ProcessExited stop within 30 s of the end [32621 ms]
+    10 s after the end the Win32 event thread is inside a transport request [44037 ms]
+    the dead target's pipes: absent [44038 ms]
+    second=75147
+    second attach still pending after 30 s [75138 ms]
+    second attach still pending 120 s after it began [165181 ms]
+measure-abort run 10: abort-unwarned-exited-attach-ok
+    target=78290
+    attached; the target floods thread events and will crash (abort) within 0.5 to 3 s [1197 ms]
+    target gone (abort) [2662 ms]
+    stops seen: ProcessExited at 2734 ms [2734 ms]
+    ProcessExited came 72 ms after the target was seen gone [2734 ms]
+    10 s after the end the Win32 event thread is not inside a transport request [13966 ms]
+    the dead target's pipes: absent [13966 ms]
+    second=78569
+    second attach finished: attached [15144 ms]
+flood-sync-kill sync-kill-attach-ok: 10; flood-crash-kill crash-kill-attach-ok: 10; flood-crash-detach crash-detach-attach-ok: 10; flood-stackoverflow-kill stackoverflow-kill-attach-ok: 10; flood-stackoverflow-detach stackoverflow-detach-attach-ok: 10; measure-crash crash-warned-exited-attach-ok: 5; measure-crash crash-warned-not-exited-orphaned-and-attach-hung: 4; measure-crash crash-warned-not-exited-attach-ok: 1; measure-stackoverflow stackoverflow-warned-exited-attach-ok: 9; measure-stackoverflow stackoverflow-warned-not-exited-orphaned-and-attach-hung: 1; measure-segv segv-unwarned-exited-attach-ok: 7; measure-segv segv-unwarned-not-exited-orphaned-and-attach-hung: 3; measure-abort abort-unwarned-exited-attach-ok: 7; measure-abort abort-unwarned-not-exited-orphaned-and-attach-hung: 2; measure-abort abort-unwarned-not-exited-attach-ok: 1
+flood-sync-kill: predicted sync-kill-attach-ok every run: holds over 10 runs
+flood-crash-kill: predicted crash-kill-attach-ok every run: holds over 10 runs
+flood-crash-detach: predicted crash-detach-attach-ok every run: holds over 10 runs
+flood-stackoverflow-kill: predicted stackoverflow-kill-attach-ok every run: holds over 10 runs
+flood-stackoverflow-detach: predicted stackoverflow-detach-attach-ok every run: holds over 10 runs
+measure-crash: predicted no run both had a ProcessExited stop and a hung second attach, and no second attach finished late: holds over 10 runs
+measure-stackoverflow: predicted no run both had a ProcessExited stop and a hung second attach, and no second attach finished late: holds over 10 runs
+measure-segv: predicted no run both had a ProcessExited stop and a hung second attach, and no second attach finished late: holds over 10 runs
+measure-abort: predicted no run both had a ProcessExited stop and a hung second attach, and no second attach finished late: holds over 10 runs
+RESULT(0): confirmed — every mode run gave its predicted outcome every time (see the header for each hypothesis)

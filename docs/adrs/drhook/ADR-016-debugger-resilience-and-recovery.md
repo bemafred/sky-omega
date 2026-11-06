@@ -589,6 +589,16 @@ omega, omega-ubuntu with both builds, omega-windows; 10 runs per mode).
   (zbook, and omega-ubuntu checked by sky-omega). With the pipe dump skipped the target died in 8 to 23 ms, and
   `abort()` still hung 1 of 5. Not a factor in the hang.
 
+*The six CI runners, run 2026-11-06* (finding 104; run 42248605917 at `63a26b2`, nine modes, 10 runs each).
+- Ending the session at the stop was clean on every runner, 239 of 239 runs with a stop; a kill after a Pause, 60 of
+  60.
+- Continued crashes hung the debugger on all four macOS and Linux runners (40 of 160) and on neither Windows runner
+  (0 of 80). No second attach that missed 30 s finished within 120 s.
+- `ProcessExited` came within 175 ms of the end or not within 30 s. Its absence went with a stuck event thread in all
+  22 macOS runs that lacked it, and with a blocked next attach in 20 of them: it marks the session's debugger as lost,
+  not always the process as poisoned.
+- On Windows x64 a stack overflow gave no stop in 2 of 30 runs (no harm there).
+
 Not yet run: a `DebuggerError`, a target DrHook launched, and whether a bounded operation completes later.
 
 **Step 5 — A minimal process-isolation proof of concept.** The worker is decided (2026-11-06); this step proves its

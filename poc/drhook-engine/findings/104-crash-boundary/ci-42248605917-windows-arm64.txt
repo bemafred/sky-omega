@@ -1,0 +1,1023 @@
+##[group]Run set -o pipefail
+set -o pipefail
+modes="flood-sync-kill flood-crash-kill flood-crash-detach flood-stackoverflow-kill flood-stackoverflow-detach"
+modes="$modes measure-crash measure-stackoverflow measure-segv measure-abort"
+dotnet run --no-cache 100-orphaned-read-smoke.cs 10 $modes 2>&1 | tee "probe-$PROBE-$FILE.txt"
+shell: C:\Program Files\Git\bin\bash.EXE --noprofile --norc -e -o pipefail {0}
+env:
+  PROBE: 100-crash-boundary
+  FILE: windows-arm64
+  DOTNET_ROOT: C:\Program Files\dotnet
+##[endgroup]
+platform: Microsoft Windows 10.0.26200 Arm64
+flood-sync-kill run 1: sync-kill-attach-ok
+    target=7796
+    attached; the target floods thread events [1283 ms]
+    stop: Pause [2298 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [2298 ms]
+    target killed (TerminateProcess) while synchronized [2312 ms]
+    target gone [2316 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [12321 ms]
+    the dead target's pipes: none on Windows (no debug transport) [12321 ms]
+    second=36324
+    second attach finished: attached [13341 ms]
+flood-sync-kill run 2: sync-kill-attach-ok
+    target=36448
+    attached; the target floods thread events [1064 ms]
+    stop: Pause [2070 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [2070 ms]
+    target killed (TerminateProcess) while synchronized [2080 ms]
+    target gone [2084 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [12090 ms]
+    the dead target's pipes: none on Windows (no debug transport) [12091 ms]
+    second=31592
+    second attach finished: attached [13110 ms]
+flood-sync-kill run 3: sync-kill-attach-ok
+    target=31780
+    attached; the target floods thread events [1086 ms]
+    stop: Pause [2088 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [2088 ms]
+    target killed (TerminateProcess) while synchronized [2100 ms]
+    target gone [2104 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [12107 ms]
+    the dead target's pipes: none on Windows (no debug transport) [12107 ms]
+    second=26592
+    second attach finished: attached [13124 ms]
+flood-sync-kill run 4: sync-kill-attach-ok
+    target=26712
+    attached; the target floods thread events [1074 ms]
+    stop: Pause [2077 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [2077 ms]
+    target killed (TerminateProcess) while synchronized [2089 ms]
+    target gone [2093 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [12102 ms]
+    the dead target's pipes: none on Windows (no debug transport) [12102 ms]
+    second=25064
+    second attach finished: attached [13123 ms]
+flood-sync-kill run 5: sync-kill-attach-ok
+    target=25256
+    attached; the target floods thread events [1063 ms]
+    stop: Pause [2067 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [2067 ms]
+    target killed (TerminateProcess) while synchronized [2078 ms]
+    target gone [2082 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [12091 ms]
+    the dead target's pipes: none on Windows (no debug transport) [12091 ms]
+    second=19488
+    second attach finished: attached [13115 ms]
+flood-sync-kill run 6: sync-kill-attach-ok
+    target=19624
+    attached; the target floods thread events [1070 ms]
+    stop: Pause [2076 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [2076 ms]
+    target killed (TerminateProcess) while synchronized [2088 ms]
+    target gone [2092 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [12106 ms]
+    the dead target's pipes: none on Windows (no debug transport) [12106 ms]
+    second=16876
+    second attach finished: attached [13124 ms]
+flood-sync-kill run 7: sync-kill-attach-ok
+    target=17212
+    attached; the target floods thread events [1078 ms]
+    stop: Pause [2081 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [2081 ms]
+    target killed (TerminateProcess) while synchronized [2093 ms]
+    target gone [2097 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [12108 ms]
+    the dead target's pipes: none on Windows (no debug transport) [12108 ms]
+    second=3824
+    second attach finished: attached [13131 ms]
+flood-sync-kill run 8: sync-kill-attach-ok
+    target=11288
+    attached; the target floods thread events [1067 ms]
+    stop: Pause [2072 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [2072 ms]
+    target killed (TerminateProcess) while synchronized [2083 ms]
+    target gone [2087 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [12096 ms]
+    the dead target's pipes: none on Windows (no debug transport) [12096 ms]
+    second=36692
+    second attach finished: attached [13117 ms]
+flood-sync-kill run 9: sync-kill-attach-ok
+    target=36808
+    attached; the target floods thread events [1069 ms]
+    stop: Pause [2075 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [2075 ms]
+    target killed (TerminateProcess) while synchronized [2086 ms]
+    target gone [2090 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [12095 ms]
+    the dead target's pipes: none on Windows (no debug transport) [12095 ms]
+    second=31872
+    second attach finished: attached [13116 ms]
+flood-sync-kill run 10: sync-kill-attach-ok
+    target=31852
+    attached; the target floods thread events [1054 ms]
+    stop: Pause [2060 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [2060 ms]
+    target killed (TerminateProcess) while synchronized [2072 ms]
+    target gone [2076 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [12089 ms]
+    the dead target's pipes: none on Windows (no debug transport) [12089 ms]
+    second=1452
+    second attach finished: attached [13109 ms]
+flood-crash-kill run 1: crash-kill-attach-ok
+    target=31716
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1063 ms]
+    stops seen: Exception(Unhandled) [3392 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [3419 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [3419 ms]
+    target killed (TerminateProcess) at the unhandled-exception stop [3431 ms]
+    target gone [3435 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [13441 ms]
+    the dead target's pipes: none on Windows (no debug transport) [13441 ms]
+    second=4432
+    second attach finished: attached [14459 ms]
+flood-crash-kill run 2: crash-kill-attach-ok
+    target=31384
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1070 ms]
+    stops seen: Exception(Unhandled) [2859 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [2863 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [2863 ms]
+    target killed (TerminateProcess) at the unhandled-exception stop [2875 ms]
+    target gone [2878 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [12886 ms]
+    the dead target's pipes: none on Windows (no debug transport) [12886 ms]
+    second=21564
+    second attach finished: attached [13909 ms]
+flood-crash-kill run 3: crash-kill-attach-ok
+    target=21680
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1067 ms]
+    stops seen: Exception(Unhandled) [4678 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [4682 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [4682 ms]
+    target killed (TerminateProcess) at the unhandled-exception stop [4697 ms]
+    target gone [4701 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [14705 ms]
+    the dead target's pipes: none on Windows (no debug transport) [14705 ms]
+    second=40616
+    second attach finished: attached [15726 ms]
+flood-crash-kill run 4: crash-kill-attach-ok
+    target=40732
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1068 ms]
+    stops seen: Exception(Unhandled) [4715 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [4718 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [4718 ms]
+    target killed (TerminateProcess) at the unhandled-exception stop [4732 ms]
+    target gone [4736 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [14737 ms]
+    the dead target's pipes: none on Windows (no debug transport) [14737 ms]
+    second=38020
+    second attach finished: attached [15758 ms]
+flood-crash-kill run 5: crash-kill-attach-ok
+    target=38136
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1068 ms]
+    stops seen: Exception(Unhandled) [4731 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [4735 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [4735 ms]
+    target killed (TerminateProcess) at the unhandled-exception stop [4750 ms]
+    target gone [4754 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [14757 ms]
+    the dead target's pipes: none on Windows (no debug transport) [14757 ms]
+    second=21328
+    second attach finished: attached [15776 ms]
+flood-crash-kill run 6: crash-kill-attach-ok
+    target=19472
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1068 ms]
+    stops seen: Exception(Unhandled) [2436 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [2439 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [2439 ms]
+    target killed (TerminateProcess) at the unhandled-exception stop [2451 ms]
+    target gone [2455 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [12466 ms]
+    the dead target's pipes: none on Windows (no debug transport) [12466 ms]
+    second=11852
+    second attach finished: attached [13486 ms]
+flood-crash-kill run 7: crash-kill-attach-ok
+    target=11976
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1068 ms]
+    stops seen: Exception(Unhandled) [2340 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [2343 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [2343 ms]
+    target killed (TerminateProcess) at the unhandled-exception stop [2355 ms]
+    target gone [2359 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [12365 ms]
+    the dead target's pipes: none on Windows (no debug transport) [12365 ms]
+    second=33544
+    second attach finished: attached [13385 ms]
+flood-crash-kill run 8: crash-kill-attach-ok
+    target=33680
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1068 ms]
+    stops seen: Exception(Unhandled) [2831 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [2834 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [2834 ms]
+    target killed (TerminateProcess) at the unhandled-exception stop [2846 ms]
+    target gone [2850 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [12851 ms]
+    the dead target's pipes: none on Windows (no debug transport) [12851 ms]
+    second=27332
+    second attach finished: attached [13874 ms]
+flood-crash-kill run 9: crash-kill-attach-ok
+    target=27476
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1068 ms]
+    stops seen: Exception(Unhandled) [4146 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [4150 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [4150 ms]
+    target killed (TerminateProcess) at the unhandled-exception stop [4163 ms]
+    target gone [4167 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [14184 ms]
+    the dead target's pipes: none on Windows (no debug transport) [14184 ms]
+    second=23304
+    second attach finished: attached [15206 ms]
+flood-crash-kill run 10: crash-kill-attach-ok
+    target=23424
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1068 ms]
+    stops seen: Exception(Unhandled) [1994 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [1997 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [1997 ms]
+    target killed (TerminateProcess) at the unhandled-exception stop [2009 ms]
+    target gone [2013 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [12018 ms]
+    the dead target's pipes: none on Windows (no debug transport) [12018 ms]
+    second=36220
+    second attach finished: attached [13039 ms]
+flood-crash-detach run 1: crash-detach-attach-ok
+    target=25208
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1068 ms]
+    stops seen: Exception(Unhandled) [3062 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [3065 ms]
+    detached at the unhandled-exception stop [3067 ms]
+    target gone, no debugger attached [3522 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [13527 ms]
+    the dead target's pipes: none on Windows (no debug transport) [13527 ms]
+    second=16852
+    second attach finished: attached [14552 ms]
+flood-crash-detach run 2: crash-detach-attach-ok
+    target=17104
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1067 ms]
+    stops seen: Exception(Unhandled) [4259 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [4262 ms]
+    detached at the unhandled-exception stop [4264 ms]
+    target gone, no debugger attached [4351 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [14366 ms]
+    the dead target's pipes: none on Windows (no debug transport) [14366 ms]
+    second=14612
+    second attach finished: attached [15384 ms]
+flood-crash-detach run 3: crash-detach-attach-ok
+    target=14744
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1066 ms]
+    stops seen: Exception(Unhandled) [2780 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [2783 ms]
+    detached at the unhandled-exception stop [2785 ms]
+    target gone, no debugger attached [2867 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [12877 ms]
+    the dead target's pipes: none on Windows (no debug transport) [12877 ms]
+    second=36612
+    second attach finished: attached [13898 ms]
+flood-crash-detach run 4: crash-detach-attach-ok
+    target=1572
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1061 ms]
+    stops seen: Exception(Unhandled) [3734 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [3738 ms]
+    detached at the unhandled-exception stop [3739 ms]
+    target gone, no debugger attached [3824 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [13836 ms]
+    the dead target's pipes: none on Windows (no debug transport) [13836 ms]
+    second=19104
+    second attach finished: attached [14857 ms]
+flood-crash-detach run 5: crash-detach-attach-ok
+    target=10004
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1068 ms]
+    stops seen: Exception(Unhandled) [3441 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [3444 ms]
+    detached at the unhandled-exception stop [3446 ms]
+    target gone, no debugger attached [3529 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [13536 ms]
+    the dead target's pipes: none on Windows (no debug transport) [13536 ms]
+    second=28616
+    second attach finished: attached [14559 ms]
+flood-crash-detach run 6: crash-detach-attach-ok
+    target=28764
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1067 ms]
+    stops seen: Exception(Unhandled) [3219 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [3223 ms]
+    detached at the unhandled-exception stop [3225 ms]
+    target gone, no debugger attached [3309 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [13313 ms]
+    the dead target's pipes: none on Windows (no debug transport) [13313 ms]
+    second=22992
+    second attach finished: attached [14332 ms]
+flood-crash-detach run 7: crash-detach-attach-ok
+    target=23112
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1067 ms]
+    stops seen: Exception(Unhandled) [1821 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [1824 ms]
+    detached at the unhandled-exception stop [1826 ms]
+    target gone, no debugger attached [1908 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [11914 ms]
+    the dead target's pipes: none on Windows (no debug transport) [11914 ms]
+    second=23708
+    second attach finished: attached [12937 ms]
+flood-crash-detach run 8: crash-detach-attach-ok
+    target=5308
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1068 ms]
+    stops seen: Exception(Unhandled) [4325 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [4328 ms]
+    detached at the unhandled-exception stop [4330 ms]
+    target gone, no debugger attached [4415 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [14421 ms]
+    the dead target's pipes: none on Windows (no debug transport) [14421 ms]
+    second=13164
+    second attach finished: attached [15444 ms]
+flood-crash-detach run 9: crash-detach-attach-ok
+    target=13292
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1066 ms]
+    stops seen: Exception(Unhandled) [4935 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [4938 ms]
+    detached at the unhandled-exception stop [4940 ms]
+    target gone, no debugger attached [5025 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [15040 ms]
+    the dead target's pipes: none on Windows (no debug transport) [15040 ms]
+    second=2188
+    second attach finished: attached [16059 ms]
+flood-crash-detach run 10: crash-detach-attach-ok
+    target=10336
+    attached; the target floods thread events and will call FailFast within 0.5 to 3 s [1070 ms]
+    stops seen: Exception(Unhandled) [4102 ms]
+    at the unhandled-exception stop; exception type: System.ExecutionEngineException [4106 ms]
+    detached at the unhandled-exception stop [4107 ms]
+    target gone, no debugger attached [4193 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [14208 ms]
+    the dead target's pipes: none on Windows (no debug transport) [14208 ms]
+    second=23272
+    second attach finished: attached [15228 ms]
+flood-stackoverflow-kill run 1: stackoverflow-kill-attach-ok
+    target=11312
+    attached; the target floods thread events and will overflow its stack within 0.5 to 3 s [1073 ms]
+    stops seen: Exception(Unhandled) [4062 ms]
+    at the unhandled-exception stop; exception type: System.StackOverflowException [4065 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [4065 ms]
+    target killed (TerminateProcess) at the unhandled-exception stop [4080 ms]
+    target gone [4084 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [14086 ms]
+    the dead target's pipes: none on Windows (no debug transport) [14086 ms]
+    second=32344
+    second attach finished: attached [15107 ms]
+flood-stackoverflow-kill run 2: stackoverflow-kill-attach-ok
+    target=32480
+    attached; the target floods thread events and will overflow its stack within 0.5 to 3 s [1067 ms]
+    stops seen: Exception(Unhandled) [3978 ms]
+    at the unhandled-exception stop; exception type: System.StackOverflowException [3981 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [3981 ms]
+    target killed (TerminateProcess) at the unhandled-exception stop [3996 ms]
+    target gone [4000 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [14015 ms]
+    the dead target's pipes: none on Windows (no debug transport) [14015 ms]
+    second=29800
+    second attach finished: attached [15036 ms]
+flood-stackoverflow-kill run 3: stackoverflow-kill-attach-ok
+    target=29916
+    attached; the target floods thread events and will overflow its stack within 0.5 to 3 s [1066 ms]
+    stops seen: Exception(Unhandled) [3929 ms]
+    at the unhandled-exception stop; exception type: System.StackOverflowException [3932 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [3932 ms]
+    target killed (TerminateProcess) at the unhandled-exception stop [3946 ms]
+    target gone [3950 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [13960 ms]
+    the dead target's pipes: none on Windows (no debug transport) [13961 ms]
+    second=25460
+    second attach finished: attached [14982 ms]
+flood-stackoverflow-kill run 4: stackoverflow-kill-attach-ok
+    target=25572
+    attached; the target floods thread events and will overflow its stack within 0.5 to 3 s [1068 ms]
+    stops seen: Exception(Unhandled) [3161 ms]
+    at the unhandled-exception stop; exception type: System.StackOverflowException [3165 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [3165 ms]
+    target killed (TerminateProcess) at the unhandled-exception stop [3178 ms]
+    target gone [3182 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [13187 ms]
+    the dead target's pipes: none on Windows (no debug transport) [13188 ms]
+    second=2344
+    second attach finished: attached [14207 ms]
+flood-stackoverflow-kill run 5: stackoverflow-kill-attach-ok
+    target=38212
+    attached; the target floods thread events and will overflow its stack within 0.5 to 3 s [1070 ms]
+    stops seen: Exception(Unhandled) [3350 ms]
+    at the unhandled-exception stop; exception type: System.StackOverflowException [3354 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [3354 ms]
+    target killed (TerminateProcess) at the unhandled-exception stop [3367 ms]
+    target gone [3371 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [13386 ms]
+    the dead target's pipes: none on Windows (no debug transport) [13386 ms]
+    second=17560
+    second attach finished: attached [14407 ms]
+flood-stackoverflow-kill run 6: stackoverflow-kill-attach-ok
+    target=17672
+    attached; the target floods thread events and will overflow its stack within 0.5 to 3 s [1054 ms]
+    stops seen: Exception(Unhandled) [3603 ms]
+    at the unhandled-exception stop; exception type: System.StackOverflowException [3606 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [3606 ms]
+    target killed (TerminateProcess) at the unhandled-exception stop [3619 ms]
+    target gone [3623 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [13633 ms]
+    the dead target's pipes: none on Windows (no debug transport) [13633 ms]
+    second=11828
+    second attach finished: attached [14652 ms]
+flood-stackoverflow-kill run 7: stackoverflow-kill-attach-ok
+    target=22560
+    attached; the target floods thread events and will overflow its stack within 0.5 to 3 s [1067 ms]
+    stops seen: Exception(Unhandled) [2812 ms]
+    at the unhandled-exception stop; exception type: System.StackOverflowException [2815 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [2815 ms]
+    target killed (TerminateProcess) at the unhandled-exception stop [2827 ms]
+    target gone [2831 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [12835 ms]
+    the dead target's pipes: none on Windows (no debug transport) [12835 ms]
+    second=34868
+    second attach finished: attached [13859 ms]
+flood-stackoverflow-kill run 8: stackoverflow-kill-attach-ok
+    target=34996
+    attached; the target floods thread events and will overflow its stack within 0.5 to 3 s [1056 ms]
+    stops seen: Exception(Unhandled) [4897 ms]
+    at the unhandled-exception stop; exception type: System.StackOverflowException [4900 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [4900 ms]
+    target killed (TerminateProcess) at the unhandled-exception stop [4915 ms]
+    target gone [4919 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [14925 ms]
+    the dead target's pipes: none on Windows (no debug transport) [14925 ms]
+    second=33780
+    second attach finished: attached [15946 ms]
+flood-stackoverflow-kill run 9: stackoverflow-kill-attach-ok
+    target=33936
+    attached; the target floods thread events and will overflow its stack within 0.5 to 3 s [1068 ms]
+    stops seen: Exception(Unhandled) [1810 ms]
+    at the unhandled-exception stop; exception type: System.StackOverflowException [1814 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [1814 ms]
+    target killed (TerminateProcess) at the unhandled-exception stop [1824 ms]
+    target gone [1828 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [11834 ms]
+    the dead target's pipes: none on Windows (no debug transport) [11834 ms]
+    second=24892
+    second attach finished: attached [12857 ms]
+flood-stackoverflow-kill run 10: stackoverflow-kill-attach-ok
+    target=7676
+    attached; the target floods thread events and will overflow its stack within 0.5 to 3 s [1068 ms]
+    stops seen: Exception(Unhandled) [1779 ms]
+    at the unhandled-exception stop; exception type: System.StackOverflowException [1782 ms]
+    the Win32 event thread's state before the kill: not checked (macOS only) [1782 ms]
+    target killed (TerminateProcess) at the unhandled-exception stop [1793 ms]
+    target gone [1797 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [11798 ms]
+    the dead target's pipes: none on Windows (no debug transport) [11798 ms]
+    second=16956
+    second attach finished: attached [12818 ms]
+flood-stackoverflow-detach run 1: stackoverflow-detach-attach-ok
+    target=3528
+    attached; the target floods thread events and will overflow its stack within 0.5 to 3 s [1066 ms]
+    stops seen: Exception(Unhandled) [4745 ms]
+    at the unhandled-exception stop; exception type: System.StackOverflowException [4749 ms]
+    detached at the unhandled-exception stop [4751 ms]
+    target gone, no debugger attached [4754 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [14760 ms]
+    the dead target's pipes: none on Windows (no debug transport) [14760 ms]
+    second=27204
+    second attach finished: attached [15780 ms]
+flood-stackoverflow-detach run 2: stackoverflow-detach-attach-ok
+    target=17032
+    attached; the target floods thread events and will overflow its stack within 0.5 to 3 s [1070 ms]
+    stops seen: Exception(Unhandled) [2030 ms]
+    at the unhandled-exception stop; exception type: System.StackOverflowException [2033 ms]
+    detached at the unhandled-exception stop [2035 ms]
+    target gone, no debugger attached [2038 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [12046 ms]
+    the dead target's pipes: none on Windows (no debug transport) [12046 ms]
+    second=35168
+    second attach finished: attached [13066 ms]
+flood-stackoverflow-detach run 3: stackoverflow-detach-attach-ok
+    target=35420
+    attached; the target floods thread events and will overflow its stack within 0.5 to 3 s [1063 ms]
+    stops seen: Exception(Unhandled) [3612 ms]
+    at the unhandled-exception stop; exception type: System.StackOverflowException [3615 ms]
+    detached at the unhandled-exception stop [3618 ms]
+    target gone, no debugger attached [3622 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [13632 ms]
+    the dead target's pipes: none on Windows (no debug transport) [13632 ms]
+    second=30384
+    second attach finished: attached [14651 ms]
+flood-stackoverflow-detach run 4: stackoverflow-detach-attach-ok
+    target=30492
+    attached; the target floods thread events and will overflow its stack within 0.5 to 3 s [1054 ms]
+    stops seen: Exception(Unhandled) [4595 ms]
+    at the unhandled-exception stop; exception type: System.StackOverflowException [4598 ms]
+    detached at the unhandled-exception stop [4600 ms]
+    target gone, no debugger attached [4604 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [14611 ms]
+    the dead target's pipes: none on Windows (no debug transport) [14611 ms]
+    second=27092
+    second attach finished: attached [15630 ms]
+flood-stackoverflow-detach run 5: stackoverflow-detach-attach-ok
+    target=23620
+    attached; the target floods thread events and will overflow its stack within 0.5 to 3 s [1068 ms]
+    stops seen: Exception(Unhandled) [3240 ms]
+    at the unhandled-exception stop; exception type: System.StackOverflowException [3244 ms]
+    detached at the unhandled-exception stop [3246 ms]
+    target gone, no debugger attached [3250 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [13254 ms]
+    the dead target's pipes: none on Windows (no debug transport) [13254 ms]
+    second=40828
+    second attach finished: attached [14276 ms]
+flood-stackoverflow-detach run 6: stackoverflow-detach-attach-ok
+    target=40956
+    attached; the target floods thread events and will overflow its stack within 0.5 to 3 s [1068 ms]
+    stops seen: Exception(Unhandled) [3569 ms]
+    at the unhandled-exception stop; exception type: System.StackOverflowException [3572 ms]
+    detached at the unhandled-exception stop [3574 ms]
+    target gone, no debugger attached [3578 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [13591 ms]
+    the dead target's pipes: none on Windows (no debug transport) [13591 ms]
+    second=21148
+    second attach finished: attached [14613 ms]
+flood-stackoverflow-detach run 7: stackoverflow-detach-attach-ok
+    target=6708
+    attached; the target floods thread events and will overflow its stack within 0.5 to 3 s [1068 ms]
+    stops seen: Exception(Unhandled) [4163 ms]
+    at the unhandled-exception stop; exception type: System.StackOverflowException [4166 ms]
+    detached at the unhandled-exception stop [4168 ms]
+    target gone, no debugger attached [4172 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [14175 ms]
+    the dead target's pipes: none on Windows (no debug transport) [14175 ms]
+    second=11752
+    second attach finished: attached [15193 ms]
+flood-stackoverflow-detach run 8: stackoverflow-detach-attach-ok
+    target=2836
+    attached; the target floods thread events and will overflow its stack within 0.5 to 3 s [1068 ms]
+    stops seen: Exception(Unhandled) [2878 ms]
+    at the unhandled-exception stop; exception type: System.StackOverflowException [2881 ms]
+    detached at the unhandled-exception stop [2883 ms]
+    target gone, no debugger attached [2887 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [12890 ms]
+    the dead target's pipes: none on Windows (no debug transport) [12890 ms]
+    second=6900
+    second attach finished: attached [13911 ms]
+flood-stackoverflow-detach run 9: stackoverflow-detach-attach-ok
+    target=11340
+    attached; the target floods thread events and will overflow its stack within 0.5 to 3 s [1070 ms]
+    stops seen: Exception(Unhandled) [3037 ms]
+    at the unhandled-exception stop; exception type: System.StackOverflowException [3040 ms]
+    detached at the unhandled-exception stop [3042 ms]
+    target gone, no debugger attached [3046 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [13049 ms]
+    the dead target's pipes: none on Windows (no debug transport) [13049 ms]
+    second=34944
+    second attach finished: attached [14069 ms]
+flood-stackoverflow-detach run 10: stackoverflow-detach-attach-ok
+    target=4872
+    attached; the target floods thread events and will overflow its stack within 0.5 to 3 s [1067 ms]
+    stops seen: Exception(Unhandled) [4325 ms]
+    at the unhandled-exception stop; exception type: System.StackOverflowException [4328 ms]
+    detached at the unhandled-exception stop [4330 ms]
+    target gone, no debugger attached [4334 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [14342 ms]
+    the dead target's pipes: none on Windows (no debug transport) [14342 ms]
+    second=1288
+    second attach finished: attached [15364 ms]
+measure-crash run 1: crash-warned-exited-attach-ok
+    target=36696
+    attached; the target floods thread events and will crash (crash) within 0.5 to 3 s [1063 ms]
+    target gone (crash) [4878 ms]
+    stops seen: Exception(Unhandled, System.ExecutionEngineException) at 4853 ms, ProcessExited at 4884 ms [4884 ms]
+    from continuing the unhandled-exception stop to the target seen gone: 19 ms [4884 ms]
+    ProcessExited came 6 ms after the target was seen gone [4884 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [14897 ms]
+    the dead target's pipes: none on Windows (no debug transport) [14897 ms]
+    second=30964
+    second attach finished: attached [15917 ms]
+measure-crash run 2: crash-warned-exited-attach-ok
+    target=31084
+    attached; the target floods thread events and will crash (crash) within 0.5 to 3 s [1070 ms]
+    target gone (crash) [3277 ms]
+    stops seen: Exception(Unhandled, System.ExecutionEngineException) at 3255 ms, ProcessExited at 3286 ms [3286 ms]
+    from continuing the unhandled-exception stop to the target seen gone: 17 ms [3286 ms]
+    ProcessExited came 9 ms after the target was seen gone [3286 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [13287 ms]
+    the dead target's pipes: none on Windows (no debug transport) [13287 ms]
+    second=18632
+    second attach finished: attached [14307 ms]
+measure-crash run 3: crash-warned-exited-attach-ok
+    target=4012
+    attached; the target floods thread events and will crash (crash) within 0.5 to 3 s [1067 ms]
+    target gone (crash) [3603 ms]
+    stops seen: Exception(Unhandled, System.ExecutionEngineException) at 3580 ms, ProcessExited at 3611 ms [3612 ms]
+    from continuing the unhandled-exception stop to the target seen gone: 17 ms [3612 ms]
+    ProcessExited came 8 ms after the target was seen gone [3612 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [13616 ms]
+    the dead target's pipes: none on Windows (no debug transport) [13616 ms]
+    second=38252
+    second attach finished: attached [14635 ms]
+measure-crash run 4: crash-warned-exited-attach-ok
+    target=38360
+    attached; the target floods thread events and will crash (crash) within 0.5 to 3 s [1055 ms]
+    target gone (crash) [3074 ms]
+    stops seen: Exception(Unhandled, System.ExecutionEngineException) at 3051 ms, ProcessExited at 3082 ms [3083 ms]
+    from continuing the unhandled-exception stop to the target seen gone: 17 ms [3083 ms]
+    ProcessExited came 8 ms after the target was seen gone [3083 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [13085 ms]
+    the dead target's pipes: none on Windows (no debug transport) [13085 ms]
+    second=25716
+    second attach finished: attached [14107 ms]
+measure-crash run 5: crash-warned-exited-attach-ok
+    target=11720
+    attached; the target floods thread events and will crash (crash) within 0.5 to 3 s [1069 ms]
+    target gone (crash) [4170 ms]
+    stops seen: Exception(Unhandled, System.ExecutionEngineException) at 4148 ms, ProcessExited at 4179 ms [4179 ms]
+    from continuing the unhandled-exception stop to the target seen gone: 17 ms [4179 ms]
+    ProcessExited came 9 ms after the target was seen gone [4179 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [14186 ms]
+    the dead target's pipes: none on Windows (no debug transport) [14186 ms]
+    second=12788
+    second attach finished: attached [15206 ms]
+measure-crash run 6: crash-warned-exited-attach-ok
+    target=12924
+    attached; the target floods thread events and will crash (crash) within 0.5 to 3 s [1068 ms]
+    target gone (crash) [1792 ms]
+    stops seen: Exception(Unhandled, System.ExecutionEngineException) at 1772 ms, ProcessExited at 1804 ms [1804 ms]
+    from continuing the unhandled-exception stop to the target seen gone: 14 ms [1804 ms]
+    ProcessExited came 12 ms after the target was seen gone [1804 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [11810 ms]
+    the dead target's pipes: none on Windows (no debug transport) [11810 ms]
+    second=20956
+    second attach finished: attached [12829 ms]
+measure-crash run 7: crash-warned-exited-attach-ok
+    target=19244
+    attached; the target floods thread events and will crash (crash) within 0.5 to 3 s [1066 ms]
+    target gone (crash) [3842 ms]
+    stops seen: Exception(Unhandled, System.ExecutionEngineException) at 3818 ms, ProcessExited at 3850 ms [3850 ms]
+    from continuing the unhandled-exception stop to the target seen gone: 18 ms [3850 ms]
+    ProcessExited came 8 ms after the target was seen gone [3850 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [13858 ms]
+    the dead target's pipes: none on Windows (no debug transport) [13858 ms]
+    second=27652
+    second attach finished: attached [14879 ms]
+measure-crash run 8: crash-warned-exited-attach-ok
+    target=27784
+    attached; the target floods thread events and will crash (crash) within 0.5 to 3 s [1068 ms]
+    target gone (crash) [2915 ms]
+    stops seen: Exception(Unhandled, System.ExecutionEngineException) at 2893 ms, ProcessExited at 2924 ms [2925 ms]
+    from continuing the unhandled-exception stop to the target seen gone: 16 ms [2925 ms]
+    ProcessExited came 9 ms after the target was seen gone [2925 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [12928 ms]
+    the dead target's pipes: none on Windows (no debug transport) [12928 ms]
+    second=30980
+    second attach finished: attached [13950 ms]
+measure-crash run 9: crash-warned-exited-attach-ok
+    target=21048
+    attached; the target floods thread events and will crash (crash) within 0.5 to 3 s [1067 ms]
+    target gone (crash) [2909 ms]
+    stops seen: Exception(Unhandled, System.ExecutionEngineException) at 2887 ms, ProcessExited at 2918 ms [2919 ms]
+    from continuing the unhandled-exception stop to the target seen gone: 17 ms [2919 ms]
+    ProcessExited came 9 ms after the target was seen gone [2919 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [12933 ms]
+    the dead target's pipes: none on Windows (no debug transport) [12933 ms]
+    second=16680
+    second attach finished: attached [13952 ms]
+measure-crash run 10: crash-warned-exited-attach-ok
+    target=31940
+    attached; the target floods thread events and will crash (crash) within 0.5 to 3 s [1071 ms]
+    target gone (crash) [4640 ms]
+    stops seen: Exception(Unhandled, System.ExecutionEngineException) at 4616 ms, ProcessExited at 4647 ms [4647 ms]
+    from continuing the unhandled-exception stop to the target seen gone: 19 ms [4647 ms]
+    ProcessExited came 7 ms after the target was seen gone [4647 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [14650 ms]
+    the dead target's pipes: none on Windows (no debug transport) [14650 ms]
+    second=33464
+    second attach finished: attached [15670 ms]
+measure-stackoverflow run 1: stackoverflow-warned-exited-attach-ok
+    target=13336
+    attached; the target floods thread events and will crash (stackoverflow) within 0.5 to 3 s [1065 ms]
+    target gone (stackoverflow) [2003 ms]
+    stops seen: Exception(Unhandled, System.StackOverflowException) at 1977 ms, ProcessExited at 2021 ms [2022 ms]
+    from continuing the unhandled-exception stop to the target seen gone: 21 ms [2022 ms]
+    ProcessExited came 18 ms after the target was seen gone [2022 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [12028 ms]
+    the dead target's pipes: none on Windows (no debug transport) [12028 ms]
+    second=1692
+    second attach finished: attached [13049 ms]
+measure-stackoverflow run 2: stackoverflow-warned-exited-attach-ok
+    target=34928
+    attached; the target floods thread events and will crash (stackoverflow) within 0.5 to 3 s [1067 ms]
+    target gone (stackoverflow) [2724 ms]
+    stops seen: Exception(Unhandled, System.StackOverflowException) at 2702 ms, ProcessExited at 2731 ms [2731 ms]
+    from continuing the unhandled-exception stop to the target seen gone: 16 ms [2731 ms]
+    ProcessExited came 7 ms after the target was seen gone [2731 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [12743 ms]
+    the dead target's pipes: none on Windows (no debug transport) [12743 ms]
+    second=37992
+    second attach finished: attached [13764 ms]
+measure-stackoverflow run 3: stackoverflow-warned-exited-attach-ok
+    target=23520
+    attached; the target floods thread events and will crash (stackoverflow) within 0.5 to 3 s [1054 ms]
+    target gone (stackoverflow) [4048 ms]
+    stops seen: Exception(Unhandled, System.StackOverflowException) at 4026 ms, ProcessExited at 4055 ms [4055 ms]
+    from continuing the unhandled-exception stop to the target seen gone: 17 ms [4055 ms]
+    ProcessExited came 7 ms after the target was seen gone [4055 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [14058 ms]
+    the dead target's pipes: none on Windows (no debug transport) [14058 ms]
+    second=19436
+    second attach finished: attached [15078 ms]
+measure-stackoverflow run 4: stackoverflow-warned-exited-attach-ok
+    target=27772
+    attached; the target floods thread events and will crash (stackoverflow) within 0.5 to 3 s [1066 ms]
+    target gone (stackoverflow) [3637 ms]
+    stops seen: Exception(Unhandled, System.StackOverflowException) at 3615 ms, ProcessExited at 3659 ms [3659 ms]
+    from continuing the unhandled-exception stop to the target seen gone: 17 ms [3660 ms]
+    ProcessExited came 22 ms after the target was seen gone [3660 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [13670 ms]
+    the dead target's pipes: none on Windows (no debug transport) [13670 ms]
+    second=18100
+    second attach finished: attached [14690 ms]
+measure-stackoverflow run 5: stackoverflow-warned-exited-attach-ok
+    target=23456
+    attached; the target floods thread events and will crash (stackoverflow) within 0.5 to 3 s [1069 ms]
+    target gone (stackoverflow) [3453 ms]
+    stops seen: Exception(Unhandled, System.StackOverflowException) at 3430 ms, ProcessExited at 3459 ms [3459 ms]
+    from continuing the unhandled-exception stop to the target seen gone: 17 ms [3459 ms]
+    ProcessExited came 6 ms after the target was seen gone [3459 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [13464 ms]
+    the dead target's pipes: none on Windows (no debug transport) [13464 ms]
+    second=38404
+    second attach finished: attached [14483 ms]
+measure-stackoverflow run 6: stackoverflow-warned-exited-attach-ok
+    target=29480
+    attached; the target floods thread events and will crash (stackoverflow) within 0.5 to 3 s [1068 ms]
+    target gone (stackoverflow) [4618 ms]
+    stops seen: Exception(Unhandled, System.StackOverflowException) at 4593 ms, ProcessExited at 4638 ms [4638 ms]
+    from continuing the unhandled-exception stop to the target seen gone: 19 ms [4638 ms]
+    ProcessExited came 20 ms after the target was seen gone [4638 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [14651 ms]
+    the dead target's pipes: none on Windows (no debug transport) [14651 ms]
+    second=22944
+    second attach finished: attached [15673 ms]
+measure-stackoverflow run 7: stackoverflow-warned-exited-attach-ok
+    target=16712
+    attached; the target floods thread events and will crash (stackoverflow) within 0.5 to 3 s [1067 ms]
+    target gone (stackoverflow) [4802 ms]
+    stops seen: Exception(Unhandled, System.StackOverflowException) at 4777 ms, ProcessExited at 4806 ms [4806 ms]
+    from continuing the unhandled-exception stop to the target seen gone: 19 ms [4806 ms]
+    ProcessExited came 4 ms after the target was seen gone [4806 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [14810 ms]
+    the dead target's pipes: none on Windows (no debug transport) [14810 ms]
+    second=12192
+    second attach finished: attached [15830 ms]
+measure-stackoverflow run 8: stackoverflow-warned-exited-attach-ok
+    target=12304
+    attached; the target floods thread events and will crash (stackoverflow) within 0.5 to 3 s [1066 ms]
+    target gone (stackoverflow) [2865 ms]
+    stops seen: Exception(Unhandled, System.StackOverflowException) at 2844 ms, ProcessExited at 2873 ms [2873 ms]
+    from continuing the unhandled-exception stop to the target seen gone: 16 ms [2873 ms]
+    ProcessExited came 8 ms after the target was seen gone [2873 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [12880 ms]
+    the dead target's pipes: none on Windows (no debug transport) [12880 ms]
+    second=34424
+    second attach finished: attached [13900 ms]
+measure-stackoverflow run 9: stackoverflow-warned-exited-attach-ok
+    target=34540
+    attached; the target floods thread events and will crash (stackoverflow) within 0.5 to 3 s [1070 ms]
+    target gone (stackoverflow) [3464 ms]
+    stops seen: Exception(Unhandled, System.StackOverflowException) at 3441 ms, ProcessExited at 3470 ms [3471 ms]
+    from continuing the unhandled-exception stop to the target seen gone: 17 ms [3471 ms]
+    ProcessExited came 6 ms after the target was seen gone [3471 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [13475 ms]
+    the dead target's pipes: none on Windows (no debug transport) [13476 ms]
+    second=28692
+    second attach finished: attached [14495 ms]
+measure-stackoverflow run 10: stackoverflow-warned-exited-attach-ok
+    target=23240
+    attached; the target floods thread events and will crash (stackoverflow) within 0.5 to 3 s [1067 ms]
+    target gone (stackoverflow) [4774 ms]
+    stops seen: Exception(Unhandled, System.StackOverflowException) at 4750 ms, ProcessExited at 4778 ms [4779 ms]
+    from continuing the unhandled-exception stop to the target seen gone: 19 ms [4779 ms]
+    ProcessExited came 4 ms after the target was seen gone [4779 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [14782 ms]
+    the dead target's pipes: none on Windows (no debug transport) [14782 ms]
+    second=26132
+    second attach finished: attached [15802 ms]
+measure-segv run 1: segv-warned-exited-attach-ok
+    target=26248
+    attached; the target floods thread events and will crash (segv) within 0.5 to 3 s [1066 ms]
+    target gone (segv) [3216 ms]
+    stops seen: Exception(Unhandled, System.ExecutionEngineException) at 3156 ms, Exception(FirstChance, type not read) at 3223 ms, ProcessExited at 3232 ms [3232 ms]
+    from continuing the unhandled-exception stop to the target seen gone: 54 ms [3232 ms]
+    ProcessExited came 16 ms after the target was seen gone [3232 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [13247 ms]
+    the dead target's pipes: none on Windows (no debug transport) [13247 ms]
+    second=39488
+    second attach finished: attached [14265 ms]
+measure-segv run 2: segv-warned-exited-attach-ok
+    target=39600
+    attached; the target floods thread events and will crash (segv) within 0.5 to 3 s [1068 ms]
+    target gone (segv) [3216 ms]
+    stops seen: Exception(Unhandled, System.ExecutionEngineException) at 3193 ms, Exception(FirstChance, System.OutOfMemoryException) at 3201 ms, ProcessExited at 3221 ms [3222 ms]
+    from continuing the unhandled-exception stop to the target seen gone: 17 ms [3222 ms]
+    ProcessExited came 5 ms after the target was seen gone [3222 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [13231 ms]
+    the dead target's pipes: none on Windows (no debug transport) [13231 ms]
+    second=23448
+    second attach finished: attached [14251 ms]
+measure-segv run 3: segv-warned-exited-attach-ok
+    target=19684
+    attached; the target floods thread events and will crash (segv) within 0.5 to 3 s [1068 ms]
+    target gone (segv) [1765 ms]
+    stops seen: Exception(Unhandled, System.ExecutionEngineException) at 1745 ms, Exception(FirstChance, System.OutOfMemoryException) at 1752 ms, ProcessExited at 1774 ms [1774 ms]
+    from continuing the unhandled-exception stop to the target seen gone: 14 ms [1774 ms]
+    ProcessExited came 9 ms after the target was seen gone [1774 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [11781 ms]
+    the dead target's pipes: none on Windows (no debug transport) [11781 ms]
+    second=6968
+    second attach finished: attached [12801 ms]
+measure-segv run 4: segv-warned-exited-attach-ok
+    target=8084
+    attached; the target floods thread events and will crash (segv) within 0.5 to 3 s [1069 ms]
+    target gone (segv) [3261 ms]
+    stops seen: Exception(Unhandled, System.ExecutionEngineException) at 3238 ms, Exception(FirstChance, System.OutOfMemoryException) at 3246 ms, ProcessExited at 3266 ms [3266 ms]
+    from continuing the unhandled-exception stop to the target seen gone: 17 ms [3266 ms]
+    ProcessExited came 5 ms after the target was seen gone [3266 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [13272 ms]
+    the dead target's pipes: none on Windows (no debug transport) [13272 ms]
+    second=22436
+    second attach finished: attached [14292 ms]
+measure-segv run 5: segv-warned-exited-attach-ok
+    target=22848
+    attached; the target floods thread events and will crash (segv) within 0.5 to 3 s [1069 ms]
+    target gone (segv) [4727 ms]
+    stops seen: Exception(Unhandled, System.ExecutionEngineException) at 4703 ms, ProcessExited at 4747 ms [4747 ms]
+    from continuing the unhandled-exception stop to the target seen gone: 19 ms [4747 ms]
+    ProcessExited came 20 ms after the target was seen gone [4747 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [14754 ms]
+    the dead target's pipes: none on Windows (no debug transport) [14754 ms]
+    second=30624
+    second attach finished: attached [15775 ms]
+measure-segv run 6: segv-warned-exited-attach-ok
+    target=30768
+    attached; the target floods thread events and will crash (segv) within 0.5 to 3 s [1069 ms]
+    target gone (segv) [3843 ms]
+    stops seen: Exception(Unhandled, System.ExecutionEngineException) at 3820 ms, Exception(FirstChance, System.OutOfMemoryException) at 3828 ms, ProcessExited at 3863 ms [3864 ms]
+    from continuing the unhandled-exception stop to the target seen gone: 18 ms [3864 ms]
+    ProcessExited came 20 ms after the target was seen gone [3864 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [13866 ms]
+    the dead target's pipes: none on Windows (no debug transport) [13866 ms]
+    second=8432
+    second attach finished: attached [14887 ms]
+measure-segv run 7: segv-warned-exited-attach-ok
+    target=33388
+    attached; the target floods thread events and will crash (segv) within 0.5 to 3 s [1055 ms]
+    target gone (segv) [4381 ms]
+    stops seen: Exception(Unhandled, System.ExecutionEngineException) at 4358 ms, ProcessExited at 4401 ms [4401 ms]
+    from continuing the unhandled-exception stop to the target seen gone: 18 ms [4401 ms]
+    ProcessExited came 20 ms after the target was seen gone [4401 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [14407 ms]
+    the dead target's pipes: none on Windows (no debug transport) [14407 ms]
+    second=40572
+    second attach finished: attached [15426 ms]
+measure-segv run 8: segv-warned-exited-attach-ok
+    target=40652
+    attached; the target floods thread events and will crash (segv) within 0.5 to 3 s [1067 ms]
+    target gone (segv) [4171 ms]
+    stops seen: Exception(Unhandled, System.ExecutionEngineException) at 4148 ms, Exception(FirstChance, System.OutOfMemoryException) at 4155 ms, ProcessExited at 4181 ms [4181 ms]
+    from continuing the unhandled-exception stop to the target seen gone: 18 ms [4181 ms]
+    ProcessExited came 10 ms after the target was seen gone [4181 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [14195 ms]
+    the dead target's pipes: none on Windows (no debug transport) [14195 ms]
+    second=1964
+    second attach finished: attached [15215 ms]
+measure-segv run 9: segv-warned-exited-attach-ok
+    target=24596
+    attached; the target floods thread events and will crash (segv) within 0.5 to 3 s [1069 ms]
+    target gone (segv) [1798 ms]
+    stops seen: Exception(Unhandled, System.ExecutionEngineException) at 1777 ms, Exception(FirstChance, System.OutOfMemoryException) at 1785 ms, ProcessExited at 1821 ms [1822 ms]
+    from continuing the unhandled-exception stop to the target seen gone: 16 ms [1822 ms]
+    ProcessExited came 23 ms after the target was seen gone [1822 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [11823 ms]
+    the dead target's pipes: none on Windows (no debug transport) [11823 ms]
+    second=21080
+    second attach finished: attached [12845 ms]
+measure-segv run 10: segv-warned-exited-attach-ok
+    target=33296
+    attached; the target floods thread events and will crash (segv) within 0.5 to 3 s [1069 ms]
+    target gone (segv) [3621 ms]
+    stops seen: Exception(Unhandled, System.ExecutionEngineException) at 3598 ms, Exception(FirstChance, System.OutOfMemoryException) at 3606 ms, ProcessExited at 3628 ms [3629 ms]
+    from continuing the unhandled-exception stop to the target seen gone: 17 ms [3629 ms]
+    ProcessExited came 7 ms after the target was seen gone [3629 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [13634 ms]
+    the dead target's pipes: none on Windows (no debug transport) [13634 ms]
+    second=5432
+    second attach finished: attached [14654 ms]
+measure-abort run 1: abort-unwarned-exited-attach-ok
+    target=7268
+    attached; the target floods thread events and will crash (abort) within 0.5 to 3 s [1065 ms]
+    target gone (abort) [2312 ms]
+    stops seen: ProcessExited at 2340 ms [2341 ms]
+    ProcessExited came 28 ms after the target was seen gone [2341 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [12347 ms]
+    the dead target's pipes: none on Windows (no debug transport) [12347 ms]
+    second=21120
+    second attach finished: attached [13366 ms]
+measure-abort run 2: abort-unwarned-exited-attach-ok
+    target=21104
+    attached; the target floods thread events and will crash (abort) within 0.5 to 3 s [1067 ms]
+    target gone (abort) [4768 ms]
+    stops seen: ProcessExited at 4795 ms [4796 ms]
+    ProcessExited came 27 ms after the target was seen gone [4796 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [14802 ms]
+    the dead target's pipes: none on Windows (no debug transport) [14802 ms]
+    second=32120
+    second attach finished: attached [15822 ms]
+measure-abort run 3: abort-unwarned-exited-attach-ok
+    target=30752
+    attached; the target floods thread events and will crash (abort) within 0.5 to 3 s [1070 ms]
+    target gone (abort) [4344 ms]
+    stops seen: ProcessExited at 4371 ms [4372 ms]
+    ProcessExited came 27 ms after the target was seen gone [4372 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [14383 ms]
+    the dead target's pipes: none on Windows (no debug transport) [14383 ms]
+    second=38764
+    second attach finished: attached [15402 ms]
+measure-abort run 4: abort-unwarned-exited-attach-ok
+    target=21560
+    attached; the target floods thread events and will crash (abort) within 0.5 to 3 s [1054 ms]
+    target gone (abort) [2772 ms]
+    stops seen: ProcessExited at 2800 ms [2801 ms]
+    ProcessExited came 28 ms after the target was seen gone [2801 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [12808 ms]
+    the dead target's pipes: none on Windows (no debug transport) [12808 ms]
+    second=13800
+    second attach finished: attached [13829 ms]
+measure-abort run 5: abort-unwarned-exited-attach-ok
+    target=13944
+    attached; the target floods thread events and will crash (abort) within 0.5 to 3 s [1068 ms]
+    target gone (abort) [5274 ms]
+    stops seen: ProcessExited at 5302 ms [5302 ms]
+    ProcessExited came 28 ms after the target was seen gone [5303 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [15312 ms]
+    the dead target's pipes: none on Windows (no debug transport) [15312 ms]
+    second=11756
+    second attach finished: attached [16332 ms]
+measure-abort run 6: abort-unwarned-exited-attach-ok
+    target=11876
+    attached; the target floods thread events and will crash (abort) within 0.5 to 3 s [1056 ms]
+    target gone (abort) [4820 ms]
+    stops seen: ProcessExited at 4847 ms [4848 ms]
+    ProcessExited came 27 ms after the target was seen gone [4848 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [14852 ms]
+    the dead target's pipes: none on Windows (no debug transport) [14852 ms]
+    second=4116
+    second attach finished: attached [15872 ms]
+measure-abort run 7: abort-unwarned-exited-attach-ok
+    target=2384
+    attached; the target floods thread events and will crash (abort) within 0.5 to 3 s [1054 ms]
+    target gone (abort) [4866 ms]
+    stops seen: ProcessExited at 4893 ms [4894 ms]
+    ProcessExited came 27 ms after the target was seen gone [4894 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [14910 ms]
+    the dead target's pipes: none on Windows (no debug transport) [14910 ms]
+    second=16080
+    second attach finished: attached [15931 ms]
+measure-abort run 8: abort-unwarned-exited-attach-ok
+    target=35096
+    attached; the target floods thread events and will crash (abort) within 0.5 to 3 s [1070 ms]
+    target gone (abort) [3826 ms]
+    stops seen: ProcessExited at 3853 ms [3854 ms]
+    ProcessExited came 27 ms after the target was seen gone [3854 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [13858 ms]
+    the dead target's pipes: none on Windows (no debug transport) [13858 ms]
+    second=28824
+    second attach finished: attached [14880 ms]
+measure-abort run 9: abort-unwarned-exited-attach-ok
+    target=28944
+    attached; the target floods thread events and will crash (abort) within 0.5 to 3 s [1068 ms]
+    target gone (abort) [4487 ms]
+    stops seen: ProcessExited at 4514 ms [4515 ms]
+    ProcessExited came 27 ms after the target was seen gone [4515 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [14530 ms]
+    the dead target's pipes: none on Windows (no debug transport) [14530 ms]
+    second=19032
+    second attach finished: attached [15551 ms]
+measure-abort run 10: abort-unwarned-exited-attach-ok
+    target=38208
+    attached; the target floods thread events and will crash (abort) within 0.5 to 3 s [1069 ms]
+    target gone (abort) [2849 ms]
+    stops seen: ProcessExited at 2876 ms [2877 ms]
+    ProcessExited came 27 ms after the target was seen gone [2877 ms]
+    10 s after the end the Win32 event thread's state: not checked (macOS only) [12893 ms]
+    the dead target's pipes: none on Windows (no debug transport) [12893 ms]
+    second=7356
+    second attach finished: attached [13914 ms]
+flood-sync-kill sync-kill-attach-ok: 10; flood-crash-kill crash-kill-attach-ok: 10; flood-crash-detach crash-detach-attach-ok: 10; flood-stackoverflow-kill stackoverflow-kill-attach-ok: 10; flood-stackoverflow-detach stackoverflow-detach-attach-ok: 10; measure-crash crash-warned-exited-attach-ok: 10; measure-stackoverflow stackoverflow-warned-exited-attach-ok: 10; measure-segv segv-warned-exited-attach-ok: 10; measure-abort abort-unwarned-exited-attach-ok: 10
+flood-sync-kill: predicted sync-kill-attach-ok every run: holds over 10 runs
+flood-crash-kill: predicted crash-kill-attach-ok every run: holds over 10 runs
+flood-crash-detach: predicted crash-detach-attach-ok every run: holds over 10 runs
+flood-stackoverflow-kill: predicted stackoverflow-kill-attach-ok every run: holds over 10 runs
+flood-stackoverflow-detach: predicted stackoverflow-detach-attach-ok every run: holds over 10 runs
+measure-crash: predicted a usable debugger every run: holds over 10 runs
+measure-stackoverflow: predicted a usable debugger every run: holds over 10 runs
+measure-segv: predicted a usable debugger every run: holds over 10 runs
+measure-abort: predicted a usable debugger every run: holds over 10 runs
+RESULT(0): confirmed — every mode run gave its predicted outcome every time (see the header for each hypothesis)

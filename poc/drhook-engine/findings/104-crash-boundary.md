@@ -4,7 +4,8 @@
 **Status:** **OBSERVED** on omega (macOS 27.0.1 arm64, SDK 10.0.301) and omega-ubuntu (Linux arm64 VM, Ubuntu's and
 Microsoft's .NET 10.0.14), 10 runs per mode on each; crashes without the managed warning added 2026-11-06; ending at
 a stack overflow's stop, the `ProcessExited` timing and omega-windows (Windows 11 arm64 VM: no hang in 130 runs)
-added later on 2026-11-06; Linux x64 (zbook, bare metal, Microsoft's .NET 10.0.14) added the same day.
+added later on 2026-11-06; Linux x64 (zbook, bare metal, Microsoft's .NET 10.0.14) and the six CI runners (the hang
+on all four macOS and Linux runners, none on Windows) added the same day.
 **Not fixed:** DrHook continues every stop it is asked to, including the unhandled-exception one. ADR-016 Step 4,
 probe 100 (`poc/drhook-engine/100-orphaned-read-smoke.cs`, modes added in `5984ad0`, `04aff45` and `4da7093`).
 
@@ -218,6 +219,42 @@ outlived 45 s: the stacks are in [finding 105](105-dll-pal-never-rechecks-a-wait
   `DacDbiInterfaceImpl::RequestSyncAtEvent` while dispatching an event, and the second attach was waiting on the
   DAC's `g_dacMutex` in `FlushCache` (stacks named with Microsoft's symbol files; finding 105).
 
+## Results on the six CI runners (2026-11-06)
+
+The `DrHook probe` workflow, probe `100-crash-boundary`, run 42248605917 at `63a26b2`, 16:02–16:54 UTC: nine modes, 10
+runs each, on GitHub's macOS 26 arm64 and x64, Ubuntu 24.04 arm64 and x64, and Windows Server x64 and Windows 11
+arm64 runners. Raw output (the job logs): `104-crash-boundary/ci-42248605917-<runner>.txt`.
+
+| Mode | macOS arm64 | macOS x64 | Linux x64 | Linux arm64 | Windows x64 | Windows arm64 |
+|------|-------------|-----------|-----------|-------------|-------------|---------------|
+| `flood-sync-kill` | 10 usable | 10 | 10 | 10 | 10 | 10 |
+| `flood-crash-kill`, `-detach` | 20 usable | 20 | 20 | 20 | 20 | 20 |
+| `flood-stackoverflow-kill`, `-detach` | 20 usable | 20 | 20 | 20 | 19, **1 no stop** | 20 |
+| `measure-crash` | **4 hung** | **6** | **4** | **4** | 0 | 0 |
+| `measure-stackoverflow` | **1** | 0 | **3** | **1** | 0 | 0 |
+| `measure-segv` | **3** | **4** | **3** | **2** | 0 | 0 |
+| `measure-abort` | **2** | 0 | **1** | **2** | 0 | 0 |
+
+Five runners printed RESULT(0); Windows x64 printed RESULT(1) because of the one run with no stop.
+
+- **Ending the session at the stop was clean on every runner,** 239 of 239 runs that had a stop. A kill after a
+  Pause was clean too, 60 of 60.
+- **The hang reproduces on all four macOS and Linux runners,** 40 of 160 continued crashes, and on neither Windows
+  runner (0 of 80). No second attach that missed 30 s finished within 120 s (40 of 40).
+- **No `ProcessExited` does not always mean an unusable debugger.** On macOS arm64, 2 runs (`measure-crash` run 9,
+  `measure-abort` run 8) had no `ProcessExited` stop within 30 s, and the event thread was still inside a transport
+  request 10 s after the end, but the second attach finished, at once. In every other run on every runner, a
+  `ProcessExited` stop came exactly when the second attach worked. So its absence showed a stuck event thread every
+  time it was checked (macOS), and a stuck thread blocked the next attach in 20 of 22 macOS runs. Which request the
+  2 were in, and why the next attach did not wait on them, is not recorded: CI takes no samples.
+- **`ProcessExited` came later on the macOS runners:** 143 ms before to 175 ms after the probe saw the target gone
+  (arm64), 79 ms before to 166 ms after (x64); Linux 13 ms before to 23 ms after; Windows 3 to 29 ms after.
+- **A stack overflow gave no stop on Windows x64 in 2 of 30 runs** (`flood-stackoverflow-kill` run 3: only
+  `ProcessExited`; `measure-stackoverflow` run 4: unwarned). On Windows it did no harm, but it means the warning stop
+  is not guaranteed there.
+- **The Linux runners' targets took 424 to 640 ms to die** after a continued stop (not checked why; apport on
+  Ubuntu 24.04 is not known to be enabled on GitHub's images). macOS 1 to 152 ms, Windows 14 to 54 ms.
+
 ## What this answers
 
 - **The disappearance, not the signal.** In `flood-crash` DrHook sent no signal; the target ended itself. On omega,
@@ -255,6 +292,9 @@ its own, and consistent with omega's.
 - Why the hang rate differs by machine and crash (stack overflow 5 of 10 on omega, 1 of 20 on omega-ubuntu, 0 of 15
   on zbook). The second a Linux target takes to die is apport (zbook and omega-ubuntu), and the hang does not need it.
 - A target DrHook launched, rather than attached to.
+- The 2 macOS arm64 CI runs whose event thread was stuck while the next attach still worked: which request, and
+  whether it held the DAC lock.
+- Why the Linux runners' targets take about half a second to die.
 - What an operator loses by not continuing the unhandled-exception stop. Continuing it is how a debugger shows the
   program's own death; the trade-off is for Step 6.
 
@@ -267,10 +307,14 @@ Input to Step 6, not a decision:
 - The route it cannot avoid that way is real: a native fault or a direct `abort()` gives no stop and still hung the
   debugger on macOS arm64 and Linux arm64. With finding 105, nothing in the process can recover from it; the worker
   process is decided (Martin, 2026-11-06; ADR-016).
-- Avoidance covers a stack overflow too: end the session at its stop (60 of 60).
-- Detection, which DrHook does not do today: once the target is gone, a `ProcessExited` stop came within 34 ms or
-  not within 30 s. The detector should check the stuck state itself (a request outstanding to a target that is gone)
-  rather than a time bound alone, so that a runtime that notices the death later is not taken for a hung one.
+- Avoidance covers a stack overflow too: end the session at its stop (60 of 60 on our machines, 239 of 239 runs with
+  a stop on CI). On Windows x64 a stack overflow sometimes gives no stop (2 of 30), harmless there.
+- Detection, which DrHook does not do today: once the target is gone, a `ProcessExited` stop came within 175 ms or
+  not within 30 s. Its absence marks a stuck event thread, which usually, not always, also blocks later sessions
+  (CI macOS arm64: 2 runs stuck with the next attach working). So it marks the session's debugger as lost, not proof
+  that the process is poisoned; with the worker, the worker is discarded either way. The detector should check the
+  stuck state itself (a request outstanding to a target that is gone) rather than a time bound alone, so that a
+  runtime that notices the death later is not taken for a hung one.
 
 Where the probes ran: ADR-016 keeps anything that could freeze a machine off omega and zbook. These modes hang only
 the probe's own child process, which the parent ends from outside; Martin approved running them on omega on

@@ -106,7 +106,9 @@ target's process handle, which should wake it when the target dies (read below).
 A thread of mscordbi that starts waiting while the target is alive is woken only by the reply or by monitoring, and
 mscordbi's PAL does no monitoring. So when the target dies with a request in flight, nothing wakes the requester:
 its wait has no timeout, and the death that should end it is checked only when a wait starts. In the Win32 event
-thread this also holds the DAC lock (finding 100), so every later attach in the process hangs; in `Terminate` it
+thread this usually also holds the DAC lock (finding 100), so every later attach in the process hangs; on the macOS
+CI runners it did in 20 of 22 runs with a stuck event thread, and in 2 the next attach still worked (finding 104,
+which request is not recorded); in `Terminate` it
 holds the teardown (finding 103). A death between requests is noticed, because the next wait that starts checks the
 process first: that is the usable case, and why a kill while the target is synchronized, when no request is in
 flight, was clean (finding 104).
@@ -123,6 +125,7 @@ Not tested.
 - The threads of a usable run's process on macOS (on Linux x64: 3 samples, no worker in the DAC's PAL, as predicted).
 - Linux arm64's stacks (omega-ubuntu: thread names only).
 - Which request each hung run on omega-ubuntu was in. On zbook: all 5 in `WriteMemory` from `RequestSyncAtEvent`.
+- Why, in 2 macOS arm64 CI runs, a stuck event thread did not block the next attach.
 
 ## For ADR-016
 
@@ -131,7 +134,7 @@ Not tested.
   avoid.
 - Avoidance follows from the mechanism: end a session only when no request is in flight (synchronized), as at the
   unhandled-exception stop.
-- Detection follows too: once the target is gone, a `ProcessExited` stop either comes within milliseconds or not at
-  all.
+- Detection follows too: once the target is gone, a `ProcessExited` stop either comes within milliseconds (at most
+  175 ms, on the macOS CI runners) or not at all. Its absence marks the stuck event thread, not always a blocked DAC.
 - Upstream: the right fix is in the runtime, a debugger-side PAL that monitors waited processes, or a transport wait
   that re-checks the target. Worth reporting with this finding's references.
