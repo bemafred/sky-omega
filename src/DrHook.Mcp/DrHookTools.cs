@@ -30,7 +30,7 @@ public sealed class DrHookTools
         "Passive — does not halt or modify execution. Returns structured summary " +
         "with thread states (each thread's state and the innermost named frame it is at), " +
         "collapsed stacks (one entry per distinct managed stack, naming the threads in it), " +
-        "hotspots, exceptions, GC and lock-contention counts, and anomaly flags. " +
+        "hotspots, exceptions, GC and lock-contention counts, and anomaly flags. The threads are those the sampler saw: a thread with no managed frame for the whole capture (an idle finalizer, a native thread) is never sampled and is not listed. " +
         "Requires a hypothesis: state what you expect BEFORE inspecting.")]
     public async Task<string> Snapshot(
         [Description("Target process ID")] int pid,

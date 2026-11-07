@@ -227,7 +227,7 @@ public sealed class StackInspector
             CapturedAt: DateTime.UtcNow,
             DurationMs: observedMs,
             Hypothesis: hypothesis,
-            ThreadCount: threadSamples.Count,
+            SampledThreadCount: threadSamples.Count,
             TotalSamples: totalSamples,
             Ticks: ticks,
             ThreadSummary: threads,
@@ -301,6 +301,11 @@ public sealed record ThreadSummary(int ThreadId, int SampleCount, int ManagedSam
     }
 }
 
+/// <summary>A passive capture of a process. <see cref="SampledThreadCount"/> and <see cref="ThreadSummary"/> are the
+/// threads the sample profiler saw. It samples only a thread with a managed frame on its stack, so a thread with none for
+/// the whole capture, such as the finalizer while it has nothing to finalize, is absent; whether such a thread appears
+/// depends on whether it ran managed code during the capture (seen 2026-11-07: present with 2 of 1,176 ticks in one
+/// run, absent in the next).</summary>
 public sealed record ObservationSnapshot(
     int Pid,
     string ProcessName,
@@ -308,7 +313,7 @@ public sealed record ObservationSnapshot(
     DateTime CapturedAt,
     int DurationMs,
     string Hypothesis,
-    int ThreadCount,
+    int SampledThreadCount,
     int TotalSamples,
     int Ticks,
     List<ThreadSummary> ThreadSummary,
@@ -377,7 +382,7 @@ public sealed record ObservationSnapshot(
             // ── Summary (not raw data) ──
             ["summary"] = new JsonObject
             {
-                ["threadCount"]     = ThreadCount,
+                ["sampledThreads"]  = SampledThreadCount,
                 ["totalSamples"]    = TotalSamples,
                 ["ticks"]           = Ticks,
                 ["exceptionCount"]  = Exceptions.Count,

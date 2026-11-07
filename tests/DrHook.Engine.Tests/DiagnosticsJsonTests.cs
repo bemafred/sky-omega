@@ -59,7 +59,7 @@ public sealed class DiagnosticsJsonTests
             CapturedAt: capturedAt,
             DurationMs: 500,
             Hypothesis: "the target is idle",
-            ThreadCount: 3,
+            SampledThreadCount: 3,
             TotalSamples: 150,
             Ticks: 50,
             ThreadSummary: [
@@ -80,7 +80,10 @@ public sealed class DiagnosticsJsonTests
         Assert.Equal("target", (string)json["processName"]!);
         Assert.Equal(capturedAt.ToString("O"), (string)json["capturedAt"]!);
         Assert.Equal("the target is idle", (string)json["hypothesis"]!);
-        Assert.Equal(3, (int)json["summary"]!["threadCount"]!);
+        // The count is of the threads the sampler saw: a thread with no managed frame for the whole capture (an idle
+        // finalizer) is never sampled, so a name that claims every thread would claim what the snapshot cannot see.
+        Assert.Equal(3, (int)json["summary"]!["sampledThreads"]!);
+        Assert.Null(json["summary"]!["threadCount"]);
         Assert.Equal(150, (int)json["summary"]!["totalSamples"]!);
         Assert.Equal(50, (int)json["summary"]!["ticks"]!);
         Assert.Equal(1, (int)json["summary"]!["exceptionCount"]!);

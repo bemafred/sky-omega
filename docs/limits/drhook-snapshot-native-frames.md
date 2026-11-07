@@ -2,7 +2,7 @@
 
 **Status:**        Latent
 **Surfaced:**      2026-11-07, by ADR-016 Step 5 (probe 106), while the snapshot's collapsed stacks and thread states were built.
-**Last reviewed:** 2026-11-07
+**Last reviewed:** 2026-11-07 (the unsampled managed thread added)
 **Promotes to:**   A DrHook ADR, when a debugging task needs to see where a thread waits below its last managed frame, or a thread the runtime does not manage. The first candidate is a debugger worker stuck as in finding 105, whose wait is in mscordbi's PAL (ADR-016 Step 6).
 
 ## Description
@@ -11,6 +11,7 @@
 
 - **Below the last managed frame, nothing.** A thread outside managed code shows the managed frame it left from: `Monitor.Wait`, `Thread.Sleep`, or a P/Invoke such as `Interop+Sys.Read`. It doesn't show the native frames under that frame: the kernel wait, the runtime's or a native library's code.
 - **Threads the runtime doesn't manage are invisible.** mscordbi's own threads, where finding 105's hang lives, are an example.
+- **So is a managed thread with no managed frame for the whole capture.** The sample profiler takes no sample of a thread without a managed frame on its stack. The finalizer, waiting while it has nothing to finalize, is the usual case: on 2026-11-07 it appeared in one capture, where it ran finalizers at 2 of 1,176 ticks, and was absent from the next. So the snapshot's summary counts `sampledThreads`, the threads it saw, not the process's threads, and the tool description says so.
 - **P/Invoke stubs generated at run time have no name.** One was observed innermost under `SocketAsyncEngine.EventLoop`: it has no module, and the rundown doesn't name it. The stack keeps it as `[unresolved frame]`, and the thread's `at` names its caller.
 
 No DrHook text promises any of this. The snapshot's promise is collapsed stacks and a thread state overview of the process's managed threads, and that is kept.
