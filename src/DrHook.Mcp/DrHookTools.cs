@@ -53,7 +53,7 @@ public sealed class DrHookTools
         "To debug a test, attach to the testhost child with drhook_attach; project-aware launch directly from a " +
         ".csproj (dispatching MTP / VSTest internally) is planned — ADR-010 Tier 3.")]
     public async Task<string> Launch(
-        [Description("Executable path (e.g. 'dotnet' or '/path/to/app')")] string program,
+        [Description("Executable path (e.g. 'dotnet' or '/path/to/app'). A name without a slash is looked up on DrHook's PATH; a path with one is used as given, relative to cwd. A program that cannot run fails the launch before anything is spawned, with the operating system's error for it.")] string program,
         [Description("Arguments as JSON array (e.g. [\"exec\", \"/path/to/app.dll\"])")] string[] args,
         [Description("Source file path for the initial breakpoint")] string sourceFile,
         [Description("Line number for the initial breakpoint")] int line,

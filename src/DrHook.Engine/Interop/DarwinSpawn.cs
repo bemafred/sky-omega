@@ -1,4 +1,4 @@
-// macOS suspended spawn: posix_spawnp with POSIX_SPAWN_START_SUSPENDED (an Apple extension in
+// macOS suspended spawn: posix_spawn with POSIX_SPAWN_START_SUSPENDED (an Apple extension in
 // <spawn.h>), released with SIGCONT. The child never runs a single instruction before Continue, so
 // the runtime-startup callback cannot be missed.
 //

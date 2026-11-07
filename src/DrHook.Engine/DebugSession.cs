@@ -2764,8 +2764,8 @@ public sealed class LaunchFailedException : Exception
         Stderr = stderr;
     }
 
-    /// <summary>The launch step that failed: <c>posix_spawn</c>, <c>CreateProcess</c>, <c>RegisterForRuntimeStartup</c>
-    /// or <c>runtime startup</c>.</summary>
+    /// <summary>The launch step that failed: <c>program lookup</c> (macOS and Linux, before anything is spawned),
+    /// <c>posix_spawn</c>, <c>CreateProcess</c>, <c>RegisterForRuntimeStartup</c> or <c>runtime startup</c>.</summary>
     public string Step { get; }
     /// <summary>Why it failed, as the step reported it.</summary>
     public string Reason { get; }

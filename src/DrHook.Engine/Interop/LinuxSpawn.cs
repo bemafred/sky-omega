@@ -6,6 +6,11 @@
 // stopped shell is the target's, and the target runs no instruction of its own before the callback is
 // armed — the same guarantee DarwinSpawn gets from POSIX_SPAWN_START_SUSPENDED.
 //
+// The program the shell execs is the path ProgramLookup found, which always holds a slash, so the shell's exec looks
+// nothing up and a missing program is reported before the shell is spawned. Because the shell's exec names the program
+// by that path, a program given by a bare name sees the path as its argv[0] (POSIX sh's exec cannot set argv[0] apart from
+// the file); on macOS argv[0] is the name as given.
+//
 // ABI basis — glibc 2.43 <spawn.h>, <bits/types/__sigset_t.h>, <bits/types/struct_sched_param.h>,
 // read on zbook (Ubuntu 26.04.1 LTS, x86_64) 2026-10-25; sizes confirmed there with sizeof():
 // posix_spawnattr_t = 336 bytes, posix_spawn_file_actions_t = 80 bytes. sigset_t is

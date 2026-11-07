@@ -6,10 +6,11 @@
 // stayed a zombie under the debugger, because the failure path killed it and nothing reaped it. A program that
 // cannot be spawned at all also read as E_FAIL, hiding the spawn's errno.
 //
-// Where a missing program fails differs per platform. macOS and Windows spawn the program itself, so the spawn fails
-// with the OS's error. Linux spawns /bin/sh, which stops itself and then execs the program (glibc has no suspended
-// spawn; LinuxSpawn), so the spawn succeeds and the exec fails after the release: the shell exits 127 with "not found"
-// on stderr (seen 2026-11-07 on Linux arm64 and x64).
+// A missing program is found missing before anything is spawned. On macOS and Linux DrHook looks the program up itself
+// (ProgramLookup) and spawns the path it found, so both report the operating system's error for the program. Until
+// 2026-11-07 Linux reported the shell's instead: the Linux spawn is /bin/sh, which holds itself and then execs the
+// program (glibc has no suspended spawn; LinuxSpawn), so a missing program failed after the shell had started, as the
+// shell's exit 127 and its "not found" (seen on Linux arm64 and x64). Windows fails it in CreateProcess.
 
 using System;
 using System.Diagnostics;
@@ -70,23 +71,15 @@ public sealed class LaunchFailureTest
         Assert.IsTrue(root.TryGetProperty("launchFailure", out JsonElement failure), $"no launchFailure in: {launch}");
         string message = root.GetProperty("message").GetString()!;
         Assert.IsFalse(message.Contains("0x80004005", StringComparison.Ordinal), $"the OS's error is hidden behind E_FAIL: {message}");
-        if (OperatingSystem.IsLinux())
+        Assert.IsFalse(failure.TryGetProperty("pid", out _), $"nothing was spawned, so there is no pid: {failure}");
+        if (OperatingSystem.IsWindows())
         {
-            // The shell's exec failed: its exit code and its message, and the shell is reaped.
-            Assert.AreEqual("runtime startup", failure.GetProperty("step").GetString(), $"launchFailure: {failure}");
-            JsonElement exit = failure.GetProperty("targetExit");
-            Assert.AreEqual("exited", exit.GetProperty("kind").GetString(), $"targetExit: {exit}");
-            Assert.AreEqual(127, exit.GetProperty("code").GetInt32(), $"targetExit: {exit}");
-            StringAssert.Contains(failure.GetProperty("stderr").GetString(), "not found", $"launchFailure: {failure}");
-            int pid = failure.GetProperty("pid").GetInt32();
-            Assert.ThrowsExactly<ArgumentException>(() => Process.GetProcessById(pid), $"target {pid} is still in the process table");
+            Assert.AreEqual("CreateProcess", failure.GetProperty("step").GetString(), $"launchFailure: {failure}");
         }
         else
         {
-            Assert.AreEqual(OperatingSystem.IsWindows() ? "CreateProcess" : "posix_spawn", failure.GetProperty("step").GetString(), $"launchFailure: {failure}");
-            Assert.IsFalse(failure.TryGetProperty("pid", out _), $"nothing was spawned, so there is no pid: {failure}");
-            if (OperatingSystem.IsMacOS())
-                StringAssert.Contains(message, "No such file or directory", $"message: {message}");
+            Assert.AreEqual("program lookup", failure.GetProperty("step").GetString(), $"launchFailure: {failure}");
+            Assert.AreEqual($"{missingProgram}: errno 2 (No such file or directory)", failure.GetProperty("reason").GetString(), $"launchFailure: {failure}");
         }
     }
 }

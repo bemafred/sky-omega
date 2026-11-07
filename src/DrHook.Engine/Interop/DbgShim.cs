@@ -373,16 +373,21 @@ internal sealed unsafe class DbgShim : IDisposable
         stdoutFd = -1;
         stderrFd = -1;
 
+        // Found before anything is spawned, so a program that cannot run is reported with the OS's error for it, the
+        // same on macOS and Linux (ProgramLookup), not as whatever holds the child on the way to it.
+        if (!ProgramLookup.TryFind(program, workingDirectory, Environment.GetEnvironmentVariable("PATH"), out string file, out string whyNot))
+            throw new LaunchFailedException("program lookup", E_FAIL, whyNot, processId: null, targetExit: null, stdout: "", stderr: "");
+
         string[] argv = new string[args.Count + 1];
         argv[0] = program;
         for (int i = 0; i < args.Count; i++) argv[i + 1] = args[i];
 
-        int spawnRc = PosixSpawn.SpawnSuspendedRedirected(program, argv, workingDirectory, env, out int childPid, out int oFd, out int eFd);
+        int spawnRc = PosixSpawn.SpawnSuspendedRedirected(file, argv, workingDirectory, env, out int childPid, out int oFd, out int eFd);
         if (spawnRc != 0)
         {
             int errno = Math.Abs(spawnRc);
             throw new LaunchFailedException("posix_spawn", E_FAIL,
-                $"posix_spawn of {program} failed with errno {errno} ({Marshal.GetPInvokeErrorMessage(errno)})",
+                $"posix_spawn of {file} failed with errno {errno} ({Marshal.GetPInvokeErrorMessage(errno)})",
                 processId: null, targetExit: null, stdout: "", stderr: "");
         }
         pid = (uint)childPid;

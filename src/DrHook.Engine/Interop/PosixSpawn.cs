@@ -2,14 +2,15 @@
 // (validated by probe 59 / finding 75). dbgshim's CreateProcessForLaunch takes no stdio handles,
 // so a launched debuggee inherits the debugger process's fds — on an MCP stdio server that means
 // the debuggee's Console.WriteLine corrupts the JSON-RPC channel. Here DrHook OWNS the spawn:
-// posix_spawnp the target with stdin redirected to /dev/null and stdout/stderr dup2'd to
+// posix_spawn the target with stdin redirected to /dev/null and stdout/stderr dup2'd to
 // DrHook-owned pipes, HELD before it runs; the caller arms RegisterForRuntimeStartup, then
-// Continue releases it.
+// Continue releases it. The caller passes the path to run, which ProgramLookup found: posix_spawn, not
+// posix_spawnp, so nothing here searches PATH a second time (2026-11-07).
 //
 // How the target is held, and the libc ABI the spawn uses, differ per platform, so each has its own
 // implementation: DarwinSpawn (POSIX_SPAWN_START_SUSPENDED, an Apple extension) and LinuxSpawn
 // (glibc has no suspended-spawn flag; the child stops itself before exec). This file holds the part
-// that is the same on both: the pipes, the file actions and the posix_spawnp call, over spawn
+// that is the same on both: the pipes, the file actions and the posix_spawn call, over spawn
 // attribute/file-action storage the platform implementation declares exactly.
 // Windows uses CreateProcess(CREATE_SUSPENDED) + STARTUPINFO redirection (not yet wired).
 
@@ -26,7 +27,7 @@ internal static unsafe class PosixSpawn
     [DllImport("libc", SetLastError = true)] private static extern int close(int fd);
     [DllImport("libc", SetLastError = true)] private static extern nint read(int fd, byte* buf, nint count);
     [DllImport("libc", SetLastError = true)] internal static extern int kill(int pid, int sig);
-    [DllImport("libc", SetLastError = true)] private static extern int posix_spawnp(int* pid, byte* file, void* fileActions, void* attrp, byte** argv, byte** envp);
+    [DllImport("libc", SetLastError = true)] private static extern int posix_spawn(int* pid, byte* path, void* fileActions, void* attrp, byte** argv, byte** envp);
     [DllImport("libc")] private static extern int posix_spawnattr_init(void* attr);
     [DllImport("libc")] private static extern int posix_spawnattr_setflags(void* attr, short flags);
     [DllImport("libc")] private static extern int posix_spawnattr_destroy(void* attr);
@@ -37,7 +38,8 @@ internal static unsafe class PosixSpawn
     [DllImport("libc")] private static extern int posix_spawn_file_actions_addopen(void* fa, int fd, byte* path, int oflag, int mode);
     [DllImport("libc")] private static extern int posix_spawn_file_actions_destroy(void* fa);
 
-    /// <summary>Spawn <paramref name="file"/> (PATH-searched like execvp) HELD before it runs, with the
+    /// <summary>Spawn the file at the path <paramref name="file"/> (not searched on PATH: <see cref="ProgramLookup"/>
+    /// finds it; a relative path is relative to <paramref name="cwd"/>) HELD before it runs, with the
     /// child's stdin → /dev/null (never the debugger's fd 0 / MCP JSON-RPC channel), stdout → a fresh pipe
     /// and stderr → a second pipe. Returns 0 with <paramref name="pid"/> and the parent-side read fds on
     /// success; a negative/errno-style code on failure (read fds = -1). The caller must arm
@@ -149,7 +151,7 @@ internal static unsafe class PosixSpawn
         byte* cFile = Utf8(file);
 
         int childPid;
-        int rc = posix_spawnp(&childPid, cFile, fileActions, attr, cArgv, cEnvp);
+        int rc = posix_spawn(&childPid, cFile, fileActions, attr, cArgv, cEnvp);
 
         posix_spawn_file_actions_destroy(fileActions);
         posix_spawnattr_destroy(attr);
