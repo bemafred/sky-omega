@@ -1,4 +1,3 @@
-using System.Text.Json;
 using System.Text.Json.Nodes;
 using SkyOmega.DrHook.Engine.Observation;
 
@@ -47,7 +46,5 @@ public sealed record DotNetProcessList(List<DotNetProcessEntry> Processes)
             ["executableDeleted"] = p.ExecutableDeleted
         }).ToArray()),
         ["count"] = Processes.Count
-    }.ToJsonString(Indented);
-
-    private static readonly JsonSerializerOptions Indented = new() { WriteIndented = true };
+    }.ToJsonString(OperatorJson.Options);
 }

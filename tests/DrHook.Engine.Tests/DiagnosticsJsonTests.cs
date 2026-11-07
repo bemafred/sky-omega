@@ -31,6 +31,23 @@ public sealed class DiagnosticsJsonTests
         Assert.True((bool)processes[1]!["executableDeleted"]!);
     }
 
+    // The JSON's reader is the LLM operator, over an MCP text channel, never HTML. The default encoder writes
+    // + < > & ' and " as +, < and the like, which that reader has to decode in its head. Before
+    // 2026-11-07 only the snapshot escaped relaxed; every other result escaped by default.
+    [Fact]
+    public void ProcessList_ToJson_WritesTheOperatorsCharactersAsThemselves()
+    {
+        var list = new DotNetProcessList([
+            new DotNetProcessEntry(41, "Probe+Nested<T>", "/src/A & B/it's \"here\"", "1.0.0"),
+        ]);
+
+        string text = list.ToJson();
+
+        Assert.Contains("\"name\": \"Probe+Nested<T>\"", text);
+        Assert.Contains("\"path\": \"/src/A & B/it's \\\"here\\\"\"", text);
+        Assert.DoesNotContain("\\u00", text);
+    }
+
     [Fact]
     public void ObservationSnapshot_ToJson_WritesSummaryThreadsStacksExceptionsAndAnomalies_WithoutReflection()
     {

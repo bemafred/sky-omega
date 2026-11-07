@@ -19,7 +19,6 @@
 
 using System.Diagnostics;
 using System.Globalization;
-using System.Text.Json;
 using System.Text.Json.Nodes;
 using SkyOmega.DrHook.Engine;
 using SkyOmega.DrHook.Engine.Interop;
@@ -31,8 +30,6 @@ namespace SkyOmega.DrHook.Mcp;
 
 public sealed class EngineSteppingSession : IDisposable
 {
-    private static readonly JsonSerializerOptions Indented = new() { WriteIndented = true };
-
     private DebugSession? _session;
     private string _sessionHypothesis = "";
     private string _targetVersion = "unknown";
@@ -1370,7 +1367,7 @@ public sealed class EngineSteppingSession : IDisposable
     // ToJsonString on the JsonNode tree avoids the reflection-based serializer (which is
     // disabled when the host runs trimmed/AOT — e.g., the .NET 10 file-based-app context used
     // by Probe 41). Equivalent output for the JsonObject inputs we use.
-    private static string Render(JsonObject obj) => obj.ToJsonString(Indented);
+    private static string Render(JsonObject obj) => obj.ToJsonString(OperatorJson.Options);
 
     // Queue the UI-liveness job while the session still holds a stop (finding: the post-capture hang appeared after
     // detach — ADR-012 Q8). Returns the sentinel to read once the target is released, or a note saying why no

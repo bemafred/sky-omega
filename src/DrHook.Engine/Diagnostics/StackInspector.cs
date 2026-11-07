@@ -1,6 +1,4 @@
 using System.Diagnostics;
-using System.Text.Encodings.Web;
-using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.Diagnostics.NETCore.Client;
 using Microsoft.Diagnostics.Tracing;
@@ -427,10 +425,7 @@ public sealed record ObservationSnapshot(
                 ? $"Anomalies detected. Compare with hypothesis: \"{Hypothesis}\". What is the delta?"
                 : $"No anomalies. Does this confirm or challenge your hypothesis: \"{Hypothesis}\"?"
 
-        }.ToJsonString(Indented);
+        }.ToJsonString(OperatorJson.Options);
     }
 
-    // Relaxed escaping: frame names are full of + < > & (nested types, generics, byrefs), which the default encoder
-    // writes as \u002B and the like. The JSON goes to an MCP text channel, never into HTML.
-    private static readonly JsonSerializerOptions Indented = new() { WriteIndented = true, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
 }
