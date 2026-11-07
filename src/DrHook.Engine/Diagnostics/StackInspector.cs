@@ -182,8 +182,15 @@ public sealed class StackInspector
                 .OrderByDescending(s => s.SampleCount)
                 .ToList());
         var totalSamples = threadSamples.Values.Sum();
+        // The sampler takes every managed thread that has a managed frame on its stack at each tick, and no sample of
+        // one that has none (the finalizer waiting below its managed frames; observed 2026-11-07 sampled in 2 of 1,176
+        // ticks). A thread that keeps a managed frame for the whole capture, as the main thread does in Main, is
+        // sampled at every tick, so the most samples any thread has is the capture's tick count. This assumes one
+        // such thread: if every thread lost its managed frames for part of the capture, the count is low and every
+        // thread's share of the ticks reads high.
+        var ticks = threadSamples.Count == 0 ? 0 : threadSamples.Values.Max();
         var threads = threadSamples
-            .Select(kv => new ThreadSummary(kv.Key, kv.Value, managedSamples.GetValueOrDefault(kv.Key, 0),
+            .Select(kv => new ThreadSummary(kv.Key, kv.Value, managedSamples.GetValueOrDefault(kv.Key, 0), ticks,
                 stacksByThread.GetValueOrDefault(kv.Key) ?? []))
             .ToList();
 
@@ -192,10 +199,10 @@ public sealed class StackInspector
         if (truncated)
             anomalies.Add($"TRUNCATED: the trace reached {MaxSampleTraceBytes / (1024 * 1024)} MiB after {observedMs} of the {durationMs} ms asked for; the capture stopped early");
 
-        // Anomaly: a thread running managed code in more than 80% of its samples (a tight loop, a spin-wait, or
+        // Anomaly: a thread running managed code at more than 80% of the capture's ticks (a tight loop, a spin-wait, or
         // sustained work). A thread that waits is sampled as External and is not one.
         foreach (var hot in threads.Where(t => t.SampleCount > 10 && t.ManagedPercentage > ThreadSummary.RunningPercentage))
-            anomalies.Add($"HOTSPOT: Thread {hot.ThreadId} was running managed code in {hot.ManagedSampleCount}/{hot.SampleCount} of its samples ({hot.ManagedPercentage:F0}%), at {hot.At ?? "an unknown frame"} — a tight loop, a spin-wait, or sustained work");
+            anomalies.Add($"HOTSPOT: Thread {hot.ThreadId} was running managed code at {hot.ManagedSampleCount} of the capture's {ticks} sampling ticks ({hot.ManagedPercentage:F0}%), at {hot.At ?? "an unknown frame"} — a tight loop, a spin-wait, or sustained work");
 
         // Anomaly: high GC pressure
         if (gcEvents.Count > 5)
@@ -224,6 +231,7 @@ public sealed class StackInspector
             Hypothesis: hypothesis,
             ThreadCount: threadSamples.Count,
             TotalSamples: totalSamples,
+            Ticks: ticks,
             ThreadSummary: threads,
             Exceptions: exceptions,
             GcEvents: gcEvents,
@@ -247,29 +255,52 @@ public sealed record GcEvent(DateTime Timestamp, int Generation, string Reason);
 public sealed record CollapsedStack(IReadOnlyList<string> Frames, int SampleCount, int ManagedSampleCount);
 
 /// <summary>One thread's samples: how many were taken, how many found it running managed code (the rest found it
-/// outside managed code: waiting, blocked, or in native code), and the distinct stacks they found it in, most
-/// frequent first.</summary>
-public sealed record ThreadSummary(int ThreadId, int SampleCount, int ManagedSampleCount, IReadOnlyList<CollapsedStack> Stacks)
+/// outside managed code: waiting, blocked, or in native code), the capture's sampling ticks, and the distinct stacks
+/// the samples found it in, most frequent first. A thread has fewer samples than the capture has ticks when it had no
+/// managed frame on its stack at some ticks, or did not live through the whole capture.</summary>
+public sealed record ThreadSummary(int ThreadId, int SampleCount, int ManagedSampleCount, int Ticks, IReadOnlyList<CollapsedStack> Stacks)
 {
-    /// <summary>Above this share of managed samples a thread is running managed code; below
+    /// <summary>Above this share of the capture's ticks running managed code a thread is running managed code; below
     /// <see cref="OutsidePercentage"/> it is outside managed code. Observed 2026-11-07: a spinning thread was sampled
-    /// in managed code in 605 of 605 samples, and threads in a pipe read, in Monitor.Wait and in Thread.Sleep in 0 of
+    /// in managed code in 605 of 605 ticks, and threads in a pipe read, in Monitor.Wait and in Thread.Sleep in 0 of
     /// 605. Between the two it is partly both.</summary>
     public const double RunningPercentage = 80;
     public const double OutsidePercentage = 20;
 
-    public double ManagedPercentage => 100.0 * ManagedSampleCount / Math.Max(SampleCount, 1);
+    /// <summary>The share of a thread's samples a frame must be in for the thread to be at it. Observed 2026-11-07: a
+    /// spinner was in a runtime helper its loop calls in 622 of 1,176 samples and in its loop in all of them; a lock
+    /// contender was in Monitor.Enter in 633 of 1,173 and in Thread.Sleep in the rest; a collector was in Thread.Sleep
+    /// in 1,173 of 1,176.</summary>
+    public const double AtPercentage = 80;
+
+    /// <summary>The share of the capture's ticks at which the thread was running managed code. A tick without a sample
+    /// of the thread found no managed frame on its stack, so it was not running managed code then.</summary>
+    public double ManagedPercentage => 100.0 * ManagedSampleCount / Math.Max(Math.Max(Ticks, SampleCount), 1);
 
     /// <summary>The thread's state over the capture, from its samples' types.</summary>
     public string State => ManagedPercentage > RunningPercentage ? "running managed code"
         : ManagedPercentage < OutsidePercentage ? "outside managed code"
         : "partly running managed code";
 
-    /// <summary>The innermost named frame of the thread's most frequent stack: where it ran, or for a thread outside
-    /// managed code, the managed frame it left from (Monitor.Wait, Thread.Sleep, a P/Invoke such as Interop+Sys.Read).
-    /// Unnamed frames are passed over: a P/Invoke stub generated at run time has no module and no name (observed
-    /// 2026-11-07 innermost under SocketAsyncEngine.EventLoop), and the stack keeps it.</summary>
-    public string? At => Stacks is [{ Frames: var frames }, ..] ? frames.FirstOrDefault(f => !f.StartsWith('[')) : null;
+    /// <summary>The innermost named frame that is in at least <see cref="AtPercentage"/> of the thread's samples: where
+    /// it ran, or for a thread outside managed code, the managed frame it left from (Monitor.Wait, Thread.Sleep, a
+    /// P/Invoke such as Interop+Sys.Read). A thread split between stacks is at the frame they share, not at the top of
+    /// whichever stack has a few more samples, so two captures of the same behaviour name the same frame. With no frame
+    /// that common, it is the innermost named frame of the most frequent stack. Unnamed frames are passed over: a
+    /// P/Invoke stub generated at run time has no module and no name (observed 2026-11-07 innermost under
+    /// SocketAsyncEngine.EventLoop), and the stack keeps it.</summary>
+    public string? At
+    {
+        get
+        {
+            if (Stacks is not [{ Frames: var frames }, ..]) return null;
+            var named = frames.Where(f => !f.StartsWith('['));
+            return named.FirstOrDefault(frame =>
+                       100.0 * Stacks.Where(s => s.Frames.Contains(frame)).Sum(s => s.SampleCount) / Math.Max(SampleCount, 1)
+                       >= AtPercentage)
+                   ?? named.FirstOrDefault();
+        }
+    }
 }
 
 public sealed record ObservationSnapshot(
@@ -281,6 +312,7 @@ public sealed record ObservationSnapshot(
     string Hypothesis,
     int ThreadCount,
     int TotalSamples,
+    int Ticks,
     List<ThreadSummary> ThreadSummary,
     List<ExceptionEvent> Exceptions,
     List<GcEvent> GcEvents,
@@ -349,6 +381,7 @@ public sealed record ObservationSnapshot(
             {
                 ["threadCount"]     = ThreadCount,
                 ["totalSamples"]    = TotalSamples,
+                ["ticks"]           = Ticks,
                 ["exceptionCount"]  = Exceptions.Count,
                 ["gcEventCount"]    = GcEvents.Count,
                 ["contentionCount"] = ContentionCount,

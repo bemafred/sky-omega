@@ -44,12 +44,13 @@ public sealed class DiagnosticsJsonTests
             Hypothesis: "the target is idle",
             ThreadCount: 3,
             TotalSamples: 150,
+            Ticks: 50,
             ThreadSummary: [
-                new ThreadSummary(12, 50, 2, [new CollapsedStack(["System.Threading.Monitor.Wait(class System.Object,int32)", "Worker.Run()"], 50, 2)]),
-                new ThreadSummary(11, 50, 45, [
+                new ThreadSummary(12, 50, 2, 50, [new CollapsedStack(["System.Threading.Monitor.Wait(class System.Object,int32)", "Worker.Run()"], 50, 2)]),
+                new ThreadSummary(11, 50, 45, 50, [
                     new CollapsedStack(["Spinner.Spin()", "Spinner.Run()"], 40, 40),
                     new CollapsedStack(["Spinner.Report()", "Spinner.Run()"], 10, 5)]),
-                new ThreadSummary(13, 50, 2, [new CollapsedStack(["System.Threading.Monitor.Wait(class System.Object,int32)", "Worker.Run()"], 50, 2)]),
+                new ThreadSummary(13, 50, 2, 50, [new CollapsedStack(["System.Threading.Monitor.Wait(class System.Object,int32)", "Worker.Run()"], 50, 2)]),
             ],
             Exceptions: [new ExceptionEvent(capturedAt, "System.InvalidOperationException", "boom", 11)],
             GcEvents: [new GcEvent(capturedAt, 0, "AllocSmall")],
@@ -64,6 +65,7 @@ public sealed class DiagnosticsJsonTests
         Assert.Equal("the target is idle", (string)json["hypothesis"]!);
         Assert.Equal(3, (int)json["summary"]!["threadCount"]!);
         Assert.Equal(150, (int)json["summary"]!["totalSamples"]!);
+        Assert.Equal(50, (int)json["summary"]!["ticks"]!);
         Assert.Equal(1, (int)json["summary"]!["exceptionCount"]!);
         Assert.Equal(1, (int)json["summary"]!["gcEventCount"]!);
         Assert.Equal(3, (int)json["summary"]!["contentionCount"]!);
