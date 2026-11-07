@@ -4,7 +4,8 @@
 **Status:** **Mechanism located** in the runtime source (`release/10.0`) and consistent with every hung process
 sampled on omega (macOS 27.0.1 arm64, runtime 10.0.9) and omega-ubuntu (Ubuntu 26.04.1 arm64, runtime 10.0.14),
 and with the named stacks of every thread on zbook (Ubuntu 26.04.1 x64, runtime 10.0.14);
-Windows, which has no PAL, did not hang. **Not reproduced as
+Windows, which has no PAL, did not hang. A target DrHook launched, the debugger's own child, hangs the same way
+(2026-11-07, as predicted). **Not reproduced as
 a minimal case. Not fixed**, here or upstream. It explains the hangs of findings
 [100](100-orphaned-transport-read-holds-dac-lock.md), [103](103-terminate-waits-on-error-write.md) and
 [104](104-crash-boundary.md).
@@ -100,6 +101,16 @@ target's process handle, which should wake it when the target dies (read below).
   to 172 ms after the probe saw the target gone ([finding 104](104-crash-boundary.md)). There mscordbi reads the
   target's memory directly, with no transport request to wait on, and a process handle is a kernel object that
   signals at the death. This is the outcome the mechanism predicts; it does not show the mechanism.
+- **A launched target, the debugger's own child, hangs the same way** (2026-11-07, [finding 104](104-crash-boundary.md)).
+  - On the three Unix machines, 26 of 120 launched runs hung and 32 of 120 attached runs in the same batch. On
+    omega-windows, none of 80 hung.
+  - zbook sampled all 10 hung children with gdb and named their frames as on 2026-11-06
+    ([`zbook-linux-x64-launched/`](105-dll-pal-never-rechecks-a-waited-process/zbook-linux-x64-launched/)).
+  - The stacks are the same as before. The Win32 event thread waits in `RequestSyncAtEvent` → `WriteMemory` →
+    `SendRequestMessageAndWait`; the second attach waits on `g_dacMutex`; the transport thread is in `Sleep`.
+  - No thread is in `waitpid` or `waitid`. The waited child is not where the hang is.
+  - 4 of the 7 launched hangs entered through `ShimProxyCallback::ExitThread`, the rest through `CreateThread`, and
+    both lead to the same `RequestSyncAtEvent`.
 
 ## Mechanism (inferred from the above)
 
@@ -116,7 +127,7 @@ flight, was clean (finding 104).
 This makes the hang a race between the target's death and an outstanding request, whatever ends the target: a
 SIGKILL (finding 100), FailFast, a stack overflow, a native fault or `abort()` (finding 104). It also predicts the
 hang for a launched target, the debugger's own child, since monitoring is what is missing, not the means of checking.
-Not tested.
+Tested 2026-11-07: it held (above).
 
 ## Not established
 

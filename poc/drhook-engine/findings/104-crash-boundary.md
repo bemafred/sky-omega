@@ -5,7 +5,8 @@
 Microsoft's .NET 10.0.14), 10 runs per mode on each; crashes without the managed warning added 2026-11-06; ending at
 a stack overflow's stop, the `ProcessExited` timing and omega-windows (Windows 11 arm64 VM: no hang in 130 runs)
 added later on 2026-11-06; Linux x64 (zbook, bare metal, Microsoft's .NET 10.0.14) and the six CI runners (the hang
-on all four macOS and Linux runners, none on Windows) added the same day.
+on all four macOS and Linux runners, none on Windows) added the same day; a target DrHook launched, on omega,
+omega-ubuntu, zbook and omega-windows, added 2026-11-07 (it hangs as an attached one does).
 **Not fixed:** DrHook continues every stop it is asked to, including the unhandled-exception one. ADR-016 Step 4,
 probe 100 (`poc/drhook-engine/100-orphaned-read-smoke.cs`, modes added in `5984ad0`, `04aff45` and `4da7093`).
 
@@ -255,6 +256,54 @@ Five runners printed RESULT(0); Windows x64 printed RESULT(1) because of the one
 - **The Linux runners' targets took 424 to 640 ms to die** after a continued stop (not checked why; apport on
   Ubuntu 24.04 is not known to be enabled on GitHub's images). macOS 1 to 152 ms, Windows 14 to 54 ms.
 
+## A target DrHook launched (2026-11-07)
+
+Every run until now attached to a target started under bash. A launched target is the debugger's own child, and
+mscordbi learns of a child's death differently (`waitpid`, not `kill(pid, 0)`), so the hang might not reach it.
+Finding 105 predicts it does: what is missing is a thread that re-checks a waited process, not the means of checking.
+
+Construction: four modes, `launch-measure-crash`, `-stackoverflow`, `-segv` and `-abort`, the same as `measure-*`
+except that `DebugSession.Launch` starts the target, attached before managed code runs. The launched target stays a
+zombie until it is reaped, and `kill(pid, 0)` succeeds on a zombie, so the probe sees the death with `waitid(…, WEXITED
+| WNOHANG | WNOWAIT)`, which does not reap: reaping it would race mscordbi's PAL (finding 87). The four attached
+`measure-*` modes ran in the same batch, 10 runs per mode. Probe 100 at `3a7ab57` plus these modes, on omega
+(05:25–07:12 UTC), omega-ubuntu (Ubuntu's .NET 10.0.14, 05:25–06:17), zbook (Microsoft's .NET 10.0.14, run by
+sky-zbook under its gdb holder, 05:28–06:13) and omega-windows (06:17–06:38). Every machine printed RESULT(0). Raw
+output: `104-crash-boundary/<machine>-launched-and-attached.txt`.
+
+Hung runs out of 10, launched / attached:
+
+| Mode | omega | omega-ubuntu | zbook | omega-windows |
+|------|-------|--------------|-------|---------------|
+| crash (FailFast) | **3** / **9** | **1** / **1** | 0 / 0 | 0 / 0 |
+| stack overflow | **6** / **4** | 0 / **3** | 0 / 0 | 0 / 0 |
+| native fault | **4** / **3** | **1** / **1** | **7** / **1** | 0 / 0 |
+| `abort()` | **1** / **5** | **3** / **3** | 0 / **2** | 0 / 0 |
+| all | **14** / **21** | **5** / **8** | **7** / **3** | 0 / 0 |
+
+- **A launched target hangs the debugger as an attached one does.** On the three Unix machines, 26 of 120 launched
+  runs hung and 32 of 120 attached runs, each in the same batch. The prediction held, on every machine where the
+  attached runs hung; Windows hung in neither (80 of 80 usable).
+- **The detector holds for both.** A `ProcessExited` stop came in every usable run and in no hung one. Relative to
+  the probe seeing the target gone: omega 0 to 35 ms, omega-ubuntu 16 ms before to 26 ms after, zbook 19 ms before to
+  22 ms after, omega-windows 12 to 169 ms. No second attach that missed 30 s finished within 120 s.
+- **The same request, named** (zbook, all 10 hung children, sampled with gdb at 45 s;
+  `105-dll-pal-never-rechecks-a-waited-process/zbook-linux-x64-launched/`):
+  - The Win32 event thread waits in `RequestSyncAtEvent` → `DbgTransportSession::WriteMemory` →
+    `SendRequestMessageAndWait`, and the second attach waits on `g_dacMutex`, as on 2026-11-06.
+  - No thread is in `waitpid` or `waitid`. The launched hang is not in the child-waiting code.
+  - The event that leads there differs. 4 of the 7 launched hangs came through `ShimProxyCallback::ExitThread` and 3
+    through `CreateThread`. All attached hangs came through `CreateThread` (3 here, 5 on 2026-11-06). Either kind of
+    thread event leads to the same request.
+- **The rates differ by mode, with no consistent direction.** zbook's native fault hung 7 of 10 launched against 1 of
+  10 attached, about a 1-in-100 split for that cell alone if both hang alike. omega's FailFast leans the other way
+  just as strongly (3 against 9), and its `abort()` too (1 against 5). These are 3 of the 12 Unix cells, so no
+  difference between launching and attaching is shown.
+- **Windows announces a launched native fault as it does an attached one,** with an `Exception(Unhandled,
+  System.ExecutionEngineException)` stop. `abort()` gives none either way.
+- **A launched Linux target takes the same second to die** after its stop is continued (apport): omega-ubuntu 1,059 to
+  1,091 ms, zbook 1,155 to 1,191 ms. On omega it is 3 to 30 ms.
+
 ## What this answers
 
 - **The disappearance, not the signal.** In `flood-crash` DrHook sent no signal; the target ended itself. On omega,
@@ -291,7 +340,6 @@ its own, and consistent with omega's.
   `WriteMemory` from `RequestSyncAtEvent`, 5 of 5 ([finding 105](105-dll-pal-never-rechecks-a-waited-process.md)).
 - Why the hang rate differs by machine and crash (stack overflow 5 of 10 on omega, 1 of 20 on omega-ubuntu, 0 of 15
   on zbook). The second a Linux target takes to die is apport (zbook and omega-ubuntu), and the hang does not need it.
-- A target DrHook launched, rather than attached to.
 - The 2 macOS arm64 CI runs whose event thread was stuck while the next attach still worked: which request, and
   whether it held the DAC lock.
 - Why the Linux runners' targets take about half a second to die.
@@ -307,6 +355,8 @@ Input to Step 6, not a decision:
 - The route it cannot avoid that way is real: a native fault or a direct `abort()` gives no stop and still hung the
   debugger on macOS arm64 and Linux arm64. With finding 105, nothing in the process can recover from it; the worker
   process is decided (Martin, 2026-11-06; ADR-016).
+- None of this depends on how the session began. A target DrHook launched hung the debugger as an attached one
+  did, 26 of 120 against 32 of 120 on Unix, with the same request named on zbook, and the same detection held.
 - Avoidance covers a stack overflow too: end the session at its stop (60 of 60 on our machines, 239 of 239 runs with
   a stop on CI). On Windows x64 a stack overflow sometimes gives no stop (2 of 30), harmless there.
 - Detection, which DrHook does not do today: once the target is gone, a `ProcessExited` stop came within 175 ms or

@@ -619,7 +619,17 @@ omega, omega-ubuntu with both builds, omega-windows; 10 runs per mode).
   not always the process as poisoned.
 - On Windows x64 a stack overflow gave no stop in 2 of 30 runs (no harm there).
 
-Not yet run: a `DebuggerError`, a target DrHook launched, and whether a bounded operation completes later.
+*A target DrHook launched, run 2026-11-07* (findings 104 and 105; probe 100 at `3a7ab57` plus four `launch-measure-*`
+modes; omega, omega-ubuntu, zbook and omega-windows; 10 runs per mode, launched and attached in one batch).
+- A launched target, the debugger's own child, hung the debugger as an attached one did: 26 of 120 launched runs on
+  the three Unix machines, 32 of 120 attached; none of 80 on Windows. As finding 105 predicted.
+- `ProcessExited` came in every usable run and in no hung one, launched or attached; no second attach that missed
+  30 s finished within 120 s. The detector does not depend on how the session began.
+- zbook's named stacks of all 10 hung children show the same request and lock as before, and no thread in `waitpid`
+  or `waitid`.
+
+Not yet run: a `DebuggerError` (handled to its documented contract since `3a7ab57`, not induced), and whether a
+bounded operation completes later.
 
 **Step 5 — A minimal process-isolation proof of concept.** The worker is decided (2026-11-06); this step proves its
 design, not its need. A supervisor and one worker. Induce finding 100's exact

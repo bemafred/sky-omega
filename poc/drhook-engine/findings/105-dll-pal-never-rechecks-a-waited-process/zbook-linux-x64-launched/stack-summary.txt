@@ -1,0 +1,180 @@
+== child-1044407-launch-measure-segv.txt: pid 1044407 mode launch-measure-segv age 45.4s sampled 05:34:04.170Z
+  .NET SynchManag  lwp 1044409 started by libcoreclr.so          chain libcoreclr.so
+  .NET EventPipe   lwp 1044410 started by libcoreclr.so          chain libcoreclr.so
+  .NET DebugPipe   lwp 1044411 started by libcoreclr.so          chain libcoreclr.so
+  .NET Debugger    lwp 1044412 started by libcoreclr.so          chain libcoreclr.so
+  .NET Finalizer   lwp 1044413 started by libcoreclr.so          chain libcoreclr.so
+  100-orphaned-re  lwp 1044423 started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  100-orphaned-re  lwp 1044424 started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  .NET DebugPipe   lwp 1044425 started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  DrHook.Callback  lwp 1044426 started by -                      chain libcoreclr.so > jit?
+  .NET SigHandler  lwp 1044429 started by libSystem.Native.so    chain libSystem.Native.so
+  .NET Tiered Com  lwp 1045616 started by libcoreclr.so          chain libcoreclr.so
+  .NET Sockets     lwp 1045619 started by -                      chain libSystem.Native.so > jit?
+  probe100-second  lwp 1045628 started by -                      chain libmscordaccore.so > libmscordbi.so > jit? > libmscordbi.so > jit?
+  probe100-second  lwp 1045629 started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  probe100-second  lwp 1045630 started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  .NET DebugPipe   lwp 1045631 started by libmscordaccore.so     chain libmscordbi.so > libmscordaccore.so
+  100-orphaned-re  lwp 1044407 started by -                      chain libcoreclr.so > jit?
+== child-1045790-launch-measure-segv.txt: pid 1045790 mode launch-measure-segv age 46.0s sampled 05:36:48.037Z
+  .NET SynchManag  lwp 1045792 started by libcoreclr.so          chain libcoreclr.so
+  .NET EventPipe   lwp 1045793 started by libcoreclr.so          chain libcoreclr.so
+  .NET DebugPipe   lwp 1045794 started by libcoreclr.so          chain libcoreclr.so
+  .NET Debugger    lwp 1045795 started by libcoreclr.so          chain libcoreclr.so
+  .NET Finalizer   lwp 1045796 started by libcoreclr.so          chain libcoreclr.so
+  100-orphaned-re  lwp 1045806 started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  100-orphaned-re  lwp 1045807 started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  .NET DebugPipe   lwp 1045808 started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  DrHook.Callback  lwp 1045809 started by -                      chain libcoreclr.so > jit?
+  .NET SigHandler  lwp 1045812 started by libSystem.Native.so    chain libSystem.Native.so
+  .NET Tiered Com  lwp 1048499 started by libcoreclr.so          chain libcoreclr.so
+  .NET Sockets     lwp 1048502 started by -                      chain libSystem.Native.so > jit?
+  probe100-second  lwp 1048510 started by -                      chain libmscordaccore.so > libmscordbi.so > jit? > libmscordbi.so > jit?
+  probe100-second  lwp 1048511 started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  probe100-second  lwp 1048512 started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  .NET DebugPipe   lwp 1048513 started by libmscordaccore.so     chain libmscordbi.so > libmscordaccore.so
+  100-orphaned-re  lwp 1045790 started by -                      chain libcoreclr.so > jit?
+== child-1053610-launch-measure-segv.txt: pid 1053610 mode launch-measure-segv age 45.2s sampled 05:40:00.022Z
+  .NET SynchManag  lwp 1053613 started by libcoreclr.so          chain libcoreclr.so
+  .NET EventPipe   lwp 1053614 started by libcoreclr.so          chain libcoreclr.so
+  .NET DebugPipe   lwp 1053615 started by libcoreclr.so          chain libcoreclr.so
+  .NET Debugger    lwp 1053616 started by libcoreclr.so          chain libcoreclr.so
+  .NET Finalizer   lwp 1053617 started by libcoreclr.so          chain libcoreclr.so
+  100-orphaned-re  lwp 1053627 started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  100-orphaned-re  lwp 1053628 started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  .NET DebugPipe   lwp 1053629 started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  DrHook.Callback  lwp 1053630 started by -                      chain libcoreclr.so > jit?
+  .NET SigHandler  lwp 1053633 started by libSystem.Native.so    chain libSystem.Native.so
+  .NET Tiered Com  lwp 1055995 started by libcoreclr.so          chain libcoreclr.so
+  .NET Sockets     lwp 1055998 started by -                      chain libSystem.Native.so > jit?
+  probe100-second  lwp 1056009 started by -                      chain libmscordaccore.so > libmscordbi.so > jit? > libmscordbi.so > jit?
+  probe100-second  lwp 1056010 started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  probe100-second  lwp 1056011 started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  .NET DebugPipe   lwp 1056012 started by libmscordaccore.so     chain libmscordbi.so > libmscordaccore.so
+  100-orphaned-re  lwp 1053610 started by -                      chain libcoreclr.so > jit?
+== child-1056167-launch-measure-segv.txt: pid 1056167 mode launch-measure-segv age 46.7s sampled 05:42:45.683Z
+  .NET SynchManag  lwp 1056169 started by libcoreclr.so          chain libcoreclr.so
+  .NET EventPipe   lwp 1056170 started by libcoreclr.so          chain libcoreclr.so
+  .NET DebugPipe   lwp 1056171 started by libcoreclr.so          chain libcoreclr.so
+  .NET Debugger    lwp 1056172 started by libcoreclr.so          chain libcoreclr.so
+  .NET Finalizer   lwp 1056173 started by libcoreclr.so          chain libcoreclr.so
+  100-orphaned-re  lwp 1056183 started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  100-orphaned-re  lwp 1056184 started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  .NET DebugPipe   lwp 1056185 started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  DrHook.Callback  lwp 1056186 started by -                      chain libcoreclr.so > jit?
+  .NET SigHandler  lwp 1056189 started by libSystem.Native.so    chain libSystem.Native.so
+  .NET Tiered Com  lwp 1058887 started by libcoreclr.so          chain libcoreclr.so
+  .NET Sockets     lwp 1058890 started by -                      chain libSystem.Native.so > jit?
+  probe100-second  lwp 1058899 started by -                      chain libmscordaccore.so > libmscordbi.so > jit? > libmscordbi.so > jit?
+  probe100-second  lwp 1058900 started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  probe100-second  lwp 1058901 started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  .NET DebugPipe   lwp 1058902 started by libmscordaccore.so     chain libmscordbi.so > libmscordaccore.so
+  100-orphaned-re  lwp 1056167 started by -                      chain libcoreclr.so > jit?
+== child-1059054-launch-measure-segv.txt: pid 1059054 mode launch-measure-segv age 46.0s sampled 05:45:29.390Z
+  .NET SynchManag  lwp 1059056 started by libcoreclr.so          chain libcoreclr.so
+  .NET EventPipe   lwp 1059057 started by libcoreclr.so          chain libcoreclr.so
+  .NET DebugPipe   lwp 1059058 started by libcoreclr.so          chain libcoreclr.so
+  .NET Debugger    lwp 1059059 started by libcoreclr.so          chain libcoreclr.so
+  .NET Finalizer   lwp 1059060 started by libcoreclr.so          chain libcoreclr.so
+  100-orphaned-re  lwp 1059070 started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  100-orphaned-re  lwp 1059071 started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  .NET DebugPipe   lwp 1059072 started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  DrHook.Callback  lwp 1059073 started by -                      chain libcoreclr.so > jit?
+  .NET SigHandler  lwp 1059076 started by libSystem.Native.so    chain libSystem.Native.so
+  .NET Tiered Com  lwp 1061827 started by libcoreclr.so          chain libcoreclr.so
+  .NET Sockets     lwp 1061830 started by -                      chain libSystem.Native.so > jit?
+  probe100-second  lwp 1061838 started by -                      chain libmscordaccore.so > libmscordbi.so > jit? > libmscordbi.so > jit?
+  probe100-second  lwp 1061839 started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  probe100-second  lwp 1061840 started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  .NET DebugPipe   lwp 1061841 started by libmscordaccore.so     chain libmscordbi.so > libmscordaccore.so
+  100-orphaned-re  lwp 1059054 started by -                      chain libcoreclr.so > jit?
+== child-1061979-launch-measure-segv.txt: pid 1061979 mode launch-measure-segv age 45.0s sampled 05:48:13.069Z
+  .NET SynchManag  lwp 1061981 started by libcoreclr.so          chain libcoreclr.so
+  .NET EventPipe   lwp 1061982 started by libcoreclr.so          chain libcoreclr.so
+  .NET DebugPipe   lwp 1061983 started by libcoreclr.so          chain libcoreclr.so
+  .NET Debugger    lwp 1061984 started by libcoreclr.so          chain libcoreclr.so
+  .NET Finalizer   lwp 1061985 started by libcoreclr.so          chain libcoreclr.so
+  100-orphaned-re  lwp 1061995 started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  100-orphaned-re  lwp 1061997 started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  .NET DebugPipe   lwp 1061998 started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  DrHook.Callback  lwp 1061999 started by -                      chain libcoreclr.so > jit?
+  .NET SigHandler  lwp 1062002 started by libSystem.Native.so    chain libSystem.Native.so
+  .NET Tiered Com  lwp 1063916 started by libcoreclr.so          chain libcoreclr.so
+  .NET Sockets     lwp 1063919 started by -                      chain libSystem.Native.so > jit?
+  probe100-second  lwp 1063927 started by -                      chain libmscordaccore.so > libmscordbi.so > jit? > libmscordbi.so > jit?
+  probe100-second  lwp 1063928 started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  probe100-second  lwp 1063929 started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  .NET DebugPipe   lwp 1063930 started by libmscordaccore.so     chain libmscordbi.so > libmscordaccore.so
+  100-orphaned-re  lwp 1061979 started by -                      chain libcoreclr.so > jit?
+== child-1066722-launch-measure-segv.txt: pid 1066722 mode launch-measure-segv age 45.0s sampled 05:51:11.173Z
+  .NET SynchManag  lwp 1066725 started by libcoreclr.so          chain libcoreclr.so
+  .NET EventPipe   lwp 1066726 started by libcoreclr.so          chain libcoreclr.so
+  .NET DebugPipe   lwp 1066727 started by libcoreclr.so          chain libcoreclr.so
+  .NET Debugger    lwp 1066728 started by libcoreclr.so          chain libcoreclr.so
+  .NET Finalizer   lwp 1066729 started by libcoreclr.so          chain libcoreclr.so
+  100-orphaned-re  lwp 1066738 started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  100-orphaned-re  lwp 1066739 started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  .NET DebugPipe   lwp 1066740 started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  DrHook.Callback  lwp 1066741 started by -                      chain libcoreclr.so > jit?
+  .NET SigHandler  lwp 1066744 started by libSystem.Native.so    chain libSystem.Native.so
+  .NET Tiered Com  lwp 1067805 started by libcoreclr.so          chain libcoreclr.so
+  .NET Sockets     lwp 1067808 started by -                      chain libSystem.Native.so > jit?
+  probe100-second  lwp 1067817 started by -                      chain libmscordaccore.so > libmscordbi.so > jit? > libmscordbi.so > jit?
+  probe100-second  lwp 1067818 started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  probe100-second  lwp 1067819 started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  .NET DebugPipe   lwp 1067820 started by libmscordaccore.so     chain libmscordbi.so > libmscordaccore.so
+  100-orphaned-re  lwp 1066722 started by -                      chain libcoreclr.so > jit?
+== child-1349344-measure-segv.txt: pid 1349344 mode measure-segv age 46.6s sampled 06:03:42.640Z
+  .NET SynchManag  lwp 1349346 started by libcoreclr.so          chain libcoreclr.so
+  .NET EventPipe   lwp 1349347 started by libcoreclr.so          chain libcoreclr.so
+  .NET DebugPipe   lwp 1349348 started by libcoreclr.so          chain libcoreclr.so
+  .NET Debugger    lwp 1349349 started by libcoreclr.so          chain libcoreclr.so
+  .NET Finalizer   lwp 1349350 started by libcoreclr.so          chain libcoreclr.so
+  .NET SigHandler  lwp 1349352 started by libSystem.Native.so    chain libSystem.Native.so
+  .NET Sockets     lwp 1349355 started by -                      chain libSystem.Native.so > jit?
+  100-orphaned-re  lwp 1357206 started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  100-orphaned-re  lwp 1357247 started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  .NET DebugPipe   lwp 1357250 started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  DrHook.Callback  lwp 1357258 started by -                      chain libcoreclr.so > jit?
+  .NET Tiered Com  lwp 1358592 started by libcoreclr.so          chain libcoreclr.so
+  probe100-second  lwp 1358602 started by -                      chain libmscordaccore.so > libmscordbi.so > jit? > libmscordbi.so > jit?
+  probe100-second  lwp 1358603 started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  probe100-second  lwp 1358604 started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  .NET DebugPipe   lwp 1358605 started by libmscordaccore.so     chain libmscordbi.so > libmscordaccore.so
+  100-orphaned-re  lwp 1349344 started by -                      chain libcoreclr.so > jit?
+== child-1375577-measure-abort.txt: pid 1375577 mode measure-abort age 45.9s sampled 06:06:56.529Z
+  .NET SynchManag  lwp 1375579 started by libcoreclr.so          chain libcoreclr.so
+  .NET EventPipe   lwp 1375580 started by libcoreclr.so          chain libcoreclr.so
+  .NET DebugPipe   lwp 1375581 started by libcoreclr.so          chain libcoreclr.so
+  .NET Debugger    lwp 1375582 started by libcoreclr.so          chain libcoreclr.so
+  .NET Finalizer   lwp 1375583 started by libcoreclr.so          chain libcoreclr.so
+  .NET SigHandler  lwp 1375585 started by libSystem.Native.so    chain libSystem.Native.so
+  .NET Sockets     lwp 1375588 started by -                      chain libSystem.Native.so > jit?
+  100-orphaned-re  lwp 1383119 started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  100-orphaned-re  lwp 1383159 started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  .NET DebugPipe   lwp 1383161 started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  DrHook.Callback  lwp 1383167 started by -                      chain libcoreclr.so > jit?
+  .NET Tiered Com  lwp 1384045 started by libcoreclr.so          chain libcoreclr.so
+  probe100-second  lwp 1384056 started by -                      chain libmscordaccore.so > libmscordbi.so > jit? > libmscordbi.so > jit?
+  probe100-second  lwp 1384057 started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  probe100-second  lwp 1384058 started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  .NET DebugPipe   lwp 1384059 started by libmscordaccore.so     chain libmscordbi.so > libmscordaccore.so
+  100-orphaned-re  lwp 1375577 started by -                      chain libcoreclr.so > jit?
+== child-1438159-measure-abort.txt: pid 1438159 mode measure-abort age 46.0s sampled 06:11:15.069Z
+  .NET SynchManag  lwp 1438161 started by libcoreclr.so          chain libcoreclr.so
+  .NET EventPipe   lwp 1438162 started by libcoreclr.so          chain libcoreclr.so
+  .NET DebugPipe   lwp 1438163 started by libcoreclr.so          chain libcoreclr.so
+  .NET Debugger    lwp 1438164 started by libcoreclr.so          chain libcoreclr.so
+  .NET Finalizer   lwp 1438165 started by libcoreclr.so          chain libcoreclr.so
+  .NET SigHandler  lwp 1438167 started by libSystem.Native.so    chain libSystem.Native.so
+  .NET Sockets     lwp 1438170 started by -                      chain libSystem.Native.so > jit?
+  100-orphaned-re  lwp 1445996 started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  100-orphaned-re  lwp 1446047 started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  .NET DebugPipe   lwp 1446048 started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  DrHook.Callback  lwp 1446055 started by -                      chain libcoreclr.so > jit?
+  .NET Tiered Com  lwp 1446761 started by libcoreclr.so          chain libcoreclr.so
+  probe100-second  lwp 1446773 started by -                      chain libmscordaccore.so > libmscordbi.so > jit? > libmscordbi.so > jit?
+  probe100-second  lwp 1446774 started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  probe100-second  lwp 1446775 started by libmscordaccore.so     chain libmscordaccore.so > libmscordbi.so > libmscordaccore.so
+  .NET DebugPipe   lwp 1446776 started by libmscordaccore.so     chain libmscordbi.so > libmscordaccore.so
+  100-orphaned-re  lwp 1438159 started by -                      chain libcoreclr.so > jit?

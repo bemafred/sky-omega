@@ -1,6 +1,7 @@
 #!/usr/bin/env -S dotnet
 #:project ../../src/DrHook.Engine/DrHook.Engine.csproj
 #:property TargetFramework=net10.0
+#:property AllowUnsafeBlocks=true
 //
 // DrHook.Engine probe 100 — a read of target memory that the target can never answer (finding 100) =================
 //
@@ -139,8 +140,25 @@
 //             flood-abort use ucrtbase's memset and abort(). There is no debug transport: mscordbi reads the target's
 //             memory directly and learns of its death from its process handle. Hypothesis: nothing waits on a dead
 //             target, so no crash leaves the debugger unusable. Predicted: a usable second attach, N of N, every mode.
+//   launch-measure-crash, launch-measure-stackoverflow, launch-measure-segv, launch-measure-abort (2026-11-06): as
+//             the measure-* modes, but DebugSession.Launch starts the target as the debugger's own child, attached
+//             before managed code runs, instead of attaching to a target started under bash. The second attach after
+//             the end is unchanged. Hypothesis (finding 105): the hang does not depend on how the target was started,
+//             since what is missing is a thread that re-checks a waited process, not the means of checking it; a
+//             child is checked with waitpid, a non-child with kill(pid, 0), both only when a wait starts. Predicted:
+//             as for measure-*, on Unix no run both has a ProcessExited stop and a hung second attach, no attach
+//             finishes late, and some runs hang; on Windows a usable debugger every run. Construction detail: the
+//             launched target is this process's child, so it stays a zombie until reaped and kill(pid, 0) still
+//             succeeds on it; WaitUntilGone asks waitid with WNOWAIT, which sees a dead child without reaping it, so
+//             the probe does not race mscordbi's PAL for the reap (finding 87). Falsified if no launched run hangs
+//             on a platform where the attached runs do, over the same number of runs.
+//   Observed 2026-11-07, 10 runs per mode, launched and attached in one batch: launched hung 14/40 on omega, 5/40 on
+//             omega-ubuntu, 7/40 on zbook (Linux x64), 0/40 on omega-windows; attached 21, 8, 3 and 0 of 40. RESULT(0)
+//             on all four. Holds: a launched target hangs the debugger as an attached one does (finding 104).
 //   Usage: dotnet run --no-cache 100-orphaned-read-smoke.cs 10 flood-stackoverflow-kill flood-stackoverflow-detach
 //             measure-crash measure-stackoverflow measure-segv measure-abort
+//          dotnet run --no-cache 100-orphaned-read-smoke.cs 10 launch-measure-crash launch-measure-stackoverflow
+//             launch-measure-segv launch-measure-abort measure-crash measure-stackoverflow measure-segv measure-abort
 //
 // Observed 2026-10-30, omega (macOS 27, arm64): control 3/3 completed after SIGCONT and kill 3/3 returned within
 // ~20 ms of the kill (the dead target's pipes removed), refuting the first form of the hypothesis (any pending read
@@ -196,6 +214,10 @@ if (args.Length == 3 && args[0] == "child")
         "measure-stackoverflow" => ChildContinuedCrash(args[2], "flood-stackoverflow", "stackoverflow", TimeSpan.FromSeconds(30)),
         "measure-segv" => ChildContinuedCrash(args[2], "flood-segv", "segv", TimeSpan.FromSeconds(30)),
         "measure-abort" => ChildContinuedCrash(args[2], "flood-abort", "abort", TimeSpan.FromSeconds(30)),
+        "launch-measure-crash" => ChildContinuedCrash(args[2], "flood-crash", "launched-crash", TimeSpan.FromSeconds(30)),
+        "launch-measure-stackoverflow" => ChildContinuedCrash(args[2], "flood-stackoverflow", "launched-stackoverflow", TimeSpan.FromSeconds(30)),
+        "launch-measure-segv" => ChildContinuedCrash(args[2], "flood-segv", "launched-segv", TimeSpan.FromSeconds(30)),
+        "launch-measure-abort" => ChildContinuedCrash(args[2], "flood-abort", "launched-abort", TimeSpan.FromSeconds(30)),
         _ => Child(args[1], args[2]),
     };
 
@@ -229,6 +251,10 @@ var predicted = new Dictionary<string, (string Text, Func<List<string>, bool> Ho
     ["measure-stackoverflow"] = windows ? ("a usable debugger every run", usableEveryRun) : (measuredText, measuredHolds),
     ["measure-segv"] = windows ? ("a usable debugger every run", usableEveryRun) : (measuredText, measuredHolds),
     ["measure-abort"] = windows ? ("a usable debugger every run", usableEveryRun) : (measuredText, measuredHolds),
+    ["launch-measure-crash"] = windows ? ("a usable debugger every run", usableEveryRun) : (measuredText, measuredHolds),
+    ["launch-measure-stackoverflow"] = windows ? ("a usable debugger every run", usableEveryRun) : (measuredText, measuredHolds),
+    ["launch-measure-segv"] = windows ? ("a usable debugger every run", usableEveryRun) : (measuredText, measuredHolds),
+    ["launch-measure-abort"] = windows ? ("a usable debugger every run", usableEveryRun) : (measuredText, measuredHolds),
 };
 int runs = args.Length > 0 ? int.Parse(args[0]) : 3;
 string[] modes = args.Length > 1 ? args[1..] : OperatingSystem.IsMacOS() ? ["control", "kill", "flood-kill"] : ["control", "kill"];
@@ -613,13 +639,29 @@ static int ChildContinuedCrash(string dll, string targetMode, string kind, TimeS
     void Say(string text) { Console.WriteLine($"child: {text} [{clock.ElapsedMilliseconds} ms]"); Console.Out.Flush(); }
     int Result(string outcome) { Console.WriteLine($"child: result={outcome}"); Console.Out.Flush(); return 0; }
 
-    int pid = StartTarget(dll, targetMode);
-    Console.WriteLine($"child: target={pid}");
-    Console.Out.Flush();
+    // "launched-*": DebugSession.Launch spawns the target as this process's own child, attached before managed code
+    // runs (the debugger's own target). Otherwise the target is started under bash (Unix) and attached to.
+    bool launched = kind.StartsWith("launched-", StringComparison.Ordinal);
+    int pid;
     DebugSession session;
-    try { session = DebugSession.AttachAndOwn(pid, new Sink()); }
-    catch (Exception e) { Say($"attach failed: {e.Message}"); return Result("setup-failed"); }
-    Say($"attached; the target floods thread events and will crash ({kind}) within 0.5 to 3 s");
+    if (launched)
+    {
+        try { session = DebugSession.Launch("dotnet", new[] { dll, targetMode }, null, new Sink()); }
+        catch (Exception e) { Say($"launch failed: {e.Message}"); return Result("setup-failed"); }
+        pid = session.ProcessId;
+        Console.WriteLine($"child: target={pid}");
+        Console.Out.Flush();
+        Say($"launched; the target floods thread events and will crash ({kind}) within 0.5 to 3 s");
+    }
+    else
+    {
+        pid = StartTarget(dll, targetMode);
+        Console.WriteLine($"child: target={pid}");
+        Console.Out.Flush();
+        try { session = DebugSession.AttachAndOwn(pid, new Sink()); }
+        catch (Exception e) { Say($"attach failed: {e.Message}"); return Result("setup-failed"); }
+        Say($"attached; the target floods thread events and will crash ({kind}) within 0.5 to 3 s");
+    }
 
     var stops = new List<string>();
     bool warned = false;
@@ -711,7 +753,11 @@ static int AfterTheEnd(string prefix, int pid, string dll, Action<string> say, F
     return result(stuck == true ? $"{prefix}-orphaned-and-attach-hung" : $"{prefix}-attach-hung");
 }
 
-// Unix: polls with signal 0 until the process is gone (bash, its parent, reaps it). True once kill(pid, 0) fails.
+// Unix: polls until the process is gone. A target that is this process's own child (launched) stays a zombie until
+// someone reaps it, and kill(pid, 0) still succeeds on a zombie; reaping it here would race mscordbi's PAL, which
+// reaps its own child (finding 87), and change what is measured. So each poll first asks waitid with WNOWAIT, which
+// reports a dead child without reaping it; for a process that is not our child (started under bash, which reaps it)
+// waitid fails with ECHILD, and the poll falls back to kill(pid, 0).
 // Windows: waits on the process itself.
 static bool WaitUntilGone(int pid, TimeSpan bound)
 {
@@ -723,10 +769,26 @@ static bool WaitUntilGone(int pid, TimeSpan bound)
     var waited = Stopwatch.StartNew();
     while (waited.Elapsed < bound)
     {
-        if (kill(pid, 0) != 0) return true;
+        if (ChildHasExited(pid) is { } exited) { if (exited) return true; }
+        else if (kill(pid, 0) != 0) return true;
         Thread.Sleep(20);
     }
     return false;
+}
+
+// waitid(P_PID, pid, WEXITED | WNOHANG | WNOWAIT): true if our child pid has exited (left as a zombie, not reaped),
+// false if it is our child and still running, null if it is not our child (ECHILD) or the call failed otherwise.
+// siginfo_t: si_pid at offset 16 on Linux (64-bit), 12 on macOS; both fit in 128 bytes. WNOHANG with no state change
+// returns 0 and leaves si_pid 0.
+static unsafe bool? ChildHasExited(int pid)
+{
+    const int P_PID = 1, WEXITED = 4, WNOHANG = 1;
+    int wnowait = OperatingSystem.IsMacOS() ? 0x20 : 0x01000000;
+    byte* info = stackalloc byte[128];
+    new Span<byte>(info, 128).Clear();
+    if (waitid(P_PID, (uint)pid, info, WEXITED | WNOHANG | wnowait) != 0) return null;
+    int siPid = *(int*)(info + (OperatingSystem.IsMacOS() ? 12 : 16));
+    return siPid == pid;
 }
 
 // SIGKILL on Unix; TerminateProcess (Process.Kill) on Windows.
@@ -816,6 +878,9 @@ static string? BuildTarget(string csPath)
     }
     return null;
 }
+
+[DllImport("libc", SetLastError = true)]
+static extern unsafe int waitid(int idtype, uint id, byte* infop, int options);
 
 [DllImport("libc", SetLastError = true)]
 static extern int kill(int pid, int sig);
