@@ -34,7 +34,9 @@ public sealed record DotNetProcessEntry(int Pid, string Name, string Path, strin
 
 public sealed record DotNetProcessList(List<DotNetProcessEntry> Processes)
 {
-    public string ToJson() => JsonSerializer.Serialize(new JsonObject
+    // JsonNode writes itself; JsonSerializer.Serialize would need reflection-based metadata, which a trimmed, AOT or
+    // file-based host disables.
+    public string ToJson() => new JsonObject
     {
         ["processes"] = new JsonArray(Processes.Select(p => (JsonNode)new JsonObject
         {
@@ -45,5 +47,7 @@ public sealed record DotNetProcessList(List<DotNetProcessEntry> Processes)
             ["executableDeleted"] = p.ExecutableDeleted
         }).ToArray()),
         ["count"] = Processes.Count
-    }, new JsonSerializerOptions { WriteIndented = true });
+    }.ToJsonString(Indented);
+
+    private static readonly JsonSerializerOptions Indented = new() { WriteIndented = true };
 }

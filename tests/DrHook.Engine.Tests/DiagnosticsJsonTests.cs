@@ -1,0 +1,73 @@
+// The diagnostics results' JSON in a host without reflection-based serialization. This project disables it
+// (JsonSerializerIsReflectionEnabledByDefault=false), as trimmed, AOT and file-based hosts of the engine do; before
+// 2026-11-07 both ToJson methods threw InvalidOperationException there (probe 106 dogfooding).
+
+using System.Text.Json.Nodes;
+using SkyOmega.DrHook.Engine.Diagnostics;
+using Xunit;
+
+namespace SkyOmega.DrHook.Engine.Tests;
+
+public sealed class DiagnosticsJsonTests
+{
+    [Fact]
+    public void ProcessList_ToJson_WritesEveryEntry_WithoutReflection()
+    {
+        var list = new DotNetProcessList([
+            new DotNetProcessEntry(41, "first", "/bin/first", "1.2.3"),
+            new DotNetProcessEntry(42, "second", "/bin/second", "unknown", ExecutableDeleted: true),
+        ]);
+
+        JsonNode json = JsonNode.Parse(list.ToJson())!;
+
+        Assert.Equal(2, (int)json["count"]!);
+        JsonArray processes = json["processes"]!.AsArray();
+        Assert.Equal(41, (int)processes[0]!["pid"]!);
+        Assert.Equal("first", (string)processes[0]!["name"]!);
+        Assert.Equal("/bin/first", (string)processes[0]!["path"]!);
+        Assert.Equal("1.2.3", (string)processes[0]!["version"]!);
+        Assert.False((bool)processes[0]!["executableDeleted"]!);
+        Assert.Equal(42, (int)processes[1]!["pid"]!);
+        Assert.True((bool)processes[1]!["executableDeleted"]!);
+    }
+
+    [Fact]
+    public void ObservationSnapshot_ToJson_WritesSummaryThreadsExceptionsAndAnomalies_WithoutReflection()
+    {
+        var capturedAt = new DateTime(2026, 11, 7, 12, 0, 0, DateTimeKind.Utc);
+        var snapshot = new ObservationSnapshot(
+            Pid: 7,
+            ProcessName: "target",
+            AssemblyVersion: "1.0.0",
+            CapturedAt: capturedAt,
+            DurationMs: 500,
+            Hypothesis: "the target is idle",
+            ThreadCount: 2,
+            TotalSamples: 100,
+            ThreadSummary: [new ThreadSummary(12, 50, 2), new ThreadSummary(11, 50, 45)],
+            Exceptions: [new ExceptionEvent(capturedAt, "System.InvalidOperationException", "boom", 11)],
+            GcEvents: [new GcEvent(capturedAt, 0, "AllocSmall")],
+            ContentionCount: 3,
+            Anomalies: ["CONTENTION: 3 lock contention events — possible deadlock risk"]);
+
+        JsonNode json = JsonNode.Parse(snapshot.ToJson())!;
+
+        Assert.Equal(7, (int)json["pid"]!);
+        Assert.Equal("target", (string)json["processName"]!);
+        Assert.Equal(capturedAt.ToString("O"), (string)json["capturedAt"]!);
+        Assert.Equal("the target is idle", (string)json["hypothesis"]!);
+        Assert.Equal(2, (int)json["summary"]!["threadCount"]!);
+        Assert.Equal(100, (int)json["summary"]!["totalSamples"]!);
+        Assert.Equal(1, (int)json["summary"]!["exceptionCount"]!);
+        Assert.Equal(1, (int)json["summary"]!["gcEventCount"]!);
+        Assert.Equal(3, (int)json["summary"]!["contentionCount"]!);
+        Assert.Equal(11, (int)json["threads"]![0]!["threadId"]!);
+        Assert.Equal(50, (int)json["threads"]![0]!["samples"]!);
+        Assert.Equal(45, (int)json["threads"]![0]!["managedSamples"]!);
+        Assert.Equal(90.0, (double)json["threads"]![0]!["managedPercentage"]!);
+        Assert.Equal(12, (int)json["threads"]![1]!["threadId"]!);
+        Assert.Equal("boom", (string)json["exceptions"]![0]!["message"]!);
+        Assert.Equal("CONTENTION: 3 lock contention events — possible deadlock risk", (string)json["anomalies"]![0]!);
+        Assert.StartsWith("Anomalies detected.", (string)json["deltaPrompt"]!);
+    }
+}

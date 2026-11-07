@@ -10,6 +10,9 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <RootNamespace>SkyOmega.DrHook.Engine.Tests</RootNamespace>
     <AssemblyName>SkyOmega.DrHook.Engine.Tests</AssemblyName>
+    <!-- The engine runs in hosts that disable reflection-based JSON (trimmed, AOT, file-based apps). The tests run
+         the same way, so engine code that needs it fails here. -->
+    <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
   </PropertyGroup>
 
   <ItemGroup>

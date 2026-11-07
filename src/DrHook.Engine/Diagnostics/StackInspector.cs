@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.Diagnostics.NETCore.Client;
 using Microsoft.Diagnostics.Tracing;
+using Microsoft.Diagnostics.Tracing.EventPipe;
 using Microsoft.Diagnostics.Tracing.Parsers;
 
 namespace SkyOmega.DrHook.Engine.Diagnostics;
@@ -57,7 +58,11 @@ public sealed class StackInspector
 
         var client = new DiagnosticsClient(pid);
 
+        // The sample profiler samples every managed thread on each tick, whatever it is doing, so a thread's share of
+        // all samples measures the number of threads, not activity. What a sample says about its thread is its type:
+        // Managed (running managed code) or External (outside it: waiting, blocked, in native code).
         var threadSamples = new Dictionary<int, int>();        // threadId → sample count
+        var managedSamples = new Dictionary<int, int>();       // threadId → samples taken in managed code
         var exceptions = new List<ExceptionEvent>();
         var gcEvents = new List<GcEvent>();
         var contentionCount = 0;
@@ -80,13 +85,12 @@ public sealed class StackInspector
             Interlocked.Increment(ref contentionCount);
         };
 
-        source.Dynamic.All += e =>
+        new SampleProfilerTraceEventParser(source).ThreadSample += e =>
         {
-            if (e.ProviderName == "Microsoft-DotNETCore-SampleProfiler")
-            {
-                var tid = e.ThreadID;
-                threadSamples[tid] = threadSamples.GetValueOrDefault(tid, 0) + 1;
-            }
+            var tid = e.ThreadID;
+            threadSamples[tid] = threadSamples.GetValueOrDefault(tid, 0) + 1;
+            if (e.Type == ClrThreadSampleType.Managed)
+                managedSamples[tid] = managedSamples.GetValueOrDefault(tid, 0) + 1;
         };
 
         // Capture for the specified duration
@@ -98,15 +102,16 @@ public sealed class StackInspector
         // ─── Build summary (refinement #1: summarization) ──────────────
 
         var totalSamples = threadSamples.Values.Sum();
-        var hotThread = threadSamples.Count > 0
-            ? threadSamples.MaxBy(kv => kv.Value)
-            : new KeyValuePair<int, int>(0, 0);
+        var threads = threadSamples
+            .Select(kv => new ThreadSummary(kv.Key, kv.Value, managedSamples.GetValueOrDefault(kv.Key, 0)))
+            .ToList();
 
         var anomalies = new List<string>();
 
-        // Anomaly: single thread consuming >80% of samples (possible infinite loop)
-        if (totalSamples > 10 && hotThread.Value > totalSamples * 0.8)
-            anomalies.Add($"HOTSPOT: Thread {hotThread.Key} consumed {hotThread.Value}/{totalSamples} samples ({100.0 * hotThread.Value / totalSamples:F0}%) — possible tight loop or spin-wait");
+        // Anomaly: a thread running managed code in more than 80% of its samples (a tight loop, a spin-wait, or
+        // sustained work). A thread that waits is sampled as External and is not one.
+        foreach (var hot in threads.Where(t => t.SampleCount > 10 && t.ManagedSampleCount > t.SampleCount * 0.8))
+            anomalies.Add($"HOTSPOT: Thread {hot.ThreadId} was running managed code in {hot.ManagedSampleCount}/{hot.SampleCount} of its samples ({hot.ManagedPercentage:F0}%) — a tight loop, a spin-wait, or sustained work");
 
         // Anomaly: high GC pressure
         if (gcEvents.Count > 5)
@@ -120,9 +125,11 @@ public sealed class StackInspector
         if (exceptions.Count > 0)
             anomalies.Add($"EXCEPTIONS: {exceptions.Count} exception(s) thrown: {string.Join(", ", exceptions.Select(e => e.Type).Distinct())}");
 
-        // Anomaly: no activity at all
-        if (totalSamples == 0 && exceptions.Count == 0 && gcEvents.Count == 0)
-            anomalies.Add("IDLE: No activity captured — process may be idle, blocked, or observation window too short");
+        // Anomaly: no activity at all. Waiting threads are sampled too, so activity is managed samples, not samples.
+        if (managedSamples.Count == 0 && exceptions.Count == 0 && gcEvents.Count == 0)
+            anomalies.Add(totalSamples == 0
+                ? "IDLE: No samples captured — the observation window may be too short"
+                : $"IDLE: No thread ran managed code in {totalSamples} samples — every thread is waiting, blocked, or in native code");
 
         return new ObservationSnapshot(
             Pid: pid,
@@ -133,8 +140,7 @@ public sealed class StackInspector
             Hypothesis: hypothesis,
             ThreadCount: threadSamples.Count,
             TotalSamples: totalSamples,
-            ThreadSummary: threadSamples.Select(kv =>
-                new ThreadSummary(kv.Key, kv.Value, 100.0 * kv.Value / Math.Max(totalSamples, 1))).ToList(),
+            ThreadSummary: threads,
             Exceptions: exceptions,
             GcEvents: gcEvents,
             ContentionCount: contentionCount,
@@ -144,7 +150,12 @@ public sealed class StackInspector
 
 public sealed record ExceptionEvent(DateTime Timestamp, string Type, string Message, int ThreadId);
 public sealed record GcEvent(DateTime Timestamp, int Generation, string Reason);
-public sealed record ThreadSummary(int ThreadId, int SampleCount, double Percentage);
+/// <summary>One thread's samples: how many were taken, and how many found it running managed code (the rest found it
+/// outside managed code: waiting, blocked, or in native code).</summary>
+public sealed record ThreadSummary(int ThreadId, int SampleCount, int ManagedSampleCount)
+{
+    public double ManagedPercentage => 100.0 * ManagedSampleCount / Math.Max(SampleCount, 1);
+}
 
 public sealed record ObservationSnapshot(
     int Pid,
@@ -161,7 +172,9 @@ public sealed record ObservationSnapshot(
     int ContentionCount,
     List<string> Anomalies)
 {
-    public string ToJson() => JsonSerializer.Serialize(new JsonObject
+    // JsonNode writes itself; JsonSerializer.Serialize would need reflection-based metadata, which a trimmed, AOT or
+    // file-based host disables.
+    public string ToJson() => new JsonObject
     {
         // ── Context (anchoring) ──
         ["pid"]             = Pid,
@@ -183,15 +196,17 @@ public sealed record ObservationSnapshot(
             ["contentionCount"] = ContentionCount,
         },
 
-        // ── Thread detail (top 5 by activity) ──
+        // ── Thread detail (top 5 by managed samples: the threads running managed code most) ──
         ["threads"] = new JsonArray(ThreadSummary
-            .OrderByDescending(t => t.SampleCount)
+            .OrderByDescending(t => t.ManagedSampleCount)
+            .ThenByDescending(t => t.SampleCount)
             .Take(5)
             .Select(t => (JsonNode)new JsonObject
             {
-                ["threadId"]    = t.ThreadId,
-                ["samples"]     = t.SampleCount,
-                ["percentage"]  = Math.Round(t.Percentage, 1)
+                ["threadId"]          = t.ThreadId,
+                ["samples"]           = t.SampleCount,
+                ["managedSamples"]    = t.ManagedSampleCount,
+                ["managedPercentage"] = Math.Round(t.ManagedPercentage, 1)
             }).ToArray()),
 
         // ── Exceptions (all — these are high-signal) ──
@@ -211,5 +226,7 @@ public sealed record ObservationSnapshot(
             ? $"Anomalies detected. Compare with hypothesis: \"{Hypothesis}\". What is the delta?"
             : $"No anomalies. Does this confirm or challenge your hypothesis: \"{Hypothesis}\"?"
 
-    }, new JsonSerializerOptions { WriteIndented = true });
+    }.ToJsonString(Indented);
+
+    private static readonly JsonSerializerOptions Indented = new() { WriteIndented = true };
 }
