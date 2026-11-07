@@ -233,6 +233,19 @@ unhealthy worker and the session it affects, and starts a fresh worker.
   `ExitProcess` cannot arrive, the API leaves no clean way to shut the debugger down inside its process (Context).
   A process boundary is a real boundary around that state, not another managed abstraction.
 - **What it would also dissolve.** Finding 86's runtime lock becomes per worker, not per service.
+- **A fresh engine without a reconnect** (observed 2026-11-07, an input to Step 6's choice of worker lifetime, not a
+  decision).
+  - **The problem.** Today an engine change reaches the operator only through a new MCP process, and the client may
+    not offer one. The Claude desktop app's Code sessions refuse `/mcp reconnect`, at the machine as well as over
+    Remote Control. Its alternatives, a new session or an app restart, lose the operator's view or interrupt the
+    work. So the session that changed the engine goes on debugging with the engine it started with.
+  - **What a worker per session would give.** If each worker starts from the current build, the MCP process is only
+    the supervisor (the tool surface, the protocol and the supervision) and rarely changes. An engine change then
+    reaches the next `drhook_launch` or `drhook_attach` with no reconnect.
+  - **What that needs.** The worker runs from its own copy of the build, so a rebuild cannot replace the files of a
+    running worker. On 2026-11-07 a build replaced the binaries under two running `drhook-mcp` processes.
+  - **What it leaves.** A change to the tool surface itself still needs a new MCP process, unless the client honours
+    MCP's `notifications/tools/list_changed` (untested).
 - **What it brings.** The worker is a program with its own lifecycle, held to the same rules. A launched target
   becomes the worker's child, so the worker's death affects it. Whether a target that is held stopped resumes, stays
   frozen or dies when its debugger process dies is not known on any platform. Recovering the service and
@@ -641,7 +654,8 @@ and native threads, is filed in the limits register: [drhook-snapshot-native-fra
 
 **Step 6 — Decide (Epistemics).** From Steps 2 to 5: the session end for each scenario; the operation contracts; what
 replaces ADR-008's Decision 1; the bounds, detection and anomalies for the extraordinary ends; the worker's lifetime
-(per session or per runtime version) and its protocol; how DrHook attributes an expired bound. This ADR moves to Accepted with that decision.
+(per session or per runtime version; a worker per session would also bring an engine change to the next session without
+a reconnect, see the containment boundary) and its protocol; how DrHook attributes an expired bound. This ADR moves to Accepted with that decision.
 
 **Step 7 — Engineering.** Implement only what Step 6 decided: for the worker, the minimum protocol,
 lifecycle state and supervision, and no general-purpose framework. Rewrite the tests in the kinds above, with
