@@ -47,6 +47,7 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
     private int _detached;  // 0 = attached, 1 = detached; atomic via Interlocked.Exchange (ENG-DS-1)
     private int _disposed;  // 0 = live, 1 = disposed; atomic via Interlocked.Exchange (ENG-DS-1)
     private readonly bool _ownsTarget;  // true = Owned (substrate kills target on Dispose); false = Borrowed (detach-leave-running). Probe 44 + finding 64.
+    private readonly long? _targetStart;       // Unix: the target's start time (ProcessLifetime), with its PID its identity; null on Windows or when unreadable.
     private readonly Process? _targetProcess;  // Owned: the handle the substrate kills through on Dispose (closes MCH-RE-2, finding 63). Borrowed (Attach): death detection only, never killed. Null only for an owned launch whose target was already gone.
     private readonly string? _imageBaseDir;    // directory of the launched/attached executable — where a single-file app's sidecar <module>.pdb lives when the bundled module has no on-disk PE.
 
@@ -169,6 +170,7 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
         _pProcess = pProcess;
         _ownsTarget = ownsTarget;
         _targetProcess = targetProcess;
+        _targetStart = targetProcess is null ? null : Interop.ProcessLifetime.StartOf(processId);
         _naturalExitTimeout = naturalExitTimeout;
         _imageBaseDir = imageBaseDir;
     }
@@ -186,6 +188,38 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
     /// ICorDebug throws <see cref="DebuggerLostException"/>, <see cref="WaitForStop"/> returns
     /// <see cref="StopReason.DebuggerLost"/>, and <see cref="Dispose"/> calls nothing on mscordbi's objects.</summary>
     public bool IsDebuggerLost => _pump.LostStop is not null;
+
+    /// <summary>True once the target has exited, whether or not it has been reaped, read from the OS and not from
+    /// mscordbi. A dead target that nobody has reaped is a zombie, which <see cref="Process.HasExited"/> reports as
+    /// running for a process this one did not <c>Process.Start</c>; in a session stuck as in finding 105 nothing
+    /// reaps it (observed 2026-11-07, probe 106). Unix: PID and start time (<c>ProcessLifetime</c>), so a reused PID
+    /// is not mistaken for the target. Windows: the process handle.</summary>
+    [System.Diagnostics.CodeAnalysis.MemberNotNullWhen(false, nameof(_targetProcess))]
+    public bool TargetHasExited
+    {
+        get
+        {
+            if (_targetProcess is null) return true;
+            if (_targetStart is long start && Interop.ProcessLifetime.HasEnded(ProcessId, start) is bool ended) return ended;
+            return _targetProcess.HasExited;
+        }
+    }
+
+    /// <summary>Waits up to <paramref name="timeoutMs"/> for <see cref="TargetHasExited"/>. Windows waits on the process
+    /// handle. Unix polls every 10 ms: a process this one did not <c>Process.Start</c> gives it no exit notification,
+    /// and <see cref="Process.WaitForExit(int)"/> on it would wait past a zombie's death.</summary>
+    private bool WaitForTargetExit(int timeoutMs)
+    {
+        if (_targetProcess is null) return true;
+        if (OperatingSystem.IsWindows()) return _targetProcess.WaitForExit(timeoutMs);
+        var waited = Stopwatch.StartNew();
+        while (!TargetHasExited)
+        {
+            if (waited.ElapsedMilliseconds >= timeoutMs) return false;
+            Thread.Sleep(10);
+        }
+        return true;
+    }
 
     /// <summary>The error <c>DebuggerError</c> reported, or null while the debugger is usable.</summary>
     public DebuggerErrorInfo? DebuggerError => _pump.LostStop?.DebuggerError;
@@ -704,7 +738,7 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
                 "sessions don't own the target's lifecycle — the caller does. To terminate a Borrowed " +
                 "target, the caller (who owns it) should signal it via their own process-management path.");
         }
-        if (_targetProcess is null || _targetProcess.HasExited) return true;
+        if (TargetHasExited) return true;
 
         try
         {
@@ -718,7 +752,7 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
                     Observed: $"kill returned {rc}, errno {err}",
                     Expected: "0 (signal queued for delivery)",
                     Context: new Dictionary<string, string> { ["pid"] = _targetProcess.Id.ToString(System.Globalization.CultureInfo.InvariantCulture), ["errno"] = err.ToString(System.Globalization.CultureInfo.InvariantCulture) }));
-                return _targetProcess.HasExited;
+                return TargetHasExited;
             }
         }
         catch (PlatformNotSupportedException)
@@ -741,10 +775,10 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
                 Observed: $"{ex.GetType().Name}: {ex.Message}",
                 Expected: "kill returns 0 on success or -1+errno on failure",
                 Context: null));
-            return _targetProcess.HasExited;
+            return TargetHasExited;
         }
 
-        return _targetProcess.WaitForExit((int)timeout.TotalMilliseconds);
+        return WaitForTargetExit((int)timeout.TotalMilliseconds);
     }
 
     /// <summary>Forcibly terminate the Owned target after a brief grace period and tear down the
@@ -769,7 +803,7 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
     {
         if (Volatile.Read(ref _disposed) != 0) return;
 
-        if (_targetProcess is not null && !_targetProcess.HasExited)
+        if (!TargetHasExited)
         {
             bool exitedNaturally = false;
             if (_ownsTarget)
@@ -777,7 +811,7 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
                 // Owned Stage 1: SIGTERM with brief grace — catches well-behaved targets.
                 TimeSpan grace = briefGrace ?? DefaultAbandonBriefGrace;
                 try { exitedNaturally = RequestExit(grace); }
-                catch { exitedNaturally = _targetProcess.HasExited; }
+                catch { exitedNaturally = TargetHasExited; }
             }
 
             // Stage 2: SIGKILL. The fallback for an Owned target that ignored SIGTERM, AND the
@@ -2170,7 +2204,7 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
         {
             // Both codes say the target is gone. Check that with the OS: in finding 102 one TERMINATED came
             // while the target was running (zbook, it ran 1,024 ms more).
-            if (_targetProcess is not null && !_targetProcess.WaitForExit(GoneTargetExitConfirmMs))
+            if (_targetProcess is not null && !WaitForTargetExit(GoneTargetExitConfirmMs))
             {
                 _sink.OnAnomaly(new EngineAnomaly(
                     DateTimeOffset.UtcNow, AnomalyKind.GoneTargetAlive, "mcp-request", "Detach",
@@ -2208,7 +2242,7 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
     {
         try
         {
-            if (_targetProcess is not null && !_targetProcess.HasExited)
+            if (!TargetHasExited)
             {
                 _targetProcess.Kill(entireProcessTree: true);
             }
@@ -2372,7 +2406,7 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
         {
             try
             {
-                bool targetDead = _targetProcess?.HasExited == true;
+                bool targetDead = _targetProcess is not null && TargetHasExited;
                 if (targetDead)
                 {
                     // Target died between the stop and this call — nothing to leave running. Settle and Detach
@@ -2486,7 +2520,7 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
             lock (s_lostSessions) s_lostSessions.Add(this);
 
             // An owned target is ended with the OS, as documented. A borrowed one is not ours to end and is left as it is.
-            if (_ownsTarget && _targetProcess is not null && !_targetProcess.HasExited)
+            if (_ownsTarget && !TargetHasExited)
             {
                 try { _targetProcess.Kill(entireProcessTree: true); }
                 catch (Exception ex)
@@ -2517,7 +2551,7 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
                 // substrate own the kill operation. Finding 68's empirical SIGTERM evidence motivates
                 // the two-stage discipline — substrate trusts well-implemented targets to exit
                 // naturally, and only forces the kernel-mandated kill against violators.
-                if (_ownsTarget && _targetProcess is not null && !_targetProcess.HasExited)
+                if (_ownsTarget && !TargetHasExited)
                 {
                     // ADR-008 Increment 1b: release any pending mscordbi stop before SIGTERM.
                     // The substrate KNOWS from session activity whether the target is currently
@@ -2538,7 +2572,7 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
 
                     bool exitedNaturally = false;
                     try { exitedNaturally = RequestExit(_naturalExitTimeout); }
-                    catch { exitedNaturally = _targetProcess.HasExited; }
+                    catch { exitedNaturally = TargetHasExited; }
 
                     if (!exitedNaturally)
                     {
@@ -2578,7 +2612,7 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
                 // safety precondition for the later _callback.Dispose (which frees the CCW's
                 // native vtable + GCHandle backing memory). Without Detach, a dispatch in flight
                 // when _callback.Dispose runs would UAF the freed CCW memory.
-                bool targetDead = _targetProcess?.HasExited == true;
+                bool targetDead = _targetProcess is not null && TargetHasExited;
 
                 if (targetDead)
                 {
