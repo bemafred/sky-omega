@@ -78,7 +78,7 @@ The substrate is `DrHook.Engine` — a BCL + P/Invoke + source-gen COM implement
 | Tool | What it does | Former name |
 |------|---------------|-------------|
 | `drhook_processes` | List .NET processes (EventPipe-driven enumeration) | *(unchanged)* |
-| `drhook_snapshot` | Passive thread/stack snapshot of running process (EventPipe). Requires `hypothesis` parameter. | *(unchanged)* |
+| `drhook_snapshot` | Passive summary of a running process (EventPipe): per thread, how many samples ran managed code; exceptions; GC and contention counts; anomaly flags. No call stacks ([limit](docs/limits/drhook-snapshot-call-stacks.md)). Requires `hypothesis` parameter. | *(unchanged)* |
 
 ### Substrate diagnostics
 
