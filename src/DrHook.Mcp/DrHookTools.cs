@@ -28,7 +28,9 @@ public sealed class DrHookTools
     [McpServerTool(Name = "drhook_snapshot"), Description(
         "Capture a summarized observation of a running .NET process via EventPipe. " +
         "Passive — does not halt or modify execution. Returns structured summary " +
-        "with thread states, hotspots, exceptions, GC pressure, and anomaly flags. " +
+        "with thread states (each thread's state and the innermost named frame it is at), " +
+        "collapsed stacks (one entry per distinct managed stack, naming the threads in it), " +
+        "hotspots, exceptions, GC and lock-contention counts, and anomaly flags. " +
         "Requires a hypothesis: state what you expect BEFORE inspecting.")]
     public async Task<string> Snapshot(
         [Description("Target process ID")] int pid,

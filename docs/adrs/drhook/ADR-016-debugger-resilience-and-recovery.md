@@ -636,7 +636,8 @@ design, not its need. A supervisor and one worker. Induce finding 100's exact
 failure in the worker; the supervisor must detect it, discard the worker, and conduct a fresh session that succeeds.
 Having lost the worker, the supervisor cannot always know what became of the target, so it reports the target's last
 known state, when that was observed and how certain it is, and unknown when nothing establishes it. Also recorded,
-per platform: what happens to a target held stopped when its worker dies.
+per platform: what happens to a target held stopped when its worker dies. What the snapshot cannot see, native frames
+and native threads, is filed in the limits register: [drhook-snapshot-native-frames](../../limits/drhook-snapshot-native-frames.md).
 
 **Step 6 — Decide (Epistemics).** From Steps 2 to 5: the session end for each scenario; the operation contracts; what
 replaces ADR-008's Decision 1; the bounds, detection and anomalies for the extraordinary ends; the worker's lifetime

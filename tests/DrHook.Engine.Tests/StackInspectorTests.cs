@@ -3,7 +3,9 @@
 // The sample profiler samples every managed thread on each tick, whatever it is doing (observed 2026-11-07: ten
 // threads, about 614 samples each over one second). Before that date HOTSPOT was a thread's share of all samples,
 // which measures the number of threads: it named a thread blocked in ReadLine in probe 106's two-thread worker, and
-// could not fire at all in a process of ten threads. A sample's type says what its thread was doing.
+// could not fire at all in a process of ten threads. A sample's type says what its thread was doing, and its stack
+// where. The GC and contention counts were always zero until the same date: the runtime provider was enabled at
+// Warning, and those events are Informational.
 
 using System.IO.Pipes;
 using System.Runtime.CompilerServices;
@@ -69,6 +71,72 @@ public sealed partial class StackInspectorTests
         Assert.True(waited.ManagedPercentage < 10, $"the reader ran managed code in {waited.ManagedSampleCount}/{waited.SampleCount} samples");
         Assert.Contains(snapshot.Anomalies, a => a.StartsWith($"HOTSPOT: Thread {spun.ThreadId} ", StringComparison.Ordinal));
         Assert.DoesNotContain(snapshot.Anomalies, a => a.StartsWith($"HOTSPOT: Thread {waited.ThreadId} ", StringComparison.Ordinal));
+
+        // The thread state overview and the stacks: the spinner runs in this test's own lambda, the reader waits in
+        // the pipe's read.
+        Assert.Equal("running managed code", spun.State);
+        Assert.Equal("outside managed code", waited.State);
+        Assert.NotNull(spun.At);
+        Assert.Contains(nameof(Capture_NamesTheThreadRunningManagedCode_AndNotTheThreadBlockedInARead), spun.At);
+        Assert.Contains(waited.Stacks[0].Frames, f => f.StartsWith("System.IO.Pipes.PipeStream.Read", StringComparison.Ordinal));
+        Assert.Contains($"at {spun.At}", snapshot.Anomalies.Single(a => a.StartsWith($"HOTSPOT: Thread {spun.ThreadId} ", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public async Task Capture_CountsTheGarbageCollectionsTheProcessRuns()
+    {
+        var stop = new StrongBox<bool>(false);
+        var collector = new Thread(() =>
+        {
+            while (!Volatile.Read(ref stop.Value)) { GC.Collect(); Thread.Sleep(50); }
+        }) { IsBackground = true, Name = "collector" };
+        collector.Start();
+
+        ObservationSnapshot snapshot;
+        try
+        {
+            snapshot = await new StackInspector().CaptureAsync(Environment.ProcessId, 1000,
+                "a collection every 50 ms is counted", TestContext.Current.CancellationToken);
+        }
+        finally
+        {
+            Volatile.Write(ref stop.Value, true);
+            collector.Join();
+        }
+
+        Assert.True(snapshot.GcEvents.Count >= 5, $"{snapshot.GcEvents.Count} garbage collections were counted in a second of one every 50 ms");
+    }
+
+    [Fact]
+    public async Task Capture_CountsTheLockContentionTheProcessHas()
+    {
+        var stop = new StrongBox<bool>(false);
+        var gate = new object();
+        var holder = new Thread(() =>
+        {
+            while (!Volatile.Read(ref stop.Value)) lock (gate) Thread.Sleep(50);
+        }) { IsBackground = true, Name = "holder" };
+        var contender = new Thread(() =>
+        {
+            while (!Volatile.Read(ref stop.Value)) { lock (gate) { } Thread.Sleep(10); }
+        }) { IsBackground = true, Name = "contender" };
+        holder.Start();
+        contender.Start();
+
+        ObservationSnapshot snapshot;
+        try
+        {
+            snapshot = await new StackInspector().CaptureAsync(Environment.ProcessId, 1000,
+                "the contender blocks on the holder's lock many times", TestContext.Current.CancellationToken);
+        }
+        finally
+        {
+            Volatile.Write(ref stop.Value, true);
+            holder.Join();
+            contender.Join();
+        }
+
+        Assert.True(snapshot.ContentionCount >= 5, $"{snapshot.ContentionCount} contentions were counted in a second of a lock held 50 ms at a time");
     }
 
     [LibraryImport("libc")]
