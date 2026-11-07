@@ -61,6 +61,82 @@ public sealed class ProcessLifetimeTests
         Assert.True(ProcessLifetime.HasEnded(Environment.ProcessId, start.Value + 1));   // a reused PID is another process
     }
 
+    // How a child ended, read without reaping it (WaitForChildEnd, behind DebugSession.TargetExitWithin). mscordbi's
+    // PAL reaps a child of the debugger when it sees the exit (finding 87), so the read must leave the child to it.
+    [Fact]
+    public void AChildThatExited_ReadsAsItsExitCode_AndIsLeftForItsReaper()
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "waitid is POSIX; Windows reads the exit code from a handle.");
+
+        int rc = PosixSpawn.SpawnSuspendedRedirected("/bin/sh", ["/bin/sh", "-c", "exit 3"], cwd: null, env: null,
+            out int pid, out int stdoutFd, out int stderrFd);
+        Assert.Equal(0, rc);
+        bool reaped = false;
+        try
+        {
+            PosixSpawn.Continue(pid);
+
+            TargetExit exit = ProcessLifetime.WaitForChildEnd(pid);
+
+            Assert.Equal(TargetExit.Exited(3), exit);
+            Assert.Equal("exited with code 3", exit.Description);
+            Assert.Equal(0, PosixSpawn.kill(pid, 0));             // still a zombie: the read did not reap it
+            PosixSignals.ReapChild(pid);
+            reaped = true;
+            TargetExit afterReap = ProcessLifetime.WaitForChildEnd(pid);
+            Assert.Equal(TargetExitKind.Unknown, afterReap.Kind);
+            Assert.Equal("another reaper collected its exit status before DrHook read it", afterReap.WhyUnknown);
+        }
+        finally
+        {
+            if (!reaped) PosixSignals.ReapChild(pid);
+            PosixSpawn.Close(stdoutFd);
+            PosixSpawn.Close(stderrFd);
+        }
+    }
+
+    [Fact]
+    public void AChildThatWasKilled_ReadsAsTheSignalThatKilledIt()
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "waitid is POSIX; Windows has no signals.");
+
+        int rc = PosixSpawn.SpawnSuspendedRedirected("/bin/sleep", ["/bin/sleep", "30"], cwd: null, env: null,
+            out int pid, out int stdoutFd, out int stderrFd);
+        Assert.Equal(0, rc);
+        try
+        {
+            PosixSpawn.Continue(pid);
+            PosixSpawn.Kill(pid);
+
+            TargetExit exit = ProcessLifetime.WaitForChildEnd(pid);
+
+            Assert.Equal(TargetExit.Killed(9, coreDumped: false), exit);
+            Assert.Equal("SIGKILL", exit.SignalName);
+            Assert.Equal("was killed by signal 9 (SIGKILL)", exit.Description);
+        }
+        finally
+        {
+            PosixSignals.ReapChild(pid);
+            PosixSpawn.Close(stdoutFd);
+            PosixSpawn.Close(stderrFd);
+        }
+    }
+
+    [Fact]
+    public void OnWindows_AProcessThatExited_ReadsAsItsExitCode()
+    {
+        Assert.SkipUnless(OperatingSystem.IsWindows(), "Windows only.");
+
+        using Process child = Process.Start(new ProcessStartInfo("cmd.exe", "/c exit 3") { UseShellExecute = false, CreateNoWindow = true })!;
+        Microsoft.Win32.SafeHandles.SafeProcessHandle handle = ProcessLifetime.OpenForEnd(child.Id);
+        Assert.False(handle.IsInvalid);
+
+        TargetExit exit = ProcessLifetime.WaitForEnd(handle);
+
+        Assert.Equal(TargetExit.Exited(3), exit);
+        Assert.True(handle.IsClosed);                            // WaitForEnd closes the handle it was given
+    }
+
     [Fact]
     public void OnWindows_TheAnswerIsTheProcessHandles()
     {

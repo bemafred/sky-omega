@@ -352,7 +352,7 @@ public sealed class EngineSteppingSession : IDisposable
             }
             if (setup.EndsSession)
                 return Task.FromResult(RenderSessionEnd("attach", setup,
-                    $"The process exited during attach setup, before the breakpoint at {sourceFile}:{line} could be armed. Drain drhook_drain_log / drhook_drain_console for any output; start the next session with drhook_launch or drhook_attach.",
+                    end => $"{end} during attach setup, before the breakpoint at {sourceFile}:{line} could be armed. Drain drhook_drain_log / drhook_drain_console for any output; start the next session with drhook_launch or drhook_attach.",
                     hypothesis));
 
             // Set the initial breakpoint and run to it.
@@ -365,7 +365,7 @@ public sealed class EngineSteppingSession : IDisposable
             if (stop is null) return Task.FromResult(Error("Timed out waiting for the breakpoint to hit."));
             if (stop.EndsSession)
                 return Task.FromResult(RenderSessionEnd("attach", stop,
-                    $"The process exited before reaching the breakpoint at {sourceFile}:{line} — it completed or threw before that line executed. Drain drhook_drain_log / drhook_drain_console for any output; start the next session with drhook_launch or drhook_attach.",
+                    end => $"{end} before reaching the breakpoint at {sourceFile}:{line}. Drain drhook_drain_log / drhook_drain_console for any output; start the next session with drhook_launch or drhook_attach.",
                     hypothesis));
 
             PublishTransportSnapshot(stop);
@@ -435,7 +435,7 @@ public sealed class EngineSteppingSession : IDisposable
             }
             if (setup.EndsSession)
                 return Task.FromResult(RenderSessionEnd("launch", setup,
-                    $"The process exited during launch setup, before the breakpoint at {sourceFile}:{line} could be armed — it completed or threw within the 10s setup window. Drain drhook_drain_log / drhook_drain_console for any output; start the next session with drhook_launch or drhook_attach.",
+                    end => $"{end} during launch setup (the 10 s setup window), before the breakpoint at {sourceFile}:{line} could be armed. Drain drhook_drain_log / drhook_drain_console for any output; start the next session with drhook_launch or drhook_attach.",
                     hypothesis));
 
             int id = TrackSourceBreakpoint(sourceFile, line);
@@ -447,7 +447,7 @@ public sealed class EngineSteppingSession : IDisposable
             if (stop is null) { CleanupSession(); return Task.FromResult(Error("Timed out waiting for the breakpoint to hit.")); }
             if (stop.EndsSession)
                 return Task.FromResult(RenderSessionEnd("launch", stop,
-                    $"The process exited before reaching the breakpoint at {sourceFile}:{line} — it completed or threw before that line executed. Drain drhook_drain_log / drhook_drain_console for any output; start the next session with drhook_launch or drhook_attach.",
+                    end => $"{end} before reaching the breakpoint at {sourceFile}:{line}. Drain drhook_drain_log / drhook_drain_console for any output; start the next session with drhook_launch or drhook_attach.",
                     hypothesis));
 
             PublishTransportSnapshot(stop);
@@ -486,22 +486,33 @@ public sealed class EngineSteppingSession : IDisposable
         int pid = _targetPid;
         // Borrowed stop leaves the target running — owe the same liveness verdict as drhook_detach. Owned stop ends it.
         (DispatcherDrainSentinel? sentinel, string? livenessNote) = owned ? (null, null) : QueueUiLivenessJob();
+        DebugSession session = _session;
+        int steps = _stepCount;
+        string sessionHypothesis = _sessionHypothesis;
         JsonObject summary = new()
         {
             ["status"] = "stopped",
             ["hypothesis"] = hypothesis,
             ["mode"] = owned ? "owned" : "borrowed",
             ["disposition"] = owned
-                ? "Owned: target asked to exit gracefully (SIGTERM → SIGKILL if stuck, ADR-008)"
+                ? "Owned: target asked to exit (SIGTERM, then SIGKILL if it has not exited within the natural-exit window, ADR-008)"
                 : "Borrowed: detached, target left running",
-            ["totalSteps"] = _stepCount,
-            ["sessionHypothesis"] = _sessionHypothesis,
+            ["totalSteps"] = steps,
+            ["sessionHypothesis"] = sessionHypothesis,
             ["assemblyVersion"] = _targetVersion,
-            ["prompt"] = $"Session ended after {_stepCount} steps ({(owned ? "Owned: target gracefully terminated" : "Borrowed: target left running")}). " +
-                         $"Did the observations confirm or challenge the hypothesis: \"{_sessionHypothesis}\"?"
         };
 
         CleanupSession();
+        string ending = "Borrowed: target left running";
+        if (owned)
+        {
+            TargetExit exit = session.TargetExitWithin(TargetExitWait)
+                ?? TargetExit.Unknown($"it had not ended {TargetExitWait.TotalSeconds:0} s after the session's teardown");
+            summary["targetExit"] = TargetExitToJson(exit);
+            ending = $"Owned: the target {exit.Description}";
+        }
+        summary["prompt"] = $"Session ended after {steps} steps ({ending}). " +
+                            $"Did the observations confirm or challenge the hypothesis: \"{sessionHypothesis}\"?";
         if (sentinel is not null || livenessNote is not null) summary["uiLiveness"] = ReadUiLivenessVerdict(sentinel, livenessNote, pid);
         return Task.FromResult(Render(summary));
     }
@@ -553,9 +564,12 @@ public sealed class EngineSteppingSession : IDisposable
         bool owned = _session!.OwnsTarget;
         int steps = _stepCount, pid = _targetPid;
         string hyp = _sessionHypothesis, ver = _targetVersion;
+        DebugSession session = _session;
         try { _session.Abandon(); }
         catch (Exception ex) { return Task.FromResult(Error($"Kill (Abandon) failed: {ex.GetType().Name}: {ex.Message}")); }
         CleanupSession(); // Abandon already disposed; CleanupSession's Dispose is the idempotent no-op + state reset.
+        TargetExit exit = session.TargetExitWithin(TargetExitWait)
+            ?? TargetExit.Unknown($"it had not ended {TargetExitWait.TotalSeconds:0} s after the kill");
 
         return Task.FromResult(Render(new JsonObject
         {
@@ -563,13 +577,14 @@ public sealed class EngineSteppingSession : IDisposable
             ["hypothesis"] = hypothesis,
             ["mode"] = owned ? "owned" : "borrowed",
             ["pid"] = pid,
+            ["targetExit"] = TargetExitToJson(exit),
             ["disposition"] = owned
                 ? "forcibly terminated (SIGTERM brief-grace → SIGKILL, DebugSession.Abandon)"
                 : "forcibly terminated (SIGKILL — Borrowed force, F-010-1)",
             ["totalSteps"] = steps,
             ["sessionHypothesis"] = hyp,
             ["assemblyVersion"] = ver,
-            ["prompt"] = $"Target {pid} force-killed after {steps} steps — reason: \"{hypothesis}\". " +
+            ["prompt"] = $"Target {pid} killed after {steps} steps: it {exit.Description}. Reason given: \"{hypothesis}\". " +
                          $"drhook_kill is an anomaly path; a well-behaved target ends via drhook_stop."
         }));
     }
@@ -606,7 +621,7 @@ public sealed class EngineSteppingSession : IDisposable
             // process for a frame (finding 77).
             if (stop.EndsSession)
                 return Task.FromResult(RenderSessionEnd("continue", stop,
-                    "The debuggee exited (ran to completion) — no further stops, the session is over. Drain drhook_drain_log / drhook_drain_console for any final output; start the next session with drhook_launch or drhook_attach.",
+                    end => $"{end} — no further stops, the session is over. Drain drhook_drain_log / drhook_drain_console for any final output; start the next session with drhook_launch or drhook_attach.",
                     hypothesis));
 
             PublishTransportSnapshot(stop);
@@ -640,7 +655,7 @@ public sealed class EngineSteppingSession : IDisposable
             if (stop is null) return Task.FromResult(Error("Pause timed out — the engine did not surface a stop within budget."));
             if (stop.EndsSession)
                 return Task.FromResult(RenderSessionEnd("pause", stop,
-                    "The debuggee exited before the pause could synchronize — no stop to report; the session is over. Drain drhook_drain_log / drhook_drain_console for any final output; start the next session with drhook_launch or drhook_attach.",
+                    end => $"{end} before the pause could synchronize — no stop to report; the session is over. Drain drhook_drain_log / drhook_drain_console for any final output; start the next session with drhook_launch or drhook_attach.",
                     hypothesis));
 
             PublishTransportSnapshot(stop);
@@ -673,7 +688,7 @@ public sealed class EngineSteppingSession : IDisposable
             if (stop is null) return Task.FromResult(Error("Step did not complete within budget."));
             if (stop.EndsSession)
                 return Task.FromResult(RenderSessionEnd(operationName, stop,
-                    $"The debuggee exited (ran to completion) during {operationName} — no further stops, the session is over. Drain drhook_drain_log / drhook_drain_console for any final output; start the next session with drhook_launch or drhook_attach.",
+                    end => $"{end} during {operationName} — no further stops, the session is over. Drain drhook_drain_log / drhook_drain_console for any final output; start the next session with drhook_launch or drhook_attach.",
                     hypothesis));
 
             PublishTransportSnapshot(stop);
@@ -1169,11 +1184,18 @@ public sealed class EngineSteppingSession : IDisposable
     /// <paramref name="exitNote"/> is the operation's own wording for <see cref="StopReason.ProcessExited"/>. For
     /// <see cref="StopReason.DebuggerLost"/> the report carries DebuggerError's codes, and the target's state as the OS
     /// sees it after teardown (an owned target is killed by it; a borrowed one is left as it is).</summary>
-    private string RenderSessionEnd(string operation, StopInfo stop, string exitNote, string? hypothesis)
+    // How long a session's end waits for the target's exit record. On an exit the record is already read: the exit
+    // watch's waitid returns when the target turns zombie, before mscordbi's PAL reaps it and delivers ExitProcess. On
+    // drhook_stop the wait follows Dispose, which has already waited out the natural-exit window.
+    private static readonly TimeSpan TargetExitWait = TimeSpan.FromSeconds(2);
+
+    // exitNote: the result's prompt, given the end's opening sentence ("The debuggee exited with code 3").
+    private string RenderSessionEnd(string operation, StopInfo stop, Func<string, string> exitNote, string? hypothesis)
     {
         string version = _targetVersion;
         int pid = _session?.ProcessId ?? 0;
         bool owned = _session?.OwnsTarget ?? false;
+        TargetExit? exit = stop.Reason == StopReason.ProcessExited ? _session?.TargetExitWithin(TargetExitWait) : null;
         CleanupSession();
         JsonObject ended = new()
         {
@@ -1202,10 +1224,35 @@ public sealed class EngineSteppingSession : IDisposable
         }
         else
         {
-            ended["prompt"] = exitNote;
+            TargetExit known = exit ?? TargetExit.Unknown($"no exit record within {TargetExitWait.TotalSeconds:0} s of the exit");
+            ended["targetExit"] = TargetExitToJson(known);
+            ended["prompt"] = exitNote($"The debuggee {known.Description}");
         }
         if (hypothesis is not null) ended["hypothesis"] = hypothesis;
         return Render(ended);
+    }
+
+    private static JsonObject TargetExitToJson(TargetExit exit)
+    {
+        JsonObject node = new()
+        {
+            ["kind"] = exit.Kind switch
+            {
+                TargetExitKind.Exited => "exited",
+                TargetExitKind.Killed => "killed",
+                _ => "unknown",
+            },
+        };
+        if (exit.Code is int code) node["code"] = code;
+        if (exit.Signal is int signal)
+        {
+            node["signal"] = signal;
+            if (exit.SignalName is { } name) node["signalName"] = name;
+            node["coreDumped"] = exit.CoreDumped;
+        }
+        if (exit.WhyUnknown is { } why) node["why"] = why;
+        node["description"] = exit.Description;
+        return node;
     }
 
     private JsonObject BuildCurrentState()

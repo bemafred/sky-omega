@@ -157,7 +157,7 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
     private DebugSession(int processId, DbgShim dbgShim, CallbackPump pump, ManagedCallbackHost callback,
                          ICorDebug cordbg, ICorDebugController controller, IDebugEventSink sink,
                          nint pUnknown, nint pProcess, bool ownsTarget, Process? targetProcess,
-                         TimeSpan naturalExitTimeout, string? imageBaseDir)
+                         TimeSpan naturalExitTimeout, string? imageBaseDir, Task<TargetExit> targetExit)
     {
         ProcessId = processId;
         _dbgShim = dbgShim;
@@ -173,6 +173,63 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
         _targetStart = targetProcess is null ? null : Interop.ProcessLifetime.StartOf(processId);
         _naturalExitTimeout = naturalExitTimeout;
         _imageBaseDir = imageBaseDir;
+        _targetExit = targetExit;
+    }
+
+    // How the target ended, read from the OS on a thread started before the debugger attached (ObserveExit).
+    private readonly Task<TargetExit> _targetExit;
+
+    /// <summary>How the target ended, as the operating system records it: its exit code, or the signal that ended it.
+    /// Waits up to <paramref name="timeout"/> for the end and returns null when the target is still running then.
+    /// Calls nothing on mscordbi, so it may be read after <c>DebuggerError</c> and after <see cref="Dispose"/>.
+    /// Unknown, with the reason, for a POSIX target that is not this process's child (only its parent can read how
+    /// it ended).</summary>
+    public TargetExit? TargetExitWithin(TimeSpan timeout) => _targetExit.Wait(timeout) ? _targetExit.Result : null;
+
+    /// <summary>Start reading how <paramref name="processId"/> ends, before the debugger attaches. The read blocks on a
+    /// background thread until the target ends, so it lives as long as the target, as the detach reaper does; it is
+    /// a blocked system call and dies with this process.
+    /// POSIX: waitid with WNOWAIT reads the child's record without reaping it. mscordbi's PAL reaps a child of this
+    /// process when it sees the exit (finding 87), before ExitProcess is delivered, so the record must be read by a
+    /// wait already in place; WNOWAIT leaves the reaping to the PAL. A target that is not this process's child is
+    /// unknown: only its parent can read its end.
+    /// Windows: a handle of DrHook's own (the launch's CreateProcess handle is closed after launch), waited on, then
+    /// GetExitCodeProcess. That works for any process DrHook can open, attached ones included.</summary>
+    private static Task<TargetExit> ObserveExit(int processId)
+    {
+        Func<TargetExit> read;
+        if (OperatingSystem.IsWindows())
+        {
+            Microsoft.Win32.SafeHandles.SafeProcessHandle handle = Interop.ProcessLifetime.OpenForEnd(processId);
+            if (handle.IsInvalid)
+            {
+                int error = Marshal.GetLastPInvokeError();
+                handle.Dispose();
+                return Task.FromResult(TargetExit.Unknown(
+                    $"DrHook could not open it to read its exit code (error {error.ToString(System.Globalization.CultureInfo.InvariantCulture)})"));
+            }
+            read = () => Interop.ProcessLifetime.WaitForEnd(handle);
+        }
+        else if (Interop.ProcessParentage.ParentOf(processId) == Environment.ProcessId)
+        {
+            read = () => Interop.ProcessLifetime.WaitForChildEnd(processId);
+        }
+        else
+        {
+            return Task.FromResult(TargetExit.Unknown("it is not DrHook's child, so only its own parent can read how it ended"));
+        }
+
+        var ended = new TaskCompletionSource<TargetExit>(TaskCreationOptions.RunContinuationsAsynchronously);
+        new Thread(() =>
+        {
+            try { ended.SetResult(read()); }
+            catch (Exception ex) { ended.SetResult(TargetExit.Unknown($"reading it failed: {ex.GetType().Name}: {ex.Message}")); }
+        }, maxStackSize: 256 * 1024)
+        {
+            IsBackground = true,
+            Name = $"drhook-exit-{processId.ToString(System.Globalization.CultureInfo.InvariantCulture)}",
+        }.Start();
+        return ended.Task;
     }
 
     /// <summary>OS process id of the attached target.</summary>
@@ -265,7 +322,7 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
             ThrowIfFailed(dbgShim.CreateCordbForProcess(processId, out pUnknown), "CreateDebuggingInterfaceFromVersion");
             // Borrowed sessions don't use naturalExitTimeout (substrate doesn't terminate them).
             // Pass DefaultNaturalExitTimeout for field initialization symmetry only.
-            return FromCordbg(dbgShim, sink, processId, pUnknown, ownsTarget: false, targetProcess: targetProcess, naturalExitTimeout: DefaultNaturalExitTimeout, imageBaseDir: ImageDirOf(targetProcess), targetRuntimeMajor: targetRuntimeMajor);
+            return FromCordbg(dbgShim, sink, processId, pUnknown, ownsTarget: false, targetProcess: targetProcess, naturalExitTimeout: DefaultNaturalExitTimeout, targetExit: ObserveExit(processId), imageBaseDir: ImageDirOf(targetProcess), targetRuntimeMajor: targetRuntimeMajor);
         }
         catch
         {
@@ -356,7 +413,7 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
             GuardRuntimeLock(targetRuntimeMajor);
             ThrowIfFailed(dbgShim.CreateCordbForProcess(processId, out pUnknown), "CreateDebuggingInterfaceFromVersion");
             return FromCordbg(dbgShim, sink, processId, pUnknown, ownsTarget: true, targetProcess: targetProcess,
-                naturalExitTimeout: naturalExitTimeout ?? DefaultNaturalExitTimeout, imageBaseDir: ImageDirOf(targetProcess), targetRuntimeMajor: targetRuntimeMajor);
+                naturalExitTimeout: naturalExitTimeout ?? DefaultNaturalExitTimeout, targetExit: ObserveExit(processId), imageBaseDir: ImageDirOf(targetProcess), targetRuntimeMajor: targetRuntimeMajor);
         }
         catch
         {
@@ -410,9 +467,11 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
                     dbgShim.LaunchWithDebuggerPosix(program, args, workingDirectory, env, TimeSpan.FromSeconds(30),
                         out uint pidPosix, out pUnknown, out stdoutFd, out stderrFd),
                     "DbgShim.LaunchWithDebuggerPosix");
+                // Read the child's end from now on, before the debugger attaches and its PAL can reap the child.
+                Task<TargetExit> targetExit = ObserveExit((int)pidPosix);
                 try { targetProcess = Process.GetProcessById((int)pidPosix); } catch (ArgumentException) { /* exited already */ }
                 DebugSession session = FromCordbg(dbgShim, sink, (int)pidPosix, pUnknown, ownsTarget: true,
-                    targetProcess: targetProcess, naturalExitTimeout: naturalExitTimeout ?? DefaultNaturalExitTimeout,
+                    targetProcess: targetProcess, naturalExitTimeout: naturalExitTimeout ?? DefaultNaturalExitTimeout, targetExit: targetExit,
                     entryModule: entryModule, imageBaseDir: launchedImageDir ?? ImageDirOf(targetProcess), targetRuntimeMajor: targetRuntimeMajor);
                 session.BeginConsoleDrain(stdoutFd, stderrFd);
                 return session;
@@ -426,9 +485,10 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
                 dbgShim.LaunchWithDebuggerWindows(program, args, workingDirectory, env, TimeSpan.FromSeconds(30),
                     out windowsChild, out pUnknown),
                 "DbgShim.LaunchWithDebuggerWindows");
+            Task<TargetExit> windowsTargetExit = ObserveExit(windowsChild!.ProcessId);
             try { targetProcess = Process.GetProcessById(windowsChild!.ProcessId); } catch (ArgumentException) { /* exited already */ }
             DebugSession windowsSession = FromCordbg(dbgShim, sink, windowsChild!.ProcessId, pUnknown, ownsTarget: true,
-                targetProcess: targetProcess, naturalExitTimeout: naturalExitTimeout ?? DefaultNaturalExitTimeout,
+                targetProcess: targetProcess, naturalExitTimeout: naturalExitTimeout ?? DefaultNaturalExitTimeout, targetExit: windowsTargetExit,
                 entryModule: entryModule, imageBaseDir: launchedImageDir ?? ImageDirOf(targetProcess), targetRuntimeMajor: targetRuntimeMajor);
             windowsSession.BeginConsoleDrain(windowsChild.StdoutRead, windowsChild.StderrRead);
             windowsChild.Dispose(); // the process and thread handles; the session owns the pipe read ends now
@@ -563,7 +623,7 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
                 $"#:property TargetFramework=net{locked}.0).");
     }
 
-    private static DebugSession FromCordbg(DbgShim dbgShim, IDebugEventSink sink, int processId, nint pUnknown, bool ownsTarget, Process? targetProcess, TimeSpan naturalExitTimeout, string? entryModule = null, string? imageBaseDir = null, int? targetRuntimeMajor = null)
+    private static DebugSession FromCordbg(DbgShim dbgShim, IDebugEventSink sink, int processId, nint pUnknown, bool ownsTarget, Process? targetProcess, TimeSpan naturalExitTimeout, Task<TargetExit> targetExit, string? entryModule = null, string? imageBaseDir = null, int? targetRuntimeMajor = null)
     {
         CallbackPump? pump = null;
         ManagedCallbackHost? callback = null;
@@ -603,7 +663,7 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
             // Construct the session before Start so the pump's per-LoadModule hook can call
             // session.TryBindPending (full pending-breakpoints). Start begins the worker; nothing
             // drains until then, so building the session first is race-free.
-            var session = new DebugSession(processId, dbgShim, pump, callback, cordbg, controller, sink, pUnknown, pProcess, ownsTarget, targetProcess, naturalExitTimeout, imageBaseDir);
+            var session = new DebugSession(processId, dbgShim, pump, callback, cordbg, controller, sink, pUnknown, pProcess, ownsTarget, targetProcess, naturalExitTimeout, imageBaseDir, targetExit);
             pump.Start(
                 (kind, thread) =>
                 {

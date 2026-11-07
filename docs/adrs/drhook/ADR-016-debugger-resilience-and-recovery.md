@@ -86,6 +86,15 @@ program with no handler: CoreCLR's default disposition ends it with exit code 14
 its work had got. Only a program that registers a handler (`PosixSignalRegistration`, `Console.CancelKeyPress`)
 cancels cooperatively and exits 0. Finding 68's probes ran without a debugger attached.
 
+Since 2026-11-07 every session end says how the target ended, read from the operating system and not inferred
+(`TargetExit`): the exit code, or the signal that ended it. On POSIX, a thread started at launch blocks in
+`waitid(..., WEXITED | WNOWAIT)`, which reads the child's record without reaping it, so mscordbi's PAL still reaps it
+(finding 87). On Windows, DrHook waits on a handle of its own and reads `GetExitCodeProcess`. An attached POSIX
+target that is not DrHook's child reads as unknown, with the reason. Before that, every exit was reported as "ran to
+completion" and every owned `drhook_stop` as "gracefully terminated": the engine had the status and discarded it.
+With a debugger attached, the first reading agrees with finding 68: `drhook_stop` of a launched .NET target with no
+handler reads "killed by signal 15 (SIGTERM)" (macOS, 2026-11-07).
+
 So a forced stop is DrHook's routine session end.
 [Finding 100](../../../poc/drhook-engine/findings/100-orphaned-transport-read-holds-dac-lock.md) is one consequence:
 a target that dies while mscordbi's Win32 event thread reads its memory leaves that debugger process unable to

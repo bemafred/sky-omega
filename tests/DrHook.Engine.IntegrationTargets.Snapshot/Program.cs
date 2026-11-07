@@ -27,6 +27,20 @@ if (args is ["console-streams", string reportPath])
     return;
 }
 
+// `exit-with <code>`: the TargetExitTest mode for an exit. The process ends with the given exit code.
+if (args is ["exit-with", string exitCode])
+{
+    int code = int.Parse(exitCode, System.Globalization.CultureInfo.InvariantCulture);
+    Environment.Exit(code);   // EXIT_HERE
+}
+
+// `kill-self`: the TargetExitTest mode for a death the process does not choose. Process.Kill is SIGKILL on POSIX and
+// TerminateProcess with exit code -1 on Windows.
+if (args is ["kill-self"])
+{
+    System.Diagnostics.Process.GetCurrentProcess().Kill();   // KILL_HERE
+}
+
 var worker = new Worker();
 const string alphabet = "abcdefghij";
 for (int beat = 1; beat <= 600; beat++)

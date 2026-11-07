@@ -1,5 +1,5 @@
 // Whether a process has ended, by its PID and its start time: a PID alone stops being an identity once the process
-// is reaped and the PID reused.
+// is reaped and the PID reused. And how it ended (WaitForChildEnd, WaitForEnd; see their section below).
 //
 // A process that has exited but has not been reaped is a zombie, and kill(pid, 0) succeeds on a zombie. That is why
 // Process.HasExited reports a zombie as running for any process this one did not Process.Start, which is how the
@@ -16,6 +16,7 @@ using System;
 using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
 
 namespace SkyOmega.DrHook.Engine.Interop;
 
@@ -74,4 +75,89 @@ internal static unsafe class ProcessLifetime
         }
         return null;
     }
+
+    // How a process ended. POSIX: waitid(P_PID, pid, WEXITED | WNOWAIT) blocks until the child ends and reads its
+    // record without reaping it, so whoever reaps it still can (mscordbi's PAL reaps a child of this process, finding
+    // 87). Verified 2026-11-07 by a C probe on macOS 27 arm64 and Linux arm64: an exit with code 3, a SIGTERM and an
+    // abort read as CLD_EXITED/3, CLD_KILLED/15 and CLD_KILLED/6 (CLD_DUMPED/6 on Linux, which dumped core); a later
+    // waitpid reaped each with the same status; after the reap waitid gave ECHILD.
+    // siginfo_t, from the headers (compiled probes, 2026-11-07): macOS 27 SDK, 104 bytes, si_code at 8, si_status at
+    // 20, WNOWAIT 0x20; glibc 2.43 on arm64 and x64, 128 bytes, si_code at 8, si_status at 24, WNOWAIT 0x01000000.
+    // P_PID 1, WEXITED 4, CLD_EXITED 1, CLD_KILLED 2, CLD_DUMPED 3 on both.
+    // Windows: a handle with SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, waited on, then GetExitCodeProcess. Any
+    // process DrHook can open, not only its children; the process record lasts as long as the handle.
+
+    private const int P_PID = 1;
+    private const int WEXITED = 4;
+    private const int CLD_EXITED = 1, CLD_KILLED = 2, CLD_DUMPED = 3;
+    private const int SiginfoBufferSize = 128;
+    private const int SiCodeOffset = 8;
+    private const int EINTR = 4, ECHILD = 10;
+
+    /// <summary>Blocks until the child <paramref name="pid"/> of this process ends, and returns how it ended, leaving it
+    /// unreaped for its reaper. Unknown when another reaper collected it first, or waitid fails. Unix only.</summary>
+    public static TargetExit WaitForChildEnd(int pid)
+    {
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
+            throw new PlatformNotSupportedException("ProcessLifetime.WaitForChildEnd is Unix-only.");
+        int noWait = OperatingSystem.IsMacOS() ? 0x20 : 0x01000000;
+        int statusOffset = OperatingSystem.IsMacOS() ? 20 : 24;
+        byte* info = stackalloc byte[SiginfoBufferSize];
+        while (true)
+        {
+            new Span<byte>(info, SiginfoBufferSize).Clear();
+            if (waitid(P_PID, (uint)pid, info, WEXITED | noWait) == 0)
+            {
+                int code = *(int*)(info + SiCodeOffset);
+                int status = *(int*)(info + statusOffset);
+                return code switch
+                {
+                    CLD_EXITED => TargetExit.Exited(status),
+                    CLD_KILLED => TargetExit.Killed(status, coreDumped: false),
+                    CLD_DUMPED => TargetExit.Killed(status, coreDumped: true),
+                    _ => TargetExit.Unknown($"waitid reported si_code {code.ToString(CultureInfo.InvariantCulture)}"),
+                };
+            }
+            int errno = Marshal.GetLastPInvokeError();
+            if (errno == EINTR) continue;
+            return errno == ECHILD
+                ? TargetExit.Unknown("another reaper collected its exit status before DrHook read it")
+                : TargetExit.Unknown($"waitid failed with errno {errno.ToString(CultureInfo.InvariantCulture)}");
+        }
+    }
+
+    private const uint SYNCHRONIZE = 0x00100000, PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
+    private const uint INFINITE = 0xFFFFFFFF, WAIT_OBJECT_0 = 0;
+
+    /// <summary>A handle to <paramref name="pid"/> that can wait for its end and read its exit code; invalid when it
+    /// cannot be opened (then <see cref="Marshal.GetLastPInvokeError"/> says why). Windows only.</summary>
+    public static SafeProcessHandle OpenForEnd(int pid) =>
+        OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, inheritHandle: false, (uint)pid);
+
+    /// <summary>Blocks until the process of <paramref name="process"/> ends and returns its exit code, then closes the
+    /// handle. Windows only.</summary>
+    public static TargetExit WaitForEnd(SafeProcessHandle process)
+    {
+        using (process)
+        {
+            if (WaitForSingleObject(process, INFINITE) != WAIT_OBJECT_0)
+                return TargetExit.Unknown($"WaitForSingleObject failed with error {Marshal.GetLastPInvokeError().ToString(CultureInfo.InvariantCulture)}");
+            if (!GetExitCodeProcess(process, out uint code))
+                return TargetExit.Unknown($"GetExitCodeProcess failed with error {Marshal.GetLastPInvokeError().ToString(CultureInfo.InvariantCulture)}");
+            return TargetExit.Exited(unchecked((int)code));
+        }
+    }
+
+    [DllImport("libc", SetLastError = true)]
+    private static extern int waitid(int idtype, uint id, byte* infop, int options);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern SafeProcessHandle OpenProcess(uint desiredAccess, [MarshalAs(UnmanagedType.Bool)] bool inheritHandle, uint processId);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern uint WaitForSingleObject(SafeProcessHandle handle, uint milliseconds);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetExitCodeProcess(SafeProcessHandle process, out uint exitCode);
 }
