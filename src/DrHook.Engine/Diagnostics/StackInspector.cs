@@ -12,11 +12,8 @@ namespace SkyOmega.DrHook.Engine.Diagnostics;
 /// Captures and SUMMARIZES live observations from a running .NET process via EventPipe.
 ///
 /// Cross-LLM refinements applied:
-///   #1 Signal summarization — per thread, how many of its samples ran managed code; exception, GC and
-///      contention counts; anomaly flags. Raw EventPipe output overwhelms LLM context. Summaries are
-///      diagnosis-ready. No call stacks are captured: a snapshot says which threads ran managed code, not
-///      where, and not why a thread that did not was waiting, blocked or in native code
-///      (docs/limits/drhook-snapshot-call-stacks.md).
+///   #1 Signal summarization — collapsed stacks, thread state overview, anomaly flags.
+///      Raw EventPipe output overwhelms LLM context. Summaries are diagnosis-ready.
 ///   #2 Code version anchoring — assembly version captured with every observation.
 ///      Grounds the observation in a specific code state. Prevents bitemporal desync.
 ///   #3 Hypothesis field — consumer states expectations BEFORE inspecting.
