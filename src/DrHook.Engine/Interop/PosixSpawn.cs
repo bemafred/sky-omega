@@ -71,6 +71,43 @@ internal static unsafe class PosixSpawn
 
     internal static nint Read(int fd, byte* buf, nint count) => read(fd, buf, count);
 
+    /// <summary>What has been written to the pipe <paramref name="fd"/> and not yet read, up to
+    /// <paramref name="maxBytes"/>, without waiting: <c>poll</c> with a zero timeout before every read. For a child that
+    /// has ended, that is all it wrote (a grandchild still holding the write end could add more later; it is not waited
+    /// for). Decoded as UTF-8; a read cut at <paramref name="maxBytes"/> ends with a note saying so.</summary>
+    internal static string ReadAvailable(int fd, int maxBytes)
+    {
+        if (fd < 0) return "";
+        byte[] buffer = new byte[maxBytes];
+        int total = 0;
+        fixed (byte* p = buffer)
+        {
+            while (total < maxBytes)
+            {
+                PollFd ready = new() { Fd = fd, Events = POLLIN };
+                int polled = poll(&ready, 1, 0);
+                if (polled < 0 && Marshal.GetLastPInvokeError() == EINTR) continue;
+                if (polled <= 0) break;                          // nothing to read now, or poll failed
+                nint n = read(fd, p + total, maxBytes - total);
+                if (n < 0 && Marshal.GetLastPInvokeError() == EINTR) continue;
+                if (n <= 0) break;                               // end of file (every writer closed it), or an error
+                total += (int)n;
+            }
+        }
+        string text = System.Text.Encoding.UTF8.GetString(buffer, 0, total);
+        return total == maxBytes ? text + $"[read cut at {maxBytes} bytes]" : text;
+    }
+
+    // struct pollfd { int fd; short events; short revents; }, the same 8 bytes on Darwin and Linux; POLLIN is 0x1 on both.
+    // nfds_t is unsigned int on Darwin and unsigned long on Linux: passed as nuint, a 64-bit register whose low half the
+    // callee reads on arm64 and x64 alike.
+    [StructLayout(LayoutKind.Sequential)]
+    private struct PollFd { public int Fd; public short Events; public short Revents; }
+    private const short POLLIN = 0x1;
+    private const int EINTR = 4;                               // same on Darwin and Linux
+
+    [DllImport("libc", SetLastError = true)] private static extern int poll(PollFd* fds, nuint nfds, int timeout);
+
     /// <summary>The spawn itself, shared by both platforms. <paramref name="attr"/> and
     /// <paramref name="fileActions"/> point to UNINITIALIZED storage of the platform's exact
     /// <c>posix_spawnattr_t</c> / <c>posix_spawn_file_actions_t</c> type; this initializes, uses and

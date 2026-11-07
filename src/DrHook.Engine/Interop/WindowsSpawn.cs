@@ -148,6 +148,27 @@ internal static unsafe class WindowsSpawn
     /// <summary>End a child that will not be handed over (a failed launch). Best effort.</summary>
     public static void Terminate(WindowsSpawnedProcess child) => _ = TerminateProcess(child.Process, 1);
 
+    /// <summary>What has been written to <paramref name="pipe"/> and not yet read, up to <paramref name="maxBytes"/>,
+    /// without waiting: <c>PeekNamedPipe</c> says how much is there, and only that much is read. For a child that has
+    /// ended, that is all it wrote. Decoded as UTF-8; a read cut at <paramref name="maxBytes"/> ends with a note.</summary>
+    public static string ReadAvailable(SafeFileHandle pipe, int maxBytes)
+    {
+        byte[] buffer = new byte[maxBytes];
+        int total = 0;
+        fixed (byte* p = buffer)
+        {
+            while (total < maxBytes)
+            {
+                if (!PeekNamedPipe(pipe, 0, 0, 0, out uint available, 0) || available == 0) break;   // empty, or the writer closed it
+                uint toRead = (uint)Math.Min(available, (uint)(maxBytes - total));
+                if (!ReadFile(pipe, p + total, toRead, out uint read, 0) || read == 0) break;
+                total += (int)read;
+            }
+        }
+        string text = Encoding.UTF8.GetString(buffer, 0, total);
+        return total == maxBytes ? text + $"[read cut at {maxBytes} bytes]" : text;
+    }
+
     /// <summary>The command line for <paramref name="program"/> and <paramref name="args"/>, each quoted so the
     /// child's argument parser (CommandLineToArgvW rules) gets back exactly the strings given: backslashes are
     /// literal except before a double quote, where each one is doubled.</summary>
@@ -268,6 +289,14 @@ internal static unsafe class WindowsSpawn
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern uint ResumeThread(SafeFileHandle thread);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool PeekNamedPipe(SafeFileHandle pipe, nint buffer, uint bufferSize, nint bytesRead, out uint totalBytesAvailable, nint bytesLeftThisMessage);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool ReadFile(SafeFileHandle file, byte* buffer, uint bytesToRead, out uint bytesRead, nint overlapped);
 
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]

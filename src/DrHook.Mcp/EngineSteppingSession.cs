@@ -469,6 +469,29 @@ public sealed class EngineSteppingSession : IDisposable
             };
             return Task.FromResult(Render(result));
         }
+        catch (LaunchFailedException failed)
+        {
+            CleanupSession();
+            JsonObject failure = new()
+            {
+                ["step"] = failed.Step,
+                ["reason"] = failed.Reason,
+                ["hresult"] = $"0x{failed.HResult:X8}",
+            };
+            if (failed.ProcessId is int failedPid) failure["pid"] = failedPid;
+            if (failed.TargetExit is { } exit) failure["targetExit"] = TargetExitToJson(exit);
+            if (failed.ProcessId is not null)
+            {
+                failure["stdout"] = failed.Stdout;
+                failure["stderr"] = failed.Stderr;
+            }
+            return Task.FromResult(Render(new JsonObject
+            {
+                ["status"] = "error",
+                ["message"] = $"Failed to launch program: {failed.Message}",
+                ["launchFailure"] = failure,
+            }));
+        }
         catch (Exception ex)
         {
             CleanupSession();

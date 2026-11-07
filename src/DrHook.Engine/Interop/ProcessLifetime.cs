@@ -16,6 +16,8 @@ using System;
 using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.Win32.SafeHandles;
 
 namespace SkyOmega.DrHook.Engine.Interop;
@@ -84,6 +86,15 @@ internal static unsafe class ProcessLifetime
     // siginfo_t, from the headers (compiled probes, 2026-11-07): macOS 27 SDK, 104 bytes, si_code at 8, si_status at
     // 20, WNOWAIT 0x20; glibc 2.43 on arm64 and x64, 128 bytes, si_code at 8, si_status at 24, WNOWAIT 0x01000000.
     // P_PID 1, WEXITED 4, CLD_EXITED 1, CLD_KILLED 2, CLD_DUMPED 3 on both.
+    // macOS deviates for a stopped child: waitid(WEXITED | WNOWAIT) on a child held by POSIX_SPAWN_START_SUSPENDED (how a
+    // launch holds it) returns CLD_STOPPED at once and on every call, though WSTOPPED was not asked for; after SIGCONT it
+    // blocks until the exit (C probe, 2026-11-07). Linux follows POSIX: a SIGSTOPped child (how its launch holds it) is
+    // ignored, and waitid returns at the exit (C probe on Linux arm64). So macOS waits with kqueue: EVFILT_PROC with
+    // NOTE_EXIT | NOTE_EXITSTATUS blocks through a hold and through a SIGSTOP/SIGCONT, returns at the exit with the wait
+    // status in data (exit 3: 0x300; SIGKILL: 0x9), and does not reap. A registration on a child that has already exited
+    // fails with ESRCH; then waitid reads the zombie, which is not stopped. struct kevent (macOS 27 SDK, compiled probe):
+    // 32 bytes, ident at 0, filter (int16) at 8, flags (uint16) at 10, fflags (uint32) at 12, data (intptr) at 16, udata
+    // at 24; EVFILT_PROC -5, EV_ADD 0x1, EV_ONESHOT 0x10, EV_ERROR 0x4000, NOTE_EXIT 0x80000000, NOTE_EXITSTATUS 0x04000000.
     // Windows: a handle with SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, waited on, then GetExitCodeProcess. Any
     // process DrHook can open, not only its children; the process record lasts as long as the handle.
 
@@ -95,11 +106,44 @@ internal static unsafe class ProcessLifetime
     private const int EINTR = 4, ECHILD = 10;
 
     /// <summary>Blocks until the child <paramref name="pid"/> of this process ends, and returns how it ended, leaving it
-    /// unreaped for its reaper. Unknown when another reaper collected it first, or waitid fails. Unix only.</summary>
+    /// unreaped for its reaper. A hold or a stop is not an end. Unknown when another reaper collected it first, or the
+    /// wait fails. Unix only.</summary>
     public static TargetExit WaitForChildEnd(int pid)
     {
         if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
             throw new PlatformNotSupportedException("ProcessLifetime.WaitForChildEnd is Unix-only.");
+        if (OperatingSystem.IsMacOS())
+        {
+            int queue = kqueue();
+            if (queue < 0)
+                return TargetExit.Unknown($"kqueue failed with errno {Marshal.GetLastPInvokeError().ToString(CultureInfo.InvariantCulture)}");
+            try
+            {
+                Kevent change = new() { Ident = (nuint)pid, Filter = EVFILT_PROC, Flags = EV_ADD | EV_ONESHOT, Fflags = NOTE_EXIT | NOTE_EXITSTATUS };
+                if (kevent(queue, &change, 1, null, 0, null) == 0)
+                {
+                    Kevent ended;
+                    int received;
+                    while ((received = kevent(queue, null, 0, &ended, 1, null)) < 0 && Marshal.GetLastPInvokeError() == EINTR) { }
+                    if (received != 1)
+                        return TargetExit.Unknown($"kevent failed with errno {Marshal.GetLastPInvokeError().ToString(CultureInfo.InvariantCulture)}");
+                    if ((ended.Flags & EV_ERROR) != 0)
+                        return TargetExit.Unknown($"kevent reported error {ended.Data.ToString(CultureInfo.InvariantCulture)}");
+                    // The wait status, as waitpid gives it: an exit when the low 7 bits are 0, else the killing signal.
+                    int status = (int)ended.Data;
+                    return (status & 0x7F) == 0
+                        ? TargetExit.Exited((status >> 8) & 0xFF)
+                        : TargetExit.Killed(status & 0x7F, coreDumped: (status & 0x80) != 0);
+                }
+                if (Marshal.GetLastPInvokeError() != ESRCH)
+                    return TargetExit.Unknown($"kevent registration failed with errno {Marshal.GetLastPInvokeError().ToString(CultureInfo.InvariantCulture)}");
+                // ESRCH: the child has already exited. A zombie is not stopped, so waitid below reads its record.
+            }
+            finally
+            {
+                PosixSpawn.Close(queue);
+            }
+        }
         int noWait = OperatingSystem.IsMacOS() ? 0x20 : 0x01000000;
         int statusOffset = OperatingSystem.IsMacOS() ? 20 : 24;
         byte* info = stackalloc byte[SiginfoBufferSize];
@@ -148,8 +192,75 @@ internal static unsafe class ProcessLifetime
         }
     }
 
+    /// <summary>Start reading how <paramref name="processId"/> ends, before the debugger attaches. The read blocks on a
+    /// background thread until the target ends, so it lives as long as the target, as the detach reaper does; it is
+    /// a blocked system call and dies with this process.
+    /// POSIX: waitid with WNOWAIT reads the child's record without reaping it. mscordbi's PAL reaps a child of this
+    /// process when it sees the exit (finding 87), before ExitProcess is delivered, so the record must be read by a
+    /// wait already in place; WNOWAIT leaves the reaping to the PAL. A target that is not this process's child is
+    /// unknown: only its parent can read its end.
+    /// Windows: a handle of DrHook's own (the launch's CreateProcess handle is closed after launch), waited on, then
+    /// GetExitCodeProcess. That works for any process DrHook can open, attached ones included.
+    /// A launch starts it at the spawn, while the child is still held (DbgShim); an attach, before it attaches.</summary>
+    public static Task<TargetExit> ObserveEnd(int processId)
+    {
+        Func<TargetExit> read;
+        if (OperatingSystem.IsWindows())
+        {
+            SafeProcessHandle handle = OpenForEnd(processId);
+            if (handle.IsInvalid)
+            {
+                int error = Marshal.GetLastPInvokeError();
+                handle.Dispose();
+                return Task.FromResult(TargetExit.Unknown(
+                    $"DrHook could not open it to read its exit code (error {error.ToString(CultureInfo.InvariantCulture)})"));
+            }
+            read = () => WaitForEnd(handle);
+        }
+        else if (ProcessParentage.ParentOf(processId) == Environment.ProcessId)
+        {
+            read = () => WaitForChildEnd(processId);
+        }
+        else
+        {
+            return Task.FromResult(TargetExit.Unknown("it is not DrHook's child, so only its own parent can read how it ended"));
+        }
+
+        var ended = new TaskCompletionSource<TargetExit>(TaskCreationOptions.RunContinuationsAsynchronously);
+        new Thread(() =>
+        {
+            try { ended.SetResult(read()); }
+            catch (Exception ex) { ended.SetResult(TargetExit.Unknown($"reading it failed: {ex.GetType().Name}: {ex.Message}")); }
+        }, maxStackSize: 256 * 1024)
+        {
+            IsBackground = true,
+            Name = $"drhook-exit-{processId.ToString(CultureInfo.InvariantCulture)}",
+        }.Start();
+        return ended.Task;
+    }
+
     [DllImport("libc", SetLastError = true)]
     private static extern int waitid(int idtype, uint id, byte* infop, int options);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct Kevent
+    {
+        public nuint Ident;
+        public short Filter;
+        public ushort Flags;
+        public uint Fflags;
+        public nint Data;
+        public nint Udata;
+    }
+    private const short EVFILT_PROC = -5;
+    private const ushort EV_ADD = 0x1, EV_ONESHOT = 0x10, EV_ERROR = 0x4000;
+    private const uint NOTE_EXIT = 0x80000000, NOTE_EXITSTATUS = 0x04000000;
+
+    [DllImport("libc", SetLastError = true)]
+    private static extern int kqueue();
+
+    [DllImport("libc", SetLastError = true)]
+    private static extern int kevent(int kq, Kevent* changelist, int nchanges, Kevent* eventlist, int nevents, void* timeout);
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern SafeProcessHandle OpenProcess(uint desiredAccess, [MarshalAs(UnmanagedType.Bool)] bool inheritHandle, uint processId);

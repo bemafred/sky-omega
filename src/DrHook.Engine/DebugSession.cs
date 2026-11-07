@@ -176,7 +176,7 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
         _targetExit = targetExit;
     }
 
-    // How the target ended, read from the OS on a thread started before the debugger attached (ObserveExit).
+    // How the target ended, read from the OS on a thread started before the debugger attached (ProcessLifetime.ObserveEnd).
     private readonly Task<TargetExit> _targetExit;
 
     /// <summary>How the target ended, as the operating system records it: its exit code, or the signal that ended it.
@@ -186,51 +186,6 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
     /// it ended).</summary>
     public TargetExit? TargetExitWithin(TimeSpan timeout) => _targetExit.Wait(timeout) ? _targetExit.Result : null;
 
-    /// <summary>Start reading how <paramref name="processId"/> ends, before the debugger attaches. The read blocks on a
-    /// background thread until the target ends, so it lives as long as the target, as the detach reaper does; it is
-    /// a blocked system call and dies with this process.
-    /// POSIX: waitid with WNOWAIT reads the child's record without reaping it. mscordbi's PAL reaps a child of this
-    /// process when it sees the exit (finding 87), before ExitProcess is delivered, so the record must be read by a
-    /// wait already in place; WNOWAIT leaves the reaping to the PAL. A target that is not this process's child is
-    /// unknown: only its parent can read its end.
-    /// Windows: a handle of DrHook's own (the launch's CreateProcess handle is closed after launch), waited on, then
-    /// GetExitCodeProcess. That works for any process DrHook can open, attached ones included.</summary>
-    private static Task<TargetExit> ObserveExit(int processId)
-    {
-        Func<TargetExit> read;
-        if (OperatingSystem.IsWindows())
-        {
-            Microsoft.Win32.SafeHandles.SafeProcessHandle handle = Interop.ProcessLifetime.OpenForEnd(processId);
-            if (handle.IsInvalid)
-            {
-                int error = Marshal.GetLastPInvokeError();
-                handle.Dispose();
-                return Task.FromResult(TargetExit.Unknown(
-                    $"DrHook could not open it to read its exit code (error {error.ToString(System.Globalization.CultureInfo.InvariantCulture)})"));
-            }
-            read = () => Interop.ProcessLifetime.WaitForEnd(handle);
-        }
-        else if (Interop.ProcessParentage.ParentOf(processId) == Environment.ProcessId)
-        {
-            read = () => Interop.ProcessLifetime.WaitForChildEnd(processId);
-        }
-        else
-        {
-            return Task.FromResult(TargetExit.Unknown("it is not DrHook's child, so only its own parent can read how it ended"));
-        }
-
-        var ended = new TaskCompletionSource<TargetExit>(TaskCreationOptions.RunContinuationsAsynchronously);
-        new Thread(() =>
-        {
-            try { ended.SetResult(read()); }
-            catch (Exception ex) { ended.SetResult(TargetExit.Unknown($"reading it failed: {ex.GetType().Name}: {ex.Message}")); }
-        }, maxStackSize: 256 * 1024)
-        {
-            IsBackground = true,
-            Name = $"drhook-exit-{processId.ToString(System.Globalization.CultureInfo.InvariantCulture)}",
-        }.Start();
-        return ended.Task;
-    }
 
     /// <summary>OS process id of the attached target.</summary>
     public int ProcessId { get; }
@@ -322,7 +277,7 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
             ThrowIfFailed(dbgShim.CreateCordbForProcess(processId, out pUnknown), "CreateDebuggingInterfaceFromVersion");
             // Borrowed sessions don't use naturalExitTimeout (substrate doesn't terminate them).
             // Pass DefaultNaturalExitTimeout for field initialization symmetry only.
-            return FromCordbg(dbgShim, sink, processId, pUnknown, ownsTarget: false, targetProcess: targetProcess, naturalExitTimeout: DefaultNaturalExitTimeout, targetExit: ObserveExit(processId), imageBaseDir: ImageDirOf(targetProcess), targetRuntimeMajor: targetRuntimeMajor);
+            return FromCordbg(dbgShim, sink, processId, pUnknown, ownsTarget: false, targetProcess: targetProcess, naturalExitTimeout: DefaultNaturalExitTimeout, targetExit: Interop.ProcessLifetime.ObserveEnd(processId), imageBaseDir: ImageDirOf(targetProcess), targetRuntimeMajor: targetRuntimeMajor);
         }
         catch
         {
@@ -413,7 +368,7 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
             GuardRuntimeLock(targetRuntimeMajor);
             ThrowIfFailed(dbgShim.CreateCordbForProcess(processId, out pUnknown), "CreateDebuggingInterfaceFromVersion");
             return FromCordbg(dbgShim, sink, processId, pUnknown, ownsTarget: true, targetProcess: targetProcess,
-                naturalExitTimeout: naturalExitTimeout ?? DefaultNaturalExitTimeout, targetExit: ObserveExit(processId), imageBaseDir: ImageDirOf(targetProcess), targetRuntimeMajor: targetRuntimeMajor);
+                naturalExitTimeout: naturalExitTimeout ?? DefaultNaturalExitTimeout, targetExit: Interop.ProcessLifetime.ObserveEnd(processId), imageBaseDir: ImageDirOf(targetProcess), targetRuntimeMajor: targetRuntimeMajor);
         }
         catch
         {
@@ -448,6 +403,7 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
         Process? targetProcess = null;
         int stdoutFd = -1, stderrFd = -1;
         WindowsSpawnedProcess? windowsChild = null;
+        int posixPid = 0;
         // For a single-file app the launched program IS the apphost, so its directory holds the
         // sidecar <module>.pdb. (For `dotnet exec X.dll` program is the muxer — but those modules are
         // on disk, so the SymbolsFor sidecar fallback never fires and this value goes unused.)
@@ -463,12 +419,11 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
                 // POSIX (ADR-011 D2 / finding 75): OWN the spawn so the debuggee's stdout/stderr go to
                 // DrHook-owned pipes, not the inherited fds — which under an MCP stdio server are the
                 // JSON-RPC channel. dbgshim's CreateProcessForLaunch offers no stdio redirection.
-                ThrowIfFailed(
-                    dbgShim.LaunchWithDebuggerPosix(program, args, workingDirectory, env, TimeSpan.FromSeconds(30),
-                        out uint pidPosix, out pUnknown, out stdoutFd, out stderrFd),
-                    "DbgShim.LaunchWithDebuggerPosix");
-                // Read the child's end from now on, before the debugger attaches and its PAL can reap the child.
-                Task<TargetExit> targetExit = ObserveExit((int)pidPosix);
+                // The launch starts the exit watch at the spawn, while the child is held (before any reaper), and on
+                // failure throws LaunchFailedException having ended, read and reaped the child.
+                dbgShim.LaunchWithDebuggerPosix(program, args, workingDirectory, env, TimeSpan.FromSeconds(30),
+                    out uint pidPosix, out pUnknown, out stdoutFd, out stderrFd, out Task<TargetExit> targetExit);
+                posixPid = (int)pidPosix;
                 try { targetProcess = Process.GetProcessById((int)pidPosix); } catch (ArgumentException) { /* exited already */ }
                 DebugSession session = FromCordbg(dbgShim, sink, (int)pidPosix, pUnknown, ownsTarget: true,
                     targetProcess: targetProcess, naturalExitTimeout: naturalExitTimeout ?? DefaultNaturalExitTimeout, targetExit: targetExit,
@@ -481,11 +436,9 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
             // CreateProcessForLaunch let the debuggee share the host's stdin/stdout/stderr — probe 64 saw it
             // write to the MCP channel and read the client's request line. WindowsSpawn gives it NUL stdin and
             // DrHook-owned pipes, and applies env overrides in the same CreateProcess call.
-            ThrowIfFailed(
-                dbgShim.LaunchWithDebuggerWindows(program, args, workingDirectory, env, TimeSpan.FromSeconds(30),
-                    out windowsChild, out pUnknown),
-                "DbgShim.LaunchWithDebuggerWindows");
-            Task<TargetExit> windowsTargetExit = ObserveExit(windowsChild!.ProcessId);
+            dbgShim.LaunchWithDebuggerWindows(program, args, workingDirectory, env, TimeSpan.FromSeconds(30),
+                out WindowsSpawnedProcess spawned, out pUnknown, out Task<TargetExit> windowsTargetExit);
+            windowsChild = spawned;
             try { targetProcess = Process.GetProcessById(windowsChild!.ProcessId); } catch (ArgumentException) { /* exited already */ }
             DebugSession windowsSession = FromCordbg(dbgShim, sink, windowsChild!.ProcessId, pUnknown, ownsTarget: true,
                 targetProcess: targetProcess, naturalExitTimeout: naturalExitTimeout ?? DefaultNaturalExitTimeout, targetExit: windowsTargetExit,
@@ -494,9 +447,18 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
             windowsChild.Dispose(); // the process and thread handles; the session owns the pipe read ends now
             return windowsSession;
         }
+        catch (LaunchFailedException)
+        {
+            // The launch ended, read and reaped its child, and released its pipes; nothing of it is left here.
+            dbgShim.Dispose();
+            throw;
+        }
         catch
         {
             try { if (targetProcess is { HasExited: false }) targetProcess.Kill(); } catch { /* best effort */ }
+            // Launched but not attached: no debugger's PAL will reap the child, and Process.Kill does not (the BCL does
+            // not track a posix_spawn child), so reap it here rather than leave a zombie.
+            if (posixPid > 0) Interop.PosixSignals.ReapChild(posixPid);
             if (stdoutFd >= 0) Interop.PosixSpawn.Close(stdoutFd);
             if (stderrFd >= 0) Interop.PosixSpawn.Close(stderrFd);
             if (windowsChild is not null)
@@ -2778,6 +2740,48 @@ public sealed class DebugEngineException : Exception
     public DebugEngineException(string operation, int hresult)
         : base($"{operation} failed (HRESULT 0x{hresult:X8}).")
         => HResult = hresult;
+}
+
+/// <summary>A launch that failed, with every fact the operating system gave: the step that failed and why, and, when a
+/// target was spawned, its pid, how it ended (<see cref="TargetExit"/>) and what it wrote to stdout and stderr before
+/// it ended. A failed launch leaves no process behind: the target is ended if it still runs, and reaped.
+/// Before 2026-11-07 a failed launch reported only an HRESULT: E_FAIL for a program that could not be spawned, and E_FAIL
+/// after the full 30 s startup timeout for a target that had exited at once, which then stayed a zombie.</summary>
+public sealed class LaunchFailedException : Exception
+{
+    /// <summary>The most bytes kept of each of the target's streams: bounds what the operator reads.</summary>
+    public const int OutputBytes = 4096;
+
+    public LaunchFailedException(string step, int hresult, string reason, int? processId, TargetExit? targetExit, string stdout, string stderr)
+        : base(Describe(step, reason, targetExit, stderr))
+    {
+        HResult = hresult;
+        Step = step;
+        Reason = reason;
+        ProcessId = processId;
+        TargetExit = targetExit;
+        Stdout = stdout;
+        Stderr = stderr;
+    }
+
+    /// <summary>The launch step that failed: <c>posix_spawn</c>, <c>CreateProcess</c>, <c>RegisterForRuntimeStartup</c>
+    /// or <c>runtime startup</c>.</summary>
+    public string Step { get; }
+    /// <summary>Why it failed, as the step reported it.</summary>
+    public string Reason { get; }
+    /// <summary>The spawned target's pid; null when nothing was spawned.</summary>
+    public int? ProcessId { get; }
+    /// <summary>How the target ended; null when nothing was spawned, or its end was not read within the bound.</summary>
+    public TargetExit? TargetExit { get; }
+    /// <summary>What the target wrote to stdout before it ended, up to <see cref="OutputBytes"/>.</summary>
+    public string Stdout { get; }
+    /// <summary>What the target wrote to stderr before it ended, up to <see cref="OutputBytes"/>.</summary>
+    public string Stderr { get; }
+
+    private static string Describe(string step, string reason, TargetExit? targetExit, string stderr) =>
+        $"{step} failed: {reason}." +
+        (targetExit is { } exit ? $" The target {exit.Description}." : "") +
+        (stderr.Trim() is { Length: > 0 } written ? $" It wrote to stderr: {written}" : "");
 }
 
 /// <summary>Raised when an operation that would call ICorDebug is asked of a session whose debugger is lost:

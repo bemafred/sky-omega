@@ -262,57 +262,93 @@ internal sealed unsafe class DbgShim : IDisposable
         return os + "-" + arch;
     }
 
+    // How long a failed launch waits for the target's end after ending it (a kill or TerminateProcess is immediate; the
+    // exit watch then returns at once), and how long the launch waits for the runtime to start.
+    private static readonly TimeSpan FailedTargetExitWait = TimeSpan.FromSeconds(2);
+
     /// <summary>Windows launch with ISOLATED stdio (ADR-011 D2 on Windows, probe 64). dbgshim's own
     /// <c>CreateProcessForLaunch</c> takes no stdio handles, so its child shared the host's stdin, stdout and
     /// stderr — under an MCP stdio server, the JSON-RPC channel (probe 64 saw the debuggee read the client's
     /// request line). Instead <see cref="WindowsSpawn"/> creates the target SUSPENDED with stdin = NUL and
     /// stdout/stderr = DrHook-owned pipes; <c>RegisterForRuntimeStartup</c> is armed while it is suspended; then
     /// its main thread is resumed. On success <paramref name="child"/> is set and the caller owns it — the pipe read
-    /// ends to drain, the handles to dispose; the caller still <c>DebugActiveProcess</c>es to complete the attach.</summary>
-    public int LaunchWithDebuggerWindows(string program, IReadOnlyList<string> args, string? workingDirectory,
-        IReadOnlyDictionary<string, string>? env, TimeSpan startupTimeout, out WindowsSpawnedProcess? child, out nint pUnknown)
+    /// ends to drain, the handles to dispose; the caller still <c>DebugActiveProcess</c>es to complete the attach.
+    /// <paramref name="targetExit"/> is the exit watch, started at the spawn. On failure it throws
+    /// <see cref="LaunchFailedException"/> and leaves no process behind.</summary>
+    public void LaunchWithDebuggerWindows(string program, IReadOnlyList<string> args, string? workingDirectory,
+        IReadOnlyDictionary<string, string>? env, TimeSpan startupTimeout, out WindowsSpawnedProcess child, out nint pUnknown,
+        out Task<TargetExit> targetExit)
     {
-        child = null;
         pUnknown = 0;
         WindowsSpawnedProcess spawned;
         try { spawned = WindowsSpawn.SpawnSuspendedRedirected(program, args, workingDirectory, env); }
-        catch (System.ComponentModel.Win32Exception ex) { return ex.NativeErrorCode == 0 ? E_FAIL : unchecked((int)(0x80070000u | (uint)ex.NativeErrorCode)); }
+        catch (System.ComponentModel.Win32Exception ex)
+        {
+            int hr = ex.NativeErrorCode == 0 ? E_FAIL : unchecked((int)(0x80070000u | (uint)ex.NativeErrorCode));
+            throw new LaunchFailedException("CreateProcess", hr,
+                $"CreateProcess of {program} failed with error {ex.NativeErrorCode} ({ex.Message})",
+                processId: null, targetExit: null, stdout: "", stderr: "");
+        }
+        // The child is suspended: its end is read from now on.
+        Task<TargetExit> ended = ProcessLifetime.ObserveEnd(spawned.ProcessId);
 
         var ctx = new StartupContext();
         GCHandle handle = GCHandle.Alloc(ctx);
         nint pContext = GCHandle.ToIntPtr(handle);
         nint unregisterToken = 0;
-        bool handedOver = false;
+        bool settled = false;   // handed over, or ended and released by FailedAfterSpawn
         try
         {
             nint pCallback = (nint)(delegate* unmanaged[Cdecl]<nint, nint, int, void>)&StartupCallbackThunk;
             int hr = _registerForRuntimeStartup((uint)spawned.ProcessId, pCallback, pContext, &unregisterToken);
-            if (hr < 0) return hr;
+            if (hr < 0) throw FailedAfterSpawn("RegisterForRuntimeStartup", hr, $"it returned HRESULT 0x{hr:X8}");
 
             // Callback armed — release the suspended child. CREATE_SUSPENDED guaranteed the CLR could not have
             // initialized before now, so the runtime-startup callback is not missed.
             WindowsSpawn.Resume(spawned);
 
-            if (!ctx.Signaled.Wait(startupTimeout)) return E_FAIL;
-            if (ctx.HResult < 0) return ctx.HResult;
+            // Whichever comes first: the runtime starting (the callback), or the target ending.
+            int first = WaitHandle.WaitAny([ctx.Signaled.WaitHandle, ((IAsyncResult)ended).AsyncWaitHandle], startupTimeout);
+            if (!ctx.Signaled.IsSet)
+                throw first == WaitHandle.WaitTimeout
+                    ? FailedAfterSpawn("runtime startup", E_FAIL, $"the target's runtime did not start within {startupTimeout.TotalSeconds:0} s")
+                    : FailedAfterSpawn("runtime startup", E_FAIL, "the target ended before its runtime started");
+            if (ctx.HResult < 0)
+                throw FailedAfterSpawn("runtime startup", ctx.HResult, $"dbgshim's runtime-startup callback reported HRESULT 0x{ctx.HResult:X8}");
 
             pUnknown = ctx.PCordb;
             child = spawned;
-            handedOver = true;
-            return 0;
+            targetExit = ended;
+            settled = true;
         }
         finally
         {
             if (unregisterToken != 0) _unregisterForRuntimeStartup(unregisterToken);
             handle.Free();
             ctx.Signaled.Dispose();
-            if (!handedOver)
+            if (!settled)
             {
+                // An unexpected exception: end and release the child as before.
                 WindowsSpawn.Terminate(spawned);
                 spawned.StdoutRead.Dispose();
                 spawned.StderrRead.Dispose();
                 spawned.Dispose();
             }
+        }
+
+        // No debugger is attached and no session will own the child: end it if it still runs, read how it ended and
+        // what it wrote, and release its handles.
+        LaunchFailedException FailedAfterSpawn(string step, int hr, string reason)
+        {
+            if (!ended.IsCompleted) WindowsSpawn.Terminate(spawned);
+            TargetExit? exit = ended.Wait(FailedTargetExitWait) ? ended.Result : null;
+            string stdout = WindowsSpawn.ReadAvailable(spawned.StdoutRead, LaunchFailedException.OutputBytes);
+            string stderr = WindowsSpawn.ReadAvailable(spawned.StderrRead, LaunchFailedException.OutputBytes);
+            spawned.StdoutRead.Dispose();
+            spawned.StderrRead.Dispose();
+            spawned.Dispose();
+            settled = true;
+            return new LaunchFailedException(step, hr, reason, spawned.ProcessId, exit, stdout, stderr);
         }
     }
 
@@ -324,9 +360,13 @@ internal sealed unsafe class DbgShim : IDisposable
     /// output therefore cannot reach the parent's fds, which under an MCP stdio server are the
     /// JSON-RPC channel. On success <paramref name="pid"/> + <paramref name="pUnknown"/> are set and
     /// the caller owns draining/closing <paramref name="stdoutFd"/> + <paramref name="stderrFd"/>;
-    /// the caller still <c>DebugActiveProcess</c>es to complete the attach (same as the other paths).</summary>
-    public int LaunchWithDebuggerPosix(string program, IReadOnlyList<string> args, string? workingDirectory,
-        IReadOnlyDictionary<string, string>? env, TimeSpan startupTimeout, out uint pid, out nint pUnknown, out int stdoutFd, out int stderrFd)
+    /// the caller still <c>DebugActiveProcess</c>es to complete the attach (same as the other paths).
+    /// <paramref name="targetExit"/> is the exit watch, started at the spawn while the child is held, so it is in place
+    /// before any reaper. On failure it throws <see cref="LaunchFailedException"/> and leaves no process behind: the
+    /// child is ended if it still runs, and reaped.</summary>
+    public void LaunchWithDebuggerPosix(string program, IReadOnlyList<string> args, string? workingDirectory,
+        IReadOnlyDictionary<string, string>? env, TimeSpan startupTimeout, out uint pid, out nint pUnknown, out int stdoutFd, out int stderrFd,
+        out Task<TargetExit> targetExit)
     {
         pid = 0;
         pUnknown = 0;
@@ -338,8 +378,16 @@ internal sealed unsafe class DbgShim : IDisposable
         for (int i = 0; i < args.Count; i++) argv[i + 1] = args[i];
 
         int spawnRc = PosixSpawn.SpawnSuspendedRedirected(program, argv, workingDirectory, env, out int childPid, out int oFd, out int eFd);
-        if (spawnRc != 0) return E_FAIL;
+        if (spawnRc != 0)
+        {
+            int errno = Math.Abs(spawnRc);
+            throw new LaunchFailedException("posix_spawn", E_FAIL,
+                $"posix_spawn of {program} failed with errno {errno} ({Marshal.GetPInvokeErrorMessage(errno)})",
+                processId: null, targetExit: null, stdout: "", stderr: "");
+        }
         pid = (uint)childPid;
+        // The child is held: its end is read from now on, before the debugger's PAL can reap it.
+        Task<TargetExit> ended = ProcessLifetime.ObserveEnd(childPid);
 
         var ctx = new StartupContext();
         GCHandle handle = GCHandle.Alloc(ctx);
@@ -349,25 +397,46 @@ internal sealed unsafe class DbgShim : IDisposable
         {
             nint pCallback = (nint)(delegate* unmanaged[Cdecl]<nint, nint, int, void>)&StartupCallbackThunk;
             int hr = _registerForRuntimeStartup((uint)childPid, pCallback, pContext, &unregisterToken);
-            if (hr < 0) { PosixSpawn.Kill(childPid); PosixSpawn.Close(oFd); PosixSpawn.Close(eFd); return hr; }
+            if (hr < 0) throw FailedAfterSpawn("RegisterForRuntimeStartup", hr, $"it returned HRESULT 0x{hr:X8}");
 
             // Callback armed — release the suspended child. START_SUSPENDED guaranteed the CLR could
             // not have initialized before now, so the runtime-startup callback is not missed.
             PosixSpawn.Continue(childPid);
 
-            if (!ctx.Signaled.Wait(startupTimeout)) { PosixSpawn.Kill(childPid); PosixSpawn.Close(oFd); PosixSpawn.Close(eFd); return E_FAIL; }
-            if (ctx.HResult < 0) { PosixSpawn.Kill(childPid); PosixSpawn.Close(oFd); PosixSpawn.Close(eFd); return ctx.HResult; }
+            // Whichever comes first: the runtime starting (the callback), or the target ending. Before 2026-11-07 the
+            // launch waited for the callback alone, the full startup timeout for a target that had exited at once.
+            int first = WaitHandle.WaitAny([ctx.Signaled.WaitHandle, ((IAsyncResult)ended).AsyncWaitHandle], startupTimeout);
+            if (!ctx.Signaled.IsSet)
+                throw first == WaitHandle.WaitTimeout
+                    ? FailedAfterSpawn("runtime startup", E_FAIL, $"the target's runtime did not start within {startupTimeout.TotalSeconds:0} s")
+                    : FailedAfterSpawn("runtime startup", E_FAIL, "the target ended before its runtime started");
+            if (ctx.HResult < 0)
+                throw FailedAfterSpawn("runtime startup", ctx.HResult, $"dbgshim's runtime-startup callback reported HRESULT 0x{ctx.HResult:X8}");
 
             pUnknown = ctx.PCordb;
             stdoutFd = oFd;
             stderrFd = eFd;
-            return 0;
+            targetExit = ended;
         }
         finally
         {
             if (unregisterToken != 0) _unregisterForRuntimeStartup(unregisterToken);
             handle.Free();
             ctx.Signaled.Dispose();
+        }
+
+        // No debugger is attached and no session will own the child: end it if it still runs, read how it ended and
+        // what it wrote, reap it (nothing else will), and close its pipes.
+        LaunchFailedException FailedAfterSpawn(string step, int hr, string reason)
+        {
+            if (!ended.IsCompleted) PosixSpawn.Kill(childPid);
+            TargetExit? exit = ended.Wait(FailedTargetExitWait) ? ended.Result : null;
+            string stdout = PosixSpawn.ReadAvailable(oFd, LaunchFailedException.OutputBytes);
+            string stderr = PosixSpawn.ReadAvailable(eFd, LaunchFailedException.OutputBytes);
+            PosixSignals.ReapChild(childPid);
+            PosixSpawn.Close(oFd);
+            PosixSpawn.Close(eFd);
+            return new LaunchFailedException(step, hr, reason, childPid, exit, stdout, stderr);
         }
     }
 

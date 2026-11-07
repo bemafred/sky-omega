@@ -95,6 +95,39 @@ public sealed class ProcessLifetimeTests
         }
     }
 
+    // A launch starts the exit watch at the spawn, while the child is held. On macOS a child held by
+    // POSIX_SPAWN_START_SUSPENDED reads as CLD_STOPPED to waitid(WEXITED | WNOWAIT) at once, though WSTOPPED was not asked
+    // for (C probe, 2026-11-07); the watch must wait through the hold, and through a later stop, for the end.
+    [Fact]
+    public async Task AChildWatchedWhileHeld_ReadsAsItsExitCode_NotAsTheHold()
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "POSIX spawn; Windows reads the exit code from a handle.");
+
+        int rc = PosixSpawn.SpawnSuspendedRedirected("/bin/sh", ["/bin/sh", "-c", "sleep 0.3; exit 3"], cwd: null, env: null,
+            out int pid, out int stdoutFd, out int stderrFd);
+        Assert.Equal(0, rc);
+        try
+        {
+            Task<TargetExit> ended = Task.Run(() => ProcessLifetime.WaitForChildEnd(pid), TestContext.Current.CancellationToken);
+            await Task.Delay(100, TestContext.Current.CancellationToken);   // the watch is waiting while the child is held
+            if (ended.IsCompleted) Assert.Fail($"the watch ended during the hold: {await ended}");
+
+            PosixSpawn.Continue(pid);
+
+            TargetExit exit = await ended.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+            Assert.Equal(TargetExit.Exited(3), exit);
+        }
+        finally
+        {
+            // Released before the reap, so a failed assertion during the hold cannot leave waitpid waiting on a held
+            // child forever (it did, 2026-11-07); the child then ends by itself.
+            PosixSpawn.Continue(pid);
+            PosixSignals.ReapChild(pid);
+            PosixSpawn.Close(stdoutFd);
+            PosixSpawn.Close(stderrFd);
+        }
+    }
+
     [Fact]
     public void AChildThatWasKilled_ReadsAsTheSignalThatKilledIt()
     {
