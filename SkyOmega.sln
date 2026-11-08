@@ -266,6 +266,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "ADRs", "ADRs", "{1E5C8B91-3
 		docs\adrs\drhook\ADR-015-run-until-anomaly.md = docs\adrs\drhook\ADR-015-run-until-anomaly.md
 		docs\adrs\drhook\ADR-016-debugger-resilience-and-recovery.md = docs\adrs\drhook\ADR-016-debugger-resilience-and-recovery.md
 		docs\adrs\drhook\README.md = docs\adrs\drhook\README.md
+		docs\adrs\drhook\ADR-017-debugging-a-process-tree.md = docs\adrs\drhook\ADR-017-debugging-a-process-tree.md
 	EndProjectSection
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "SkyOmega.Bcl", "SkyOmega.Bcl", "{1E5C8B91-3F47-4D2A-9C1B-100000000001}"
