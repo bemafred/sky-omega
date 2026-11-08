@@ -104,8 +104,8 @@ observation. A listener that resumes every child automatically works only while 
 2026-11-08).
 
 So the shell stays for the default launch. The shell's hold ends at `exec` and touches nothing the target starts.
-The diagnostics-port hold suits only a mode the operator chooses for catching children, with this limit written down.
-Commit `b570e31` (a POSIX launch finds
+The diagnostics-port hold suits only a mode the operator chooses for catching children, with this limit written down
+([ADR-017](../../../docs/adrs/drhook/ADR-017-debugging-a-process-tree.md)). Commit `b570e31` (a POSIX launch finds
 the program itself) is unaffected.
 
 ## The rev 4 stop
