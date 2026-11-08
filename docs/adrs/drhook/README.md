@@ -20,4 +20,4 @@ Intent and rationale: [ADR-004 — DrHook: Runtime Observation Substrate](../ADR
 | [ADR-014](ADR-014-inspection-fault-containment.md)              | DrHook Inspection Robustness — Value-Type Read Safety and Fault Containment (a frame's shape must never crash the engine) | Completed |
 | [ADR-015](ADR-015-run-until-anomaly.md)                          | Run-Until-Anomaly — Repeat-Until-Failure Driving with Freeze-on-Catch for Intermittent Runtime Bugs | Proposed |
 | [ADR-016](ADR-016-debugger-resilience-and-recovery.md)           | Debugger Resilience and Recovery — DrHook Stays Dependable When Its Target Is Not | Proposed · experimental charter (Steps 0–5 approved) |
-| [ADR-017](ADR-017-debugging-a-process-tree.md)                   | Debugging a Process Tree — a Breakpoint in a Worker, from the Supervisor's Session | Proposed |
+| [ADR-017](ADR-017-debugging-a-process-tree.md)                   | Debugging a Process Tree — a Breakpoint in a Worker, from the Supervisor's Session | Accepted |

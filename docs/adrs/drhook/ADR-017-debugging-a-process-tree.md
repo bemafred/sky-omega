@@ -1,7 +1,8 @@
 # ADR-017: Debugging a Process Tree — a Breakpoint in a Worker, from the Supervisor's Session
 
-**Status:** Proposed — 2026-11-08 (Emergence). Nothing here is approved for engineering. The next step is Martin's
-assessment of this draft; every probe below is reviewed before it runs.
+**Status:** Accepted — 2026-11-08 (Martin: "I accept the ADR"). Proposed the same day. The scenario, the principles
+and the lead candidate are approved. Steps 2 to 5 confirm or replace the mechanism; engineering waits for their
+evidence and for ADR-016's worker, which principle 4 builds on. Every probe below is reviewed before it runs.
 
 ## The question
 
@@ -77,7 +78,7 @@ In the columns of ADR-016's scenario table:
 |----------|---------------|---------------|-----------------|--------------------------------|-------------------|
 | **Debugging a process tree:** a flaw suspected in a worker, with the supervisor's context | the supervisor launched with child-catching chosen; breakpoints set once for the session | DrHook's for the supervisor it launched; each caught child is the supervisor's | the supervisor ends, after its workers | release every held child, then end as the supervisor's scenario says | a child started after DrHook leaves waits forever (finding 107); a held child may hold up the supervisor, whose own timeouts may expire (a worker that must report within a bound); the program can read the variable DrHook added |
 
-## Decision (proposed)
+## Decision
 
 ### Principles
 
@@ -135,17 +136,18 @@ supports. That second point is still a claim until it is measured.
 - **Q9. Rider.** How does Rider's "Attach to child .NET processes" hold a child? A child's environment and threads
   under Rider can be read without Rider's source.
 
-## Steps (Emergence to Epistemics)
+## Steps
 
-1. **Martin's assessment** of this draft: the scenario, the principles, the lead candidate.
+1. **Martin's assessment** of this draft: the scenario, the principles, the lead candidate. *Done 2026-11-08:
+   accepted.*
 2. **Rider as the reference** (Q9). Martin runs a supervisor under Rider with the option on, and the child's
    environment and threads are read. This is read-only and cheap.
 3. **Probe 107's modes on macOS and Windows** (Q1), with an observation layer for each platform.
 4. **A probe with DrHook.Engine** (Q2, Q3): a supervisor starts a worker; a breakpoint in the worker's startup code,
    set before either starts, must stop the worker; the supervisor runs on; both end naturally.
 5. **The crash case** (Q4): held children released by a listener bound again on the same path.
-6. **Decide** the mechanism, the scope and the surface (Accepted). Engineering waits for ADR-016's worker, which
-   principle 4 builds on.
+6. **Decide** the mechanism, the scope and the surface from that evidence. Engineering follows, once ADR-016's worker
+   exists; the ADR is Completed when it is built and dogfooded.
 
 ## Not in this ADR
 
