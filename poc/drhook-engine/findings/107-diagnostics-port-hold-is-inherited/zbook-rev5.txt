@@ -1,0 +1,354 @@
+probe 107 rev 5 on Ubuntu 26.04.1 LTS X64, runtime 10.0.14
+target /home/bemafred/.local/share/dotnet/runfile/107-launch-hold-target-cf5d4c12aad2c2bfca65f21b2b1289fb747aee9ac19ad20aed7cbbcda179a7cc/bin/debug/107-launch-hold-target.dll
+hook   /home/bemafred/.local/share/dotnet/runfile/107-launch-hold-hook-8e346cbf335943136c8146696be7778aa8127d406f6553a9c3c3a678faf4284f/bin/debug/107-launch-hold-hook.dll
+dbgshim /home/bemafred/.nuget/packages/microsoft.diagnostics.dbgshim.linux-x64/9.0.661903/runtimes/linux-x64/native/libdbgshim.so
+hold run 1:
+    spawned 1550315: dotnet /home/bemafred/.local/share/dotnet/runfile/107-launch-hold-target-cf5d4c12aad2c2bfca65f21b2b1289fb747aee9ac19ad20aed7cbbcda179a7cc/bin/debug/107-launch-hold-target.dll plain 4000 [DOTNET_DiagnosticPorts=/tmp/p107-1550245-hold1.sock,connect,suspend] [startup hook]
+    advertise from 1550315 after 0 ms, cookie 291dcc27-6f30-4fcb-8e29-0b9bbba17e1f; state S, 3 threads, libcoreclr mapped; default port present (dotnet-diagnostic-1550315-33437183-socket)
+    RegisterForRuntimeStartup 2 s into the pause: 0x00000000; marks so far: none; semaphores: sem.clrst0017a7eb0000000001fe35ff, sem.clrco0017a7eb0000000001fe35ff (sem.clr* in /dev/shm: 2)
+    after holding 2 s more: callbacks none; marks so far: none; state S, 3 threads, libcoreclr mapped
+    Q6: default port present (dotnet-diagnostic-1550315-33437183-socket); DiagnosticsClient.ResumeRuntime: returned [call 20 ms]; 2 s later the pause holds (callbacks since: none; marks: none)
+    ResumeRuntime over the reverse connection: OK
+    not ended within 15 s of the resume; where its threads wait:
+      1550315  dotnet           S futex_do_wait
+      1550316  .NET SynchManag  S poll_schedule_timeout.constprop.0
+      1550317  .NET EventPipe   S poll_schedule_timeout.constprop.0
+      1550333  .NET DebugPipe   S wait_for_partner
+      1550334  .NET Debugger    S futex_do_wait
+      1550335  dotnet           S futex_do_wait
+    UnregisterForRuntimeStartup: 0x00000000; semaphores left: none
+    callbacks 0x00000000 +cordb at 05:31:10.908; marks: none; re-dials after the resume: 1; default port while running: present (dotnet-diagnostic-1550315-33437183-socket)
+    still alive after the bound: target 1550315 SIGKILLed
+hold run 1: held-stopped-before-main-killed
+hold run 2:
+    spawned 1550359: dotnet /home/bemafred/.local/share/dotnet/runfile/107-launch-hold-target-cf5d4c12aad2c2bfca65f21b2b1289fb747aee9ac19ad20aed7cbbcda179a7cc/bin/debug/107-launch-hold-target.dll plain 4000 [DOTNET_DiagnosticPorts=/tmp/p107-1550245-hold2.sock,connect,suspend] [startup hook]
+    advertise from 1550359 after 6 ms, cookie 0c94645e-4052-4116-89d1-5223228c69dc; state S, 3 threads, libcoreclr mapped; default port present (dotnet-diagnostic-1550359-33439322-socket)
+    RegisterForRuntimeStartup 2 s into the pause: 0x00000000; marks so far: none; semaphores: sem.clrst0017a8170000000001fe3e5a, sem.clrco0017a8170000000001fe3e5a (sem.clr* in /dev/shm: 2)
+    after holding 2 s more: callbacks none; marks so far: none; state S, 3 threads, libcoreclr mapped
+    Q6: default port present (dotnet-diagnostic-1550359-33439322-socket); DiagnosticsClient.ResumeRuntime: returned [call 4 ms]; 2 s later the pause holds (callbacks since: none; marks: none)
+    ResumeRuntime over the reverse connection: OK
+    not ended within 15 s of the resume; where its threads wait:
+      1550359  dotnet           S futex_do_wait
+      1550361  .NET SynchManag  S poll_schedule_timeout.constprop.0
+      1550362  .NET EventPipe   S poll_schedule_timeout.constprop.0
+      1550377  .NET DebugPipe   S wait_for_partner
+      1550378  .NET Debugger    S futex_do_wait
+      1550379  dotnet           S futex_do_wait
+      1550380  .NET Finalizer   S futex_do_wait
+    UnregisterForRuntimeStartup: 0x00000000; semaphores left: none
+    callbacks 0x00000000 +cordb at 05:31:32.255; marks: none; re-dials after the resume: 1; default port while running: present (dotnet-diagnostic-1550359-33439322-socket)
+    still alive after the bound: target 1550359 SIGKILLed
+hold run 2: held-stopped-before-main-killed
+hold run 3:
+    spawned 1550402: dotnet /home/bemafred/.local/share/dotnet/runfile/107-launch-hold-target-cf5d4c12aad2c2bfca65f21b2b1289fb747aee9ac19ad20aed7cbbcda179a7cc/bin/debug/107-launch-hold-target.dll plain 4000 [DOTNET_DiagnosticPorts=/tmp/p107-1550245-hold3.sock,connect,suspend] [startup hook]
+    advertise from 1550402 after 5 ms, cookie e169853e-8c3c-4b8b-9c21-f242e1b6f585; state S, 3 threads, libcoreclr mapped; default port present (dotnet-diagnostic-1550402-33441455-socket)
+    RegisterForRuntimeStartup 2 s into the pause: 0x00000000; marks so far: none; semaphores: sem.clrst0017a8420000000001fe46af, sem.clrco0017a8420000000001fe46af (sem.clr* in /dev/shm: 2)
+    after holding 2 s more: callbacks none; marks so far: none; state S, 3 threads, libcoreclr mapped
+    Q6: default port present (dotnet-diagnostic-1550402-33441455-socket); DiagnosticsClient.ResumeRuntime: returned [call 3 ms]; 2 s later the pause holds (callbacks since: none; marks: none)
+    ResumeRuntime over the reverse connection: OK
+    not ended within 15 s of the resume; where its threads wait:
+      1550402  dotnet           S futex_do_wait
+      1550403  .NET SynchManag  S poll_schedule_timeout.constprop.0
+      1550404  .NET EventPipe   S poll_schedule_timeout.constprop.0
+      1550416  .NET DebugPipe   S wait_for_partner
+      1550417  .NET Debugger    S futex_do_wait
+      1550418  dotnet           S futex_do_wait
+      1550419  .NET Finalizer   S futex_do_wait
+    UnregisterForRuntimeStartup: 0x00000000; semaphores left: none
+    callbacks 0x00000000 +cordb at 05:31:53.584; marks: none; re-dials after the resume: 1; default port while running: present (dotnet-diagnostic-1550402-33441455-socket)
+    still alive after the bound: target 1550402 SIGKILLed
+hold run 3: held-stopped-before-main-killed
+hold run 4:
+    spawned 1550444: dotnet /home/bemafred/.local/share/dotnet/runfile/107-launch-hold-target-cf5d4c12aad2c2bfca65f21b2b1289fb747aee9ac19ad20aed7cbbcda179a7cc/bin/debug/107-launch-hold-target.dll plain 4000 [DOTNET_DiagnosticPorts=/tmp/p107-1550245-hold4.sock,connect,suspend] [startup hook]
+    advertise from 1550444 after 5 ms, cookie 59438b05-a242-45bb-85ab-4b7b59b09d75; state S, 3 threads, libcoreclr mapped; default port present (dotnet-diagnostic-1550444-33443588-socket)
+    RegisterForRuntimeStartup 2 s into the pause: 0x00000000; marks so far: none; semaphores: sem.clrst0017a86c0000000001fe4f04, sem.clrco0017a86c0000000001fe4f04 (sem.clr* in /dev/shm: 2)
+    after holding 2 s more: callbacks none; marks so far: none; state S, 3 threads, libcoreclr mapped
+    Q6: default port present (dotnet-diagnostic-1550444-33443588-socket); DiagnosticsClient.ResumeRuntime: returned [call 3 ms]; 2 s later the pause holds (callbacks since: none; marks: none)
+    ResumeRuntime over the reverse connection: OK
+    not ended within 15 s of the resume; where its threads wait:
+      1550444  dotnet           S futex_do_wait
+      1550445  .NET SynchManag  S poll_schedule_timeout.constprop.0
+      1550446  .NET EventPipe   S poll_schedule_timeout.constprop.0
+      1550455  .NET DebugPipe   S wait_for_partner
+      1550456  .NET Debugger    S futex_do_wait
+      1550457  dotnet           S futex_do_wait
+      1550458  .NET Finalizer   S futex_do_wait
+    UnregisterForRuntimeStartup: 0x00000000; semaphores left: none
+    callbacks 0x00000000 +cordb at 05:32:14.911; marks: none; re-dials after the resume: 1; default port while running: present (dotnet-diagnostic-1550444-33443588-socket)
+    still alive after the bound: target 1550444 SIGKILLed
+hold run 4: held-stopped-before-main-killed
+hold run 5:
+    spawned 1550489: dotnet /home/bemafred/.local/share/dotnet/runfile/107-launch-hold-target-cf5d4c12aad2c2bfca65f21b2b1289fb747aee9ac19ad20aed7cbbcda179a7cc/bin/debug/107-launch-hold-target.dll plain 4000 [DOTNET_DiagnosticPorts=/tmp/p107-1550245-hold5.sock,connect,suspend] [startup hook]
+    advertise from 1550489 after 10 ms, cookie 8f6adacb-f172-4a4a-a1d6-f46407fcc063; state S, 3 threads, libcoreclr mapped; default port present (dotnet-diagnostic-1550489-33445721-socket)
+    RegisterForRuntimeStartup 2 s into the pause: 0x00000000; marks so far: none; semaphores: sem.clrst0017a8990000000001fe5759, sem.clrco0017a8990000000001fe5759 (sem.clr* in /dev/shm: 2)
+    after holding 2 s more: callbacks none; marks so far: none; state S, 3 threads, libcoreclr mapped
+    Q6: default port present (dotnet-diagnostic-1550489-33445721-socket); DiagnosticsClient.ResumeRuntime: returned [call 2 ms]; 2 s later the pause holds (callbacks since: none; marks: none)
+    ResumeRuntime over the reverse connection: OK
+    not ended within 15 s of the resume; where its threads wait:
+      1550489  dotnet           S futex_do_wait
+      1550490  .NET SynchManag  S poll_schedule_timeout.constprop.0
+      1550491  .NET EventPipe   S poll_schedule_timeout.constprop.0
+      1550500  .NET DebugPipe   S wait_for_partner
+      1550501  .NET Debugger    S futex_do_wait
+      1550502  dotnet           S futex_do_wait
+      1550503  .NET Finalizer   S futex_do_wait
+    UnregisterForRuntimeStartup: 0x00000000; semaphores left: none
+    callbacks 0x00000000 +cordb at 05:32:36.235; marks: none; re-dials after the resume: 1; default port while running: present (dotnet-diagnostic-1550489-33445721-socket)
+    still alive after the bound: target 1550489 SIGKILLed
+hold run 5: held-stopped-before-main-killed
+hold run 6:
+    spawned 1550539: dotnet /home/bemafred/.local/share/dotnet/runfile/107-launch-hold-target-cf5d4c12aad2c2bfca65f21b2b1289fb747aee9ac19ad20aed7cbbcda179a7cc/bin/debug/107-launch-hold-target.dll plain 4000 [DOTNET_DiagnosticPorts=/tmp/p107-1550245-hold6.sock,connect,suspend] [startup hook]
+    advertise from 1550539 after 6 ms, cookie 944f2229-8401-4e60-9110-15e2eb5b0a27; state S, 3 threads, libcoreclr mapped; default port present (dotnet-diagnostic-1550539-33447853-socket)
+    RegisterForRuntimeStartup 2 s into the pause: 0x00000000; marks so far: none; semaphores: sem.clrst0017a8cb0000000001fe5fad, sem.clrco0017a8cb0000000001fe5fad (sem.clr* in /dev/shm: 2)
+    after holding 2 s more: callbacks none; marks so far: none; state S, 3 threads, libcoreclr mapped
+    ResumeRuntime over the reverse connection: OK
+    not ended within 15 s of the resume; where its threads wait:
+      1550539  dotnet           S futex_do_wait
+      1550540  .NET SynchManag  S poll_schedule_timeout.constprop.0
+      1550541  .NET EventPipe   S poll_schedule_timeout.constprop.0
+      1550548  .NET DebugPipe   S wait_for_partner
+      1550549  .NET Debugger    S futex_do_wait
+      1550550  dotnet           S futex_do_wait
+      1550551  .NET Finalizer   S futex_do_wait
+    UnregisterForRuntimeStartup: 0x00000000; semaphores left: none
+    callbacks 0x00000000 +cordb at 05:32:55.554; marks: none; re-dials after the resume: 1; default port while running: present (dotnet-diagnostic-1550539-33447853-socket)
+    still alive after the bound: target 1550539 SIGKILLed
+hold run 6: held-stopped-before-main-killed
+hold run 7:
+    spawned 1550584: dotnet /home/bemafred/.local/share/dotnet/runfile/107-launch-hold-target-cf5d4c12aad2c2bfca65f21b2b1289fb747aee9ac19ad20aed7cbbcda179a7cc/bin/debug/107-launch-hold-target.dll plain 4000 [DOTNET_DiagnosticPorts=/tmp/p107-1550245-hold7.sock,connect,suspend] [startup hook]
+    advertise from 1550584 after 7 ms, cookie a56ddd3a-5569-4eeb-ab4b-cf6f3d4b3226; state S, 3 threads, libcoreclr mapped; default port present (dotnet-diagnostic-1550584-33449785-socket)
+    RegisterForRuntimeStartup 2 s into the pause: 0x00000000; marks so far: none; semaphores: sem.clrst0017a8f80000000001fe6739, sem.clrco0017a8f80000000001fe6739 (sem.clr* in /dev/shm: 2)
+    after holding 2 s more: callbacks none; marks so far: none; state S, 3 threads, libcoreclr mapped
+    ResumeRuntime over the reverse connection: OK
+    not ended within 15 s of the resume; where its threads wait:
+      1550584  dotnet           S futex_do_wait
+      1550585  .NET SynchManag  S poll_schedule_timeout.constprop.0
+      1550586  .NET EventPipe   S poll_schedule_timeout.constprop.0
+      1550593  .NET DebugPipe   S wait_for_partner
+      1550594  .NET Debugger    S futex_do_wait
+      1550595  dotnet           S futex_do_wait
+      1550596  .NET Finalizer   S futex_do_wait
+    UnregisterForRuntimeStartup: 0x00000000; semaphores left: none
+    callbacks 0x00000000 +cordb at 05:33:14.875; marks: none; re-dials after the resume: 1; default port while running: present (dotnet-diagnostic-1550584-33449785-socket)
+    still alive after the bound: target 1550584 SIGKILLed
+hold run 7: held-stopped-before-main-killed
+hold run 8:
+    spawned 1550626: dotnet /home/bemafred/.local/share/dotnet/runfile/107-launch-hold-target-cf5d4c12aad2c2bfca65f21b2b1289fb747aee9ac19ad20aed7cbbcda179a7cc/bin/debug/107-launch-hold-target.dll plain 4000 [DOTNET_DiagnosticPorts=/tmp/p107-1550245-hold8.sock,connect,suspend] [startup hook]
+    advertise from 1550626 after 12 ms, cookie 71c98ce9-5d4c-49ef-9b90-66789f56b6ae; state S, 3 threads, libcoreclr mapped; default port present (dotnet-diagnostic-1550626-33451717-socket)
+    RegisterForRuntimeStartup 2 s into the pause: 0x00000000; marks so far: none; semaphores: sem.clrst0017a9220000000001fe6ec5, sem.clrco0017a9220000000001fe6ec5 (sem.clr* in /dev/shm: 2)
+    after holding 2 s more: callbacks none; marks so far: none; state S, 3 threads, libcoreclr mapped
+    ResumeRuntime over the reverse connection: OK
+    not ended within 15 s of the resume; where its threads wait:
+      1550626  dotnet           S futex_do_wait
+      1550627  .NET SynchManag  S poll_schedule_timeout.constprop.0
+      1550628  .NET EventPipe   S poll_schedule_timeout.constprop.0
+      1550633  .NET DebugPipe   S wait_for_partner
+      1550634  .NET Debugger    S futex_do_wait
+      1550635  dotnet           S futex_do_wait
+      1550636  .NET Finalizer   S futex_do_wait
+    UnregisterForRuntimeStartup: 0x00000000; semaphores left: none
+    callbacks 0x00000000 +cordb at 05:33:34.200; marks: none; re-dials after the resume: 1; default port while running: present (dotnet-diagnostic-1550626-33451717-socket)
+    still alive after the bound: target 1550626 SIGKILLed
+hold run 8: held-stopped-before-main-killed
+hold run 9:
+    spawned 1550658: dotnet /home/bemafred/.local/share/dotnet/runfile/107-launch-hold-target-cf5d4c12aad2c2bfca65f21b2b1289fb747aee9ac19ad20aed7cbbcda179a7cc/bin/debug/107-launch-hold-target.dll plain 4000 [DOTNET_DiagnosticPorts=/tmp/p107-1550245-hold9.sock,connect,suspend] [startup hook]
+    advertise from 1550658 after 7 ms, cookie d8919190-7bd3-4cd4-b5aa-9bf16f45681d; state S, 3 threads, libcoreclr mapped; default port present (dotnet-diagnostic-1550658-33453649-socket)
+    RegisterForRuntimeStartup 2 s into the pause: 0x00000000; marks so far: none; semaphores: sem.clrst0017a9420000000001fe7651, sem.clrco0017a9420000000001fe7651 (sem.clr* in /dev/shm: 2)
+    after holding 2 s more: callbacks none; marks so far: none; state S, 3 threads, libcoreclr mapped
+    ResumeRuntime over the reverse connection: OK
+    not ended within 15 s of the resume; where its threads wait:
+      1550658  dotnet           S futex_do_wait
+      1550659  .NET SynchManag  S poll_schedule_timeout.constprop.0
+      1550660  .NET EventPipe   S poll_schedule_timeout.constprop.0
+      1550664  .NET DebugPipe   S wait_for_partner
+      1550665  .NET Debugger    S futex_do_wait
+      1550666  dotnet           S futex_do_wait
+      1550667  .NET Finalizer   S futex_do_wait
+    UnregisterForRuntimeStartup: 0x00000000; semaphores left: none
+    callbacks 0x00000000 +cordb at 05:33:53.518; marks: none; re-dials after the resume: 1; default port while running: present (dotnet-diagnostic-1550658-33453649-socket)
+    still alive after the bound: target 1550658 SIGKILLed
+hold run 9: held-stopped-before-main-killed
+hold run 10:
+    spawned 1550701: dotnet /home/bemafred/.local/share/dotnet/runfile/107-launch-hold-target-cf5d4c12aad2c2bfca65f21b2b1289fb747aee9ac19ad20aed7cbbcda179a7cc/bin/debug/107-launch-hold-target.dll plain 4000 [DOTNET_DiagnosticPorts=/tmp/p107-1550245-hold10.sock,connect,suspend] [startup hook]
+    advertise from 1550701 after 6 ms, cookie 64503cf2-9fa8-4ea8-b67e-d11d13310613; state S, 3 threads, libcoreclr mapped; default port present (dotnet-diagnostic-1550701-33455582-socket)
+    RegisterForRuntimeStartup 2 s into the pause: 0x00000000; marks so far: none; semaphores: sem.clrst0017a96d0000000001fe7dde, sem.clrco0017a96d0000000001fe7dde (sem.clr* in /dev/shm: 2)
+    after holding 2 s more: callbacks none; marks so far: none; state S, 3 threads, libcoreclr mapped
+    ResumeRuntime over the reverse connection: OK
+    not ended within 15 s of the resume; where its threads wait:
+      1550701  dotnet           S futex_do_wait
+      1550702  .NET SynchManag  S poll_schedule_timeout.constprop.0
+      1550703  .NET EventPipe   S poll_schedule_timeout.constprop.0
+      1550711  .NET DebugPipe   S wait_for_partner
+      1550712  .NET Debugger    S futex_do_wait
+      1550713  dotnet           S futex_do_wait
+      1550714  .NET Finalizer   S futex_do_wait
+    UnregisterForRuntimeStartup: 0x00000000; semaphores left: none
+    callbacks 0x00000000 +cordb at 05:34:12.841; marks: none; re-dials after the resume: 1; default port while running: present (dotnet-diagnostic-1550701-33455582-socket)
+    still alive after the bound: target 1550701 SIGKILLed
+hold run 10: held-stopped-before-main-killed
+hold-control run 1:
+    spawned 1550733: dotnet /home/bemafred/.local/share/dotnet/runfile/107-launch-hold-target-cf5d4c12aad2c2bfca65f21b2b1289fb747aee9ac19ad20aed7cbbcda179a7cc/bin/debug/107-launch-hold-target.dll plain 4000 [startup hook]
+    RegisterForRuntimeStartup 2 s after the spawn: 0x00000000; marks so far: modinit, main; state S, 8 threads, libcoreclr mapped
+    UnregisterForRuntimeStartup: 0x00000000; semaphores left: none
+    callbacks 0x00000000 +cordb at 05:34:30.148; marks: modinit, main, exit; spawn to main: 35 ms
+hold-control run 1: missed-main-first-exited(0)
+hold-control run 2:
+    spawned 1550752: dotnet /home/bemafred/.local/share/dotnet/runfile/107-launch-hold-target-cf5d4c12aad2c2bfca65f21b2b1289fb747aee9ac19ad20aed7cbbcda179a7cc/bin/debug/107-launch-hold-target.dll plain 4000 [startup hook]
+    RegisterForRuntimeStartup 2 s after the spawn: 0x00000000; marks so far: modinit, main; state S, 8 threads, libcoreclr mapped
+    UnregisterForRuntimeStartup: 0x00000000; semaphores left: none
+    callbacks 0x00000000 +cordb at 05:34:35.193; marks: modinit, main, exit; spawn to main: 37 ms
+hold-control run 2: missed-main-first-exited(0)
+hold-control run 3:
+    spawned 1550765: dotnet /home/bemafred/.local/share/dotnet/runfile/107-launch-hold-target-cf5d4c12aad2c2bfca65f21b2b1289fb747aee9ac19ad20aed7cbbcda179a7cc/bin/debug/107-launch-hold-target.dll plain 4000 [startup hook]
+    RegisterForRuntimeStartup 2 s after the spawn: 0x00000000; marks so far: modinit, main; state S, 8 threads, libcoreclr mapped
+    UnregisterForRuntimeStartup: 0x00000000; semaphores left: none
+    callbacks 0x00000000 +cordb at 05:34:40.240; marks: modinit, main, exit; spawn to main: 39 ms
+hold-control run 3: missed-main-first-exited(0)
+hold-control run 4:
+    spawned 1550777: dotnet /home/bemafred/.local/share/dotnet/runfile/107-launch-hold-target-cf5d4c12aad2c2bfca65f21b2b1289fb747aee9ac19ad20aed7cbbcda179a7cc/bin/debug/107-launch-hold-target.dll plain 4000 [startup hook]
+    RegisterForRuntimeStartup 2 s after the spawn: 0x00000000; marks so far: modinit, main; state S, 8 threads, libcoreclr mapped
+    UnregisterForRuntimeStartup: 0x00000000; semaphores left: none
+    callbacks 0x00000000 +cordb at 05:34:45.289; marks: modinit, main, exit; spawn to main: 34 ms
+hold-control run 4: missed-main-first-exited(0)
+hold-control run 5:
+    spawned 1550800: dotnet /home/bemafred/.local/share/dotnet/runfile/107-launch-hold-target-cf5d4c12aad2c2bfca65f21b2b1289fb747aee9ac19ad20aed7cbbcda179a7cc/bin/debug/107-launch-hold-target.dll plain 4000 [startup hook]
+    RegisterForRuntimeStartup 2 s after the spawn: 0x00000000; marks so far: modinit, main; state S, 8 threads, libcoreclr mapped
+    UnregisterForRuntimeStartup: 0x00000000; semaphores left: none
+    callbacks 0x00000000 +cordb at 05:34:50.333; marks: modinit, main, exit; spawn to main: 48 ms
+hold-control run 5: missed-main-first-exited(0)
+hold-control run 6:
+    spawned 1550813: dotnet /home/bemafred/.local/share/dotnet/runfile/107-launch-hold-target-cf5d4c12aad2c2bfca65f21b2b1289fb747aee9ac19ad20aed7cbbcda179a7cc/bin/debug/107-launch-hold-target.dll plain 4000 [startup hook]
+    RegisterForRuntimeStartup 2 s after the spawn: 0x00000000; marks so far: modinit, main; state S, 8 threads, libcoreclr mapped
+    UnregisterForRuntimeStartup: 0x00000000; semaphores left: none
+    callbacks 0x00000000 +cordb at 05:34:55.394; marks: modinit, main, exit; spawn to main: 38 ms
+hold-control run 6: missed-main-first-exited(0)
+hold-control run 7:
+    spawned 1550828: dotnet /home/bemafred/.local/share/dotnet/runfile/107-launch-hold-target-cf5d4c12aad2c2bfca65f21b2b1289fb747aee9ac19ad20aed7cbbcda179a7cc/bin/debug/107-launch-hold-target.dll plain 4000 [startup hook]
+    RegisterForRuntimeStartup 2 s after the spawn: 0x00000000; marks so far: modinit, main; state S, 8 threads, libcoreclr mapped
+    UnregisterForRuntimeStartup: 0x00000000; semaphores left: none
+    callbacks 0x00000000 +cordb at 05:35:00.445; marks: modinit, main, exit; spawn to main: 36 ms
+hold-control run 7: missed-main-first-exited(0)
+hold-control run 8:
+    spawned 1550849: dotnet /home/bemafred/.local/share/dotnet/runfile/107-launch-hold-target-cf5d4c12aad2c2bfca65f21b2b1289fb747aee9ac19ad20aed7cbbcda179a7cc/bin/debug/107-launch-hold-target.dll plain 4000 [startup hook]
+    RegisterForRuntimeStartup 2 s after the spawn: 0x00000000; marks so far: modinit, main; state S, 8 threads, libcoreclr mapped
+    UnregisterForRuntimeStartup: 0x00000000; semaphores left: none
+    callbacks 0x00000000 +cordb at 05:35:05.492; marks: modinit, main, exit; spawn to main: 35 ms
+hold-control run 8: missed-main-first-exited(0)
+hold-control run 9:
+    spawned 1550862: dotnet /home/bemafred/.local/share/dotnet/runfile/107-launch-hold-target-cf5d4c12aad2c2bfca65f21b2b1289fb747aee9ac19ad20aed7cbbcda179a7cc/bin/debug/107-launch-hold-target.dll plain 4000 [startup hook]
+    RegisterForRuntimeStartup 2 s after the spawn: 0x00000000; marks so far: modinit, main; state S, 8 threads, libcoreclr mapped
+    UnregisterForRuntimeStartup: 0x00000000; semaphores left: none
+    callbacks 0x00000000 +cordb at 05:35:10.541; marks: modinit, main, exit; spawn to main: 42 ms
+hold-control run 9: missed-main-first-exited(0)
+hold-control run 10:
+    spawned 1550878: dotnet /home/bemafred/.local/share/dotnet/runfile/107-launch-hold-target-cf5d4c12aad2c2bfca65f21b2b1289fb747aee9ac19ad20aed7cbbcda179a7cc/bin/debug/107-launch-hold-target.dll plain 4000 [startup hook]
+    RegisterForRuntimeStartup 2 s after the spawn: 0x00000000; marks so far: modinit, main; state S, 8 threads, libcoreclr mapped
+    UnregisterForRuntimeStartup: 0x00000000; semaphores left: none
+    callbacks 0x00000000 +cordb at 05:35:15.590; marks: modinit, main, exit; spawn to main: 34 ms
+hold-control run 10: missed-main-first-exited(0)
+child-listener run 1:
+    spawned 1550897: dotnet /home/bemafred/.local/share/dotnet/runfile/107-launch-hold-target-cf5d4c12aad2c2bfca65f21b2b1289fb747aee9ac19ad20aed7cbbcda179a7cc/bin/debug/107-launch-hold-target.dll spawn-child [DOTNET_DiagnosticPorts=/tmp/p107-1550245-cl1.sock,connect,suspend] [startup hook]
+    target 1550897 dialled; resume: OK
+    child 1550905 dialled 12 ms after go; its environ: DOTNET_DiagnosticPorts=/tmp/p107-1550245-cl1.sock,connect,suspend, DOTNET_STARTUP_HOOKS set; state S, 3 threads, libcoreclr mapped
+    after holding the child 5 s: no child mark; resume child: OK
+    target view: env DOTNET_DiagnosticPorts=/tmp/p107-1550245-cl1.sock,connect,suspend; child view: child: env DOTNET_DiagnosticPorts=/tmp/p107-1550245-cl1.sock,connect,suspend; re-dials target 1, child 1; marks: modinit, main, go(go), child-pid, child: modinit, child: main, child: exit, child-exit(0)
+child-listener run 1: child-paused-inherited-exited(0)
+child-listener run 2:
+    spawned 1550925: dotnet /home/bemafred/.local/share/dotnet/runfile/107-launch-hold-target-cf5d4c12aad2c2bfca65f21b2b1289fb747aee9ac19ad20aed7cbbcda179a7cc/bin/debug/107-launch-hold-target.dll spawn-child [DOTNET_DiagnosticPorts=/tmp/p107-1550245-cl2.sock,connect,suspend] [startup hook]
+    target 1550925 dialled; resume: OK
+    child 1550933 dialled 12 ms after go; its environ: DOTNET_DiagnosticPorts=/tmp/p107-1550245-cl2.sock,connect,suspend, DOTNET_STARTUP_HOOKS set; state S, 3 threads, libcoreclr mapped
+    after holding the child 5 s: no child mark; resume child: OK
+    target view: env DOTNET_DiagnosticPorts=/tmp/p107-1550245-cl2.sock,connect,suspend; child view: child: env DOTNET_DiagnosticPorts=/tmp/p107-1550245-cl2.sock,connect,suspend; re-dials target 1, child 1; marks: modinit, main, go(go), child-pid, child: modinit, child: main, child: exit, child-exit(0)
+child-listener run 2: child-paused-inherited-exited(0)
+child-listener run 3:
+    spawned 1550954: dotnet /home/bemafred/.local/share/dotnet/runfile/107-launch-hold-target-cf5d4c12aad2c2bfca65f21b2b1289fb747aee9ac19ad20aed7cbbcda179a7cc/bin/debug/107-launch-hold-target.dll spawn-child [DOTNET_DiagnosticPorts=/tmp/p107-1550245-cl3.sock,connect,suspend] [startup hook]
+    target 1550954 dialled; resume: OK
+    child 1550962 dialled 12 ms after go; its environ: DOTNET_DiagnosticPorts=/tmp/p107-1550245-cl3.sock,connect,suspend, DOTNET_STARTUP_HOOKS set; state S, 3 threads, libcoreclr mapped
+    after holding the child 5 s: no child mark; resume child: OK
+    target view: env DOTNET_DiagnosticPorts=/tmp/p107-1550245-cl3.sock,connect,suspend; child view: child: env DOTNET_DiagnosticPorts=/tmp/p107-1550245-cl3.sock,connect,suspend; re-dials target 1, child 1; marks: modinit, main, go(go), child-pid, child: modinit, child: main, child: exit, child-exit(0)
+child-listener run 3: child-paused-inherited-exited(0)
+child-no-listener run 1:
+    spawned 1550988: dotnet /home/bemafred/.local/share/dotnet/runfile/107-launch-hold-target-cf5d4c12aad2c2bfca65f21b2b1289fb747aee9ac19ad20aed7cbbcda179a7cc/bin/debug/107-launch-hold-target.dll spawn-child [DOTNET_DiagnosticPorts=/tmp/p107-1550245-cn1.sock,connect,suspend] [startup hook]
+    target 1550988 dialled; resume: OK
+    listener closed and /tmp/p107-1550245-cn1.sock unlinked; sending go
+    5 s: child state S, 3 threads, libcoreclr mapped; child marks: none
+    10 s: child state S, 3 threads, libcoreclr mapped; child marks: none
+    15 s: child state S, 3 threads, libcoreclr mapped; child marks: none
+    20 s: child state S, 3 threads, libcoreclr mapped; child marks: none
+    25 s: child state S, 3 threads, libcoreclr mapped; child marks: none
+    30 s: child state S, 3 threads, libcoreclr mapped; child marks: none
+    path bound again; child re-dialled after 387 ms; resume child: OK
+    target re-dials to the new listener: 1; marks: modinit, main, go(go), child-pid, child: modinit, child: main, child: exit, child-exit(0)
+child-no-listener run 1: child-blocked-redialled-387ms-exited(0)
+child-no-listener run 2:
+    spawned 1551060: dotnet /home/bemafred/.local/share/dotnet/runfile/107-launch-hold-target-cf5d4c12aad2c2bfca65f21b2b1289fb747aee9ac19ad20aed7cbbcda179a7cc/bin/debug/107-launch-hold-target.dll spawn-child [DOTNET_DiagnosticPorts=/tmp/p107-1550245-cn2.sock,connect,suspend] [startup hook]
+    target 1551060 dialled; resume: OK
+    listener closed and /tmp/p107-1550245-cn2.sock unlinked; sending go
+    5 s: child state S, 3 threads, libcoreclr mapped; child marks: none
+    10 s: child state S, 3 threads, libcoreclr mapped; child marks: none
+    15 s: child state S, 3 threads, libcoreclr mapped; child marks: none
+    20 s: child state S, 3 threads, libcoreclr mapped; child marks: none
+    25 s: child state S, 3 threads, libcoreclr mapped; child marks: none
+    30 s: child state S, 3 threads, libcoreclr mapped; child marks: none
+    path bound again; child re-dialled after 383 ms; resume child: OK
+    target re-dials to the new listener: 1; marks: modinit, main, go(go), child-pid, child: modinit, child: main, child: exit, child-exit(0)
+child-no-listener run 2: child-blocked-redialled-383ms-exited(0)
+child-no-listener run 3:
+    spawned 1551127: dotnet /home/bemafred/.local/share/dotnet/runfile/107-launch-hold-target-cf5d4c12aad2c2bfca65f21b2b1289fb747aee9ac19ad20aed7cbbcda179a7cc/bin/debug/107-launch-hold-target.dll spawn-child [DOTNET_DiagnosticPorts=/tmp/p107-1550245-cn3.sock,connect,suspend] [startup hook]
+    target 1551127 dialled; resume: OK
+    listener closed and /tmp/p107-1550245-cn3.sock unlinked; sending go
+    5 s: child state S, 3 threads, libcoreclr mapped; child marks: none
+    10 s: child state S, 3 threads, libcoreclr mapped; child marks: none
+    15 s: child state S, 3 threads, libcoreclr mapped; child marks: none
+    20 s: child state S, 3 threads, libcoreclr mapped; child marks: none
+    25 s: child state S, 3 threads, libcoreclr mapped; child marks: none
+    30 s: child state S, 3 threads, libcoreclr mapped; child marks: none
+    path bound again; child re-dialled after 380 ms; resume child: OK
+    target re-dials to the new listener: 1; marks: modinit, main, go(go), child-pid, child: modinit, child: main, child: exit, child-exit(0)
+child-no-listener run 3: child-blocked-redialled-380ms-exited(0)
+runtimeconfig-property run 1:
+    spawned 1551194: dotnet exec --runtimeconfig /tmp/p107-1550245-rc1.runtimeconfig.json /home/bemafred/.local/share/dotnet/runfile/107-launch-hold-target-cf5d4c12aad2c2bfca65f21b2b1289fb747aee9ac19ad20aed7cbbcda179a7cc/bin/debug/107-launch-hold-target.dll plain 0
+    marks: modinit, main, exit; view: env DOTNET_DiagnosticPorts=(unset)
+runtimeconfig-property run 1: no-dial-exited(0)
+containment:
+    removed /tmp/clr-debug-pipe-1550315-33437183-out (target 1550315, killed: expected)
+    removed /tmp/clr-debug-pipe-1550315-33437183-in (target 1550315, killed: expected)
+    removed /tmp/dotnet-diagnostic-1550315-33437183-socket (target 1550315, killed: expected)
+    removed /tmp/clr-debug-pipe-1550359-33439322-out (target 1550359, killed: expected)
+    removed /tmp/clr-debug-pipe-1550359-33439322-in (target 1550359, killed: expected)
+    removed /tmp/dotnet-diagnostic-1550359-33439322-socket (target 1550359, killed: expected)
+    removed /tmp/clr-debug-pipe-1550402-33441455-out (target 1550402, killed: expected)
+    removed /tmp/clr-debug-pipe-1550402-33441455-in (target 1550402, killed: expected)
+    removed /tmp/dotnet-diagnostic-1550402-33441455-socket (target 1550402, killed: expected)
+    removed /tmp/clr-debug-pipe-1550444-33443588-out (target 1550444, killed: expected)
+    removed /tmp/clr-debug-pipe-1550444-33443588-in (target 1550444, killed: expected)
+    removed /tmp/dotnet-diagnostic-1550444-33443588-socket (target 1550444, killed: expected)
+    removed /tmp/clr-debug-pipe-1550489-33445721-out (target 1550489, killed: expected)
+    removed /tmp/clr-debug-pipe-1550489-33445721-in (target 1550489, killed: expected)
+    removed /tmp/dotnet-diagnostic-1550489-33445721-socket (target 1550489, killed: expected)
+    removed /tmp/clr-debug-pipe-1550539-33447853-out (target 1550539, killed: expected)
+    removed /tmp/clr-debug-pipe-1550539-33447853-in (target 1550539, killed: expected)
+    removed /tmp/dotnet-diagnostic-1550539-33447853-socket (target 1550539, killed: expected)
+    removed /tmp/clr-debug-pipe-1550584-33449785-out (target 1550584, killed: expected)
+    removed /tmp/clr-debug-pipe-1550584-33449785-in (target 1550584, killed: expected)
+    removed /tmp/dotnet-diagnostic-1550584-33449785-socket (target 1550584, killed: expected)
+    removed /tmp/clr-debug-pipe-1550626-33451717-out (target 1550626, killed: expected)
+    removed /tmp/clr-debug-pipe-1550626-33451717-in (target 1550626, killed: expected)
+    removed /tmp/dotnet-diagnostic-1550626-33451717-socket (target 1550626, killed: expected)
+    removed /tmp/clr-debug-pipe-1550658-33453649-out (target 1550658, killed: expected)
+    removed /tmp/clr-debug-pipe-1550658-33453649-in (target 1550658, killed: expected)
+    removed /tmp/dotnet-diagnostic-1550658-33453649-socket (target 1550658, killed: expected)
+    removed /tmp/clr-debug-pipe-1550701-33455582-out (target 1550701, killed: expected)
+    removed /tmp/clr-debug-pipe-1550701-33455582-in (target 1550701, killed: expected)
+    removed /tmp/dotnet-diagnostic-1550701-33455582-socket (target 1550701, killed: expected)
+    tracked processes 33, alive at containment 0, files removed 30
+
+hold: held-stopped-before-main-killed: 10
+hold-control: missed-main-first-exited(0): 10
+child-listener: child-paused-inherited-exited(0): 3
+child-no-listener: child-blocked-redialled-387ms-exited(0): 1; child-blocked-redialled-383ms-exited(0): 1; child-blocked-redialled-380ms-exited(0): 1
+runtimeconfig-property: no-dial-exited(0): 1
+hold (Q1): predicted held in every run counted (released-by-default-port runs excluded): holds
+hold (end): predicted held-stopped-before-main in every held run: holds
+hold-control: predicted missed every run: holds
+exit 0

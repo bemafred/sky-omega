@@ -339,6 +339,7 @@ The substrate is backed by a probe corpus in `poc/drhook-engine/` — `NN-name-s
 - **58**: logpoint template typed-arithmetic validation (ADR-010 Increment 7).
 - **88**: UI liveness by dispatcher drain — a `File.Delete(sentinel)` job queued by func-eval is drained by an idle Avalonia app and NOT by a managed- or native-hung one (`poc/avalonia-hang-target` is the hang-on-demand fixture). Findings 88 (dbgshim `EnumerateCLRs` SEGV on Metal apps) and 89 (Borrowed detach leak) were found running it.
 - **87**: the dual-reaper race guard — `TargetIsHostChild` fires for a `Process.Start`ed child and not for a `/bin/sh`-parented one; `87-wait-interposer.c` is the `waitpid`/`wait4`/`waitid` tracer that found the second reaper (finding 87).
+- **100–107**: ADR-016 debugger resilience. 100 is the kill and crash boundary (findings 100, 104, 105), 101 the platform facts, 102 the natural ends, 106 the debugger in a worker process with a supervisor that recovers from losing it (Step 5). 107 asks whether the runtime's diagnostics-port pause (`DOTNET_DiagnosticPorts=<path>,connect,suspend`) could replace the Linux launch shell: it holds the target before its first managed code, but every .NET child inherits it and waits forever with nobody listening, so the shell stays (finding 107; Linux only, needs `Microsoft.Diagnostics.NETCore.Client`).
 
 Probes call `DrHook.Engine.DebugSession` directly (not the MCP tool layer), so the ADR-010 Tier 1 rename does not affect them.
 
