@@ -1,0 +1,41 @@
+start 2026-11-10T18:51:53Z
+probe 109 rev 1 on macOS 27.0.1 Arm64 (macOS), runtime 10.0.9
+observation layer self-check:
+    start 1794336714513244 (name key 1794336714); state running, 11 threads, libcoreclr mapped
+    threads:
+      0    -                        running
+      1    -                        waiting
+      2    .NET SynchManager        waiting
+      3    .NET EventPipe           waiting
+      4    .NET DebugPipe           waiting
+      5    .NET Debugger            waiting
+      6    -                        waiting
+      7    -                        waiting
+      8    -                        waiting
+      9    -                        waiting
+      10   .NET SigHandler          waiting
+    environment: 53 variables, HOME matches
+target /Users/bemafred/Library/Application Support/dotnet/runfile/109-diagport-hold-target-016f096e44623480bdcd845941581c4fe9783a7e7a61c73b11d5c5d38d667dea/bin/debug/109-diagport-hold-target.dll
+hook   /Users/bemafred/Library/Application Support/dotnet/runfile/109-diagport-hold-hook-e9bd9e3f98788afd0bc9b9bf74484faac3a7b1559b2924587b20566e1bb565d3/bin/debug/109-diagport-hold-hook.dll
+target startup hooks: not switched off
+dbgshim /Users/bemafred/.nuget/packages/microsoft.diagnostics.dbgshim.osx-arm64/9.0.661903/runtimes/osx-arm64/native/libdbgshim.dylib
+hold run 1:
+    spawned 76244: dotnet /Users/bemafred/Library/Application Support/dotnet/runfile/109-diagport-hold-target-016f096e44623480bdcd845941581c4fe9783a7e7a61c73b11d5c5d38d667dea/bin/debug/109-diagport-hold-target.dll plain 4000 [DOTNET_DiagnosticPorts=/var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/p109-76232-hold1.sock,connect,suspend] [startup hook]
+    advertise from 76244 after 4 ms, cookie 705fd531-11e5-4b59-a00b-a5d75bb53d3f; state running, 4 threads, libcoreclr mapped; default port present (dotnet-diagnostic-76244-1794336715-socket)
+    RegisterForRuntimeStartup 2 s into the pause: 0x00000000; marks so far: none; handshake: st: FIFO present, semaphore present; co: FIFO present, semaphore present
+    after holding 2 s more: callbacks none; marks so far: none; state running, 4 threads, libcoreclr mapped
+    Q6: default port present (dotnet-diagnostic-76244-1794336715-socket); DiagnosticsClient.ResumeRuntime: returned [call 8 ms]; 2 s later the pause holds (callbacks since: none; marks: none)
+    ResumeRuntime over the reverse connection: OK
+    not ended within 15 s of the resume; its threads:
+      0    -                        waiting
+      1    -                        waiting
+      2    .NET SynchManager        waiting
+      3    .NET EventPipe           waiting
+      4    .NET DebugPipe           waiting
+      5    .NET Debugger            waiting
+      6    -                        waiting
+      7    -                        waiting
+    UnregisterForRuntimeStartup: 0x00000000; handshake left: st: FIFO absent, semaphore absent; co: FIFO absent, semaphore absent
+    callbacks 0x00000000 +cordb at 18:52:02.328; marks: none; re-dials after the resume: 1; default port while running: present (dotnet-diagnostic-76244-1794336715-socket)
+    still alive after the bound: target 76244 killed
+end 2026-11-10T19:46:57Z exit 143

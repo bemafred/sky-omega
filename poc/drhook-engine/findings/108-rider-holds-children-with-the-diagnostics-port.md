@@ -155,7 +155,11 @@ has to share one variable with Rider.
 - **Rider's backend keeps the path bound after the run,** and keeps the dead connections open.
 - **omega's temp folder holds 500 `clr-debug-pipe` files and 438 `dotnet-diagnostic` sockets** from earlier sessions,
   like zbook's 382 stale pairs (finding 107). They were counted and left untouched.
-- **One unexplained descriptor.** In worker 2's read before its marks, `lsof` showed fd 16 open for reading on a FIFO
+- **One unexplained descriptor**, since explained by the source
+  ([finding 109](109-diagnostics-port-pause-on-every-platform.md)). fd 16 is the runtime's end of the macOS startup
+  handshake's continue FIFO: `PAL_NotifyRuntimeStarted` opens `-co` for reading and blocks on it until the debugger's
+  dbgshim writes Continue. Why the file was missing from the listing is still not established. As first recorded:
+  in worker 2's read before its marks, `lsof` showed fd 16 open for reading on a FIFO
   named `clr-debug-pipe-71044-1794334391-co`. That file was not in the temp-folder listing, and the read at its stop no
   longer showed it. Not followed.
 

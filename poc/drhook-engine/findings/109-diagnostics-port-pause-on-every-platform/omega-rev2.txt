@@ -1,0 +1,382 @@
+start 2026-11-10T19:47:17Z
+probe 109 rev 2 on macOS 27.0.1 Arm64 (macOS), runtime 10.0.9
+observation layer self-check:
+    start 1794340037919469 (name key 1794340037); state running, 11 threads, libcoreclr mapped
+    threads:
+      0    -                        running
+      1    -                        waiting
+      2    .NET SynchManager        waiting
+      3    .NET EventPipe           waiting
+      4    .NET DebugPipe           waiting
+      5    .NET Debugger            waiting
+      6    -                        waiting
+      7    -                        waiting
+      8    -                        waiting
+      9    -                        waiting
+      10   .NET SigHandler          waiting
+    environment: 53 variables, HOME matches
+target /Users/bemafred/Library/Application Support/dotnet/runfile/109-diagport-hold-target-016f096e44623480bdcd845941581c4fe9783a7e7a61c73b11d5c5d38d667dea/bin/debug/109-diagport-hold-target.dll
+hook   /Users/bemafred/Library/Application Support/dotnet/runfile/109-diagport-hold-hook-e9bd9e3f98788afd0bc9b9bf74484faac3a7b1559b2924587b20566e1bb565d3/bin/debug/109-diagport-hold-hook.dll
+target startup hooks: not switched off
+dbgshim /Users/bemafred/.nuget/packages/microsoft.diagnostics.dbgshim.osx-arm64/9.0.661903/runtimes/osx-arm64/native/libdbgshim.dylib
+hold run 1:
+    spawned 80139: dotnet /Users/bemafred/Library/Application Support/dotnet/runfile/109-diagport-hold-target-016f096e44623480bdcd845941581c4fe9783a7e7a61c73b11d5c5d38d667dea/bin/debug/109-diagport-hold-target.dll plain 4000 [DOTNET_DiagnosticPorts=/var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/p109-80134-hold1.sock,connect,suspend] [startup hook]
+    advertise from 80139 after 4 ms, cookie 9ea0960e-098a-49e0-badc-ffc20d924249; state running, 4 threads, libcoreclr mapped; default port present (dotnet-diagnostic-80139-1794340039-socket)
+    RegisterForRuntimeStartup 2 s into the pause: 0x00000000; marks so far: none; handshake: st: FIFO present, semaphore present; co: FIFO present, semaphore present
+    after holding 2 s more: callbacks none; marks so far: none; state running, 4 threads, libcoreclr mapped
+    Q6: default port present (dotnet-diagnostic-80139-1794340039-socket); DiagnosticsClient.ResumeRuntime: returned [call 17 ms]; 2 s later the pause holds (callbacks since: none; marks: none)
+    ResumeRuntime over the reverse connection: OK
+    not ended within 15 s of the resume; its threads:
+      0    -                        waiting
+      1    -                        waiting
+      2    .NET SynchManager        waiting
+      3    .NET EventPipe           waiting
+      4    .NET DebugPipe           waiting
+      5    .NET Debugger            waiting
+      6    -                        waiting
+      7    -                        waiting
+    UnregisterForRuntimeStartup: 0x00000000; handshake left: st: FIFO absent, semaphore absent; co: FIFO absent, semaphore absent
+    callbacks 0x00000000 +cordb at 19:47:26.156; marks: none; re-dials after the resume: 1; default port while running: present (dotnet-diagnostic-80139-1794340039-socket)
+    still alive after the bound: target 80139 killed
+hold run 1: held-stopped-before-main-killed
+hold run 2:
+    spawned 80183: dotnet /Users/bemafred/Library/Application Support/dotnet/runfile/109-diagport-hold-target-016f096e44623480bdcd845941581c4fe9783a7e7a61c73b11d5c5d38d667dea/bin/debug/109-diagport-hold-target.dll plain 4000 [DOTNET_DiagnosticPorts=/var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/p109-80134-hold2.sock,connect,suspend] [startup hook]
+    advertise from 80183 after 5 ms, cookie e1ccfa55-2a27-4547-9d51-e06be3ad394b; state running, 4 threads, libcoreclr mapped; default port present (dotnet-diagnostic-80183-1794340060-socket)
+    RegisterForRuntimeStartup 2 s into the pause: 0x00000000; marks so far: none; handshake: st: FIFO present, semaphore present; co: FIFO present, semaphore present
+    after holding 2 s more: callbacks none; marks so far: none; state running, 4 threads, libcoreclr mapped
+    Q6: default port present (dotnet-diagnostic-80183-1794340060-socket); DiagnosticsClient.ResumeRuntime: returned [call 7 ms]; 2 s later the pause holds (callbacks since: none; marks: none)
+    ResumeRuntime over the reverse connection: OK
+    not ended within 15 s of the resume; its threads:
+      0    -                        waiting
+      1    -                        waiting
+      2    .NET SynchManager        waiting
+      3    .NET EventPipe           waiting
+      4    .NET DebugPipe           waiting
+      5    .NET Debugger            waiting
+      6    -                        waiting
+      7    -                        waiting
+    UnregisterForRuntimeStartup: 0x00000000; handshake left: st: FIFO absent, semaphore absent; co: FIFO absent, semaphore absent
+    callbacks 0x00000000 +cordb at 19:47:47.013; marks: none; re-dials after the resume: 1; default port while running: present (dotnet-diagnostic-80183-1794340060-socket)
+    still alive after the bound: target 80183 killed
+hold run 2: held-stopped-before-main-killed
+hold run 3:
+    spawned 80269: dotnet /Users/bemafred/Library/Application Support/dotnet/runfile/109-diagport-hold-target-016f096e44623480bdcd845941581c4fe9783a7e7a61c73b11d5c5d38d667dea/bin/debug/109-diagport-hold-target.dll plain 4000 [DOTNET_DiagnosticPorts=/var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/p109-80134-hold3.sock,connect,suspend] [startup hook]
+    advertise from 80269 after 12 ms, cookie 1e54f832-1771-4c2b-8277-b34ab25b6d58; state running, 4 threads, libcoreclr mapped; default port present (dotnet-diagnostic-80269-1794340081-socket)
+    RegisterForRuntimeStartup 2 s into the pause: 0x00000000; marks so far: none; handshake: st: FIFO present, semaphore present; co: FIFO present, semaphore present
+    after holding 2 s more: callbacks none; marks so far: none; state running, 4 threads, libcoreclr mapped
+    Q6: default port present (dotnet-diagnostic-80269-1794340081-socket); DiagnosticsClient.ResumeRuntime: returned [call 5 ms]; 2 s later the pause holds (callbacks since: none; marks: none)
+    ResumeRuntime over the reverse connection: OK
+    not ended within 15 s of the resume; its threads:
+      0    -                        waiting
+      1    -                        waiting
+      2    .NET SynchManager        waiting
+      3    .NET EventPipe           waiting
+      4    .NET DebugPipe           waiting
+      5    .NET Debugger            waiting
+      6    -                        waiting
+      7    -                        waiting
+    UnregisterForRuntimeStartup: 0x00000000; handshake left: st: FIFO absent, semaphore absent; co: FIFO absent, semaphore absent
+    callbacks 0x00000000 +cordb at 19:48:08.418; marks: none; re-dials after the resume: 1; default port while running: present (dotnet-diagnostic-80269-1794340081-socket)
+    still alive after the bound: target 80269 killed
+hold run 3: held-stopped-before-main-killed
+hold run 4:
+    spawned 80322: dotnet /Users/bemafred/Library/Application Support/dotnet/runfile/109-diagport-hold-target-016f096e44623480bdcd845941581c4fe9783a7e7a61c73b11d5c5d38d667dea/bin/debug/109-diagport-hold-target.dll plain 4000 [DOTNET_DiagnosticPorts=/var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/p109-80134-hold4.sock,connect,suspend] [startup hook]
+    advertise from 80322 after 11 ms, cookie 055b6244-95d2-43a6-a4b2-3e15244986af; state running, 4 threads, libcoreclr mapped; default port present (dotnet-diagnostic-80322-1794340103-socket)
+    RegisterForRuntimeStartup 2 s into the pause: 0x00000000; marks so far: none; handshake: st: FIFO present, semaphore present; co: FIFO present, semaphore present
+    after holding 2 s more: callbacks none; marks so far: none; state running, 4 threads, libcoreclr mapped
+    Q6: default port present (dotnet-diagnostic-80322-1794340103-socket); DiagnosticsClient.ResumeRuntime: returned [call 7 ms]; 2 s later the pause holds (callbacks since: none; marks: none)
+    ResumeRuntime over the reverse connection: OK
+    not ended within 15 s of the resume; its threads:
+      0    -                        waiting
+      1    -                        waiting
+      2    .NET SynchManager        waiting
+      3    .NET EventPipe           waiting
+      4    .NET DebugPipe           waiting
+      5    .NET Debugger            waiting
+      6    -                        waiting
+      7    -                        waiting
+    UnregisterForRuntimeStartup: 0x00000000; handshake left: st: FIFO absent, semaphore absent; co: FIFO absent, semaphore absent
+    callbacks 0x00000000 +cordb at 19:48:29.827; marks: none; re-dials after the resume: 1; default port while running: present (dotnet-diagnostic-80322-1794340103-socket)
+    still alive after the bound: target 80322 killed
+hold run 4: held-stopped-before-main-killed
+hold run 5:
+    spawned 80370: dotnet /Users/bemafred/Library/Application Support/dotnet/runfile/109-diagport-hold-target-016f096e44623480bdcd845941581c4fe9783a7e7a61c73b11d5c5d38d667dea/bin/debug/109-diagport-hold-target.dll plain 4000 [DOTNET_DiagnosticPorts=/var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/p109-80134-hold5.sock,connect,suspend] [startup hook]
+    advertise from 80370 after 12 ms, cookie 29ae9cba-1792-413d-b3ca-834c74f9ee87; state running, 4 threads, libcoreclr mapped; default port present (dotnet-diagnostic-80370-1794340124-socket)
+    RegisterForRuntimeStartup 2 s into the pause: 0x00000000; marks so far: none; handshake: st: FIFO present, semaphore present; co: FIFO present, semaphore present
+    after holding 2 s more: callbacks none; marks so far: none; state running, 4 threads, libcoreclr mapped
+    Q6: default port present (dotnet-diagnostic-80370-1794340124-socket); DiagnosticsClient.ResumeRuntime: returned [call 7 ms]; 2 s later the pause holds (callbacks since: none; marks: none)
+    ResumeRuntime over the reverse connection: OK
+    not ended within 15 s of the resume; its threads:
+      0    -                        waiting
+      1    -                        waiting
+      2    .NET SynchManager        waiting
+      3    .NET EventPipe           waiting
+      4    .NET DebugPipe           waiting
+      5    .NET Debugger            waiting
+      6    -                        waiting
+      7    -                        waiting
+    UnregisterForRuntimeStartup: 0x00000000; handshake left: st: FIFO absent, semaphore absent; co: FIFO absent, semaphore absent
+    callbacks 0x00000000 +cordb at 19:48:51.224; marks: none; re-dials after the resume: 1; default port while running: present (dotnet-diagnostic-80370-1794340124-socket)
+    still alive after the bound: target 80370 killed
+hold run 5: held-stopped-before-main-killed
+hold run 6:
+    spawned 80424: dotnet /Users/bemafred/Library/Application Support/dotnet/runfile/109-diagport-hold-target-016f096e44623480bdcd845941581c4fe9783a7e7a61c73b11d5c5d38d667dea/bin/debug/109-diagport-hold-target.dll plain 4000 [DOTNET_DiagnosticPorts=/var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/p109-80134-hold6.sock,connect,suspend] [startup hook]
+    advertise from 80424 after 12 ms, cookie 2d7e7e76-5599-42ef-a7fc-af48c4c5ae48; state running, 4 threads, libcoreclr mapped; default port present (dotnet-diagnostic-80424-1794340146-socket)
+    RegisterForRuntimeStartup 2 s into the pause: 0x00000000; marks so far: none; handshake: st: FIFO present, semaphore present; co: FIFO present, semaphore present
+    after holding 2 s more: callbacks none; marks so far: none; state running, 4 threads, libcoreclr mapped
+    ResumeRuntime over the reverse connection: OK
+    not ended within 15 s of the resume; its threads:
+      0    -                        waiting
+      1    -                        waiting
+      2    .NET SynchManager        waiting
+      3    .NET EventPipe           waiting
+      4    .NET DebugPipe           waiting
+      5    .NET Debugger            waiting
+      6    -                        waiting
+      7    -                        waiting
+    UnregisterForRuntimeStartup: 0x00000000; handshake left: st: FIFO absent, semaphore absent; co: FIFO absent, semaphore absent
+    callbacks 0x00000000 +cordb at 19:49:10.609; marks: none; re-dials after the resume: 1; default port while running: present (dotnet-diagnostic-80424-1794340146-socket)
+    still alive after the bound: target 80424 killed
+hold run 6: held-stopped-before-main-killed
+hold run 7:
+    spawned 80495: dotnet /Users/bemafred/Library/Application Support/dotnet/runfile/109-diagport-hold-target-016f096e44623480bdcd845941581c4fe9783a7e7a61c73b11d5c5d38d667dea/bin/debug/109-diagport-hold-target.dll plain 4000 [DOTNET_DiagnosticPorts=/var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/p109-80134-hold7.sock,connect,suspend] [startup hook]
+    advertise from 80495 after 11 ms, cookie e200fe24-2c6e-4e4a-95de-163aad9bd09c; state running, 4 threads, libcoreclr mapped; default port present (dotnet-diagnostic-80495-1794340165-socket)
+    RegisterForRuntimeStartup 2 s into the pause: 0x00000000; marks so far: none; handshake: st: FIFO present, semaphore present; co: FIFO present, semaphore present
+    after holding 2 s more: callbacks none; marks so far: none; state running, 4 threads, libcoreclr mapped
+    ResumeRuntime over the reverse connection: OK
+    not ended within 15 s of the resume; its threads:
+      0    -                        waiting
+      1    -                        waiting
+      2    .NET SynchManager        waiting
+      3    .NET EventPipe           waiting
+      4    .NET DebugPipe           waiting
+      5    .NET Debugger            waiting
+      6    -                        waiting
+      7    -                        waiting
+    UnregisterForRuntimeStartup: 0x00000000; handshake left: st: FIFO absent, semaphore absent; co: FIFO absent, semaphore absent
+    callbacks 0x00000000 +cordb at 19:49:29.998; marks: none; re-dials after the resume: 1; default port while running: present (dotnet-diagnostic-80495-1794340165-socket)
+    still alive after the bound: target 80495 killed
+hold run 7: held-stopped-before-main-killed
+hold run 8:
+    spawned 80551: dotnet /Users/bemafred/Library/Application Support/dotnet/runfile/109-diagport-hold-target-016f096e44623480bdcd845941581c4fe9783a7e7a61c73b11d5c5d38d667dea/bin/debug/109-diagport-hold-target.dll plain 4000 [DOTNET_DiagnosticPorts=/var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/p109-80134-hold8.sock,connect,suspend] [startup hook]
+    advertise from 80551 after 11 ms, cookie f25ce621-ecc2-4827-9713-75aa6e1e2df8; state running, 4 threads, libcoreclr mapped; default port present (dotnet-diagnostic-80551-1794340184-socket)
+    RegisterForRuntimeStartup 2 s into the pause: 0x00000000; marks so far: none; handshake: st: FIFO present, semaphore present; co: FIFO present, semaphore present
+    after holding 2 s more: callbacks none; marks so far: none; state running, 4 threads, libcoreclr mapped
+    ResumeRuntime over the reverse connection: OK
+    not ended within 15 s of the resume; its threads:
+      0    -                        waiting
+      1    -                        waiting
+      2    .NET SynchManager        waiting
+      3    .NET EventPipe           waiting
+      4    .NET DebugPipe           waiting
+      5    .NET Debugger            waiting
+      6    -                        waiting
+      7    -                        waiting
+    UnregisterForRuntimeStartup: 0x00000000; handshake left: st: FIFO absent, semaphore absent; co: FIFO absent, semaphore absent
+    callbacks 0x00000000 +cordb at 19:49:49.385; marks: none; re-dials after the resume: 1; default port while running: present (dotnet-diagnostic-80551-1794340184-socket)
+    still alive after the bound: target 80551 killed
+hold run 8: held-stopped-before-main-killed
+hold run 9:
+    spawned 80648: dotnet /Users/bemafred/Library/Application Support/dotnet/runfile/109-diagport-hold-target-016f096e44623480bdcd845941581c4fe9783a7e7a61c73b11d5c5d38d667dea/bin/debug/109-diagport-hold-target.dll plain 4000 [DOTNET_DiagnosticPorts=/var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/p109-80134-hold9.sock,connect,suspend] [startup hook]
+    advertise from 80648 after 10 ms, cookie f5024653-6067-4297-ad27-0770348259a1; state running, 4 threads, libcoreclr mapped; default port present (dotnet-diagnostic-80648-1794340204-socket)
+    RegisterForRuntimeStartup 2 s into the pause: 0x00000000; marks so far: none; handshake: st: FIFO present, semaphore present; co: FIFO present, semaphore present
+    after holding 2 s more: callbacks none; marks so far: none; state running, 4 threads, libcoreclr mapped
+    ResumeRuntime over the reverse connection: OK
+    not ended within 15 s of the resume; its threads:
+      0    -                        waiting
+      1    -                        waiting
+      2    .NET SynchManager        waiting
+      3    .NET EventPipe           waiting
+      4    .NET DebugPipe           waiting
+      5    .NET Debugger            waiting
+      6    -                        waiting
+      7    -                        waiting
+    UnregisterForRuntimeStartup: 0x00000000; handshake left: st: FIFO absent, semaphore absent; co: FIFO absent, semaphore absent
+    callbacks 0x00000000 +cordb at 19:50:08.772; marks: none; re-dials after the resume: 1; default port while running: present (dotnet-diagnostic-80648-1794340204-socket)
+    still alive after the bound: target 80648 killed
+hold run 9: held-stopped-before-main-killed
+hold run 10:
+    spawned 80706: dotnet /Users/bemafred/Library/Application Support/dotnet/runfile/109-diagport-hold-target-016f096e44623480bdcd845941581c4fe9783a7e7a61c73b11d5c5d38d667dea/bin/debug/109-diagport-hold-target.dll plain 4000 [DOTNET_DiagnosticPorts=/var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/p109-80134-hold10.sock,connect,suspend] [startup hook]
+    advertise from 80706 after 12 ms, cookie b65e4608-dcbc-411e-95e7-ceaae7b73779; state running, 4 threads, libcoreclr mapped; default port present (dotnet-diagnostic-80706-1794340223-socket)
+    RegisterForRuntimeStartup 2 s into the pause: 0x00000000; marks so far: none; handshake: st: FIFO present, semaphore present; co: FIFO present, semaphore present
+    after holding 2 s more: callbacks none; marks so far: none; state running, 4 threads, libcoreclr mapped
+    ResumeRuntime over the reverse connection: OK
+    not ended within 15 s of the resume; its threads:
+      0    -                        waiting
+      1    -                        waiting
+      2    .NET SynchManager        waiting
+      3    .NET EventPipe           waiting
+      4    .NET DebugPipe           waiting
+      5    .NET Debugger            waiting
+      6    -                        waiting
+      7    -                        waiting
+    UnregisterForRuntimeStartup: 0x00000000; handshake left: st: FIFO absent, semaphore absent; co: FIFO absent, semaphore absent
+    callbacks 0x00000000 +cordb at 19:50:28.164; marks: none; re-dials after the resume: 1; default port while running: present (dotnet-diagnostic-80706-1794340223-socket)
+    still alive after the bound: target 80706 killed
+hold run 10: held-stopped-before-main-killed
+hold-control run 1:
+    spawned 80767: dotnet /Users/bemafred/Library/Application Support/dotnet/runfile/109-diagport-hold-target-016f096e44623480bdcd845941581c4fe9783a7e7a61c73b11d5c5d38d667dea/bin/debug/109-diagport-hold-target.dll plain 4000 [startup hook]
+    RegisterForRuntimeStartup 2 s after the spawn: 0x00000000; marks so far: hook, modinit, main; state running, 9 threads, libcoreclr mapped
+    UnregisterForRuntimeStartup: 0x00000000; handshake left: st: FIFO absent, semaphore absent; co: FIFO absent, semaphore absent
+    callbacks 0x00000000 +cordb at 19:50:45.052; marks: hook, modinit, main, exit; spawn to main: 34 ms
+hold-control run 1: missed-main-first-exited(0)
+hold-control run 2:
+    spawned 80789: dotnet /Users/bemafred/Library/Application Support/dotnet/runfile/109-diagport-hold-target-016f096e44623480bdcd845941581c4fe9783a7e7a61c73b11d5c5d38d667dea/bin/debug/109-diagport-hold-target.dll plain 4000 [startup hook]
+    RegisterForRuntimeStartup 2 s after the spawn: 0x00000000; marks so far: hook, modinit, main; state running, 9 threads, libcoreclr mapped
+    UnregisterForRuntimeStartup: 0x00000000; handshake left: st: FIFO absent, semaphore absent; co: FIFO absent, semaphore absent
+    callbacks 0x00000000 +cordb at 19:50:50.134; marks: hook, modinit, main, exit; spawn to main: 36 ms
+hold-control run 2: missed-main-first-exited(0)
+hold-control run 3:
+    spawned 80803: dotnet /Users/bemafred/Library/Application Support/dotnet/runfile/109-diagport-hold-target-016f096e44623480bdcd845941581c4fe9783a7e7a61c73b11d5c5d38d667dea/bin/debug/109-diagport-hold-target.dll plain 4000 [startup hook]
+    RegisterForRuntimeStartup 2 s after the spawn: 0x00000000; marks so far: hook, modinit, main; state running, 9 threads, libcoreclr mapped
+    UnregisterForRuntimeStartup: 0x00000000; handshake left: st: FIFO absent, semaphore absent; co: FIFO absent, semaphore absent
+    callbacks 0x00000000 +cordb at 19:50:55.731; marks: hook, modinit, main, exit; spawn to main: 36 ms
+hold-control run 3: missed-main-first-exited(0)
+hold-control run 4:
+    spawned 80826: dotnet /Users/bemafred/Library/Application Support/dotnet/runfile/109-diagport-hold-target-016f096e44623480bdcd845941581c4fe9783a7e7a61c73b11d5c5d38d667dea/bin/debug/109-diagport-hold-target.dll plain 4000 [startup hook]
+    RegisterForRuntimeStartup 2 s after the spawn: 0x00000000; marks so far: hook, modinit, main; state running, 9 threads, libcoreclr mapped
+    UnregisterForRuntimeStartup: 0x00000000; handshake left: st: FIFO absent, semaphore absent; co: FIFO absent, semaphore absent
+    callbacks 0x00000000 +cordb at 19:51:00.816; marks: hook, modinit, main, exit; spawn to main: 38 ms
+hold-control run 4: missed-main-first-exited(0)
+hold-control run 5:
+    spawned 80844: dotnet /Users/bemafred/Library/Application Support/dotnet/runfile/109-diagport-hold-target-016f096e44623480bdcd845941581c4fe9783a7e7a61c73b11d5c5d38d667dea/bin/debug/109-diagport-hold-target.dll plain 4000 [startup hook]
+    RegisterForRuntimeStartup 2 s after the spawn: 0x00000000; marks so far: hook, modinit, main; state running, 9 threads, libcoreclr mapped
+    UnregisterForRuntimeStartup: 0x00000000; handshake left: st: FIFO absent, semaphore absent; co: FIFO absent, semaphore absent
+    callbacks 0x00000000 +cordb at 19:51:06.388; marks: hook, modinit, main, exit; spawn to main: 36 ms
+hold-control run 5: missed-main-first-exited(0)
+hold-control run 6:
+    spawned 80877: dotnet /Users/bemafred/Library/Application Support/dotnet/runfile/109-diagport-hold-target-016f096e44623480bdcd845941581c4fe9783a7e7a61c73b11d5c5d38d667dea/bin/debug/109-diagport-hold-target.dll plain 4000 [startup hook]
+    RegisterForRuntimeStartup 2 s after the spawn: 0x00000000; marks so far: hook, modinit, main; state running, 9 threads, libcoreclr mapped
+    UnregisterForRuntimeStartup: 0x00000000; handshake left: st: FIFO absent, semaphore absent; co: FIFO absent, semaphore absent
+    callbacks 0x00000000 +cordb at 19:51:11.992; marks: hook, modinit, main, exit; spawn to main: 35 ms
+hold-control run 6: missed-main-first-exited(0)
+hold-control run 7:
+    spawned 80899: dotnet /Users/bemafred/Library/Application Support/dotnet/runfile/109-diagport-hold-target-016f096e44623480bdcd845941581c4fe9783a7e7a61c73b11d5c5d38d667dea/bin/debug/109-diagport-hold-target.dll plain 4000 [startup hook]
+    RegisterForRuntimeStartup 2 s after the spawn: 0x00000000; marks so far: hook, modinit, main; state running, 9 threads, libcoreclr mapped
+    UnregisterForRuntimeStartup: 0x00000000; handshake left: st: FIFO absent, semaphore absent; co: FIFO absent, semaphore absent
+    callbacks 0x00000000 +cordb at 19:51:17.576; marks: hook, modinit, main, exit; spawn to main: 31 ms
+hold-control run 7: missed-main-first-exited(0)
+hold-control run 8:
+    spawned 80926: dotnet /Users/bemafred/Library/Application Support/dotnet/runfile/109-diagport-hold-target-016f096e44623480bdcd845941581c4fe9783a7e7a61c73b11d5c5d38d667dea/bin/debug/109-diagport-hold-target.dll plain 4000 [startup hook]
+    RegisterForRuntimeStartup 2 s after the spawn: 0x00000000; marks so far: hook, modinit, main; state running, 9 threads, libcoreclr mapped
+    UnregisterForRuntimeStartup: 0x00000000; handshake left: st: FIFO absent, semaphore absent; co: FIFO absent, semaphore absent
+    callbacks 0x00000000 +cordb at 19:51:23.163; marks: hook, modinit, main, exit; spawn to main: 36 ms
+hold-control run 8: missed-main-first-exited(0)
+hold-control run 9:
+    spawned 80948: dotnet /Users/bemafred/Library/Application Support/dotnet/runfile/109-diagport-hold-target-016f096e44623480bdcd845941581c4fe9783a7e7a61c73b11d5c5d38d667dea/bin/debug/109-diagport-hold-target.dll plain 4000 [startup hook]
+    RegisterForRuntimeStartup 2 s after the spawn: 0x00000000; marks so far: hook, modinit, main; state running, 9 threads, libcoreclr mapped
+    UnregisterForRuntimeStartup: 0x00000000; handshake left: st: FIFO absent, semaphore absent; co: FIFO absent, semaphore absent
+    callbacks 0x00000000 +cordb at 19:51:28.762; marks: hook, modinit, main, exit; spawn to main: 36 ms
+hold-control run 9: missed-main-first-exited(0)
+hold-control run 10:
+    spawned 80975: dotnet /Users/bemafred/Library/Application Support/dotnet/runfile/109-diagport-hold-target-016f096e44623480bdcd845941581c4fe9783a7e7a61c73b11d5c5d38d667dea/bin/debug/109-diagport-hold-target.dll plain 4000 [startup hook]
+    RegisterForRuntimeStartup 2 s after the spawn: 0x00000000; marks so far: hook, modinit, main; state running, 9 threads, libcoreclr mapped
+    UnregisterForRuntimeStartup: 0x00000000; handshake left: st: FIFO absent, semaphore absent; co: FIFO absent, semaphore absent
+    callbacks 0x00000000 +cordb at 19:51:33.845; marks: hook, modinit, main, exit; spawn to main: 37 ms
+hold-control run 10: missed-main-first-exited(0)
+child-listener run 1:
+    spawned 80993: dotnet /Users/bemafred/Library/Application Support/dotnet/runfile/109-diagport-hold-target-016f096e44623480bdcd845941581c4fe9783a7e7a61c73b11d5c5d38d667dea/bin/debug/109-diagport-hold-target.dll spawn-child [DOTNET_DiagnosticPorts=/var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/p109-80134-cl1.sock,connect,suspend] [startup hook]
+    target 80993 dialled; resume: OK
+    child 81000 dialled 20 ms after go; its environment: DOTNET_DiagnosticPorts=/var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/p109-80134-cl1.sock,connect,suspend, DOTNET_STARTUP_HOOKS set; state running, 4 threads, libcoreclr mapped
+    after holding the child 5 s: no child mark; resume child: OK
+    target view: env DOTNET_DiagnosticPorts=/var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/p109-80134-cl1.sock,connect,suspend; child view: child: env DOTNET_DiagnosticPorts=/var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/p109-80134-cl1.sock,connect,suspend; re-dials target 1, child 1; marks: hook, modinit, main, go(go), child-pid, child: hook, child: modinit, child: main, child: exit, child-exit(0)
+child-listener run 1: child-paused-inherited-exited(0)
+child-listener run 2:
+    spawned 81023: dotnet /Users/bemafred/Library/Application Support/dotnet/runfile/109-diagport-hold-target-016f096e44623480bdcd845941581c4fe9783a7e7a61c73b11d5c5d38d667dea/bin/debug/109-diagport-hold-target.dll spawn-child [DOTNET_DiagnosticPorts=/var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/p109-80134-cl2.sock,connect,suspend] [startup hook]
+    target 81023 dialled; resume: OK
+    child 81024 dialled 10 ms after go; its environment: DOTNET_DiagnosticPorts=/var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/p109-80134-cl2.sock,connect,suspend, DOTNET_STARTUP_HOOKS set; state running, 4 threads, libcoreclr mapped
+    after holding the child 5 s: no child mark; resume child: OK
+    target view: env DOTNET_DiagnosticPorts=/var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/p109-80134-cl2.sock,connect,suspend; child view: child: env DOTNET_DiagnosticPorts=/var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/p109-80134-cl2.sock,connect,suspend; re-dials target 1, child 1; marks: hook, modinit, main, go(go), child-pid, child: hook, child: modinit, child: main, child: exit, child-exit(0)
+child-listener run 2: child-paused-inherited-exited(0)
+child-listener run 3:
+    spawned 81050: dotnet /Users/bemafred/Library/Application Support/dotnet/runfile/109-diagport-hold-target-016f096e44623480bdcd845941581c4fe9783a7e7a61c73b11d5c5d38d667dea/bin/debug/109-diagport-hold-target.dll spawn-child [DOTNET_DiagnosticPorts=/var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/p109-80134-cl3.sock,connect,suspend] [startup hook]
+    target 81050 dialled; resume: OK
+    child 81051 dialled 17 ms after go; its environment: DOTNET_DiagnosticPorts=/var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/p109-80134-cl3.sock,connect,suspend, DOTNET_STARTUP_HOOKS set; state running, 4 threads, libcoreclr mapped
+    after holding the child 5 s: no child mark; resume child: OK
+    target view: env DOTNET_DiagnosticPorts=/var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/p109-80134-cl3.sock,connect,suspend; child view: child: env DOTNET_DiagnosticPorts=/var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/p109-80134-cl3.sock,connect,suspend; re-dials target 1, child 1; marks: hook, modinit, main, go(go), child-pid, child: hook, child: modinit, child: main, child: exit, child-exit(0)
+child-listener run 3: child-paused-inherited-exited(0)
+child-no-listener run 1:
+    spawned 81077: dotnet /Users/bemafred/Library/Application Support/dotnet/runfile/109-diagport-hold-target-016f096e44623480bdcd845941581c4fe9783a7e7a61c73b11d5c5d38d667dea/bin/debug/109-diagport-hold-target.dll spawn-child [DOTNET_DiagnosticPorts=/var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/p109-80134-cn1.sock,connect,suspend] [startup hook]
+    target 81077 dialled; resume: OK
+    listener closed and /var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/p109-80134-cn1.sock removed; sending go
+    5 s: child state running, 4 threads, libcoreclr mapped; child marks: none
+    10 s: child state running, 4 threads, libcoreclr mapped; child marks: none
+    15 s: child state running, 4 threads, libcoreclr mapped; child marks: none
+    20 s: child state running, 4 threads, libcoreclr mapped; child marks: none
+    25 s: child state running, 4 threads, libcoreclr mapped; child marks: none
+    30 s: child state running, 4 threads, libcoreclr mapped; child marks: none
+    address bound again; child re-dialled after 428 ms; resume child: OK
+    target re-dials to the new listener: 1; marks: hook, modinit, main, go(go), child-pid, child: hook, child: modinit, child: main, child: exit, child-exit(0)
+child-no-listener run 1: child-blocked-redialled-428ms-exited(0)
+child-no-listener run 2:
+    spawned 81173: dotnet /Users/bemafred/Library/Application Support/dotnet/runfile/109-diagport-hold-target-016f096e44623480bdcd845941581c4fe9783a7e7a61c73b11d5c5d38d667dea/bin/debug/109-diagport-hold-target.dll spawn-child [DOTNET_DiagnosticPorts=/var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/p109-80134-cn2.sock,connect,suspend] [startup hook]
+    target 81173 dialled; resume: OK
+    listener closed and /var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/p109-80134-cn2.sock removed; sending go
+    5 s: child state running, 4 threads, libcoreclr mapped; child marks: none
+    10 s: child state running, 4 threads, libcoreclr mapped; child marks: none
+    15 s: child state running, 4 threads, libcoreclr mapped; child marks: none
+    20 s: child state running, 4 threads, libcoreclr mapped; child marks: none
+    25 s: child state running, 4 threads, libcoreclr mapped; child marks: none
+    30 s: child state running, 4 threads, libcoreclr mapped; child marks: none
+    address bound again; child re-dialled after 415 ms; resume child: OK
+    target re-dials to the new listener: 1; marks: hook, modinit, main, go(go), child-pid, child: hook, child: modinit, child: main, child: exit, child-exit(0)
+child-no-listener run 2: child-blocked-redialled-415ms-exited(0)
+child-no-listener run 3:
+    spawned 81273: dotnet /Users/bemafred/Library/Application Support/dotnet/runfile/109-diagport-hold-target-016f096e44623480bdcd845941581c4fe9783a7e7a61c73b11d5c5d38d667dea/bin/debug/109-diagport-hold-target.dll spawn-child [DOTNET_DiagnosticPorts=/var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/p109-80134-cn3.sock,connect,suspend] [startup hook]
+    target 81273 dialled; resume: OK
+    listener closed and /var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/p109-80134-cn3.sock removed; sending go
+    5 s: child state running, 4 threads, libcoreclr mapped; child marks: none
+    10 s: child state running, 4 threads, libcoreclr mapped; child marks: none
+    15 s: child state running, 4 threads, libcoreclr mapped; child marks: none
+    20 s: child state running, 4 threads, libcoreclr mapped; child marks: none
+    25 s: child state running, 4 threads, libcoreclr mapped; child marks: none
+    30 s: child state running, 4 threads, libcoreclr mapped; child marks: none
+    address bound again; child re-dialled after 449 ms; resume child: OK
+    target re-dials to the new listener: 1; marks: hook, modinit, main, go(go), child-pid, child: hook, child: modinit, child: main, child: exit, child-exit(0)
+child-no-listener run 3: child-blocked-redialled-449ms-exited(0)
+runtimeconfig-property run 1:
+    spawned 81363: dotnet exec --runtimeconfig /var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/p109-80134-rc1.runtimeconfig.json /Users/bemafred/Library/Application Support/dotnet/runfile/109-diagport-hold-target-016f096e44623480bdcd845941581c4fe9783a7e7a61c73b11d5c5d38d667dea/bin/debug/109-diagport-hold-target.dll plain 0
+    marks: modinit, main, exit; view: env DOTNET_DiagnosticPorts=(unset)
+runtimeconfig-property run 1: no-dial-exited(0)
+containment:
+    removed /var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/clr-debug-pipe-80139-1794340039-in (target 80139, killed: expected)
+    removed /var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/clr-debug-pipe-80139-1794340039-out (target 80139, killed: expected)
+    removed /var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/dotnet-diagnostic-80139-1794340039-socket (target 80139, killed: expected)
+    removed /var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/clr-debug-pipe-80183-1794340060-out (target 80183, killed: expected)
+    removed /var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/clr-debug-pipe-80183-1794340060-in (target 80183, killed: expected)
+    removed /var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/dotnet-diagnostic-80183-1794340060-socket (target 80183, killed: expected)
+    removed /var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/clr-debug-pipe-80269-1794340081-out (target 80269, killed: expected)
+    removed /var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/clr-debug-pipe-80269-1794340081-in (target 80269, killed: expected)
+    removed /var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/dotnet-diagnostic-80269-1794340081-socket (target 80269, killed: expected)
+    removed /var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/clr-debug-pipe-80322-1794340103-out (target 80322, killed: expected)
+    removed /var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/clr-debug-pipe-80322-1794340103-in (target 80322, killed: expected)
+    removed /var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/dotnet-diagnostic-80322-1794340103-socket (target 80322, killed: expected)
+    removed /var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/clr-debug-pipe-80370-1794340124-in (target 80370, killed: expected)
+    removed /var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/clr-debug-pipe-80370-1794340124-out (target 80370, killed: expected)
+    removed /var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/dotnet-diagnostic-80370-1794340124-socket (target 80370, killed: expected)
+    removed /var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/clr-debug-pipe-80424-1794340146-out (target 80424, killed: expected)
+    removed /var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/clr-debug-pipe-80424-1794340146-in (target 80424, killed: expected)
+    removed /var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/dotnet-diagnostic-80424-1794340146-socket (target 80424, killed: expected)
+    removed /var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/clr-debug-pipe-80495-1794340165-out (target 80495, killed: expected)
+    removed /var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/clr-debug-pipe-80495-1794340165-in (target 80495, killed: expected)
+    removed /var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/dotnet-diagnostic-80495-1794340165-socket (target 80495, killed: expected)
+    removed /var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/clr-debug-pipe-80551-1794340184-in (target 80551, killed: expected)
+    removed /var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/clr-debug-pipe-80551-1794340184-out (target 80551, killed: expected)
+    removed /var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/dotnet-diagnostic-80551-1794340184-socket (target 80551, killed: expected)
+    removed /var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/clr-debug-pipe-80648-1794340204-out (target 80648, killed: expected)
+    removed /var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/clr-debug-pipe-80648-1794340204-in (target 80648, killed: expected)
+    removed /var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/dotnet-diagnostic-80648-1794340204-socket (target 80648, killed: expected)
+    removed /var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/clr-debug-pipe-80706-1794340223-out (target 80706, killed: expected)
+    removed /var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/clr-debug-pipe-80706-1794340223-in (target 80706, killed: expected)
+    removed /var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/dotnet-diagnostic-80706-1794340223-socket (target 80706, killed: expected)
+    tracked processes 33, alive at containment 0, objects removed 30
+
+hold: held-stopped-before-main-killed: 10
+hold-control: missed-main-first-exited(0): 10
+child-listener: child-paused-inherited-exited(0): 3
+child-no-listener: child-blocked-redialled-428ms-exited(0): 1; child-blocked-redialled-415ms-exited(0): 1; child-blocked-redialled-449ms-exited(0): 1
+runtimeconfig-property: no-dial-exited(0): 1
+hold (Q1): predicted held in every run counted (released-by-default-port runs excluded): holds
+hold (end): predicted held-stopped-before-main in every held run on macOS: holds
+hold-control: predicted missed every run: holds
+end 2026-11-10T19:53:29Z exit 0

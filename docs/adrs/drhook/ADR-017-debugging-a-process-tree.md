@@ -4,6 +4,7 @@
 and the lead candidate are approved. Steps 2 to 5 confirm or replace the mechanism; engineering waits for their
 evidence and for ADR-016's worker, which principle 4 builds on. Every probe below is reviewed before it runs. Step 2
 done 2026-11-10: Rider holds children with the lead candidate ([finding 108](../../../poc/drhook-engine/findings/108-rider-holds-children-with-the-diagnostics-port.md)).
+Step 3 done 2026-11-10: the pause holds and spreads the same way on Linux, macOS and Windows ([finding 109](../../../poc/drhook-engine/findings/109-diagnostics-port-pause-on-every-platform.md)).
 
 ## The question
 
@@ -111,27 +112,33 @@ In the columns of ADR-016's scenario table:
 
 | Mechanism | Platforms | What it holds | Its cost or gap |
 |-----------|-----------|---------------|-----------------|
-| **The diagnostics-port pause**, the variable set at the supervisor's launch | Linux x64 measured (finding 107); macOS arm64 is how Rider catches children (finding 108); Windows not | every .NET descendant, before its first managed code | a child started after DrHook leaves waits forever; the program can read the variable; the variable carries one port, which another tool (Rider's DPA) may already use |
+| **The diagnostics-port pause**, the variable set at the supervisor's launch | measured on Linux x64 (finding 107), and on Linux, macOS and Windows arm64 (finding 109); Rider uses it on macOS (finding 108) | every .NET descendant, before its first managed code | a child started after DrHook leaves waits forever; the program can read the variable; the variable carries one port, which another tool (Rider's DPA) may already use |
 | **The variable added per child**, at a breakpoint in the supervisor before it starts the process | where `Process.Start` is the path | only the children DrHook chooses | changes the start info the program built (an intervention); misses children started by native code; the chosen child's own children still inherit it |
 | **Attach by pid after the start** | all | nothing: a race | the child's runtime checks dbgshim's semaphores before main, which comes 34–48 ms after the spawn; rejected without a barrier |
 | **The runtime's own notification** (dotnet/runtime#43924) | none yet | each child, at `Process.Start` | does not exist |
 | **Operating-system process tracing** (Linux `ptrace` fork following, Windows native debug events) | per platform; nothing known on macOS | every child, at `fork` or `exec` | makes DrHook a native debugger, and is not one path on every platform |
 
 The first row is the lead candidate, because it is measured and is the same mechanism on every platform the runtime
-supports. That second point is still a claim until it is measured. Rider uses it on macOS (finding 108), so an
-established debugger relies on it there; DrHook's own measurement on macOS and Windows is Step 3.
+supports. Finding 109 measured that second point: the pause holds before the first managed code, every .NET child
+inherits it, and a child with nobody listening waits, on Linux, macOS and Windows. Two things differ per platform: how a
+target ends after a startup callback without an attach (Windows runs on; Linux and macOS stop before main), and the
+startup handshake (semaphores, FIFOs, a named event).
 
 ## Open questions
 
 - **Q1. Other platforms.** Does the pause hold and spread the same way on macOS (omega) and on Windows
-  (omega-windows)? Probe 107 reads `/proc`, so it needs another way to observe there.
+  (omega-windows)? Probe 107 reads `/proc`, so it needs another way to observe there. *Answered 2026-11-10
+  ([finding 109](../../../poc/drhook-engine/findings/109-diagnostics-port-pause-on-every-platform.md)): yes, on all three; how a target ends after the startup callback, and the startup
+  handshake, differ.*
 - **Q2. A full attach after the release.** After `ResumeRuntime`, do `DebugActiveProcess`, breakpoints armed before
   main, and continue reach main with the breakpoints bound? Finding 107 stopped at the startup callback.
 - **Q3. Which children.** All .NET descendants, or the ones that match a program or module the operator names? A
-  child that does not match is released at once without an attach. How long does that delay its start?
+  child that does not match is released at once without an attach. How long does that delay its start? On Linux and
+  macOS, a child must be released by `ResumeRuntime` alone, never by registering for its startup and then not
+  attaching: the S_OK startup callback marks a debugger attached, and the child then stops before main (finding 109).
 - **Q4. When DrHook goes away.** Stop and detach release every held child first (principle 5). After a crash, a held
   child waits until a listener returns. Finding 107 showed a child re-dial within about 0.5 s once its path is bound
-  again. So a supervisor that owns the listening path (ADR-016's supervisor, which outlives a worker's crash) could
+  again; finding 109, within 0.45 s on Linux and macOS and within 0.9 s on Windows. So a supervisor that owns the listening path (ADR-016's supervisor, which outlives a worker's crash) could
   release the children of a crashed worker. A crash of `drhook-mcp` itself would leave them waiting, unless a new one
   binds the same recorded path. That is a candidate, not a decision. Rider has this shape: its backend owns the path
   and outlives each debugger worker (finding 108). What happens to a held child when one of them dies was not tested.
@@ -155,7 +162,8 @@ established debugger relies on it there; DrHook's own measurement on macOS and W
 2. **Rider as the reference** (Q9). Martin runs a supervisor under Rider with the option on, and the child's
    environment and threads are read. This is read-only and cheap. *Done 2026-11-10: probe 108,
    [finding 108](../../../poc/drhook-engine/findings/108-rider-holds-children-with-the-diagnostics-port.md).*
-3. **Probe 107's modes on macOS and Windows** (Q1), with an observation layer for each platform.
+3. **Probe 107's modes on macOS and Windows** (Q1), with an observation layer for each platform. *Done 2026-11-10:
+   probe 109, [finding 109](../../../poc/drhook-engine/findings/109-diagnostics-port-pause-on-every-platform.md).*
 4. **A probe with DrHook.Engine** (Q2, Q3): a supervisor starts a worker; a breakpoint in the worker's startup code,
    set before either starts, must stop the worker; the supervisor runs on; both end naturally.
 5. **The crash case** (Q4): held children released by a listener bound again on the same path.
@@ -174,6 +182,8 @@ established debugger relies on it there; DrHook's own measurement on macOS and W
   pause holds, and is inherited.
 - [Finding 108](../../../poc/drhook-engine/findings/108-rider-holds-children-with-the-diagnostics-port.md): Rider
   catches children with the same pause.
+- [Finding 109](../../../poc/drhook-engine/findings/109-diagnostics-port-pause-on-every-platform.md): the pause on
+  Linux, macOS and Windows.
 - [Finding 90](../../../poc/drhook-engine/findings/90-vstest-debug-wait-orphans.md) and
   [finding 91](../../../poc/drhook-engine/findings/91-vstest-host-debug-attach-race.md): VSTest's own hold, inherited
   and racing.

@@ -1,0 +1,248 @@
+start 2026-11-10T20:07:51Z
+probe 109 rev 2 on Microsoft Windows 10.0.26200 Arm64 (Windows), runtime 10.0.14
+observation layer self-check:
+    start 134388148740892149 (name key 134388148740892149); 8 threads (7 waiting), coreclr.dll loaded
+    threads:
+      14528    .NET Tiered Compilation Worker Wait ExecutionDelay
+      19828    .NET Finalizer           Wait UserRequest
+      32084    .NET EventPipe           Wait UserRequest
+      35948    -                        Wait EventPairLow
+      37716    -                        Wait EventPairLow
+      46084    -                        Wait EventPairLow
+      47016    .NET Debugger            Wait UserRequest
+      49204    -                        Running -
+target C:\Users\bemafred\AppData\Local\Temp\dotnet\runfile\109-diagport-hold-target-511a59207417c5d964a9eef8b138ec819586de3b34f634111acfd9d3a0ade32c\bin\debug\109-diagport-hold-target.dll
+hook   C:\Users\bemafred\AppData\Local\Temp\dotnet\runfile\109-diagport-hold-hook-b295903473cfae6b8bcc6e8e890119b1537cca05ed9d306ec5b217e679db408a\bin\debug\109-diagport-hold-hook.dll
+target startup hooks: not switched off
+dbgshim C:\Users\bemafred\.nuget\packages\microsoft.diagnostics.dbgshim.win-arm64\9.0.661903\runtimes\win-arm64\native\dbgshim.dll
+hold run 1:
+    spawned 27852: dotnet C:\Users\bemafred\AppData\Local\Temp\dotnet\runfile\109-diagport-hold-target-511a59207417c5d964a9eef8b138ec819586de3b34f634111acfd9d3a0ade32c\bin\debug\109-diagport-hold-target.dll plain 4000 [DOTNET_DiagnosticPorts=p109-36968-hold1,connect,suspend] [startup hook]
+    advertise from 27852 after 13 ms, cookie 9157ceaf-5777-4183-847c-2cd8e73908d2; 5 threads (5 waiting), coreclr.dll loaded; default port present (\\.\pipe\dotnet-diagnostic-27852)
+    RegisterForRuntimeStartup 2 s into the pause: 0x00000000; marks so far: none; handshake: TelestoStartupEvent_00006ccc present
+    after holding 2 s more: callbacks none; marks so far: none; 5 threads (5 waiting), coreclr.dll loaded
+    Q6: default port present (\\.\pipe\dotnet-diagnostic-27852); DiagnosticsClient.ResumeRuntime: returned [call 15 ms]; 2 s later the pause holds (callbacks since: none; marks: none)
+    ResumeRuntime over the reverse connection: OK
+    UnregisterForRuntimeStartup: 0x00000000; handshake left: TelestoStartupEvent_00006ccc absent (error 2)
+    callbacks 0x00000000 +cordb at 20:08:02.245; marks: hook, modinit, main, exit; re-dials after the resume: 1; default port while running: present (\\.\pipe\dotnet-diagnostic-27852)
+hold run 1: held-reached-main-exited(0)
+hold run 2:
+    spawned 33364: dotnet C:\Users\bemafred\AppData\Local\Temp\dotnet\runfile\109-diagport-hold-target-511a59207417c5d964a9eef8b138ec819586de3b34f634111acfd9d3a0ade32c\bin\debug\109-diagport-hold-target.dll plain 4000 [DOTNET_DiagnosticPorts=p109-36968-hold2,connect,suspend] [startup hook]
+    advertise from 33364 after 12 ms, cookie d309827c-ee29-43cc-a6bb-a20d43f19d91; 5 threads (5 waiting), coreclr.dll loaded; default port present (\\.\pipe\dotnet-diagnostic-33364)
+    RegisterForRuntimeStartup 2 s into the pause: 0x00000000; marks so far: none; handshake: TelestoStartupEvent_00008254 present
+    after holding 2 s more: callbacks none; marks so far: none; 5 threads (5 waiting), coreclr.dll loaded
+    Q6: default port present (\\.\pipe\dotnet-diagnostic-33364); DiagnosticsClient.ResumeRuntime: returned [call 3 ms]; 2 s later the pause holds (callbacks since: none; marks: none)
+    ResumeRuntime over the reverse connection: OK
+    UnregisterForRuntimeStartup: 0x00000000; handshake left: TelestoStartupEvent_00008254 absent (error 2)
+    callbacks 0x00000000 +cordb at 20:08:13.661; marks: hook, modinit, main, exit; re-dials after the resume: 1; default port while running: present (\\.\pipe\dotnet-diagnostic-33364)
+hold run 2: held-reached-main-exited(0)
+hold run 3:
+    spawned 23992: dotnet C:\Users\bemafred\AppData\Local\Temp\dotnet\runfile\109-diagport-hold-target-511a59207417c5d964a9eef8b138ec819586de3b34f634111acfd9d3a0ade32c\bin\debug\109-diagport-hold-target.dll plain 4000 [DOTNET_DiagnosticPorts=p109-36968-hold3,connect,suspend] [startup hook]
+    advertise from 23992 after 18 ms, cookie 6f623f78-41e1-4c22-b263-0fd8379ca60e; 4 threads (4 waiting), coreclr.dll loaded; default port present (\\.\pipe\dotnet-diagnostic-23992)
+    RegisterForRuntimeStartup 2 s into the pause: 0x00000000; marks so far: none; handshake: TelestoStartupEvent_00005db8 present
+    after holding 2 s more: callbacks none; marks so far: none; 4 threads (4 waiting), coreclr.dll loaded
+    Q6: default port present (\\.\pipe\dotnet-diagnostic-23992); DiagnosticsClient.ResumeRuntime: returned [call 1 ms]; 2 s later the pause holds (callbacks since: none; marks: none)
+    ResumeRuntime over the reverse connection: OK
+    UnregisterForRuntimeStartup: 0x00000000; handshake left: TelestoStartupEvent_00005db8 absent (error 2)
+    callbacks 0x00000000 +cordb at 20:08:25.098; marks: hook, modinit, main, exit; re-dials after the resume: 1; default port while running: present (\\.\pipe\dotnet-diagnostic-23992)
+hold run 3: held-reached-main-exited(0)
+hold run 4:
+    spawned 18964: dotnet C:\Users\bemafred\AppData\Local\Temp\dotnet\runfile\109-diagport-hold-target-511a59207417c5d964a9eef8b138ec819586de3b34f634111acfd9d3a0ade32c\bin\debug\109-diagport-hold-target.dll plain 4000 [DOTNET_DiagnosticPorts=p109-36968-hold4,connect,suspend] [startup hook]
+    advertise from 18964 after 17 ms, cookie 26150e9f-282e-469e-b429-84ee7c071ad3; 4 threads (4 waiting), coreclr.dll loaded; default port present (\\.\pipe\dotnet-diagnostic-18964)
+    RegisterForRuntimeStartup 2 s into the pause: 0x00000000; marks so far: none; handshake: TelestoStartupEvent_00004a14 present
+    after holding 2 s more: callbacks none; marks so far: none; 4 threads (4 waiting), coreclr.dll loaded
+    Q6: default port present (\\.\pipe\dotnet-diagnostic-18964); DiagnosticsClient.ResumeRuntime: returned [call 2 ms]; 2 s later the pause holds (callbacks since: none; marks: none)
+    ResumeRuntime over the reverse connection: OK
+    UnregisterForRuntimeStartup: 0x00000000; handshake left: TelestoStartupEvent_00004a14 absent (error 2)
+    callbacks 0x00000000 +cordb at 20:08:36.910; marks: hook, modinit, main, exit; re-dials after the resume: 1; default port while running: present (\\.\pipe\dotnet-diagnostic-18964)
+hold run 4: held-reached-main-exited(0)
+hold run 5:
+    spawned 27876: dotnet C:\Users\bemafred\AppData\Local\Temp\dotnet\runfile\109-diagport-hold-target-511a59207417c5d964a9eef8b138ec819586de3b34f634111acfd9d3a0ade32c\bin\debug\109-diagport-hold-target.dll plain 4000 [DOTNET_DiagnosticPorts=p109-36968-hold5,connect,suspend] [startup hook]
+    advertise from 27876 after 17 ms, cookie 4d3c7ffb-7261-42d5-91d6-5aec2cf636d0; 5 threads (5 waiting), coreclr.dll loaded; default port present (\\.\pipe\dotnet-diagnostic-27876)
+    RegisterForRuntimeStartup 2 s into the pause: 0x00000000; marks so far: none; handshake: TelestoStartupEvent_00006ce4 present
+    after holding 2 s more: callbacks none; marks so far: none; 5 threads (5 waiting), coreclr.dll loaded
+    Q6: default port present (\\.\pipe\dotnet-diagnostic-27876); DiagnosticsClient.ResumeRuntime: returned [call 2 ms]; 2 s later the pause holds (callbacks since: none; marks: none)
+    ResumeRuntime over the reverse connection: OK
+    UnregisterForRuntimeStartup: 0x00000000; handshake left: TelestoStartupEvent_00006ce4 absent (error 2)
+    callbacks 0x00000000 +cordb at 20:08:48.289; marks: hook, modinit, main, exit; re-dials after the resume: 1; default port while running: present (\\.\pipe\dotnet-diagnostic-27876)
+hold run 5: held-reached-main-exited(0)
+hold run 6:
+    spawned 27604: dotnet C:\Users\bemafred\AppData\Local\Temp\dotnet\runfile\109-diagport-hold-target-511a59207417c5d964a9eef8b138ec819586de3b34f634111acfd9d3a0ade32c\bin\debug\109-diagport-hold-target.dll plain 4000 [DOTNET_DiagnosticPorts=p109-36968-hold6,connect,suspend] [startup hook]
+    advertise from 27604 after 23 ms, cookie b7c22ab1-cb36-4f46-bf5f-536742ecf404; 4 threads (4 waiting), coreclr.dll loaded; default port present (\\.\pipe\dotnet-diagnostic-27604)
+    RegisterForRuntimeStartup 2 s into the pause: 0x00000000; marks so far: none; handshake: TelestoStartupEvent_00006bd4 present
+    after holding 2 s more: callbacks none; marks so far: none; 4 threads (4 waiting), coreclr.dll loaded
+    ResumeRuntime over the reverse connection: OK
+    UnregisterForRuntimeStartup: 0x00000000; handshake left: TelestoStartupEvent_00006bd4 absent (error 2)
+    callbacks 0x00000000 +cordb at 20:08:57.762; marks: hook, modinit, main, exit; re-dials after the resume: 1; default port while running: present (\\.\pipe\dotnet-diagnostic-27604)
+hold run 6: held-reached-main-exited(0)
+hold run 7:
+    spawned 26000: dotnet C:\Users\bemafred\AppData\Local\Temp\dotnet\runfile\109-diagport-hold-target-511a59207417c5d964a9eef8b138ec819586de3b34f634111acfd9d3a0ade32c\bin\debug\109-diagport-hold-target.dll plain 4000 [DOTNET_DiagnosticPorts=p109-36968-hold7,connect,suspend] [startup hook]
+    advertise from 26000 after 16 ms, cookie 854dbb21-cc32-41f8-af25-f7ee6d6a90c2; 4 threads (4 waiting), coreclr.dll loaded; default port present (\\.\pipe\dotnet-diagnostic-26000)
+    RegisterForRuntimeStartup 2 s into the pause: 0x00000000; marks so far: none; handshake: TelestoStartupEvent_00006590 present
+    after holding 2 s more: callbacks none; marks so far: none; 4 threads (4 waiting), coreclr.dll loaded
+    ResumeRuntime over the reverse connection: OK
+    UnregisterForRuntimeStartup: 0x00000000; handshake left: TelestoStartupEvent_00006590 absent (error 2)
+    callbacks 0x00000000 +cordb at 20:09:07.344; marks: hook, modinit, main, exit; re-dials after the resume: 1; default port while running: present (\\.\pipe\dotnet-diagnostic-26000)
+hold run 7: held-reached-main-exited(0)
+hold run 8:
+    spawned 41404: dotnet C:\Users\bemafred\AppData\Local\Temp\dotnet\runfile\109-diagport-hold-target-511a59207417c5d964a9eef8b138ec819586de3b34f634111acfd9d3a0ade32c\bin\debug\109-diagport-hold-target.dll plain 4000 [DOTNET_DiagnosticPorts=p109-36968-hold8,connect,suspend] [startup hook]
+    advertise from 41404 after 18 ms, cookie 1b13c217-1af3-4d89-9034-f1b11099c5fd; 5 threads (5 waiting), coreclr.dll loaded; default port present (\\.\pipe\dotnet-diagnostic-41404)
+    RegisterForRuntimeStartup 2 s into the pause: 0x00000000; marks so far: none; handshake: TelestoStartupEvent_0000a1bc present
+    after holding 2 s more: callbacks none; marks so far: none; 5 threads (5 waiting), coreclr.dll loaded
+    ResumeRuntime over the reverse connection: OK
+    UnregisterForRuntimeStartup: 0x00000000; handshake left: TelestoStartupEvent_0000a1bc absent (error 2)
+    callbacks 0x00000000 +cordb at 20:09:16.829; marks: hook, modinit, main, exit; re-dials after the resume: 1; default port while running: present (\\.\pipe\dotnet-diagnostic-41404)
+hold run 8: held-reached-main-exited(0)
+hold run 9:
+    spawned 24124: dotnet C:\Users\bemafred\AppData\Local\Temp\dotnet\runfile\109-diagport-hold-target-511a59207417c5d964a9eef8b138ec819586de3b34f634111acfd9d3a0ade32c\bin\debug\109-diagport-hold-target.dll plain 4000 [DOTNET_DiagnosticPorts=p109-36968-hold9,connect,suspend] [startup hook]
+    advertise from 24124 after 17 ms, cookie 70169519-7d58-4831-9c05-b8932a10f033; 4 threads (4 waiting), coreclr.dll loaded; default port present (\\.\pipe\dotnet-diagnostic-24124)
+    RegisterForRuntimeStartup 2 s into the pause: 0x00000000; marks so far: none; handshake: TelestoStartupEvent_00005e3c present
+    after holding 2 s more: callbacks none; marks so far: none; 4 threads (4 waiting), coreclr.dll loaded
+    ResumeRuntime over the reverse connection: OK
+    UnregisterForRuntimeStartup: 0x00000000; handshake left: TelestoStartupEvent_00005e3c absent (error 2)
+    callbacks 0x00000000 +cordb at 20:09:26.426; marks: hook, modinit, main, exit; re-dials after the resume: 1; default port while running: present (\\.\pipe\dotnet-diagnostic-24124)
+hold run 9: held-reached-main-exited(0)
+hold run 10:
+    spawned 23656: dotnet C:\Users\bemafred\AppData\Local\Temp\dotnet\runfile\109-diagport-hold-target-511a59207417c5d964a9eef8b138ec819586de3b34f634111acfd9d3a0ade32c\bin\debug\109-diagport-hold-target.dll plain 4000 [DOTNET_DiagnosticPorts=p109-36968-hold10,connect,suspend] [startup hook]
+    advertise from 23656 after 18 ms, cookie a8100026-535d-4b68-8926-7821a8d34dc0; 4 threads (4 waiting), coreclr.dll loaded; default port present (\\.\pipe\dotnet-diagnostic-23656)
+    RegisterForRuntimeStartup 2 s into the pause: 0x00000000; marks so far: none; handshake: TelestoStartupEvent_00005c68 present
+    after holding 2 s more: callbacks none; marks so far: none; 4 threads (4 waiting), coreclr.dll loaded
+    ResumeRuntime over the reverse connection: OK
+    UnregisterForRuntimeStartup: 0x00000000; handshake left: TelestoStartupEvent_00005c68 absent (error 2)
+    callbacks 0x00000000 +cordb at 20:09:36.060; marks: hook, modinit, main, exit; re-dials after the resume: 1; default port while running: present (\\.\pipe\dotnet-diagnostic-23656)
+hold run 10: held-reached-main-exited(0)
+hold-control run 1:
+    spawned 49144: dotnet C:\Users\bemafred\AppData\Local\Temp\dotnet\runfile\109-diagport-hold-target-511a59207417c5d964a9eef8b138ec819586de3b34f634111acfd9d3a0ade32c\bin\debug\109-diagport-hold-target.dll plain 4000 [startup hook]
+    RegisterForRuntimeStartup 2 s after the spawn: 0x00000000; marks so far: hook, modinit, main; 7 threads (7 waiting), coreclr.dll loaded
+    UnregisterForRuntimeStartup: 0x00000000; handshake left: TelestoStartupEvent_0000bff8 absent (error 2)
+    callbacks 0x00000000 +cordb at 20:09:43.460; marks: hook, modinit, main, exit; spawn to main: 45 ms
+hold-control run 1: missed-main-first-exited(0)
+hold-control run 2:
+    spawned 48364: dotnet C:\Users\bemafred\AppData\Local\Temp\dotnet\runfile\109-diagport-hold-target-511a59207417c5d964a9eef8b138ec819586de3b34f634111acfd9d3a0ade32c\bin\debug\109-diagport-hold-target.dll plain 4000 [startup hook]
+    RegisterForRuntimeStartup 2 s after the spawn: 0x00000000; marks so far: hook, modinit, main; 7 threads (7 waiting), coreclr.dll loaded
+    UnregisterForRuntimeStartup: 0x00000000; handshake left: TelestoStartupEvent_0000bcec absent (error 2)
+    callbacks 0x00000000 +cordb at 20:09:48.544; marks: hook, modinit, main, exit; spawn to main: 51 ms
+hold-control run 2: missed-main-first-exited(0)
+hold-control run 3:
+    spawned 20164: dotnet C:\Users\bemafred\AppData\Local\Temp\dotnet\runfile\109-diagport-hold-target-511a59207417c5d964a9eef8b138ec819586de3b34f634111acfd9d3a0ade32c\bin\debug\109-diagport-hold-target.dll plain 4000 [startup hook]
+    RegisterForRuntimeStartup 2 s after the spawn: 0x00000000; marks so far: hook, modinit, main; 7 threads (7 waiting), coreclr.dll loaded
+    UnregisterForRuntimeStartup: 0x00000000; handshake left: TelestoStartupEvent_00004ec4 absent (error 2)
+    callbacks 0x00000000 +cordb at 20:09:53.746; marks: hook, modinit, main, exit; spawn to main: 49 ms
+hold-control run 3: missed-main-first-exited(0)
+hold-control run 4:
+    spawned 17752: dotnet C:\Users\bemafred\AppData\Local\Temp\dotnet\runfile\109-diagport-hold-target-511a59207417c5d964a9eef8b138ec819586de3b34f634111acfd9d3a0ade32c\bin\debug\109-diagport-hold-target.dll plain 4000 [startup hook]
+    RegisterForRuntimeStartup 2 s after the spawn: 0x00000000; marks so far: hook, modinit, main; 8 threads (8 waiting), coreclr.dll loaded
+    UnregisterForRuntimeStartup: 0x00000000; handshake left: TelestoStartupEvent_00004558 absent (error 2)
+    callbacks 0x00000000 +cordb at 20:09:58.824; marks: hook, modinit, main, exit; spawn to main: 46 ms
+hold-control run 4: missed-main-first-exited(0)
+hold-control run 5:
+    spawned 41996: dotnet C:\Users\bemafred\AppData\Local\Temp\dotnet\runfile\109-diagport-hold-target-511a59207417c5d964a9eef8b138ec819586de3b34f634111acfd9d3a0ade32c\bin\debug\109-diagport-hold-target.dll plain 4000 [startup hook]
+    RegisterForRuntimeStartup 2 s after the spawn: 0x00000000; marks so far: hook, modinit, main; 7 threads (7 waiting), coreclr.dll loaded
+    UnregisterForRuntimeStartup: 0x00000000; handshake left: TelestoStartupEvent_0000a40c absent (error 2)
+    callbacks 0x00000000 +cordb at 20:10:04.105; marks: hook, modinit, main, exit; spawn to main: 44 ms
+hold-control run 5: missed-main-first-exited(0)
+hold-control run 6:
+    spawned 42684: dotnet C:\Users\bemafred\AppData\Local\Temp\dotnet\runfile\109-diagport-hold-target-511a59207417c5d964a9eef8b138ec819586de3b34f634111acfd9d3a0ade32c\bin\debug\109-diagport-hold-target.dll plain 4000 [startup hook]
+    RegisterForRuntimeStartup 2 s after the spawn: 0x00000000; marks so far: hook, modinit, main; 7 threads (7 waiting), coreclr.dll loaded
+    UnregisterForRuntimeStartup: 0x00000000; handshake left: TelestoStartupEvent_0000a6bc absent (error 2)
+    callbacks 0x00000000 +cordb at 20:10:09.343; marks: hook, modinit, main, exit; spawn to main: 46 ms
+hold-control run 6: missed-main-first-exited(0)
+hold-control run 7:
+    spawned 28456: dotnet C:\Users\bemafred\AppData\Local\Temp\dotnet\runfile\109-diagport-hold-target-511a59207417c5d964a9eef8b138ec819586de3b34f634111acfd9d3a0ade32c\bin\debug\109-diagport-hold-target.dll plain 4000 [startup hook]
+    RegisterForRuntimeStartup 2 s after the spawn: 0x00000000; marks so far: hook, modinit, main; 7 threads (7 waiting), coreclr.dll loaded
+    UnregisterForRuntimeStartup: 0x00000000; handshake left: TelestoStartupEvent_00006f28 absent (error 2)
+    callbacks 0x00000000 +cordb at 20:10:14.653; marks: hook, modinit, main, exit; spawn to main: 53 ms
+hold-control run 7: missed-main-first-exited(0)
+hold-control run 8:
+    spawned 22920: dotnet C:\Users\bemafred\AppData\Local\Temp\dotnet\runfile\109-diagport-hold-target-511a59207417c5d964a9eef8b138ec819586de3b34f634111acfd9d3a0ade32c\bin\debug\109-diagport-hold-target.dll plain 4000 [startup hook]
+    RegisterForRuntimeStartup 2 s after the spawn: 0x00000000; marks so far: hook, modinit, main; 8 threads (8 waiting), coreclr.dll loaded
+    UnregisterForRuntimeStartup: 0x00000000; handshake left: TelestoStartupEvent_00005988 absent (error 2)
+    callbacks 0x00000000 +cordb at 20:10:19.800; marks: hook, modinit, main, exit; spawn to main: 43 ms
+hold-control run 8: missed-main-first-exited(0)
+hold-control run 9:
+    spawned 13952: dotnet C:\Users\bemafred\AppData\Local\Temp\dotnet\runfile\109-diagport-hold-target-511a59207417c5d964a9eef8b138ec819586de3b34f634111acfd9d3a0ade32c\bin\debug\109-diagport-hold-target.dll plain 4000 [startup hook]
+    RegisterForRuntimeStartup 2 s after the spawn: 0x00000000; marks so far: hook, modinit, main; 8 threads (8 waiting), coreclr.dll loaded
+    UnregisterForRuntimeStartup: 0x00000000; handshake left: TelestoStartupEvent_00003680 absent (error 2)
+    callbacks 0x00000000 +cordb at 20:10:24.955; marks: hook, modinit, main, exit; spawn to main: 40 ms
+hold-control run 9: missed-main-first-exited(0)
+hold-control run 10:
+    spawned 29852: dotnet C:\Users\bemafred\AppData\Local\Temp\dotnet\runfile\109-diagport-hold-target-511a59207417c5d964a9eef8b138ec819586de3b34f634111acfd9d3a0ade32c\bin\debug\109-diagport-hold-target.dll plain 4000 [startup hook]
+    RegisterForRuntimeStartup 2 s after the spawn: 0x00000000; marks so far: hook, modinit, main; 8 threads (8 waiting), coreclr.dll loaded
+    UnregisterForRuntimeStartup: 0x00000000; handshake left: TelestoStartupEvent_0000749c absent (error 2)
+    callbacks 0x00000000 +cordb at 20:10:30.076; marks: hook, modinit, main, exit; spawn to main: 51 ms
+hold-control run 10: missed-main-first-exited(0)
+child-listener run 1:
+    spawned 24368: dotnet C:\Users\bemafred\AppData\Local\Temp\dotnet\runfile\109-diagport-hold-target-511a59207417c5d964a9eef8b138ec819586de3b34f634111acfd9d3a0ade32c\bin\debug\109-diagport-hold-target.dll spawn-child [DOTNET_DiagnosticPorts=p109-36968-cl1,connect,suspend] [startup hook]
+    target 24368 dialled; resume: OK
+    child 32256 dialled 19 ms after go; its environment: not read on Windows (no supported call; the child's own view follows its resume); 5 threads (5 waiting), coreclr.dll loaded
+    after holding the child 5 s: no child mark; resume child: OK
+    target view: env DOTNET_DiagnosticPorts=p109-36968-cl1,connect,suspend; child view: child: env DOTNET_DiagnosticPorts=p109-36968-cl1,connect,suspend; re-dials target 1, child 1; marks: hook, modinit, main, go(go), child-pid, child: hook, child: modinit, child: main, child: exit, child-exit(0)
+child-listener run 1: child-paused-inherited-exited(0)
+child-listener run 2:
+    spawned 17604: dotnet C:\Users\bemafred\AppData\Local\Temp\dotnet\runfile\109-diagport-hold-target-511a59207417c5d964a9eef8b138ec819586de3b34f634111acfd9d3a0ade32c\bin\debug\109-diagport-hold-target.dll spawn-child [DOTNET_DiagnosticPorts=p109-36968-cl2,connect,suspend] [startup hook]
+    target 17604 dialled; resume: OK
+    child 22156 dialled 17 ms after go; its environment: not read on Windows (no supported call; the child's own view follows its resume); 5 threads (5 waiting), coreclr.dll loaded
+    after holding the child 5 s: no child mark; resume child: OK
+    target view: env DOTNET_DiagnosticPorts=p109-36968-cl2,connect,suspend; child view: child: env DOTNET_DiagnosticPorts=p109-36968-cl2,connect,suspend; re-dials target 1, child 1; marks: hook, modinit, main, go(go), child-pid, child: hook, child: modinit, child: main, child: exit, child-exit(0)
+child-listener run 2: child-paused-inherited-exited(0)
+child-listener run 3:
+    spawned 14196: dotnet C:\Users\bemafred\AppData\Local\Temp\dotnet\runfile\109-diagport-hold-target-511a59207417c5d964a9eef8b138ec819586de3b34f634111acfd9d3a0ade32c\bin\debug\109-diagport-hold-target.dll spawn-child [DOTNET_DiagnosticPorts=p109-36968-cl3,connect,suspend] [startup hook]
+    target 14196 dialled; resume: OK
+    child 44948 dialled 16 ms after go; its environment: not read on Windows (no supported call; the child's own view follows its resume); 5 threads (5 waiting), coreclr.dll loaded
+    after holding the child 5 s: no child mark; resume child: OK
+    target view: env DOTNET_DiagnosticPorts=p109-36968-cl3,connect,suspend; child view: child: env DOTNET_DiagnosticPorts=p109-36968-cl3,connect,suspend; re-dials target 1, child 1; marks: hook, modinit, main, go(go), child-pid, child: hook, child: modinit, child: main, child: exit, child-exit(0)
+child-listener run 3: child-paused-inherited-exited(0)
+child-no-listener run 1:
+    spawned 48556: dotnet C:\Users\bemafred\AppData\Local\Temp\dotnet\runfile\109-diagport-hold-target-511a59207417c5d964a9eef8b138ec819586de3b34f634111acfd9d3a0ade32c\bin\debug\109-diagport-hold-target.dll spawn-child [DOTNET_DiagnosticPorts=p109-36968-cn1,connect,suspend] [startup hook]
+    target 48556 dialled; resume: OK
+    listener closed and p109-36968-cn1 removed; sending go
+    5 s: child 5 threads (5 waiting), coreclr.dll loaded; child marks: none
+    10 s: child 5 threads (3 waiting), coreclr.dll loaded; child marks: none
+    15 s: child 5 threads (5 waiting), coreclr.dll loaded; child marks: none
+    20 s: child 5 threads (4 waiting), coreclr.dll loaded; child marks: none
+    25 s: child 5 threads (5 waiting), coreclr.dll loaded; child marks: none
+    30 s: child 3 threads (3 waiting), coreclr.dll loaded; child marks: none
+    address bound again; child re-dialled after 865 ms; resume child: OK
+    target re-dials to the new listener: 1; marks: hook, modinit, main, go(go), child-pid, child: hook, child: modinit, child: main, child: exit, child-exit(0)
+child-no-listener run 1: child-blocked-redialled-865ms-exited(0)
+child-no-listener run 2:
+    spawned 17640: dotnet C:\Users\bemafred\AppData\Local\Temp\dotnet\runfile\109-diagport-hold-target-511a59207417c5d964a9eef8b138ec819586de3b34f634111acfd9d3a0ade32c\bin\debug\109-diagport-hold-target.dll spawn-child [DOTNET_DiagnosticPorts=p109-36968-cn2,connect,suspend] [startup hook]
+    target 17640 dialled; resume: OK
+    listener closed and p109-36968-cn2 removed; sending go
+    5 s: child 5 threads (2 waiting), coreclr.dll loaded; child marks: none
+    10 s: child 5 threads (5 waiting), coreclr.dll loaded; child marks: none
+    15 s: child 5 threads (5 waiting), coreclr.dll loaded; child marks: none
+    20 s: child 5 threads (5 waiting), coreclr.dll loaded; child marks: none
+    25 s: child 5 threads (5 waiting), coreclr.dll loaded; child marks: none
+    30 s: child 3 threads (3 waiting), coreclr.dll loaded; child marks: none
+    address bound again; child re-dialled after 729 ms; resume child: OK
+    target re-dials to the new listener: 1; marks: hook, modinit, main, go(go), child-pid, child: hook, child: modinit, child: main, child: exit, child-exit(0)
+child-no-listener run 2: child-blocked-redialled-729ms-exited(0)
+child-no-listener run 3:
+    spawned 30996: dotnet C:\Users\bemafred\AppData\Local\Temp\dotnet\runfile\109-diagport-hold-target-511a59207417c5d964a9eef8b138ec819586de3b34f634111acfd9d3a0ade32c\bin\debug\109-diagport-hold-target.dll spawn-child [DOTNET_DiagnosticPorts=p109-36968-cn3,connect,suspend] [startup hook]
+    target 30996 dialled; resume: OK
+    listener closed and p109-36968-cn3 removed; sending go
+    5 s: child 5 threads (5 waiting), coreclr.dll loaded; child marks: none
+    10 s: child 5 threads (5 waiting), coreclr.dll loaded; child marks: none
+    15 s: child 5 threads (5 waiting), coreclr.dll loaded; child marks: none
+    20 s: child 5 threads (5 waiting), coreclr.dll loaded; child marks: none
+    25 s: child 5 threads (5 waiting), coreclr.dll loaded; child marks: none
+    30 s: child 3 threads (3 waiting), coreclr.dll loaded; child marks: none
+    address bound again; child re-dialled after 159 ms; resume child: OK
+    target re-dials to the new listener: 0; marks: hook, modinit, main, go(go), child-pid, child: hook, child: modinit, child: main, child: exit, child-exit(0)
+child-no-listener run 3: child-blocked-redialled-159ms-exited(0)
+runtimeconfig-property run 1:
+    spawned 9516: dotnet exec --runtimeconfig C:\Users\bemafred\AppData\Local\Temp\p109-36968-rc1.runtimeconfig.json C:\Users\bemafred\AppData\Local\Temp\dotnet\runfile\109-diagport-hold-target-511a59207417c5d964a9eef8b138ec819586de3b34f634111acfd9d3a0ade32c\bin\debug\109-diagport-hold-target.dll plain 0
+    marks: modinit, main, exit; view: env DOTNET_DiagnosticPorts=(unset)
+runtimeconfig-property run 1: no-dial-exited(0)
+containment:
+    tracked processes 33, alive at containment 0, objects removed 0
+
+hold: held-reached-main-exited(0): 10
+hold-control: missed-main-first-exited(0): 10
+child-listener: child-paused-inherited-exited(0): 3
+child-no-listener: child-blocked-redialled-865ms-exited(0): 1; child-blocked-redialled-729ms-exited(0): 1; child-blocked-redialled-159ms-exited(0): 1
+runtimeconfig-property: no-dial-exited(0): 1
+hold (Q1): predicted held in every run counted (released-by-default-port runs excluded): holds
+hold (end): predicted held-reached-main in every held run on Windows: holds
+hold-control: predicted missed every run: holds
+end 2026-11-10T20:12:27Z exit 0
