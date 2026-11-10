@@ -95,60 +95,12 @@ public class NQuadsConformanceTests
         Assert.Equal(expected, output.ToString());
     }
 
-    public static IEnumerable<object[]> GetNQuadsCanonicalFormTests()
-    {
-        if (!W3CTestContext.IsAvailable)
-            throw new InvalidOperationException(
-                $"W3C RDF test suite not found at '{W3CTestContext.TestsRoot}'. " +
-                $"Directory exists: {Directory.Exists(W3CTestContext.TestsRoot)}. " +
-                "Run ./tools/update-submodules.sh (or .\\tools\\update-submodules.ps1) to initialize.");
+    public static IEnumerable<object[]> GetNQuadsCanonicalFormTests() =>
+        W3CTestContext.TestsOf(W3CTestFormat.NQuads, W3CTestType.CanonicalForm).Select(test => new object[] { test });
 
-        var parser = new W3CManifestParser();
-        var manifestPath = W3CTestContext.GetManifestPath(W3CTestSuite.NQuads12);
+    public static IEnumerable<object[]> GetNQuadsPositiveSyntaxTests() =>
+        W3CTestContext.TestsOf(W3CTestFormat.NQuads, W3CTestType.PositiveSyntax).Select(test => new object[] { test });
 
-        var tests = parser.ParseAsync(manifestPath).GetAwaiter().GetResult();
-
-        foreach (var test in tests.Where(t => t.Type == W3CTestType.CanonicalForm))
-        {
-            yield return new object[] { test };
-        }
-    }
-
-    public static IEnumerable<object[]> GetNQuadsPositiveSyntaxTests()
-    {
-        if (!W3CTestContext.IsAvailable)
-            throw new InvalidOperationException(
-                $"W3C RDF test suite not found at '{W3CTestContext.TestsRoot}'. " +
-                $"Directory exists: {Directory.Exists(W3CTestContext.TestsRoot)}. " +
-                "Run ./tools/update-submodules.sh (or .\\tools\\update-submodules.ps1) to initialize.");
-
-        var parser = new W3CManifestParser();
-        var manifestPath = W3CTestContext.GetManifestPath(W3CTestSuite.NQuads12);
-
-        var tests = parser.ParseAsync(manifestPath).GetAwaiter().GetResult();
-
-        foreach (var test in tests.Where(t => t.Type == W3CTestType.PositiveSyntax))
-        {
-            yield return new object[] { test };
-        }
-    }
-
-    public static IEnumerable<object[]> GetNQuadsNegativeSyntaxTests()
-    {
-        if (!W3CTestContext.IsAvailable)
-            throw new InvalidOperationException(
-                $"W3C RDF test suite not found at '{W3CTestContext.TestsRoot}'. " +
-                $"Directory exists: {Directory.Exists(W3CTestContext.TestsRoot)}. " +
-                "Run ./tools/update-submodules.sh (or .\\tools\\update-submodules.ps1) to initialize.");
-
-        var parser = new W3CManifestParser();
-        var manifestPath = W3CTestContext.GetManifestPath(W3CTestSuite.NQuads12);
-
-        var tests = parser.ParseAsync(manifestPath).GetAwaiter().GetResult();
-
-        foreach (var test in tests.Where(t => t.Type == W3CTestType.NegativeSyntax))
-        {
-            yield return new object[] { test };
-        }
-    }
+    public static IEnumerable<object[]> GetNQuadsNegativeSyntaxTests() =>
+        W3CTestContext.TestsOf(W3CTestFormat.NQuads, W3CTestType.NegativeSyntax).Select(test => new object[] { test });
 }

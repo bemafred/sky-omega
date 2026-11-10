@@ -295,6 +295,8 @@ internal sealed partial class TurtleStreamParser
         {
             Consume();
             var langTag = ParseLangDir();
+            if (!RdfLanguageTag.IsWellFormed(langTag))
+                throw ParserException($"Language tag is not well-formed BCP 47: {langTag}");
             return string.Concat("\"", lexicalForm, "\"@", langTag);
         }
 
@@ -303,6 +305,8 @@ internal sealed partial class TurtleStreamParser
             Consume(); // ^
             Consume(); // ^
             var datatype = ParseIri();  // Already includes angle brackets
+            if (RdfLanguageTag.IsTagOnlyDatatype(datatype))
+                throw ParserException($"A literal has the datatype {datatype} only with a language tag");
             return string.Concat("\"", lexicalForm, "\"^^", datatype);
         }
 
@@ -1102,7 +1106,10 @@ internal sealed partial class TurtleStreamParser
         {
             Consume();
             AppendToOutput('@');
+            int tagStart = _outputOffset;
             ParseLangDirSpan();
+            if (!RdfLanguageTag.IsWellFormed(GetOutputSpan(tagStart)))
+                throw ParserException($"Language tag is not well-formed BCP 47: {GetOutputSpan(tagStart)}");
         }
         // Datatype
         else if (ch == '^' && PeekAhead(1) == '^')
@@ -1110,6 +1117,8 @@ internal sealed partial class TurtleStreamParser
             Consume(); Consume();
             AppendToOutput("^^".AsSpan());
             var dtSpan = ParseIriSpan();  // Already includes angle brackets
+            if (RdfLanguageTag.IsTagOnlyDatatype(dtSpan))
+                throw ParserException($"A literal has the datatype {dtSpan} only with a language tag");
         }
 
         return GetOutputSpan(start);

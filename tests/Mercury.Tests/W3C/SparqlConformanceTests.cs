@@ -885,15 +885,7 @@ public class SparqlConformanceTests
 
     public static IEnumerable<object[]> GetPositiveSyntaxTests()
     {
-        if (!W3CTestContext.IsAvailable)
-            throw new InvalidOperationException(
-                $"W3C RDF test suite not found at '{W3CTestContext.TestsRoot}'. " +
-                $"Directory exists: {Directory.Exists(W3CTestContext.TestsRoot)}. " +
-                "Run ./tools/update-submodules.sh (or .\\tools\\update-submodules.ps1) to initialize.");
-
-        // The SPARQL 1.0 suite and the 1.1 suite: 1.1 tests what 1.1 added, so core features are tested only in 1.0
-        var tests = W3CTestContext.LoadTestCasesAsync(W3CTestSuite.Sparql10Query, W3CTestType.PositiveSyntax).GetAwaiter().GetResult()
-            .Concat(W3CTestContext.LoadTestCasesAsync(W3CTestSuite.Sparql11Query, W3CTestType.PositiveSyntax).GetAwaiter().GetResult());
+        var tests = W3CTestContext.TestsOf(W3CTestFormat.SparqlQuery, W3CTestType.PositiveSyntax);
 
         foreach (var test in tests)
         {
@@ -903,15 +895,7 @@ public class SparqlConformanceTests
 
     public static IEnumerable<object[]> GetNegativeSyntaxTests()
     {
-        if (!W3CTestContext.IsAvailable)
-            throw new InvalidOperationException(
-                $"W3C RDF test suite not found at '{W3CTestContext.TestsRoot}'. " +
-                $"Directory exists: {Directory.Exists(W3CTestContext.TestsRoot)}. " +
-                "Run ./tools/update-submodules.sh (or .\\tools\\update-submodules.ps1) to initialize.");
-
-        // The SPARQL 1.0 suite and the 1.1 suite: 1.1 tests what 1.1 added, so core features are tested only in 1.0
-        var tests = W3CTestContext.LoadTestCasesAsync(W3CTestSuite.Sparql10Query, W3CTestType.NegativeSyntax).GetAwaiter().GetResult()
-            .Concat(W3CTestContext.LoadTestCasesAsync(W3CTestSuite.Sparql11Query, W3CTestType.NegativeSyntax).GetAwaiter().GetResult());
+        var tests = W3CTestContext.TestsOf(W3CTestFormat.SparqlQuery, W3CTestType.NegativeSyntax);
 
         foreach (var test in tests)
         {
@@ -922,12 +906,7 @@ public class SparqlConformanceTests
     /// <summary>The Update syntax tests (syntax-update-1 and -2) of <paramref name="type"/>, run with the Update parser.</summary>
     public static IEnumerable<object[]> GetUpdateSyntaxTests(W3CTestType type)
     {
-        if (!W3CTestContext.IsAvailable)
-            throw new InvalidOperationException(
-                $"W3C RDF test suite not found at '{W3CTestContext.TestsRoot}'. " +
-                "Run ./tools/update-submodules.sh (or .\\tools\\update-submodules.ps1) to initialize.");
-
-        var tests = W3CTestContext.LoadTestCasesAsync(W3CTestSuite.Sparql11Update, type).GetAwaiter().GetResult();
+        var tests = W3CTestContext.TestsOf(W3CTestFormat.SparqlUpdate, type);
         foreach (var test in tests)
         {
             yield return new object[] { test.DisplayName, test };
@@ -936,15 +915,7 @@ public class SparqlConformanceTests
 
     public static IEnumerable<object[]> GetQueryEvalTests()
     {
-        if (!W3CTestContext.IsAvailable)
-            throw new InvalidOperationException(
-                $"W3C RDF test suite not found at '{W3CTestContext.TestsRoot}'. " +
-                $"Directory exists: {Directory.Exists(W3CTestContext.TestsRoot)}. " +
-                "Run ./tools/update-submodules.sh (or .\\tools\\update-submodules.ps1) to initialize.");
-
-        // The SPARQL 1.0 suite and the 1.1 suite: 1.1 tests what 1.1 added, so core features are tested only in 1.0
-        var tests = W3CTestContext.LoadTestCasesAsync(W3CTestSuite.Sparql10Query, W3CTestType.QueryEval).GetAwaiter().GetResult()
-            .Concat(W3CTestContext.LoadTestCasesAsync(W3CTestSuite.Sparql11Query, W3CTestType.QueryEval).GetAwaiter().GetResult());
+        var tests = W3CTestContext.TestsOf(W3CTestFormat.SparqlQuery, W3CTestType.QueryEval);
 
         foreach (var test in tests)
         {
@@ -1138,15 +1109,7 @@ public class SparqlConformanceTests
 
     public static IEnumerable<object[]> GetUpdateEvalTests()
     {
-        if (!W3CTestContext.IsAvailable)
-            throw new InvalidOperationException(
-                $"W3C RDF test suite not found at '{W3CTestContext.TestsRoot}'. " +
-                $"Directory exists: {Directory.Exists(W3CTestContext.TestsRoot)}. " +
-                "Run ./tools/update-submodules.sh (or .\\tools\\update-submodules.ps1) to initialize.");
-
-        var tests = W3CTestContext.LoadTestCasesAsync(
-            W3CTestSuite.Sparql11Update,
-            W3CTestType.UpdateEval).GetAwaiter().GetResult();
+        var tests = W3CTestContext.TestsOf(W3CTestFormat.SparqlUpdate, W3CTestType.UpdateEval);
 
         foreach (var test in tests)
         {

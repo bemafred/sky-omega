@@ -74,11 +74,8 @@ public static class W3CTestContext
         ["rdf/rdf12/rdf-n-quads/syntax#nquads12-03>"] = "RDF 1.2: the N-Quads parser does not read triple terms (ADR-059 phase 2)",
         ["rdf/rdf12/rdf-n-quads/syntax#nquads12-bnode-1>"] = "RDF 1.2: the N-Quads parser does not read triple terms (ADR-059 phase 2)",
         ["rdf/rdf12/rdf-n-quads/syntax#nquads12-nested-1>"] = "RDF 1.2: the N-Quads parser does not read triple terms (ADR-059 phase 2)",
-        ["rdf/rdf12/rdf-n-triples/syntax#ntriples-langdir-bad-4>"] = "RDF 1.2: the N-Triples parser accepts a language subtag of more than 8 letters (ADR-059 phase 2)",
         ["rdf/rdf12/rdf-n-triples/syntax#ntriples-langdir-bad-1>"] = "RDF 1.2: the N-Triples parser accepts invalid base direction (ADR-059 phase 2)",
         ["rdf/rdf12/rdf-n-triples/syntax#ntriples-langdir-bad-2>"] = "RDF 1.2: the N-Triples parser accepts invalid base direction (ADR-059 phase 2)",
-        ["rdf/rdf12/rdf-n-triples/syntax#ntriples-langdir-bad-5>"] = "RDF 1.2: the N-Triples parser accepts rdf:dirLangString as an explicit datatype (ADR-059 phase 2)",
-        ["rdf/rdf12/rdf-n-triples/syntax#ntriples-langdir-bad-3>"] = "RDF 1.2: the N-Triples parser accepts rdf:langString as an explicit datatype (ADR-059 phase 2)",
         ["rdf/rdf12/rdf-n-triples/syntax#ntriples-version-1>"] = "RDF 1.2: the N-Triples parser does not read base direction and VERSION (ADR-059 phase 2)",
         ["rdf/rdf12/rdf-n-triples/syntax#ntriples12-01>"] = "RDF 1.2: the N-Triples parser does not read triple terms (ADR-059 phase 2)",
         ["rdf/rdf12/rdf-n-triples/syntax#ntriples12-02>"] = "RDF 1.2: the N-Triples parser does not read triple terms (ADR-059 phase 2)",
@@ -353,6 +350,109 @@ public static class W3CTestContext
     }
 
     /// <summary>
+    /// The manifests in the two W3C submodules that no suite loads, by path under tests/, each with why and the
+    /// ADR-059 phase that loads it. Like <see cref="KnownFailures"/>, a listed gap, not an absent one: the guard
+    /// (<see cref="W3CManifestCoverageTests"/>) fails on a manifest that is neither loaded nor listed, and on an entry a
+    /// suite does load, which is then removed.
+    /// </summary>
+    public static IReadOnlyDictionary<string, string> ManifestsNotLoaded { get; } = new Dictionary<string, string>
+    {
+        ["w3c-rdf-tests/ns/test-manifest.ttl"] = "The manifest vocabulary (mf:), not a test manifest",
+        ["w3c-rdf-tests/rdf/rdf11/manifest.ttl"] = "The RDF 1.1 umbrella: each format's manifest is loaded by its suite, rdf-mt is ADR-059 phase 5",
+        ["w3c-rdf-tests/rdf/rdf12/manifest.ttl"] = "The RDF 1.2 umbrella: each format's manifest is loaded by its suite, rdf-semantics is ADR-059 phase 5",
+        ["w3c-rdf-tests/sparql/sparql10/manifest-evaluation.ttl"] = "An umbrella of SPARQL 1.0 manifests that sparql10/manifest.ttl also includes, so the suite loads each",
+        ["w3c-rdf-tests/sparql/sparql10/manifest-syntax.ttl"] = "An umbrella of SPARQL 1.0 manifests that sparql10/manifest.ttl also includes, so the suite loads each",
+        ["w3c-rdf-tests/sparql/sparql11/manifest.ttl"] = "The SPARQL 1.1 umbrella of query, update and result formats: query and update are loaded, result formats are ADR-059 phase 4",
+        ["w3c-rdf-tests/sparql/sparql11/manifest-all.ttl"] = "The umbrella of every SPARQL 1.1 manifest: the suites load query and update, the rest is ADR-059 phase 4",
+        ["w3c-rdf-tests/rdf/rdf11/rdf-mt/manifest.ttl"] = "RDF 1.1 semantics, entailment tests: no test kind yet (ADR-059 phase 5, Q3)",
+        ["w3c-rdf-tests/rdf/rdf11/rdf-mt/az-tests/manifest.ttl"] = "RDF 1.1 semantics, entailment tests: no test kind yet (ADR-059 phase 5, Q3)",
+        ["w3c-rdf-tests/rdf/rdf12/rdf-semantics/manifest.ttl"] = "RDF 1.2 semantics, entailment tests: no test kind yet (ADR-059 phase 5, Q3)",
+        ["w3c-rdf-tests/sparql/sparql10/extended-manifest-evaluation.ttl"] = "SPARQL 1.0 tests of what the specification leaves to extensions, in no umbrella the suite loads (sort-11); not yet triaged, no ADR-059 phase",
+        ["w3c-rdf-tests/sparql/sparql10/sort/extended-manifest.ttl"] = "SPARQL 1.0 tests of what the specification leaves to extensions, in no umbrella the suite loads (sort-11); not yet triaged, no ADR-059 phase",
+        ["w3c-rdf-tests/sparql/sparql10/open-world/sameTerm-manifest.ttl"] = "SPARQL 1.0 sameTerm tests, some requiring mf:StringSimpleLiteralCmp, in no umbrella the suite loads; not yet triaged, no ADR-059 phase",
+        ["w3c-rdf-tests/sparql/sparql11/manifest-sparql11-fed.ttl"] = "SPARQL 1.1 federation (ADR-059 phase 4)",
+        ["w3c-rdf-tests/sparql/sparql11/syntax-fed/manifest.ttl"] = "SPARQL 1.1 federation (ADR-059 phase 4)",
+        ["w3c-rdf-tests/sparql/sparql11/service/manifest.ttl"] = "SPARQL 1.1 federation (ADR-059 phase 4)",
+        ["w3c-rdf-tests/sparql/sparql11/manifest-sparql11-results.ttl"] = "SPARQL 1.1 result formats (ADR-059 phase 4)",
+        ["w3c-rdf-tests/sparql/sparql11/csv-tsv-res/manifest.ttl"] = "SPARQL 1.1 result formats (ADR-059 phase 4)",
+        ["w3c-rdf-tests/sparql/sparql11/json-res/manifest.ttl"] = "SPARQL 1.1 result formats (ADR-059 phase 4)",
+        ["w3c-rdf-tests/sparql/sparql11/entailment/manifest.ttl"] = "SPARQL 1.1 entailment regimes (ADR-059 phase 4, Q3)",
+        ["w3c-rdf-tests/sparql/sparql11/graph-store-protocol/manifest.ttl"] = "SPARQL 1.1 Graph Store protocol (ADR-059 phase 4, Q2)",
+        ["w3c-rdf-tests/sparql/sparql11/graph-store-protocol/manifest-direct.ttl"] = "SPARQL 1.1 Graph Store protocol (ADR-059 phase 4, Q2)",
+        ["w3c-rdf-tests/sparql/sparql11/graph-store-protocol/manifest-indirect.ttl"] = "SPARQL 1.1 Graph Store protocol (ADR-059 phase 4, Q2)",
+        ["w3c-rdf-tests/sparql/sparql11/http-rdf-update/manifest.ttl"] = "The SPARQL 1.1 Graph Store protocol's earlier draft (ADR-059 phase 4, Q2)",
+        ["w3c-rdf-tests/sparql/sparql11/protocol/manifest.ttl"] = "SPARQL 1.1 protocol, to run against SparqlHttpServer (ADR-059 phase 4)",
+        ["w3c-rdf-tests/sparql/sparql11/service-description/manifest.ttl"] = "SPARQL 1.1 service description (ADR-059 phase 4)",
+        ["w3c-rdf-tests/sparql/sparql12/manifest.ttl"] = "The SPARQL 1.2 umbrella (ADR-059 phase 3)",
+        ["w3c-rdf-tests/sparql/sparql12/codepoint-escapes/manifest.ttl"] = "SPARQL 1.2 (ADR-059 phase 3)",
+        ["w3c-rdf-tests/sparql/sparql12/eval-triple-terms/manifest.ttl"] = "SPARQL 1.2 (ADR-059 phase 3)",
+        ["w3c-rdf-tests/sparql/sparql12/expression/manifest.ttl"] = "SPARQL 1.2 (ADR-059 phase 3)",
+        ["w3c-rdf-tests/sparql/sparql12/grouping/manifest.ttl"] = "SPARQL 1.2 (ADR-059 phase 3)",
+        ["w3c-rdf-tests/sparql/sparql12/lang-basedir/manifest.ttl"] = "SPARQL 1.2 (ADR-059 phase 3)",
+        ["w3c-rdf-tests/sparql/sparql12/rdf11/manifest.ttl"] = "SPARQL 1.2 (ADR-059 phase 3)",
+        ["w3c-rdf-tests/sparql/sparql12/syntax/manifest.ttl"] = "SPARQL 1.2 (ADR-059 phase 3)",
+        ["w3c-rdf-tests/sparql/sparql12/syntax-triple-terms-negative/manifest.ttl"] = "SPARQL 1.2 (ADR-059 phase 3)",
+        ["w3c-rdf-tests/sparql/sparql12/syntax-triple-terms-positive/manifest.ttl"] = "SPARQL 1.2 (ADR-059 phase 3)",
+        ["w3c-rdf-tests/sparql/sparql12/version/manifest.ttl"] = "SPARQL 1.2 (ADR-059 phase 3)",
+        ["w3c-json-ld-api/tests/manifest.jsonld"] = "The umbrella of the JSON-LD API manifests: the suite loads toRdf on its own (ADR-059 phase 6)",
+        ["w3c-json-ld-api/tests/fromRdf-manifest.jsonld"] = "JSON-LD fromRdf, RDF to JSON-LD (ADR-059 phase 6)",
+        ["w3c-json-ld-api/tests/compact-manifest.jsonld"] = "The JSON-LD API's compaction: whether Mercury is a JSON-LD processor is ADR-059 Q1 (phase 6)",
+        ["w3c-json-ld-api/tests/expand-manifest.jsonld"] = "The JSON-LD API's expansion: whether Mercury is a JSON-LD processor is ADR-059 Q1 (phase 6)",
+        ["w3c-json-ld-api/tests/flatten-manifest.jsonld"] = "The JSON-LD API's flattening: whether Mercury is a JSON-LD processor is ADR-059 Q1 (phase 6)",
+        ["w3c-json-ld-api/tests/html-manifest.jsonld"] = "JSON-LD in HTML: whether Mercury is a JSON-LD processor is ADR-059 Q1 (phase 6)",
+        ["w3c-json-ld-api/tests/remote-doc-manifest.jsonld"] = "JSON-LD remote documents: whether Mercury is a JSON-LD processor is ADR-059 Q1 (phase 6)",
+    };
+
+    /// <summary>The formats whose W3C suites are in the rdf-tests submodule, each with its test class.</summary>
+    public static IReadOnlyList<W3CTestFormat> Formats { get; } =
+    [
+        W3CTestFormat.NTriples, W3CTestFormat.NQuads, W3CTestFormat.Turtle, W3CTestFormat.TriG, W3CTestFormat.RdfXml,
+        W3CTestFormat.SparqlQuery, W3CTestFormat.SparqlUpdate,
+    ];
+
+    /// <summary>
+    /// The suites a format's tests load, the one table the test classes and the guard
+    /// (<see cref="W3CManifestCoverageTests"/>) read. Each RDF format loads its RDF 1.1 and its RDF 1.2 manifest: until
+    /// rdf-tests 9fafbec (#396, 2026-11-01) the 1.2 manifest included the 1.1 one, and it still says conformance is
+    /// "the tests for relevant specifications along with the relevant RDF 1.1 tests". SPARQL queries load the 1.0 and
+    /// the 1.1 suite: 1.1 tests what 1.1 added, so core features are tested only in 1.0.
+    /// </summary>
+    public static IReadOnlyList<W3CTestSuite> SuitesOf(W3CTestFormat format) => format switch
+    {
+        W3CTestFormat.NTriples => [W3CTestSuite.NTriples11, W3CTestSuite.NTriples12],
+        W3CTestFormat.NQuads => [W3CTestSuite.NQuads11, W3CTestSuite.NQuads12],
+        W3CTestFormat.Turtle => [W3CTestSuite.Turtle11, W3CTestSuite.Turtle12],
+        W3CTestFormat.TriG => [W3CTestSuite.TriG11, W3CTestSuite.TriG12],
+        W3CTestFormat.RdfXml => [W3CTestSuite.RdfXml11, W3CTestSuite.RdfXml12],
+        W3CTestFormat.SparqlQuery => [W3CTestSuite.Sparql10Query, W3CTestSuite.Sparql11Query],
+        W3CTestFormat.SparqlUpdate => [W3CTestSuite.Sparql11Update],
+        _ => throw new ArgumentException($"No W3C suites for {format}", nameof(format))
+    };
+
+    /// <summary>
+    /// The tests of <paramref name="type"/> that a format's test class runs, from every suite of
+    /// <see cref="SuitesOf"/>. One manifest parser reads them all, so a manifest two suites include is read once.
+    /// Throws when the submodule is missing, since a run without it would pass with no tests.
+    /// </summary>
+    public static IReadOnlyList<W3CTestCase> TestsOf(W3CTestFormat format, W3CTestType type)
+    {
+        if (!IsAvailable)
+            throw new InvalidOperationException(
+                $"W3C RDF test suite not found at '{TestsRoot}'. " +
+                $"Directory exists: {Directory.Exists(TestsRoot)}. " +
+                "Run ./tools/update-submodules.sh (or .\\tools\\update-submodules.ps1) to initialize.");
+
+        var parser = new W3CManifestParser();
+        var tests = new List<W3CTestCase>();
+        foreach (var suite in SuitesOf(format))
+        {
+            var suiteTests = parser.ParseAsync(GetManifestPath(suite)).GetAwaiter().GetResult();
+            tests.AddRange(suiteTests.Where(t => t.Type == type));
+        }
+        return tests;
+    }
+
+    /// <summary>
     /// Gets the path to a specific test suite manifest.
     /// </summary>
     public static string GetManifestPath(W3CTestSuite suite) => suite switch
@@ -472,7 +572,7 @@ public enum W3CTestSuite
     TriG11,
     RdfXml11,
 
-    // RDF 1.2 Parser Tests (each manifest includes its RDF 1.1 tests; the format suites load these)
+    // RDF 1.2 Parser Tests (each format loads these and its RDF 1.1 tests: SuitesOf)
     NTriples12,
     NQuads12,
     Turtle12,

@@ -270,15 +270,18 @@ public static class JsonLdTestContext
 {
     public static string TestsRoot { get; } = FindTestsRoot();
 
+    /// <summary>The one JSON-LD manifest the suite loads; the others are in <see cref="W3CTestContext.ManifestsNotLoaded"/>.</summary>
+    public const string ToRdfManifest = "toRdf-manifest.jsonld";
+
     public static bool IsAvailable => Directory.Exists(TestsRoot) &&
-                                       File.Exists(Path.Combine(TestsRoot, "tests", "toRdf-manifest.jsonld"));
+                                       File.Exists(Path.Combine(TestsRoot, "tests", ToRdfManifest));
 
     public static string GetManifestPath(string manifest) =>
         Path.Combine(TestsRoot, "tests", manifest);
 
     public static async Task<List<JsonLdTestCase>> LoadToRdfTests()
     {
-        var manifestPath = GetManifestPath("toRdf-manifest.jsonld");
+        var manifestPath = GetManifestPath(ToRdfManifest);
         if (!File.Exists(manifestPath))
             return new List<JsonLdTestCase>();
 

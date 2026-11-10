@@ -17,6 +17,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # shows "(new commits)". If you see that, run update-submodules.sh.
 git config submodule.recurse true
 
+# "(new commits)" can also mean the checkout moved PAST the pin (an IDE's update of every
+# repository pulls the submodule); update-submodules.sh resets that too. The pin is the W3C
+# data every instance and CI runs against: it moves only in a commit that runs the W3C suite
+# against the new data (ADR-059 D6).
+
 # Build entire solution
 dotnet build SkyOmega.sln
 

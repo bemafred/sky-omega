@@ -1178,6 +1178,7 @@ internal sealed class TriGStreamParser : IDisposable, IAsyncDisposable
         {
             AppendToOutput('@');
             Consume();
+            int tagStart = _outputOffset;
             // Language tag must start with a letter (RFC 5646)
             ch = Peek();
             if (ch == -1 || !((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z')))
@@ -1191,6 +1192,8 @@ internal sealed class TriGStreamParser : IDisposable, IAsyncDisposable
                 AppendToOutput((char)ch);
                 Consume();
             }
+            if (!RdfLanguageTag.IsWellFormed(GetOutputSpan(tagStart)))
+                throw ParserException($"Language tag is not well-formed BCP 47: {GetOutputSpan(tagStart)}");
         }
         else if (ch == '^' && PeekAhead(1) == '^')
         {
@@ -1198,7 +1201,9 @@ internal sealed class TriGStreamParser : IDisposable, IAsyncDisposable
             Consume();
             AppendToOutput('^');
             Consume();
-            ParseIriOrPrefixedName(); // Datatype IRI (appended to output)
+            var datatype = ParseIriOrPrefixedName(); // Datatype IRI (appended to output)
+            if (RdfLanguageTag.IsTagOnlyDatatype(datatype))
+                throw ParserException($"A literal has the datatype {datatype} only with a language tag");
         }
 
         return GetOutputSpan(start);

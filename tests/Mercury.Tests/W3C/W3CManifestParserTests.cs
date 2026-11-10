@@ -45,7 +45,7 @@ public class W3CManifestParserTests
     }
 
     [Fact]
-    public async Task ParseTurtle12Manifest_IncludesTurtle11Tests()
+    public async Task ParseTurtle12Manifest_ReadsTheManifestsItIncludes()
     {
         Assert.SkipUnless(W3CTestContext.IsAvailable, "W3C test suite not available");
 
@@ -54,12 +54,30 @@ public class W3CManifestParserTests
 
         var tests = await parser.ParseAsync(turtle12Path, TestContext.Current.CancellationToken);
 
-        // Turtle 1.2 manifest includes Turtle 1.1 tests via mf:include
-        Assert.NotEmpty(tests);
+        // rdf12/rdf-turtle/manifest.ttl holds no tests of its own: it includes eval/ and syntax/
+        var turtle12Dir = Path.GetDirectoryName(Path.GetFullPath(turtle12Path))!;
+        Assert.Equal(
+            [Path.Combine(turtle12Dir, "eval", "manifest.ttl"), Path.GetFullPath(turtle12Path), Path.Combine(turtle12Dir, "syntax", "manifest.ttl")],
+            parser.ManifestsRead.Order(StringComparer.Ordinal));
+        Assert.Empty(parser.ManifestsNotRead);
+        Assert.Contains(tests, t => t.ManifestPath == Path.Combine(turtle12Dir, "eval", "manifest.ttl"));
+        Assert.Contains(tests, t => t.ManifestPath == Path.Combine(turtle12Dir, "syntax", "manifest.ttl"));
+    }
 
-        // Should have tests from multiple manifest files
-        var manifestPaths = tests.Select(t => t.ManifestPath).Distinct().ToList();
-        Assert.True(manifestPaths.Count >= 2, "Expected tests from multiple manifests due to mf:include");
+    [Fact]
+    public void TurtleSuite_RunsTheRdf11AndTheRdf12Tests()
+    {
+        Assert.SkipUnless(W3CTestContext.IsAvailable, "W3C test suite not available");
+
+        // Since rdf-tests 9fafbec (#396) the RDF 1.2 manifest no longer includes the RDF 1.1 one, so the suite
+        // loads both (W3CTestContext.SuitesOf); before, rdf11 arrived through the include
+        var tests = W3CTestContext.TestsOf(W3CTestFormat.Turtle, W3CTestType.PositiveEval);
+
+        var rdf11Dir = Path.GetDirectoryName(Path.GetFullPath(W3CTestContext.GetManifestPath(W3CTestSuite.Turtle11)))!;
+        var rdf12Dir = Path.GetDirectoryName(Path.GetFullPath(W3CTestContext.GetManifestPath(W3CTestSuite.Turtle12)))!;
+        Assert.Contains(tests, t => t.ManifestPath.StartsWith(rdf11Dir + Path.DirectorySeparatorChar, StringComparison.Ordinal));
+        Assert.Contains(tests, t => t.ManifestPath.StartsWith(rdf12Dir + Path.DirectorySeparatorChar, StringComparison.Ordinal));
+        Assert.Equal(tests.Count, tests.Select(t => t.Id).Distinct().Count());
     }
 
     [Fact]

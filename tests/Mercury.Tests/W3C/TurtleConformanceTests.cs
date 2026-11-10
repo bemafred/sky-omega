@@ -225,60 +225,12 @@ public class TurtleConformanceTests
         )).ToList();
     }
 
-    public static IEnumerable<object[]> GetTurtlePositiveSyntaxTests()
-    {
-        if (!W3CTestContext.IsAvailable)
-            throw new InvalidOperationException(
-                $"W3C RDF test suite not found at '{W3CTestContext.TestsRoot}'. " +
-                $"Directory exists: {Directory.Exists(W3CTestContext.TestsRoot)}. " +
-                "Run ./tools/update-submodules.sh (or .\\tools\\update-submodules.ps1) to initialize.");
+    public static IEnumerable<object[]> GetTurtlePositiveSyntaxTests() =>
+        W3CTestContext.TestsOf(W3CTestFormat.Turtle, W3CTestType.PositiveSyntax).Select(test => new object[] { test });
 
-        var parser = new W3CManifestParser();
-        var manifestPath = W3CTestContext.GetManifestPath(W3CTestSuite.Turtle12);
+    public static IEnumerable<object[]> GetTurtleNegativeSyntaxTests() =>
+        W3CTestContext.TestsOf(W3CTestFormat.Turtle, W3CTestType.NegativeSyntax).Select(test => new object[] { test });
 
-        var tests = parser.ParseAsync(manifestPath).GetAwaiter().GetResult();
-
-        foreach (var test in tests.Where(t => t.Type == W3CTestType.PositiveSyntax))
-        {
-            yield return new object[] { test };
-        }
-    }
-
-    public static IEnumerable<object[]> GetTurtleNegativeSyntaxTests()
-    {
-        if (!W3CTestContext.IsAvailable)
-            throw new InvalidOperationException(
-                $"W3C RDF test suite not found at '{W3CTestContext.TestsRoot}'. " +
-                $"Directory exists: {Directory.Exists(W3CTestContext.TestsRoot)}. " +
-                "Run ./tools/update-submodules.sh (or .\\tools\\update-submodules.ps1) to initialize.");
-
-        var parser = new W3CManifestParser();
-        var manifestPath = W3CTestContext.GetManifestPath(W3CTestSuite.Turtle12);
-
-        var tests = parser.ParseAsync(manifestPath).GetAwaiter().GetResult();
-
-        foreach (var test in tests.Where(t => t.Type == W3CTestType.NegativeSyntax))
-        {
-            yield return new object[] { test };
-        }
-    }
-
-    public static IEnumerable<object[]> GetTurtleEvalTests()
-    {
-        if (!W3CTestContext.IsAvailable)
-            throw new InvalidOperationException(
-                $"W3C RDF test suite not found at '{W3CTestContext.TestsRoot}'. " +
-                $"Directory exists: {Directory.Exists(W3CTestContext.TestsRoot)}. " +
-                "Run ./tools/update-submodules.sh (or .\\tools\\update-submodules.ps1) to initialize.");
-
-        var parser = new W3CManifestParser();
-        var manifestPath = W3CTestContext.GetManifestPath(W3CTestSuite.Turtle12);
-
-        var tests = parser.ParseAsync(manifestPath).GetAwaiter().GetResult();
-
-        foreach (var test in tests.Where(t => t.Type == W3CTestType.PositiveEval))
-        {
-            yield return new object[] { test };
-        }
-    }
+    public static IEnumerable<object[]> GetTurtleEvalTests() =>
+        W3CTestContext.TestsOf(W3CTestFormat.Turtle, W3CTestType.PositiveEval).Select(test => new object[] { test });
 }

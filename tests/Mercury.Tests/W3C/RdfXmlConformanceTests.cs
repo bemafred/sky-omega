@@ -199,47 +199,9 @@ public class RdfXmlConformanceTests
         return w3cBase + relativePath;
     }
 
-    public static IEnumerable<object[]> GetRdfXmlNegativeSyntaxTests()
-    {
-        if (!W3CTestContext.IsAvailable)
-            throw new InvalidOperationException(
-                $"W3C RDF test suite not found at '{W3CTestContext.TestsRoot}'. " +
-                $"Directory exists: {Directory.Exists(W3CTestContext.TestsRoot)}. " +
-                "Run ./tools/update-submodules.sh (or .\\tools\\update-submodules.ps1) to initialize.");
+    public static IEnumerable<object[]> GetRdfXmlNegativeSyntaxTests() =>
+        W3CTestContext.TestsOf(W3CTestFormat.RdfXml, W3CTestType.NegativeSyntax).Select(test => new object[] { test });
 
-        var parser = new W3CManifestParser();
-        var manifestPath = W3CTestContext.GetManifestPath(W3CTestSuite.RdfXml12);
-
-        if (!File.Exists(manifestPath))
-            yield break;
-
-        var tests = parser.ParseAsync(manifestPath).GetAwaiter().GetResult();
-
-        foreach (var test in tests.Where(t => t.Type == W3CTestType.NegativeSyntax))
-        {
-            yield return new object[] { test };
-        }
-    }
-
-    public static IEnumerable<object[]> GetRdfXmlEvalTests()
-    {
-        if (!W3CTestContext.IsAvailable)
-            throw new InvalidOperationException(
-                $"W3C RDF test suite not found at '{W3CTestContext.TestsRoot}'. " +
-                $"Directory exists: {Directory.Exists(W3CTestContext.TestsRoot)}. " +
-                "Run ./tools/update-submodules.sh (or .\\tools\\update-submodules.ps1) to initialize.");
-
-        var parser = new W3CManifestParser();
-        var manifestPath = W3CTestContext.GetManifestPath(W3CTestSuite.RdfXml12);
-
-        if (!File.Exists(manifestPath))
-            yield break;
-
-        var tests = parser.ParseAsync(manifestPath).GetAwaiter().GetResult();
-
-        foreach (var test in tests.Where(t => t.Type == W3CTestType.PositiveEval))
-        {
-            yield return new object[] { test };
-        }
-    }
+    public static IEnumerable<object[]> GetRdfXmlEvalTests() =>
+        W3CTestContext.TestsOf(W3CTestFormat.RdfXml, W3CTestType.PositiveEval).Select(test => new object[] { test });
 }

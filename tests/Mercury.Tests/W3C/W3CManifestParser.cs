@@ -97,6 +97,30 @@ public sealed class W3CManifestParser
     };
 
     private readonly HashSet<string> _visitedManifests = new();
+    private readonly List<string> _manifestsRead = new();
+    private readonly Dictionary<string, string> _manifestsNotRead = new();
+
+    /// <summary>
+    /// The manifests this parser has read, by full path, in the order read: each one parsed and everything it
+    /// includes. A manifest read once is not read again, so its tests are returned once.
+    /// </summary>
+    public IReadOnlyList<string> ManifestsRead => _manifestsRead;
+
+    /// <summary>
+    /// The manifests this parser was to read and could not, by full path, with why: an <c>mf:include</c> naming a
+    /// missing file, or a file the Turtle parser rejects. Their tests are absent from what <see cref="ParseAsync"/>
+    /// returns; the guard (<see cref="W3CManifestCoverageTests"/>) fails on any.
+    /// </summary>
+    public IReadOnlyDictionary<string, string> ManifestsNotRead => _manifestsNotRead;
+
+    private readonly List<string> _entriesNotRead = new();
+
+    /// <summary>
+    /// The <c>mf:entries</c> of the manifests read that this parser could not make a test of, by test IRI: an entry
+    /// the manifest does not describe, or one with no <c>mf:action</c>. They are absent from what
+    /// <see cref="ParseAsync"/> returns; the guard (<see cref="W3CManifestCoverageTests"/>) fails on any.
+    /// </summary>
+    public IReadOnlyList<string> EntriesNotRead => _entriesNotRead;
 
     /// <summary>
     /// Parses a manifest file and returns all test cases, including those from included manifests.
@@ -125,7 +149,7 @@ public sealed class W3CManifestParser
 
         if (!File.Exists(normalizedPath))
         {
-            // Skip missing manifests silently (some includes may be optional)
+            _manifestsNotRead[normalizedPath] = "no such file";
             return;
         }
 
@@ -133,6 +157,8 @@ public sealed class W3CManifestParser
 
         // Parse the manifest file into an in-memory graph
         var graph = await ParseManifestFileAsync(normalizedPath, cancellationToken).ConfigureAwait(false);
+        if (!_manifestsNotRead.ContainsKey(normalizedPath))
+            _manifestsRead.Add(normalizedPath);
 
         // Process mf:include directives first (recursive)
         foreach (var includePath in GetIncludedManifests(graph, manifestDir))
@@ -176,7 +202,8 @@ public sealed class W3CManifestParser
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            // Log but continue - some manifests may have syntax we don't support
+            // Recorded, and logged: the tests read before the error are still returned
+            _manifestsNotRead[manifestPath] = ex.Message;
             Console.Error.WriteLine($"Warning: Failed to parse manifest {manifestPath}: {ex.Message}");
         }
 
@@ -236,6 +263,8 @@ public sealed class W3CManifestParser
                     var testCase = ExtractSingleTestCase(graph, testIri, manifestDir, manifestPath);
                     if (testCase != null)
                         yield return testCase;
+                    else
+                        _entriesNotRead.Add(testIri);
                 }
             }
         }

@@ -546,6 +546,7 @@ internal sealed class NQuadsStreamParser : IDisposable, IAsyncDisposable
             // Language tag: LANGTAG ::= '@' [a-zA-Z]+ ('-' [a-zA-Z0-9]+)*
             AppendToOutput('@');
             Consume();
+            int tagStart = _outputOffset;
 
             // First character must be a letter
             var firstChar = Peek();
@@ -592,6 +593,9 @@ internal sealed class NQuadsStreamParser : IDisposable, IAsyncDisposable
                     throw ParserException($"Invalid character in language tag: {Display(ch)}");
                 }
             }
+
+            if (!RdfLanguageTag.IsWellFormed(GetOutputSpan(tagStart)))
+                throw ParserException($"Language tag is not well-formed BCP 47: {GetOutputSpan(tagStart)}");
         }
         else if (next == '^' && PeekAhead(1) == '^')
         {
@@ -606,6 +610,8 @@ internal sealed class NQuadsStreamParser : IDisposable, IAsyncDisposable
             var datatypeIri = ParseIriRefSpan();
             if (datatypeIri.IsEmpty)
                 throw ParserException("Expected datatype IRI");
+            if (RdfLanguageTag.IsTagOnlyDatatype(datatypeIri))
+                throw ParserException($"A literal has the datatype {datatypeIri} only with a language tag");
 
             // datatypeIri is already appended to output buffer
         }

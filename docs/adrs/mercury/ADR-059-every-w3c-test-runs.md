@@ -37,6 +37,7 @@ the others are counts of test entries in the manifests.
 | SPARQL 1.1 HTTP RDF update (the protocol's earlier draft) | `http-rdf-update` | 18 | In no umbrella manifest |
 | JSON-LD fromRdf | `fromRdf-manifest.jsonld` | 54 | Not mapped |
 | JSON-LD expand, compact, flatten, HTML, remote documents | five manifests | 758 | Not mapped |
+| SPARQL 1.0 extended: sort-11, and sameTerm with `mf:StringSimpleLiteralCmp` | `sparql10/extended-manifest-evaluation.ttl` (`sort/extended-manifest.ttl`), `open-world/sameTerm-manifest.ttl` | 7 | In no umbrella manifest; found by the guard on 2026-11-10, not yet triaged |
 
 Two more ways a test does not count:
 
@@ -50,20 +51,26 @@ Two more ways a test does not count:
   asserts that 14 parallel workers decompress faster than one thread. On the macOS x64 CI runner on 2026-10-30 it
   measured 322 ms against 291 ms and failed; it had passed on the same runner the run before.
 
-### The RDF 1.2 manifests include the RDF 1.1 ones
+### The RDF 1.2 manifests included the RDF 1.1 ones, until 2026-11-01
 
-Each `rdf/rdf12/rdf-*/manifest.ttl` includes its 1.2 tests and `../../rdf11/rdf-*/manifest.ttl`: "Conformance with
+Each `rdf/rdf12/rdf-*/manifest.ttl` included its 1.2 tests and `../../rdf11/rdf-*/manifest.ttl`: "Conformance with
 RDF 1.2 specifications can be determined via successfully running the tests for relevant specifications along with the
-relevant RDF 1.1 tests." Loading the 1.2 manifest instead of the 1.1 one runs every test once, with no second copy of
+relevant RDF 1.1 tests." Loading the 1.2 manifest instead of the 1.1 one ran every test once, with no second copy of
 the test methods.
+
+rdf-tests 9fafbec (#396, "Remove cross-version mf:includes in RDF manifests", 2026-11-01) removed those includes. The
+1.2 manifests still say the sentence above. On the new data, a suite that loads only the 1.2 manifests runs 1,844
+W3C tests instead of 2,827: the 993 RDF 1.1 format tests are absent, and their absence fails no test. Found at the
+update of 2026-11-10 (Submodule updates, below).
 
 ## Decision
 
 ### D1. Each test kind loads the umbrella manifest that covers it
 
-The RDF formats load `rdf/rdf12/rdf-*`; SPARQL loads `sparql/sparql12/manifest.ttl` and
+The RDF formats load `rdf/rdf12/rdf-*` and, since rdf-tests 9fafbec, `rdf/rdf11/rdf-*` beside it; SPARQL loads `sparql/sparql12/manifest.ttl` and
 `sparql/sparql11/manifest-all.ttl` (with `sparql10`); JSON-LD loads each of its manifests. The test methods are named
-for the format, not a version (`Turtle_Eval`, not `Turtle11_Eval`).
+for the format, not a version (`Turtle_Eval`, not `Turtle11_Eval`). Which suites a format loads is one table,
+`W3CTestContext.SuitesOf`, read by the test classes (through `TestsOf`) and by the guard (D4).
 
 ### D2. A test is passed, failed, a known failure, or does not apply — never absent
 
@@ -80,6 +87,25 @@ Not passed. This covers tests that need the network or a fixture that is not pre
 
 It walks the two submodules for manifest files and fails on one that no suite loads, so a submodule update cannot add
 tests that silently never run.
+
+**Built 2026-11-10** (`W3CManifestCoverageTests`), before every manifest is loaded. A manifest no suite loads is
+listed in `W3CTestContext.ManifestsNotLoaded` with its reason and phase, as D2 lists a test: 44 of the 122 manifests
+at rdf-tests 202a74e and json-ld-api 5551473, most of them umbrellas or the later phases' suites. The guard fails on:
+- a manifest that is neither loaded nor listed;
+- a listed manifest that a suite loads, or that is not in the submodules;
+- an `mf:include` the manifest parser cannot read (a missing file, a parse error), which it used to skip silently;
+- an entry of a loaded manifest the parser cannot make a test of (no description, no `mf:action`), or whose kind it
+  does not map, so no test method asks for it.
+
+Not checked: a test of a kind the parser maps but for which its format has no test method.
+
+### D6. A submodule moves only in a commit that runs the suite against the new data
+
+The pinned commit is the W3C test data every instance and CI run against. A checkout that drifts from it (`git status`
+shows `(new commits)`, as an IDE's update of every repository can cause) is reset with `tools/update-submodules.sh`.
+Upstream is followed deliberately: one commit moves the pin, after a full W3C run against the new data, and holds
+what that run requires: `KnownFailures` and `ManifestsNotLoaded` updated, a parser fixed where a new test finds a
+bug. Its message names the upstream range and the change in results.
 
 ### D5. The counts follow
 
@@ -120,7 +146,7 @@ STATISTICS.md and the README count every loaded test: passed, known failures and
    `ParallelBZip2ThroughputMeasurement` and `LargeFixtureMeasurement` are `BZip2DecompressionBenchmarks`,
    `ConvertPathThroughputMeasurement` is `ConvertPathBenchmarks`, and `ParallelBZip2ContentionTrace` is the
    `bzip2-contention` subcommand; the 50 MB fixture is generated (`BZip2LargeFixture`).
-8. **The guard** (D4), once every manifest is loaded.
+8. **The guard** (D4). Done 2026-11-10, ahead of phases 2–6, with the manifests not yet loaded listed.
 
 ## Open questions
 
@@ -135,8 +161,9 @@ STATISTICS.md and the README count every loaded test: passed, known failures and
 
 ## Consequences
 
-- Known failures went from 6 to 186 at phase 1, and to 160 when the bugs phase 1 found were fixed. They rise as each
-  phase loads more; each is a listed, countable gap.
+- Known failures went from 6 to 186 at phase 1, to 160 when the bugs phase 1 found were fixed, and to 157 at the
+  update to rdf-tests 202a74e, when the language-tag fix passed three. They rise as each phase loads more; each is a
+  listed, countable gap.
 - The conformance counts grow to the whole test data and stop changing meaning when a submodule updates.
 - The suite takes longer to run.
 
@@ -145,11 +172,44 @@ STATISTICS.md and the README count every loaded test: passed, known failures and
 1. Phase 1: the RDF format suites report 1,334 tests, 0 failed, 180 known failures by exact IRI, and
    `W3C_RUN_KNOWN_FAILURES=1` shows the same 180 failing. (Met 2026-10-30.)
 2. Each later phase: the same shape for the suites it loads.
-3. The guard (D4) fails on a manifest added to a scratch copy of the submodule, and passes on the real one.
+3. The guard (D4) fails on a manifest added to a scratch copy of the submodule, and passes on the real one. (Met
+   2026-11-10 on the real data instead: before the list was written, the guard failed naming the 44 manifests no
+   suite loads; with the format loaders put back to the RDF 1.2 manifests only, it failed naming exactly the five
+   RDF 1.1 format manifests that #396 cut off. It passes with the list.)
+
+## Submodule updates
+
+### rdf-tests d01b141 → 202a74e (2026-11-10)
+
+Eight upstream commits, 2026-11-01 to 2026-11-04. A Git update in Rider moved the checkout to upstream main, 202a74e,
+past the pin; Martin made that drift the first update under D6.
+
+- **#396** removed the RDF 1.2 manifests' includes of the RDF 1.1 ones. With the loaders unchanged, the run on the
+  new data had 1,844 tests, not 2,827. Fixed: each format loads both (D1), and the guard (D4) was built.
+- **#405** added negative syntax tests for language tags and IRIs. Nine failed: N-Quads, Turtle and TriG accepted
+  `"Hello"^^rdf:langString`, `"Hello"@cantbethislong` and `"Hello"^^rdf:dirLangString`; the N-Triples copies of the
+  same three were known failures since phase 1. Fixed in the parsers: a language tag must be well-formed BCP 47
+  (RDF 1.2 Concepts §3.4), and `rdf:langString` and `rdf:dirLangString` are never an explicit datatype. One rule,
+  `Rdf/RdfLanguageTag.cs`, for every format (docs/divergence S1f).
+- **#401** changed Turtle's `IRI-resolution-07`, **#406** renamed classes in the test vocabulary only, **#394** added
+  `rdft:syntaxFormat`; none changed a result. #398, #400 and #404 change reports, the README and the Graph Store
+  protocol tests, which are not loaded.
+
+| | d01b141 | 202a74e, loaders unchanged | 202a74e, this update |
+|---|---:|---:|---:|
+| W3C tests | 2,827 | 1,844 | 2,840 |
+| passed | 2,661 | 1,669 | 2,677 |
+| failed | 0 | 9 | 0 |
+| skipped: known failures, and 6 JSON-LD not applicable | 166 | 166 | 163 |
+
+Test by test against d01b141: no test is absent. 10 are new upstream, 3 known failures pass, and 4 are new tests of the
+suite itself.
 
 ## References
 
 - STATISTICS.md, W3C Conformance — the counts this ADR changes.
-- `tests/Mercury.Tests/W3C/W3CTestContext.cs` — `GetManifestPath`, `KnownFailures`, `ShouldSkip`.
+- `tests/Mercury.Tests/W3C/W3CTestContext.cs` — `SuitesOf`, `TestsOf`, `GetManifestPath`, `KnownFailures`,
+  `ManifestsNotLoaded`, `ShouldSkip`.
+- `tests/Mercury.Tests/W3C/W3CManifestCoverageTests.cs` — the guard (D4).
 - [compression.md](../../architecture/technical/compression.md), Test fixtures — the measurement classes.
 - W3C rdf-tests, `rdf/rdf12/rdf-turtle/manifest.ttl` — the include of the RDF 1.1 tests.
