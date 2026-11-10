@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>RiderChildHold</RootNamespace>
+    <AssemblyName>RiderChildHold</AssemblyName>
+    <!-- Probe 108 (ADR-017 Step 2): a supervisor and its workers, run under Rider with "Attach to child .NET
+         processes" to see how Rider holds a child. A project, not a file-based app: a .NET 10 file-based app runs
+         with startup hooks disabled (finding 107), which could defeat the very mechanism under observation, and
+         Rider offers the option for .NET Project and .NET Executable run configurations. Not part of the solution. -->
+  </PropertyGroup>
+</Project>

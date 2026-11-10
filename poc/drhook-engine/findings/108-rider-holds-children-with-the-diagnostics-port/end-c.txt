@@ -1,0 +1,37 @@
+# Probe 108 run C: what was left after the run ended. Read-only, by sky-omega on omega.
+# Part 1: a background check that waited for the supervisor's exit mark and no RiderChildHold process, then 3 s.
+# Part 2: by hand at 18:14:30Z: lsof -nP -U | grep rider_autoattach, and counts of runtime files in the temp dir.
+
+checked at 18:14:17Z
+== RiderChildHold processes:
+   none
+== marks tail:
+[60254 supervisor] child-ended worker1 exit 0 639299312540962920 18:14:14.0962920
+[60254 supervisor] exit (worker 1 exit 0) 639299312540964650 18:14:14.0964650
+[60257 worker1] checkpoint 10 attached=True 639299311915406660 18:13:11.5406660
+[60257 worker1] child-ended worker2 exit 0 639299312539895610 18:14:13.9895610
+[60257 worker1] exit (child exit 0) 639299312539897740 18:14:13.9897740
+[71044 worker2] checkpoint 20 attached=True 639299312538757260 18:14:13.8757260
+[71044 worker2] exit (child exit 0) 639299312538758990 18:14:13.8758990
+== runtime files left in the temp dir for 60254 60257 71044:
+   none
+== rider_autoattach dir:
+   total 0
+   drwxr-xr-x     3 bemafred  staff     96 Nov 10 19:10 .
+   drwx------@ 2934 bemafred  staff  93888 Nov 10 19:14 ..
+   srwxr-xr-x     1 bemafred  staff      0 Nov 10 19:10 582ee5e5-ae6e-4422-b8fd-5e80dfce8b77
+== debugger workers still running:
+
+   (none printed: 60250, 60265 and 71076 had exited)
+
+== part 2, 18:14:30Z: holders of the rider_autoattach socket
+   Rider.Bac pid 54328 fd 782u  /var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/rider_autoattach/582ee5e5-ae6e-4422-b8fd-5e80dfce8b77
+   Rider.Bac pid 54328 fd 855u  /var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/rider_autoattach/582ee5e5-ae6e-4422-b8fd-5e80dfce8b77
+   Rider.Bac pid 54328 fd 856u  /var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/rider_autoattach/582ee5e5-ae6e-4422-b8fd-5e80dfce8b77
+   Rider.Bac pid 54328 fd 857u  /var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/rider_autoattach/582ee5e5-ae6e-4422-b8fd-5e80dfce8b77
+   Rider.Bac pid 54328 fd 859u  /var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/rider_autoattach/582ee5e5-ae6e-4422-b8fd-5e80dfce8b77
+   Rider.Bac pid 54328 fd 861u  /var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/rider_autoattach/582ee5e5-ae6e-4422-b8fd-5e80dfce8b77
+== temp-dir runtime leftovers on omega from earlier sessions (counts, untouched)
+   clr-debug-pipe files: 500
+   dotnet-diagnostic sockets: 438
+   DPA-DiagPort entries: 2

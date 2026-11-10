@@ -1,0 +1,27 @@
+# Probe 108 run C: who holds the clr-debug-pipe FIFOs, read while worker 1 (pid 60257) was stopped at Program.cs:72.
+# Run by sky-omega on omega at 18:11Z, by hand (read-only), after read-c-worker1-held.txt:
+#   ps -o pid=,ppid=,lstart=,comm= -p 60250,60265,60261
+#   for p in 60250 60265 60254 60257; do lsof -nP -p $p | grep -E 'clr-debug-pipe|FIFO'; done
+# (lsof by path, `lsof <tmp>clr-debug-pipe-<pid>-*`, printed nothing for a FIFO; by process it does.)
+# Start times are local (CET, UTC+1).
+
+== debugger workers (18:11:30Z)
+   60261 72032 Tue Nov 10 19:10:08 2026     /Users/bemafred/Applications/Rider.app/Contents/lib/ReSharperHost/macos-arm64/JetBrains.ProcessEnumerator.Worker
+   60265 72032 Tue Nov 10 19:10:08 2026     /Users/bemafred/Applications/Rider.app/Contents/lib/ReSharperHost/macos-arm64/JetBrains.Debugger.Worker
+   60250 72032 Tue Nov 10 19:10:07 2026     /Users/bemafred/Applications/Rider.app/Contents/lib/ReSharperHost/macos-arm64/JetBrains.Debugger.Worker
+worker 1 checkpoint lines written: 0
+
+== pid 60250 (JetBrains.Debugger.Worker): clr-debug-pipe files it holds open
+   fd 270w FIFO  /private/var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/clr-debug-pipe-60254-1794334207-in
+   fd 271r FIFO  /private/var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/clr-debug-pipe-60254-1794334207-out
+== pid 60265 (JetBrains.Debugger.Worker): clr-debug-pipe files it holds open
+   fd 260w FIFO  /private/var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/clr-debug-pipe-60257-1794334208-in
+   fd 261r FIFO  /private/var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/clr-debug-pipe-60257-1794334208-out
+== pid 60254 (supervisor): clr-debug-pipe files it holds open
+   fd 11r FIFO  /private/var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/clr-debug-pipe-60254-1794334207-in
+   fd 14w FIFO  /private/var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/clr-debug-pipe-60254-1794334207-out
+== pid 60257 (worker 1): clr-debug-pipe files it holds open
+   fd 11r FIFO  /private/var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/clr-debug-pipe-60254-1794334207-in
+   fd 13r FIFO  /private/var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/clr-debug-pipe-60257-1794334208-in
+   fd 14w FIFO  /private/var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/clr-debug-pipe-60254-1794334207-out
+   fd 17w FIFO  /private/var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/clr-debug-pipe-60257-1794334208-out

@@ -1,0 +1,84 @@
+probe 108 read at 2026-11-10T18:13:11Z on macOS 27.0.1 arm64
+user temp dir /var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/
+
+== RiderChildHold 60254
+   ps: 60254 60250 60250 S+   Tue Nov 10 19:10:07 2026     /Users/bemafred/src/repos/sky-omega/poc/drhook-engine/108-rider-child-hold/bin/Debug/net10.0/RiderChildHold
+   threads: 11
+   ancestry: 60250(JetBrains.Debugger.Worker) <- 72032(rider) <- 1(launchd) <-
+   runtime files in the temp dir:
+     prwx------   1 bemafred  staff         0 Nov 10 19:10 clr-debug-pipe-60254-1794334207-in
+     prwx------   1 bemafred  staff         0 Nov 10 19:10 clr-debug-pipe-60254-1794334207-out
+     srw-------   1 bemafred  staff         0 Nov 10 19:10 dotnet-diagnostic-60254-1794334207-socket
+   unix sockets (DEVICE, FD, NAME; -> marks a connected socket and its peer's address):
+     0x4c75c3a805802f1c  fd 9u  /var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/dotnet-diagnostic-60254-1794334207-socket
+     0x5b7df2cc9ab75566  fd 10u  ->0x56716cca2c8cbc30
+     0x75070520c75da66  fd 12u  /var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/dotnet-diagnostic-60254-1794334207-socket
+     0xe7bae464b01bea58  fd 16u  /var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/dotnet-diagnostic-60254-1794334207-socket
+     peer 0x56716cca2c8cbc30: Rider.Bac pid 54328 fd 856u  /var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/rider_autoattach/582ee5e5-ae6e-4422-b8fd-5e80dfce8b77
+
+== RiderChildHold 60257
+   ps: 60257 60254 60250 S+   Tue Nov 10 19:10:08 2026     /Users/bemafred/src/repos/sky-omega/poc/drhook-engine/108-rider-child-hold/bin/Debug/net10.0/RiderChildHold
+   threads: 11
+   ancestry: 60254(RiderChildHold) <- 60250(JetBrains.Debugger.Worker) <- 72032(rider) <- 1(launchd) <-
+   runtime files in the temp dir:
+     prwx------   1 bemafred  staff         0 Nov 10 19:13 clr-debug-pipe-60257-1794334208-in
+     prwx------   1 bemafred  staff         0 Nov 10 19:13 clr-debug-pipe-60257-1794334208-out
+     srw-------   1 bemafred  staff         0 Nov 10 19:10 dotnet-diagnostic-60257-1794334208-socket
+   unix sockets (DEVICE, FD, NAME; -> marks a connected socket and its peer's address):
+     0x444e7bdaeac4acd9  fd 9u  /var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/dotnet-diagnostic-60257-1794334208-socket
+     0x4834dced8aae033a  fd 10u  ->0xcd1b58daffbe0b10
+     0x991898664e76a90d  fd 12u  /var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/dotnet-diagnostic-60257-1794334208-socket
+     peer 0xcd1b58daffbe0b10: Rider.Bac pid 54328 fd 855u  /var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/rider_autoattach/582ee5e5-ae6e-4422-b8fd-5e80dfce8b77
+
+== RiderChildHold 71044
+   ps: 71044 60257 60250 S+   Tue Nov 10 19:13:11 2026     /Users/bemafred/src/repos/sky-omega/poc/drhook-engine/108-rider-child-hold/bin/Debug/net10.0/RiderChildHold
+   threads: 4
+   ancestry: 60257(RiderChildHold) <- 60254(RiderChildHold) <- 60250(JetBrains.Debugger.Worker) <- 72032(rider) <- 1(launchd) <-
+   runtime files in the temp dir:
+     srw-------   1 bemafred  staff         0 Nov 10 19:13 dotnet-diagnostic-71044-1794334391-socket
+   unix sockets (DEVICE, FD, NAME; -> marks a connected socket and its peer's address):
+     0x92b8bfe3529df15c  fd 9u  /var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/dotnet-diagnostic-71044-1794334391-socket
+     0x29a3f9bb2eb7c54b  fd 10u  ->0x59f6d32142c463f1
+     0x269a5018d5cb9e86  fd 12u  /var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/dotnet-diagnostic-71044-1794334391-socket
+     peer 0x59f6d32142c463f1: Rider.Bac pid 54328 fd 859u  /var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/rider_autoattach/582ee5e5-ae6e-4422-b8fd-5e80dfce8b77
+
+== JetBrains processes (pid, parent, executable)
+     895     1 /Applications/JetBrains Toolbox.app/Contents/MacOS/jetbrains-toolbox
+    1041     1 /Users/bemafred/Library/Application Support/JetBrains/Daemon/bundles/current/jetbrainsd.app/Contents/MacOS/jetbrainsd
+   24860 72272 /Users/bemafred/Applications/Rider.app/Contents/plugins/jcef-plugin/jcef/Frameworks/cef_server.app/Contents/Frameworks/cef_server Helper (Renderer).app/Contents/MacOS/cef_server Helper (Renderer)
+   54328 72032 /Users/bemafred/Applications/Rider.app/Contents/lib/ReSharperHost/macos-arm64/Rider.Backend
+   54419 54328 /Users/bemafred/Applications/Rider.app/Contents/lib/ReSharperHost/macos-arm64/dotnet/dotnet
+   54435 54328 /Users/bemafred/Applications/Rider.app/Contents/lib/ReSharperHost/macos-arm64/dotnet/dotnet
+   60261 72032 /Users/bemafred/Applications/Rider.app/Contents/lib/ReSharperHost/macos-arm64/JetBrains.ProcessEnumerator.Worker
+   60265 72032 /Users/bemafred/Applications/Rider.app/Contents/lib/ReSharperHost/macos-arm64/JetBrains.Debugger.Worker
+   61621 72272 /Users/bemafred/Applications/Rider.app/Contents/plugins/jcef-plugin/jcef/Frameworks/cef_server.app/Contents/Frameworks/cef_server Helper (Renderer).app/Contents/MacOS/cef_server Helper (Renderer)
+   71076 72032 /Users/bemafred/Applications/Rider.app/Contents/lib/ReSharperHost/macos-arm64/JetBrains.Debugger.Worker
+   72032     1 /Users/bemafred/Applications/Rider.app/Contents/MacOS/rider
+   72158 72032 /Users/bemafred/Applications/Rider.app/Contents/lib/ReSharperHost/macos-arm64/Rider.Backend
+   72161 72032 /Users/bemafred/Applications/Rider.app/Contents/bin/fsnotifier
+   72272 72032 /Users/bemafred/Applications/Rider.app/Contents/plugins/jcef-plugin/jcef/Frameworks/cef_server.app/Contents/MacOS/cef_server
+   72287 72032 /Users/bemafred/Applications/Rider.app/Contents/bin/JBDevice.framework/Versions/A/Resources/JBDeviceService
+   72303 72272 /Users/bemafred/Applications/Rider.app/Contents/plugins/jcef-plugin/jcef/Frameworks/cef_server.app/Contents/Frameworks/cef_server Helper.app/Contents/MacOS/cef_server Helper
+   72305 72272 /Users/bemafred/Applications/Rider.app/Contents/plugins/jcef-plugin/jcef/Frameworks/cef_server.app/Contents/Frameworks/cef_server Helper.app/Contents/MacOS/cef_server Helper
+   72310 72272 /Users/bemafred/Applications/Rider.app/Contents/plugins/jcef-plugin/jcef/Frameworks/cef_server.app/Contents/Frameworks/cef_server Helper.app/Contents/MacOS/cef_server Helper
+   72367 72158 /Users/bemafred/Applications/Rider.app/Contents/lib/ReSharperHost/macos-arm64/dotnet/dotnet
+   72393 72158 /Users/bemafred/Applications/Rider.app/Contents/lib/ReSharperHost/macos-arm64/dotnet/dotnet
+   72490 72032 /Users/bemafred/Library/Caches/JetBrains/Rider2026.2/semantic-search/server/3.0.169/embeddings-server.app/Contents/MacOS/embeddings-server
+   60250 72032 /Users/bemafred/Applications/Rider.app/Contents/lib/ReSharperHost/macos-arm64/JetBrains.Debugger.Worker
+
+== clr-debug-pipe files held open, by process
+   JetBrains pid 60250 fd 270w  /private/var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/clr-debug-pipe-60254-1794334207-in
+   JetBrains pid 60250 fd 271r  /private/var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/clr-debug-pipe-60254-1794334207-out
+   JetBrains pid 60265 fd 260w  /private/var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/clr-debug-pipe-60257-1794334208-in
+   JetBrains pid 60265 fd 261r  /private/var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/clr-debug-pipe-60257-1794334208-out
+   RiderChil pid 60254 fd 11r  /private/var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/clr-debug-pipe-60254-1794334207-in
+   RiderChil pid 60254 fd 14w  /private/var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/clr-debug-pipe-60254-1794334207-out
+   RiderChil pid 60257 fd 11r  /private/var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/clr-debug-pipe-60254-1794334207-in
+   RiderChil pid 60257 fd 13r  /private/var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/clr-debug-pipe-60257-1794334208-in
+   RiderChil pid 60257 fd 14w  /private/var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/clr-debug-pipe-60254-1794334207-out
+   RiderChil pid 60257 fd 17w  /private/var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/clr-debug-pipe-60257-1794334208-out
+   RiderChil pid 71044 fd 11r  /private/var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/clr-debug-pipe-60254-1794334207-in
+   RiderChil pid 71044 fd 13r  /private/var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/clr-debug-pipe-60257-1794334208-in
+   RiderChil pid 71044 fd 14w  /private/var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/clr-debug-pipe-60254-1794334207-out
+   RiderChil pid 71044 fd 16r  /private/var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/clr-debug-pipe-71044-1794334391-co
+   RiderChil pid 71044 fd 17w  /private/var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/clr-debug-pipe-60257-1794334208-out

@@ -1,0 +1,263 @@
+# Probe 108 marks, run b: Rider 2026.2.4 Debug, .NET Project configuration, 'Attach to child .NET processes' off, breakpoint at Program.cs:72 (3 runs, Martin)
+# Copied from 108-rider-child-hold/bin/Debug/net10.0/marks/<run>/<pid>-<role>.txt on omega (macOS 27.0.1 arm64).
+# For the public repo, env-name lines are kept only for the variables Rider sets (JB_DPA_ROOT_SESSION_ID,
+# RIDER_BIN_DIR, _NO_DEBUG_HEAP); the count of the other names dropped is given per process. env-value lines
+# (DOTNET_, COMPlus_, CORECLR_ variables) are complete. Nothing else is changed.
+
+## 20261110T180322Z 56616-supervisor.txt  (other env-name lines dropped: 28)
+[56616 supervisor] modinit 639299306020628420 18:03:22.0628420 attached=True
+[56616 supervisor] main 639299306020775280 18:03:22.0775280
+[56616 supervisor] pid 56616
+[56616 supervisor] process-path /Users/bemafred/src/repos/sky-omega/poc/drhook-engine/108-rider-child-hold/bin/Debug/net10.0/RiderChildHold
+[56616 supervisor] runtime .NET 10.0.9 osx-arm64
+[56616 supervisor] attached-now True
+[56616 supervisor] env-value COMPLUS_FORCEENC=1
+[56616 supervisor] env-value DOTNET_DiagnosticPorts=/var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/DPA-DiagPort-0100d21a-61cd-478a-bb8a-5c0190c7bd87,connect,suspend
+[56616 supervisor] env-value DOTNET_MODIFIABLE_ASSEMBLIES=debug
+[56616 supervisor] env-name JB_DPA_ROOT_SESSION_ID
+[56616 supervisor] env-name RIDER_BIN_DIR
+[56616 supervisor] env-name _NO_DEBUG_HEAP
+[56616 supervisor] assembly Microsoft.Win32.Primitives /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/Microsoft.Win32.Primitives.dll
+[56616 supervisor] assembly RiderChildHold /Users/bemafred/src/repos/sky-omega/poc/drhook-engine/108-rider-child-hold/bin/Debug/net10.0/RiderChildHold.dll
+[56616 supervisor] assembly System.Collections /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Collections.dll
+[56616 supervisor] assembly System.Console /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Console.dll
+[56616 supervisor] assembly System.Linq /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Linq.dll
+[56616 supervisor] assembly System.Memory /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Memory.dll
+[56616 supervisor] assembly System.Numerics.Vectors /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Numerics.Vectors.dll
+[56616 supervisor] assembly System.Private.CoreLib /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Private.CoreLib.dll
+[56616 supervisor] assembly System.Runtime /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Runtime.dll
+[56616 supervisor] assembly System.Runtime.InteropServices /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Runtime.InteropServices.dll
+[56616 supervisor] assembly System.Threading /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Threading.dll
+[56616 supervisor] start-called worker1 639299306020866100 18:03:22.0866100
+[56616 supervisor] start-returned worker1 pid 56655 639299306021018300 18:03:22.1018300
+[56616 supervisor] child-ended worker1 exit 0 639299306022030340 18:03:22.2030340
+[56616 supervisor] exit (worker 1 exit 0) 639299306022032350 18:03:22.2032350
+
+## 20261110T180322Z 56655-worker1.txt  (other env-name lines dropped: 28)
+[56655 worker1] modinit 639299306021306970 18:03:22.1306970 attached=False
+[56655 worker1] main 639299306021368870 18:03:22.1368870
+[56655 worker1] pid 56655
+[56655 worker1] process-path /Users/bemafred/src/repos/sky-omega/poc/drhook-engine/108-rider-child-hold/bin/Debug/net10.0/RiderChildHold
+[56655 worker1] runtime .NET 10.0.9 osx-arm64
+[56655 worker1] attached-now False
+[56655 worker1] env-value COMPLUS_FORCEENC=1
+[56655 worker1] env-value DOTNET_DiagnosticPorts=/var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/DPA-DiagPort-0100d21a-61cd-478a-bb8a-5c0190c7bd87,connect,suspend
+[56655 worker1] env-value DOTNET_MODIFIABLE_ASSEMBLIES=debug
+[56655 worker1] env-name JB_DPA_ROOT_SESSION_ID
+[56655 worker1] env-name RIDER_BIN_DIR
+[56655 worker1] env-name _NO_DEBUG_HEAP
+[56655 worker1] assembly Microsoft.Win32.Primitives /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/Microsoft.Win32.Primitives.dll
+[56655 worker1] assembly RiderChildHold /Users/bemafred/src/repos/sky-omega/poc/drhook-engine/108-rider-child-hold/bin/Debug/net10.0/RiderChildHold.dll
+[56655 worker1] assembly System.Collections /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Collections.dll
+[56655 worker1] assembly System.Console /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Console.dll
+[56655 worker1] assembly System.Linq /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Linq.dll
+[56655 worker1] assembly System.Memory /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Memory.dll
+[56655 worker1] assembly System.Numerics.Vectors /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Numerics.Vectors.dll
+[56655 worker1] assembly System.Private.CoreLib /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Private.CoreLib.dll
+[56655 worker1] assembly System.Runtime /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Runtime.dll
+[56655 worker1] assembly System.Runtime.InteropServices /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Runtime.InteropServices.dll
+[56655 worker1] assembly System.Threading /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Threading.dll
+[56655 worker1] checkpoint 10 attached=False 639299306021403400 18:03:22.1403400
+[56655 worker1] start-called worker2 639299306021409150 18:03:22.1409150
+[56655 worker1] start-returned worker2 pid 56656 639299306021533360 18:03:22.1533360
+[56655 worker1] child-ended worker2 exit 0 639299306021951550 18:03:22.1951550
+[56655 worker1] exit (child exit 0) 639299306021952930 18:03:22.1952930
+
+## 20261110T180322Z 56656-worker2.txt  (other env-name lines dropped: 28)
+[56656 worker2] modinit 639299306021779940 18:03:22.1779940 attached=False
+[56656 worker2] main 639299306021838970 18:03:22.1838970
+[56656 worker2] pid 56656
+[56656 worker2] process-path /Users/bemafred/src/repos/sky-omega/poc/drhook-engine/108-rider-child-hold/bin/Debug/net10.0/RiderChildHold
+[56656 worker2] runtime .NET 10.0.9 osx-arm64
+[56656 worker2] attached-now False
+[56656 worker2] env-value COMPLUS_FORCEENC=1
+[56656 worker2] env-value DOTNET_DiagnosticPorts=/var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/DPA-DiagPort-0100d21a-61cd-478a-bb8a-5c0190c7bd87,connect,suspend
+[56656 worker2] env-value DOTNET_MODIFIABLE_ASSEMBLIES=debug
+[56656 worker2] env-name JB_DPA_ROOT_SESSION_ID
+[56656 worker2] env-name RIDER_BIN_DIR
+[56656 worker2] env-name _NO_DEBUG_HEAP
+[56656 worker2] assembly Microsoft.Win32.Primitives /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/Microsoft.Win32.Primitives.dll
+[56656 worker2] assembly RiderChildHold /Users/bemafred/src/repos/sky-omega/poc/drhook-engine/108-rider-child-hold/bin/Debug/net10.0/RiderChildHold.dll
+[56656 worker2] assembly System.Collections /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Collections.dll
+[56656 worker2] assembly System.Console /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Console.dll
+[56656 worker2] assembly System.Linq /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Linq.dll
+[56656 worker2] assembly System.Memory /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Memory.dll
+[56656 worker2] assembly System.Numerics.Vectors /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Numerics.Vectors.dll
+[56656 worker2] assembly System.Private.CoreLib /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Private.CoreLib.dll
+[56656 worker2] assembly System.Runtime /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Runtime.dll
+[56656 worker2] assembly System.Runtime.InteropServices /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Runtime.InteropServices.dll
+[56656 worker2] assembly System.Threading /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Threading.dll
+[56656 worker2] checkpoint 20 attached=False 639299306021873550 18:03:22.1873550
+[56656 worker2] exit (child exit 0) 639299306021873790 18:03:22.1873790
+
+## 20261110T180436Z 56745-supervisor.txt  (other env-name lines dropped: 28)
+[56745 supervisor] modinit 639299306760544560 18:04:36.0544560 attached=True
+[56745 supervisor] main 639299306760671890 18:04:36.0671890
+[56745 supervisor] pid 56745
+[56745 supervisor] process-path /Users/bemafred/src/repos/sky-omega/poc/drhook-engine/108-rider-child-hold/bin/Debug/net10.0/RiderChildHold
+[56745 supervisor] runtime .NET 10.0.9 osx-arm64
+[56745 supervisor] attached-now True
+[56745 supervisor] env-value COMPLUS_FORCEENC=1
+[56745 supervisor] env-value DOTNET_DiagnosticPorts=/var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/DPA-DiagPort-0100d21a-61cd-478a-bb8a-5c0190c7bd87,connect,suspend
+[56745 supervisor] env-value DOTNET_MODIFIABLE_ASSEMBLIES=debug
+[56745 supervisor] env-name JB_DPA_ROOT_SESSION_ID
+[56745 supervisor] env-name RIDER_BIN_DIR
+[56745 supervisor] env-name _NO_DEBUG_HEAP
+[56745 supervisor] assembly Microsoft.Win32.Primitives /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/Microsoft.Win32.Primitives.dll
+[56745 supervisor] assembly RiderChildHold /Users/bemafred/src/repos/sky-omega/poc/drhook-engine/108-rider-child-hold/bin/Debug/net10.0/RiderChildHold.dll
+[56745 supervisor] assembly System.Collections /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Collections.dll
+[56745 supervisor] assembly System.Console /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Console.dll
+[56745 supervisor] assembly System.Linq /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Linq.dll
+[56745 supervisor] assembly System.Memory /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Memory.dll
+[56745 supervisor] assembly System.Numerics.Vectors /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Numerics.Vectors.dll
+[56745 supervisor] assembly System.Private.CoreLib /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Private.CoreLib.dll
+[56745 supervisor] assembly System.Runtime /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Runtime.dll
+[56745 supervisor] assembly System.Runtime.InteropServices /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Runtime.InteropServices.dll
+[56745 supervisor] assembly System.Threading /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Threading.dll
+[56745 supervisor] start-called worker1 639299306760755560 18:04:36.0755560
+[56745 supervisor] start-returned worker1 pid 56762 639299306760840870 18:04:36.0840870
+[56745 supervisor] child-ended worker1 exit 0 639299306761839240 18:04:36.1839240
+[56745 supervisor] exit (worker 1 exit 0) 639299306761841860 18:04:36.1841860
+
+## 20261110T180436Z 56762-worker1.txt  (other env-name lines dropped: 28)
+[56762 worker1] modinit 639299306761133140 18:04:36.1133140 attached=False
+[56762 worker1] main 639299306761196430 18:04:36.1196430
+[56762 worker1] pid 56762
+[56762 worker1] process-path /Users/bemafred/src/repos/sky-omega/poc/drhook-engine/108-rider-child-hold/bin/Debug/net10.0/RiderChildHold
+[56762 worker1] runtime .NET 10.0.9 osx-arm64
+[56762 worker1] attached-now False
+[56762 worker1] env-value COMPLUS_FORCEENC=1
+[56762 worker1] env-value DOTNET_DiagnosticPorts=/var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/DPA-DiagPort-0100d21a-61cd-478a-bb8a-5c0190c7bd87,connect,suspend
+[56762 worker1] env-value DOTNET_MODIFIABLE_ASSEMBLIES=debug
+[56762 worker1] env-name JB_DPA_ROOT_SESSION_ID
+[56762 worker1] env-name RIDER_BIN_DIR
+[56762 worker1] env-name _NO_DEBUG_HEAP
+[56762 worker1] assembly Microsoft.Win32.Primitives /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/Microsoft.Win32.Primitives.dll
+[56762 worker1] assembly RiderChildHold /Users/bemafred/src/repos/sky-omega/poc/drhook-engine/108-rider-child-hold/bin/Debug/net10.0/RiderChildHold.dll
+[56762 worker1] assembly System.Collections /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Collections.dll
+[56762 worker1] assembly System.Console /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Console.dll
+[56762 worker1] assembly System.Linq /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Linq.dll
+[56762 worker1] assembly System.Memory /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Memory.dll
+[56762 worker1] assembly System.Numerics.Vectors /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Numerics.Vectors.dll
+[56762 worker1] assembly System.Private.CoreLib /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Private.CoreLib.dll
+[56762 worker1] assembly System.Runtime /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Runtime.dll
+[56762 worker1] assembly System.Runtime.InteropServices /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Runtime.InteropServices.dll
+[56762 worker1] assembly System.Threading /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Threading.dll
+[56762 worker1] checkpoint 10 attached=False 639299306761231950 18:04:36.1231950
+[56762 worker1] start-called worker2 639299306761239120 18:04:36.1239120
+[56762 worker1] start-returned worker2 pid 56763 639299306761317480 18:04:36.1317480
+[56762 worker1] child-ended worker2 exit 0 639299306761757210 18:04:36.1757210
+[56762 worker1] exit (child exit 0) 639299306761758960 18:04:36.1758960
+
+## 20261110T180436Z 56763-worker2.txt  (other env-name lines dropped: 28)
+[56763 worker2] modinit 639299306761549030 18:04:36.1549030 attached=False
+[56763 worker2] main 639299306761613270 18:04:36.1613270
+[56763 worker2] pid 56763
+[56763 worker2] process-path /Users/bemafred/src/repos/sky-omega/poc/drhook-engine/108-rider-child-hold/bin/Debug/net10.0/RiderChildHold
+[56763 worker2] runtime .NET 10.0.9 osx-arm64
+[56763 worker2] attached-now False
+[56763 worker2] env-value COMPLUS_FORCEENC=1
+[56763 worker2] env-value DOTNET_DiagnosticPorts=/var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/DPA-DiagPort-0100d21a-61cd-478a-bb8a-5c0190c7bd87,connect,suspend
+[56763 worker2] env-value DOTNET_MODIFIABLE_ASSEMBLIES=debug
+[56763 worker2] env-name JB_DPA_ROOT_SESSION_ID
+[56763 worker2] env-name RIDER_BIN_DIR
+[56763 worker2] env-name _NO_DEBUG_HEAP
+[56763 worker2] assembly Microsoft.Win32.Primitives /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/Microsoft.Win32.Primitives.dll
+[56763 worker2] assembly RiderChildHold /Users/bemafred/src/repos/sky-omega/poc/drhook-engine/108-rider-child-hold/bin/Debug/net10.0/RiderChildHold.dll
+[56763 worker2] assembly System.Collections /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Collections.dll
+[56763 worker2] assembly System.Console /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Console.dll
+[56763 worker2] assembly System.Linq /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Linq.dll
+[56763 worker2] assembly System.Memory /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Memory.dll
+[56763 worker2] assembly System.Numerics.Vectors /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Numerics.Vectors.dll
+[56763 worker2] assembly System.Private.CoreLib /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Private.CoreLib.dll
+[56763 worker2] assembly System.Runtime /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Runtime.dll
+[56763 worker2] assembly System.Runtime.InteropServices /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Runtime.InteropServices.dll
+[56763 worker2] assembly System.Threading /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Threading.dll
+[56763 worker2] checkpoint 20 attached=False 639299306761654270 18:04:36.1654270
+[56763 worker2] exit (child exit 0) 639299306761654590 18:04:36.1654590
+
+## 20261110T180528Z 56833-supervisor.txt  (other env-name lines dropped: 28)
+[56833 supervisor] modinit 639299307287011700 18:05:28.7011700 attached=True
+[56833 supervisor] main 639299307287128940 18:05:28.7128940
+[56833 supervisor] pid 56833
+[56833 supervisor] process-path /Users/bemafred/src/repos/sky-omega/poc/drhook-engine/108-rider-child-hold/bin/Debug/net10.0/RiderChildHold
+[56833 supervisor] runtime .NET 10.0.9 osx-arm64
+[56833 supervisor] attached-now True
+[56833 supervisor] env-value COMPLUS_FORCEENC=1
+[56833 supervisor] env-value DOTNET_DiagnosticPorts=/var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/DPA-DiagPort-0100d21a-61cd-478a-bb8a-5c0190c7bd87,connect,suspend
+[56833 supervisor] env-value DOTNET_MODIFIABLE_ASSEMBLIES=debug
+[56833 supervisor] env-name JB_DPA_ROOT_SESSION_ID
+[56833 supervisor] env-name RIDER_BIN_DIR
+[56833 supervisor] env-name _NO_DEBUG_HEAP
+[56833 supervisor] assembly Microsoft.Win32.Primitives /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/Microsoft.Win32.Primitives.dll
+[56833 supervisor] assembly RiderChildHold /Users/bemafred/src/repos/sky-omega/poc/drhook-engine/108-rider-child-hold/bin/Debug/net10.0/RiderChildHold.dll
+[56833 supervisor] assembly System.Collections /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Collections.dll
+[56833 supervisor] assembly System.Console /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Console.dll
+[56833 supervisor] assembly System.Linq /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Linq.dll
+[56833 supervisor] assembly System.Memory /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Memory.dll
+[56833 supervisor] assembly System.Numerics.Vectors /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Numerics.Vectors.dll
+[56833 supervisor] assembly System.Private.CoreLib /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Private.CoreLib.dll
+[56833 supervisor] assembly System.Runtime /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Runtime.dll
+[56833 supervisor] assembly System.Runtime.InteropServices /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Runtime.InteropServices.dll
+[56833 supervisor] assembly System.Threading /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Threading.dll
+[56833 supervisor] start-called worker1 639299307287210930 18:05:28.7210930
+[56833 supervisor] start-returned worker1 pid 56841 639299307287354890 18:05:28.7354890
+[56833 supervisor] child-ended worker1 exit 0 639299307288354150 18:05:28.8354150
+[56833 supervisor] exit (worker 1 exit 0) 639299307288356160 18:05:28.8356160
+
+## 20261110T180528Z 56841-worker1.txt  (other env-name lines dropped: 28)
+[56841 worker1] modinit 639299307287587220 18:05:28.7587220 attached=False
+[56841 worker1] main 639299307287654630 18:05:28.7654630
+[56841 worker1] pid 56841
+[56841 worker1] process-path /Users/bemafred/src/repos/sky-omega/poc/drhook-engine/108-rider-child-hold/bin/Debug/net10.0/RiderChildHold
+[56841 worker1] runtime .NET 10.0.9 osx-arm64
+[56841 worker1] attached-now False
+[56841 worker1] env-value COMPLUS_FORCEENC=1
+[56841 worker1] env-value DOTNET_DiagnosticPorts=/var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/DPA-DiagPort-0100d21a-61cd-478a-bb8a-5c0190c7bd87,connect,suspend
+[56841 worker1] env-value DOTNET_MODIFIABLE_ASSEMBLIES=debug
+[56841 worker1] env-name JB_DPA_ROOT_SESSION_ID
+[56841 worker1] env-name RIDER_BIN_DIR
+[56841 worker1] env-name _NO_DEBUG_HEAP
+[56841 worker1] assembly Microsoft.Win32.Primitives /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/Microsoft.Win32.Primitives.dll
+[56841 worker1] assembly RiderChildHold /Users/bemafred/src/repos/sky-omega/poc/drhook-engine/108-rider-child-hold/bin/Debug/net10.0/RiderChildHold.dll
+[56841 worker1] assembly System.Collections /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Collections.dll
+[56841 worker1] assembly System.Console /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Console.dll
+[56841 worker1] assembly System.Linq /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Linq.dll
+[56841 worker1] assembly System.Memory /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Memory.dll
+[56841 worker1] assembly System.Numerics.Vectors /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Numerics.Vectors.dll
+[56841 worker1] assembly System.Private.CoreLib /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Private.CoreLib.dll
+[56841 worker1] assembly System.Runtime /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Runtime.dll
+[56841 worker1] assembly System.Runtime.InteropServices /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Runtime.InteropServices.dll
+[56841 worker1] assembly System.Threading /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Threading.dll
+[56841 worker1] checkpoint 10 attached=False 639299307287688050 18:05:28.7688050
+[56841 worker1] start-called worker2 639299307287693690 18:05:28.7693690
+[56841 worker1] start-returned worker2 pid 56842 639299307287820620 18:05:28.7820620
+[56841 worker1] child-ended worker2 exit 0 639299307288264550 18:05:28.8264550
+[56841 worker1] exit (child exit 0) 639299307288267430 18:05:28.8267430
+
+## 20261110T180528Z 56842-worker2.txt  (other env-name lines dropped: 28)
+[56842 worker2] modinit 639299307288054370 18:05:28.8054370 attached=False
+[56842 worker2] main 639299307288131230 18:05:28.8131230
+[56842 worker2] pid 56842
+[56842 worker2] process-path /Users/bemafred/src/repos/sky-omega/poc/drhook-engine/108-rider-child-hold/bin/Debug/net10.0/RiderChildHold
+[56842 worker2] runtime .NET 10.0.9 osx-arm64
+[56842 worker2] attached-now False
+[56842 worker2] env-value COMPLUS_FORCEENC=1
+[56842 worker2] env-value DOTNET_DiagnosticPorts=/var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/DPA-DiagPort-0100d21a-61cd-478a-bb8a-5c0190c7bd87,connect,suspend
+[56842 worker2] env-value DOTNET_MODIFIABLE_ASSEMBLIES=debug
+[56842 worker2] env-name JB_DPA_ROOT_SESSION_ID
+[56842 worker2] env-name RIDER_BIN_DIR
+[56842 worker2] env-name _NO_DEBUG_HEAP
+[56842 worker2] assembly Microsoft.Win32.Primitives /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/Microsoft.Win32.Primitives.dll
+[56842 worker2] assembly RiderChildHold /Users/bemafred/src/repos/sky-omega/poc/drhook-engine/108-rider-child-hold/bin/Debug/net10.0/RiderChildHold.dll
+[56842 worker2] assembly System.Collections /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Collections.dll
+[56842 worker2] assembly System.Console /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Console.dll
+[56842 worker2] assembly System.Linq /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Linq.dll
+[56842 worker2] assembly System.Memory /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Memory.dll
+[56842 worker2] assembly System.Numerics.Vectors /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Numerics.Vectors.dll
+[56842 worker2] assembly System.Private.CoreLib /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Private.CoreLib.dll
+[56842 worker2] assembly System.Runtime /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Runtime.dll
+[56842 worker2] assembly System.Runtime.InteropServices /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Runtime.InteropServices.dll
+[56842 worker2] assembly System.Threading /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.9/System.Threading.dll
+[56842 worker2] checkpoint 20 attached=False 639299307288166500 18:05:28.8166500
+[56842 worker2] exit (child exit 0) 639299307288166740 18:05:28.8166740

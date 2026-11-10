@@ -2,7 +2,8 @@
 
 **Status:** Accepted — 2026-11-08 (Martin: "I accept the ADR"). Proposed the same day. The scenario, the principles
 and the lead candidate are approved. Steps 2 to 5 confirm or replace the mechanism; engineering waits for their
-evidence and for ADR-016's worker, which principle 4 builds on. Every probe below is reviewed before it runs.
+evidence and for ADR-016's worker, which principle 4 builds on. Every probe below is reviewed before it runs. Step 2
+done 2026-11-10: Rider holds children with the lead candidate ([finding 108](../../../poc/drhook-engine/findings/108-rider-holds-children-with-the-diagnostics-port.md)).
 
 ## The question
 
@@ -48,7 +49,15 @@ what it does with the result. A separate setup for the worker loses exactly that
 - **Rider** has "Attach to child .NET processes" (since 2025.1, per JetBrains support). It is offered for .NET Project
   and .NET Executable run configurations, and covers child and grandchild processes. It is not supported for tests run
   from the Tests window (RIDER-129067). The documentation does not say how the child is held. Rider is DrHook's
-  reference for correctness, so how it does this can be observed.
+  reference for correctness, so it was observed
+  ([finding 108](../../../poc/drhook-engine/findings/108-rider-holds-children-with-the-diagnostics-port.md), Rider
+  2026.2.4 on macOS arm64):
+  - It sets `DOTNET_DiagnosticPorts=<temp>/rider_autoattach/<guid>,connect,suspend` at the launch. Every .NET
+    descendant inherits it, the grandchild included.
+  - The listener is in Rider's backend. Each caught child gets its own `JetBrains.Debugger.Worker`, and is attached
+    before its first managed code. The hold lasted 1.4–1.6 s per child. No startup hook is involved.
+  - Even with the option off, Rider sets a suspending port for its Dynamic Program Analysis, and the children inherit
+    that one too.
 - **The runtime offers nothing for this.** [dotnet/runtime#43924](https://github.com/dotnet/runtime/issues/43924)
   (2020-10-27) says there is no way for a debugger to debug child .NET processes automatically on all platforms. It
   proposes an ICorDebug opt-in under which `Process.Start` starts the child suspended and notifies the debugger. It
@@ -102,14 +111,15 @@ In the columns of ADR-016's scenario table:
 
 | Mechanism | Platforms | What it holds | Its cost or gap |
 |-----------|-----------|---------------|-----------------|
-| **The diagnostics-port pause**, the variable set at the supervisor's launch | Linux x64 measured; macOS and Windows not | every .NET descendant, before its first managed code | a child started after DrHook leaves waits forever; the program can read the variable |
+| **The diagnostics-port pause**, the variable set at the supervisor's launch | Linux x64 measured (finding 107); macOS arm64 is how Rider catches children (finding 108); Windows not | every .NET descendant, before its first managed code | a child started after DrHook leaves waits forever; the program can read the variable; the variable carries one port, which another tool (Rider's DPA) may already use |
 | **The variable added per child**, at a breakpoint in the supervisor before it starts the process | where `Process.Start` is the path | only the children DrHook chooses | changes the start info the program built (an intervention); misses children started by native code; the chosen child's own children still inherit it |
 | **Attach by pid after the start** | all | nothing: a race | the child's runtime checks dbgshim's semaphores before main, which comes 34–48 ms after the spawn; rejected without a barrier |
 | **The runtime's own notification** (dotnet/runtime#43924) | none yet | each child, at `Process.Start` | does not exist |
 | **Operating-system process tracing** (Linux `ptrace` fork following, Windows native debug events) | per platform; nothing known on macOS | every child, at `fork` or `exec` | makes DrHook a native debugger, and is not one path on every platform |
 
 The first row is the lead candidate, because it is measured and is the same mechanism on every platform the runtime
-supports. That second point is still a claim until it is measured.
+supports. That second point is still a claim until it is measured. Rider uses it on macOS (finding 108), so an
+established debugger relies on it there; DrHook's own measurement on macOS and Windows is Step 3.
 
 ## Open questions
 
@@ -123,7 +133,8 @@ supports. That second point is still a claim until it is measured.
   child waits until a listener returns. Finding 107 showed a child re-dial within about 0.5 s once its path is bound
   again. So a supervisor that owns the listening path (ADR-016's supervisor, which outlives a worker's crash) could
   release the children of a crashed worker. A crash of `drhook-mcp` itself would leave them waiting, unless a new one
-  binds the same recorded path. That is a candidate, not a decision.
+  binds the same recorded path. That is a candidate, not a decision. Rider has this shape: its backend owns the path
+  and outlives each debugger worker (finding 108). What happens to a held child when one of them dies was not tested.
 - **Q5. An attached supervisor.** Can the children of a program that is already running be caught? The diagnostics
   protocol has a command to set an environment variable in a running process (not yet read in the source). Whether
   a variable set that way reaches the children `Process.Start` creates is unknown, and it changes the program's
@@ -134,14 +145,16 @@ supports. That second point is still a claim until it is measured.
   `drhook_processes` shows the tree, under ADR-010's rule that the tools mirror the substrate.
 - **Q8. One timeline.** One braid for the session, with every process's stops ordered by time.
 - **Q9. Rider.** How does Rider's "Attach to child .NET processes" hold a child? A child's environment and threads
-  under Rider can be read without Rider's source.
+  under Rider can be read without Rider's source. *Answered 2026-11-10 (finding 108): with the diagnostics-port pause,
+  a listener in Rider's backend, and one debugger worker per process.*
 
 ## Steps
 
 1. **Martin's assessment** of this draft: the scenario, the principles, the lead candidate. *Done 2026-11-08:
    accepted.*
 2. **Rider as the reference** (Q9). Martin runs a supervisor under Rider with the option on, and the child's
-   environment and threads are read. This is read-only and cheap.
+   environment and threads are read. This is read-only and cheap. *Done 2026-11-10: probe 108,
+   [finding 108](../../../poc/drhook-engine/findings/108-rider-holds-children-with-the-diagnostics-port.md).*
 3. **Probe 107's modes on macOS and Windows** (Q1), with an observation layer for each platform.
 4. **A probe with DrHook.Engine** (Q2, Q3): a supervisor starts a worker; a breakpoint in the worker's startup code,
    set before either starts, must stop the worker; the supervisor runs on; both end naturally.
@@ -159,6 +172,8 @@ supports. That second point is still a claim until it is measured.
 
 - [Finding 107](../../../poc/drhook-engine/findings/107-diagnostics-port-hold-is-inherited.md): the diagnostics-port
   pause holds, and is inherited.
+- [Finding 108](../../../poc/drhook-engine/findings/108-rider-holds-children-with-the-diagnostics-port.md): Rider
+  catches children with the same pause.
 - [Finding 90](../../../poc/drhook-engine/findings/90-vstest-debug-wait-orphans.md) and
   [finding 91](../../../poc/drhook-engine/findings/91-vstest-host-debug-attach-race.md): VSTest's own hold, inherited
   and racing.
