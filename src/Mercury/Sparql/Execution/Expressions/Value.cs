@@ -383,7 +383,9 @@ internal ref struct Value
     // ── The operator mapping (SPARQL 1.1 §17.3) ────────────────────────────────────────────────────────────────────
 
     // The value spaces the operator mapping compares within; None is any other literal, compared by RDFterm-equal.
-    private enum ValueSpace : byte { None, Numeric, String, Boolean, DateTime, Date }
+    // Duration holds xsd:duration and its two subtypes: they are equal by value across the three, ordered only within
+    // dayTimeDuration and within yearMonthDuration.
+    private enum ValueSpace : byte { None, Numeric, String, Boolean, DateTime, Date, Duration }
 
     private readonly ValueSpace Space => Type switch
     {
@@ -394,6 +396,8 @@ internal ref struct Value
         {
             XsdKind.DateTime when XsdDateTime.TryParse(StringValue, isDate: false, out _) => ValueSpace.DateTime,
             XsdKind.Date when XsdDateTime.TryParse(StringValue, isDate: true, out _) => ValueSpace.Date,
+            XsdKind.Duration or XsdKind.DayTimeDuration or XsdKind.YearMonthDuration
+                when XsdDuration.TryParse(StringValue, XsdDatatype.KindOf(Datatype), out _, out _) => ValueSpace.Duration,
             _ => ValueSpace.None,
         },
         _ => ValueSpace.None,
@@ -432,13 +436,20 @@ internal ref struct Value
 
     /// <summary>
     /// <c>&lt;</c>, <c>&gt;</c>, <c>&lt;=</c>, <c>&gt;=</c>: defined within a value space of the operator mapping and an
-    /// error otherwise. A comparison with NaN is false.
+    /// error otherwise. A comparison with NaN is false. Durations are ordered two dayTimeDurations or two
+    /// yearMonthDurations at a time (XPath op:dayTimeDuration-less-than, op:yearMonthDuration-less-than).
     /// </summary>
     public static Truth Order(scoped in Value a, ComparisonOperator op, scoped in Value b)
     {
         var space = a.Space;
         if (space == ValueSpace.None || space != b.Space)
             return Truth.Error;
+        if (space == ValueSpace.Duration)
+        {
+            var kind = XsdDatatype.KindOf(a.Datatype);
+            if (kind is not (XsdKind.DayTimeDuration or XsdKind.YearMonthDuration) || kind != XsdDatatype.KindOf(b.Datatype))
+                return Truth.Error;
+        }
         var compared = Compare(a, b, space, out int order);
         if (compared != Truth.True)
             return compared;
@@ -480,6 +491,13 @@ internal ref struct Value
                 return Truth.True;
             case ValueSpace.Boolean:
                 order = a.BooleanValue.CompareTo(b.BooleanValue);
+                return Truth.True;
+            case ValueSpace.Duration:
+                // Equal when both the months and the seconds are (XPath op:duration-equal); a dayTimeDuration or a
+                // yearMonthDuration has only one of them, so this is also their order
+                XsdDuration.TryParse(a.StringValue, XsdDatatype.KindOf(a.Datatype), out long aMonths, out long aTicks);
+                XsdDuration.TryParse(b.StringValue, XsdDatatype.KindOf(b.Datatype), out long bMonths, out long bTicks);
+                order = aMonths != bMonths ? aMonths.CompareTo(bMonths) : aTicks.CompareTo(bTicks);
                 return Truth.True;
             default:
                 return XsdDateTime.TryCompare(a.StringValue, b.StringValue, space == ValueSpace.Date, out order)
@@ -551,11 +569,56 @@ internal ref struct Value
         a == Truth.False || b == Truth.False ? Truth.False : a == Truth.Error || b == Truth.Error ? Truth.Error : Truth.True;
 
     /// <summary>
-    /// <c>+ - * /</c> on two numbers (XPath op:numeric-*): the operands are promoted to the wider of integer, decimal,
-    /// float and double. Integer division gives a decimal, and a decimal division by zero is an error. Anything that is
-    /// not a number is an error.
+    /// <c>+ - * /</c> in an expression: on two numbers, <see cref="NumericArithmetic"/>; on dates and durations, the
+    /// <c>+</c> and <c>-</c> of XPath's date and time operators (<see cref="DateArithmetic"/>). SPARQL 1.1's operator
+    /// mapping (§17.3) has numbers only; the date operators are Mercury's extension, as XPath 3.1's operator mapping
+    /// defines them. Anything else is an error.
     /// </summary>
     public static Value Arithmetic(char op, scoped in Value a, scoped in Value b)
+    {
+        if (a.IsNumeric && b.IsNumeric)
+            return NumericArithmetic(op, a, b);
+        return op is '+' or '-' ? DateArithmetic(op, a, b) : Error;
+    }
+
+    /// <summary>
+    /// A date or dateTime plus or minus an xsd:dayTimeDuration or xsd:yearMonthDuration, or such a duration plus a date
+    /// or dateTime: the date or dateTime moved by it (XPath op:add-*-to-dateTime, op:subtract-*-from-dateTime and their
+    /// date forms, <see cref="XsdDateTime.Add"/>). A date or dateTime minus another of its type: the dayTimeDuration
+    /// between them (op:subtract-dateTimes, op:subtract-dates, <see cref="XsdDateTime.TrySubtract"/>). An xsd:duration
+    /// that is neither subtype is an error, as in XPath, and so is a result outside the years 1 to 9999.
+    /// </summary>
+    private static Value DateArithmetic(char op, scoped in Value a, scoped in Value b)
+    {
+        var first = a.Space;
+        var second = b.Space;
+        if (op == '+' && first == ValueSpace.Duration && second is ValueSpace.DateTime or ValueSpace.Date)
+            return DateArithmetic(op, b, a);
+        if (first is not (ValueSpace.DateTime or ValueSpace.Date))
+            return Error;
+        bool isDate = first == ValueSpace.Date;
+
+        if (op == '-' && second == first)
+            return XsdDateTime.TrySubtract(a.StringValue, b.StringValue, isDate, out long between)
+                ? FromTyped(XsdDuration.DayTime(between), XsdDatatype.DayTimeDuration)
+                : Error;
+
+        var kind = XsdDatatype.KindOf(b.Datatype);
+        if (second != ValueSpace.Duration || kind is not (XsdKind.DayTimeDuration or XsdKind.YearMonthDuration))
+            return Error;
+        XsdDuration.TryParse(b.StringValue, kind, out long months, out long ticks);
+        var moved = op == '+'
+            ? XsdDateTime.Add(a.StringValue, isDate, months, ticks)
+            : XsdDateTime.Add(a.StringValue, isDate, -months, -ticks);
+        return moved is null ? Error : FromTyped(moved, isDate ? XsdDatatype.Date : XsdDatatype.DateTime);
+    }
+
+    /// <summary>
+    /// <c>+ - * /</c> on two numbers (XPath op:numeric-*): the operands are promoted to the wider of integer, decimal,
+    /// float and double. Integer division gives a decimal, and a decimal division by zero is an error. Anything that is
+    /// not a number is an error. SUM and AVG add and divide with this, op:numeric-add and op:numeric-divide (§18.5.1).
+    /// </summary>
+    public static Value NumericArithmetic(char op, scoped in Value a, scoped in Value b)
     {
         if (!a.IsNumeric || !b.IsNumeric)
             return Error;

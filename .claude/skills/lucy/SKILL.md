@@ -54,10 +54,12 @@ SELECT ?g ?s ?label ?date WHERE {
 ```
 Three **temporal-recall** modes extend this (the clause goes after `WHERE`/`LIMIT`; all verified usable):
 - **Point-in-time** — *what did we know as of a past moment* — append `AS OF "2026-06-20"^^xsd:date`.
-- **Window** — *what was valid / changed during a period* — append `DURING ["2026-06-20"^^xsd:date, "2026-06-23"^^xsd:date]`.
+- **Window** — *what was valid at some moment in a period* — append `DURING ["2026-06-20"^^xsd:date, "2026-06-23"^^xsd:date]`. A record from before the window that is still valid is in it, so this is not "what changed".
 - **Epistemic history** — *how a belief evolved / what was superseded* — append `ALL VERSIONS`.
 
-Default (no clause) = valid now.
+Default (no clause) = valid now. Neither clause selects *what was recorded since t*: `AS OF t` keeps everything older
+than t. For recency, filter on the recorded time, with the prefix `xsd:` declared:
+`FILTER(?created >= NOW() - "P7D"^^xsd:dayTimeDuration)` keeps the last week (`PT12H`, `P30D`, … for other spans).
 
 ### 3. Connective recall — expand anchors into full nodes and neighbours
 For the most relevant anchors from steps 1–2, read the **whole node** and **one hop** of links:

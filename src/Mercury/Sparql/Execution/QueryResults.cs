@@ -685,7 +685,7 @@ internal sealed class GroupedRow
 
     /// <summary>
     /// A running op:numeric-add total (SPARQL 1.1 §18.5.1.3), kept as the number the evaluator computes: an integer,
-    /// decimal, float or double, promoted as XPath promotes (<see cref="Value.Arithmetic"/>). Its default is the
+    /// decimal, float or double, promoted as XPath promotes (<see cref="Value.NumericArithmetic"/>). Its default is the
     /// integer 0, the total of nothing; a value that is no number makes it an error, which it stays.
     /// </summary>
     private struct NumericTotal
@@ -706,7 +706,7 @@ internal sealed class GroupedRow
 
         public void Add(scoped in Value value)
         {
-            var total = Value.Arithmetic('+', AsValue(), value);
+            var total = Value.NumericArithmetic('+', AsValue(), value);
             _isError = total.Type == ValueType.Unbound;
             _type = total.Type;
             _integer = total.IntegerValue;
@@ -727,7 +727,7 @@ internal sealed class GroupedRow
                 return "";
             if (count == 0)
                 return Value.FromInteger(0).Term();
-            var average = Value.Arithmetic('/', AsValue(), Value.FromInteger(count));
+            var average = Value.NumericArithmetic('/', AsValue(), Value.FromInteger(count));
             return average.Type == ValueType.Unbound ? "" : average.Term();
         }
     }

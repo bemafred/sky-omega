@@ -16,6 +16,12 @@ internal enum XsdKind : byte
     Double,
     DateTime,
     Date,
+    /// <summary><c>xsd:duration</c>: months and seconds together, equal by value but not ordered (XPath op:duration-equal).</summary>
+    Duration,
+    /// <summary><c>xsd:dayTimeDuration</c>: seconds only, ordered and added to dates (XPath §8, §9.7).</summary>
+    DayTimeDuration,
+    /// <summary><c>xsd:yearMonthDuration</c>: months only, ordered and added to dates (XPath §8, §9.7).</summary>
+    YearMonthDuration,
 }
 
 /// <summary>
@@ -34,7 +40,9 @@ internal static class XsdDatatype
     public const string Double = "<http://www.w3.org/2001/XMLSchema#double>";
     public const string DateTime = "<http://www.w3.org/2001/XMLSchema#dateTime>";
     public const string Date = "<http://www.w3.org/2001/XMLSchema#date>";
+    public const string Duration = "<http://www.w3.org/2001/XMLSchema#duration>";
     public const string DayTimeDuration = "<http://www.w3.org/2001/XMLSchema#dayTimeDuration>";
+    public const string YearMonthDuration = "<http://www.w3.org/2001/XMLSchema#yearMonthDuration>";
     public const string LangString = "<http://www.w3.org/1999/02/22-rdf-syntax-ns#langString>";
 
     // The XSD types, by local name, with the class of value each has. The integer types are xsd:integer's derivation
@@ -49,6 +57,9 @@ internal static class XsdDatatype
         ("double", XsdKind.Double, Double),
         ("dateTime", XsdKind.DateTime, DateTime),
         ("date", XsdKind.Date, Date),
+        ("duration", XsdKind.Duration, Duration),
+        ("dayTimeDuration", XsdKind.DayTimeDuration, DayTimeDuration),
+        ("yearMonthDuration", XsdKind.YearMonthDuration, YearMonthDuration),
         ("nonPositiveInteger", XsdKind.Integer, Namespaced("nonPositiveInteger")),
         ("negativeInteger", XsdKind.Integer, Namespaced("negativeInteger")),
         ("long", XsdKind.Integer, Namespaced("long")),

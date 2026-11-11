@@ -29,6 +29,7 @@ Key components:
 | Hash functions | MD5, SHA1, SHA256, SHA384, SHA512 |
 | UUID functions | UUID, STRUUID (uses time-ordered UUID v7) |
 | DateTime functions | NOW, YEAR, MONTH, DAY, HOURS, MINUTES, SECONDS, TZ, TIMEZONE |
+| Date arithmetic | dateTime or date ± xsd:dayTimeDuration or xsd:yearMonthDuration, dateTime − dateTime, date − date (XPath 3.1; an extension to SPARQL 1.1) |
 | Casts | xsd:integer, xsd:decimal, xsd:float, xsd:double, xsd:boolean, xsd:string, xsd:dateTime |
 | Computed values | BIND (arithmetic expressions) |
 | Aggregation | GROUP BY, HAVING, COUNT, SUM, AVG, MIN, MAX, GROUP_CONCAT, SAMPLE |
@@ -49,12 +50,24 @@ An expression evaluates to an RDF term or an error, by the SPARQL operator mappi
   so `BIND(1 + 1 AS ?x)` binds `"2"^^xsd:integer` and `BIND("a" AS ?x)` binds `"a"`.
 - **Arithmetic** promotes integer → decimal → float → double. `7 / 2` is `"3.5"^^xsd:decimal`. A string is not
   coerced to a number: `"5" + 1` is an error.
-- **`=` and `!=`** compare numbers, strings, booleans, dateTimes and dates by value.
+- **Date arithmetic** follows XPath 3.1's operator mapping (Functions and Operators §9.7), an extension: SPARQL 1.1
+  maps `+` and `-` on numbers only.
+  - A date or dateTime plus or minus an `xsd:dayTimeDuration` or `xsd:yearMonthDuration` (either order for `+`) is
+    moved by it, keeping its timezone: `NOW() - "P7D"^^xsd:dayTimeDuration` is a week ago. Months move the month,
+    and a day past its end becomes its last day: `"2000-01-31"^^xsd:date + "P1M"^^xsd:yearMonthDuration` is
+    `"2000-02-29"`.
+  - A dateTime minus a dateTime, or a date minus a date, is the `xsd:dayTimeDuration` between them, in canonical
+    form (`P1DT1H1.5S`, `PT0S`, `-P1D`). It is an error when one has a timezone and the other hasn't.
+  - A plain `xsd:duration`, a result outside the years 1 to 9999, and any other operands are errors. SUM and AVG
+    stay numeric (op:numeric-add, §18.5.1).
+- **`=` and `!=`** compare numbers, strings, booleans, dateTimes, dates and durations by value. Durations are equal
+  when their months and seconds are, across `xsd:duration` and its two subtypes (`"P0M"` equals `"PT0S"`).
   - Values in two different value spaces (a number and a string) are not equal.
   - A literal of an unknown datatype, or an ill-typed one, is equal only to the same term, and an error otherwise.
   - Language tags compare ignoring case.
   - A date or dateTime with a timezone and one without are ordered only when they are more than 14 hours apart.
-- **`<` `>` `<=` `>=`** are defined within those value spaces only. Comparing two IRIs is an error.
+- **`<` `>` `<=` `>=`** are defined within those value spaces only. Durations are ordered two dayTimeDurations or two
+  yearMonthDurations at a time. Comparing two IRIs is an error.
 - **Errors propagate.** `!`, `&&` and `||` follow the §17.2 truth tables, so `!?w` with `?w` unbound is an error. FILTER
   keeps a row only when the effective boolean value is true. An error leaves a BIND variable unbound.
 - **Datatypes in constants** are expanded through the prologue (`"a"^^t:type1`). An undeclared prefix is an error,
@@ -159,8 +172,13 @@ One file per type in `Sparql/Execution/Operators/`:
 
 **Design notes:**
 - Temporal clauses come after LIMIT/OFFSET in solution modifiers
-- DateTime literals support both `xsd:date` and `xsd:dateTime` formats
+- DateTime literals support both `xsd:date` and `xsd:dateTime` formats; the time is a literal, not an expression
 - Default mode is `Current` (equivalent to calling `QueryCurrent()`)
+- `AS OF t` is the store as it stood at the instant t (ValidFrom ≤ t < ValidTo): it keeps what was older than t and
+  leaves out what came later.
+- `DURING [s, e]` is every version valid at some moment in the range (ValidFrom < e and ValidTo > s). A triple
+  recorded before s and still valid is in it, so neither clause selects "recorded since t". Filter on a recorded time
+  instead: `FILTER(?created >= NOW() - "P7D"^^xsd:dayTimeDuration)` keeps the last week's records.
 
 ## OWL/RDFS Reasoning (`SkyOmega.Mercury.Owl`)
 

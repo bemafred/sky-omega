@@ -59,6 +59,54 @@ internal static class XsdDateTime
     }
 
     /// <summary>
+    /// <paramref name="lexical"/> plus a duration of <paramref name="months"/> and <paramref name="ticks"/> (XPath
+    /// op:add-yearMonthDuration-to-dateTime, op:add-dayTimeDuration-to-dateTime and their date forms; XML Schema 2
+    /// Appendix E): the months move the year and month, and a day past the end of the new month becomes its last day;
+    /// then the ticks are added. The value is read as written, with no timezone conversion, and keeps its timezone. A
+    /// date adds to its first instant and is the date the sum falls on. Null when the form is not valid or the result
+    /// is outside the years 1 to 9999.
+    /// </summary>
+    public static string? Add(ReadOnlySpan<char> lexical, bool isDate, long months, long ticks)
+    {
+        const long MonthsInRange = 12 * 9999;
+        if (!TryRead(lexical, isDate, out var fields) || months is > MonthsInRange or < -MonthsInRange)
+            return null;
+        long month = fields.Year * 12L + (fields.Month - 1) + months;
+        if (month is < 12 or >= 12 * 10000)
+            return null;
+        int year = (int)(month / 12), monthOfYear = (int)(month % 12) + 1;
+        int day = Math.Min(fields.Day, DateTime.DaysInMonth(year, monthOfYear));
+
+        long start = new DateTime(year, monthOfYear, day).Ticks + fields.Hour * TimeSpan.TicksPerHour
+            + fields.Minute * TimeSpan.TicksPerMinute + (long)decimal.Truncate(fields.Second * TimeSpan.TicksPerSecond);
+        if (ticks > DateTime.MaxValue.Ticks - start || ticks < -start)
+            return null;
+        var sum = new DateTime(start + ticks);
+
+        var zone = fields.Zone is "+00:00" or "-00:00" ? "Z" : fields.Zone;
+        if (isDate)
+            return string.Concat(sum.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), zone);
+        long fraction = sum.Ticks % TimeSpan.TicksPerSecond;
+        return string.Concat(sum.ToString("yyyy-MM-ddTHH:mm:ss", CultureInfo.InvariantCulture),
+            fraction == 0 ? "" : "." + fraction.ToString("D7", CultureInfo.InvariantCulture).TrimEnd('0'), zone);
+    }
+
+    /// <summary>
+    /// The time from <paramref name="b"/> to <paramref name="a"/>, in ticks (XPath op:subtract-dateTimes,
+    /// op:subtract-dates). False when either form is not valid, or when one has a timezone and the other hasn't: XPath
+    /// reads the one without in an implicit timezone, and SPARQL names none, so their difference is not known.
+    /// </summary>
+    public static bool TrySubtract(ReadOnlySpan<char> a, ReadOnlySpan<char> b, bool isDate, out long ticks)
+    {
+        ticks = 0;
+        if (!TryParse(a, isDate, out long x, out bool aZoned) || !TryParse(b, isDate, out long y, out bool bZoned)
+            || aZoned != bZoned)
+            return false;
+        ticks = x - y;
+        return true;
+    }
+
+    /// <summary>
     /// The fields of a valid <c>xsd:dateTime</c> lexical form <c>yyyy-MM-ddThh:mm:ss(.s+)?(Z|±hh:mm)?</c>, or of an
     /// <c>xsd:date</c> <c>yyyy-MM-dd(Z|±hh:mm)?</c>, as written, except that <c>24:00:00</c> is the next day's
     /// <c>00:00:00</c>: SPARQL's YEAR … TZ read them with no timezone conversion (§17.4.5). The one reader of the
