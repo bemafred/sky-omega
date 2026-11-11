@@ -21,7 +21,7 @@ public class Adr049EvaluateToValueProbeTests
 {
     private static Value Eval(string expr)
     {
-        var e = new FilterEvaluator(expr.AsSpan());
+        var e = new FilterEvaluator(expr.AsSpan(), DateTimeOffset.UtcNow);
         return e.EvaluateToValue(
             ReadOnlySpan<Binding>.Empty, 0, ReadOnlySpan<char>.Empty, null, ReadOnlySpan<char>.Empty);
     }

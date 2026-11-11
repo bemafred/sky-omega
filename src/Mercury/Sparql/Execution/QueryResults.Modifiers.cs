@@ -81,7 +81,7 @@ internal ref partial struct QueryResults
         }
 
         if (_orderBy.HasOrderBy && rows.Count > 1)
-            rows.Sort(new MaterializedRowComparer(_orderBy, _source.ToString(), _buffer?.Prefixes ?? _materializedPrefixes));
+            rows.Sort(new MaterializedRowComparer(_orderBy, _source.ToString(), _now, _buffer?.Prefixes ?? _materializedPrefixes));
         _bindingTable.Clear();
     }
 
@@ -128,7 +128,7 @@ internal ref partial struct QueryResults
         if (_sortedResults.Count > 1)
         {
             var sourceStr = _source.ToString();
-            _sortedResults.Sort(new MaterializedRowComparer(_orderBy, sourceStr, _buffer?.Prefixes ?? _materializedPrefixes));
+            _sortedResults.Sort(new MaterializedRowComparer(_orderBy, sourceStr, _now, _buffer?.Prefixes ?? _materializedPrefixes));
         }
 
         // Reset for iteration
@@ -209,7 +209,7 @@ internal ref partial struct QueryResults
     {
         _groupedSolutions = new List<MaterializedRow>(_groupedResults!.Count);
         var comparer = _orderBy.HasOrderBy
-            ? new MaterializedRowComparer(_orderBy, _source.ToString(), _buffer?.Prefixes ?? _materializedPrefixes)
+            ? new MaterializedRowComparer(_orderBy, _source.ToString(), _now, _buffer?.Prefixes ?? _materializedPrefixes)
             : null;
         for (int g = 0; g < _groupedResults.Count; g++)
         {
@@ -297,7 +297,7 @@ internal ref partial struct QueryResults
             }
 
             // Update aggregates for this group
-            group.UpdateAggregates(_bindingTable, sourceStr);
+            group.UpdateAggregates(_bindingTable, sourceStr, _now);
             // Note: Do NOT call _bindingTable.Clear() here!
             // The scan manages its own binding state via TruncateTo() for backtracking.
             // Calling Clear() resets _stringOffset to 0, corrupting string data that
@@ -330,7 +330,7 @@ internal ref partial struct QueryResults
                 // HavingClause ::= 'HAVING' HavingCondition+, ANDed: each condition's aggregates are the group's
                 // (§18.2.4.1), and an error, an aggregate's included, removes the group as FILTER does
                 var condition = WithAggregateValues(_having.ExpressionStart, _having.ExpressionLength, group);
-                if (condition == null || !EvaluateMultipleHavingConditions(condition, _bindingTable))
+                if (condition == null || !EvaluateMultipleHavingConditions(condition, _bindingTable, _now))
                     continue;
             }
 
@@ -399,7 +399,7 @@ internal ref partial struct QueryResults
     /// Handles format: (cond1) (cond2) ... where all conditions must be true.
     /// Also handles single condition: (cond1) or just: cond1
     /// </summary>
-    private static bool EvaluateMultipleHavingConditions(string expr, BindingTable bindingTable)
+    private static bool EvaluateMultipleHavingConditions(string expr, BindingTable bindingTable, DateTimeOffset? now)
     {
         var span = expr.AsSpan().Trim();
         if (span.Length == 0)
@@ -427,7 +427,7 @@ internal ref partial struct QueryResults
                 var condition = span.Slice(condStart, pos - 1 - condStart);
 
                 // Evaluate this condition
-                var evaluator = new FilterEvaluator(condition);
+                var evaluator = new FilterEvaluator(condition, now);
                 if (!evaluator.Evaluate(bindingTable.GetBindings(), bindingTable.Count, bindingTable.GetStringBuffer()))
                     return false; // This condition failed - AND fails
             }
@@ -436,7 +436,7 @@ internal ref partial struct QueryResults
         }
 
         // Single condition without outer parens - evaluate directly
-        var singleEvaluator = new FilterEvaluator(span);
+        var singleEvaluator = new FilterEvaluator(span, now);
         return singleEvaluator.Evaluate(bindingTable.GetBindings(), bindingTable.Count, bindingTable.GetStringBuffer());
     }
 
@@ -492,7 +492,7 @@ internal ref partial struct QueryResults
                 : ReadOnlySpan<char>.Empty;
 
             // Evaluate the expression using existing bindings
-            var evaluator = new FilterEvaluator(expr);
+            var evaluator = new FilterEvaluator(expr, _now);
             var value = evaluator.EvaluateToValue(
                 _bindingTable.GetBindings(),
                 _bindingTable.Count,
@@ -531,7 +531,7 @@ internal ref partial struct QueryResults
                 continue;
 
             // Evaluate the expression
-            var evaluator = new FilterEvaluator(substitutedExpr.AsSpan());
+            var evaluator = new FilterEvaluator(substitutedExpr.AsSpan(), _now);
             var value = evaluator.EvaluateToValue(
                 _bindingTable.GetBindings(),
                 _bindingTable.Count,
@@ -551,16 +551,19 @@ internal sealed class MaterializedRowComparer : IComparer<MaterializedRow>
 {
     private readonly OrderByClause _orderBy;
     private readonly string _source;
+    // NOW()'s value: the time of the query execution whose rows are sorted (SPARQL 1.1 §17.4.5.1)
+    private readonly DateTimeOffset? _now;
     private readonly PrefixMapping[]? _prefixes;
     // Per condition: true when it is one variable, read from the row; otherwise an expression, evaluated
     private readonly bool[] _isVariable;
     // An expression condition's value for a row, evaluated once per row rather than once per comparison
     private readonly Dictionary<MaterializedRow, string[]>? _values;
 
-    public MaterializedRowComparer(OrderByClause orderBy, string source, PrefixMapping[]? prefixes = null)
+    public MaterializedRowComparer(OrderByClause orderBy, string source, DateTimeOffset? now, PrefixMapping[]? prefixes = null)
     {
         _orderBy = orderBy;
         _source = source;
+        _now = now;
         _prefixes = prefixes;
         _isVariable = new bool[orderBy.Count];
         bool anyExpression = false;
@@ -684,7 +687,7 @@ internal sealed class MaterializedRowComparer : IComparer<MaterializedRow>
     /// </summary>
     internal ReadOnlySpan<char> Evaluate(ReadOnlySpan<char> expression, scoped ref BindingTable bindings)
     {
-        var evaluator = new FilterEvaluator(expression);
+        var evaluator = new FilterEvaluator(expression, _now);
         var value = evaluator.EvaluateToValue(bindings.GetBindings(), bindings.Count, bindings.GetStringBuffer(),
             _prefixes, _source.AsSpan());
         return value.Type == ValueType.Unbound ? ReadOnlySpan<char>.Empty : value.Term();

@@ -36,6 +36,8 @@ internal class UpdateExecutor
     private readonly string _source;
     private readonly UpdateOperation _update;
     private readonly LoadExecutor? _loadExecutor;
+    // NOW()'s value: the time of the update request the operation is part of, read once for all its operations
+    private readonly DateTimeOffset _now;
     private string? _expandedTerm; // Buffer for expanded prefixed names
     private string? _literalScratch; // ADR-044: scratch owner for canonicalized literals
 
@@ -43,17 +45,28 @@ internal class UpdateExecutor
     // names one node; every scope mints new nodes (SPARQL 1.1 Update §3.1.1, §3.1.3)
     private Rdf.BlankNodeScope _bnodeScope = new();
 
+    /// <summary>An operation executed on its own: it is the whole request, and reads the time now.</summary>
     public UpdateExecutor(QuadStore store, ReadOnlySpan<char> source, UpdateOperation update)
-        : this(store, source, update, null)
+        : this(store, source, update, null, DateTimeOffset.UtcNow)
     {
     }
 
+    /// <summary>An operation executed on its own, with LOAD: it is the whole request, and reads the time now.</summary>
     public UpdateExecutor(QuadStore store, ReadOnlySpan<char> source, UpdateOperation update, LoadExecutor? loadExecutor)
+        : this(store, source, update, loadExecutor, DateTimeOffset.UtcNow)
+    {
+    }
+
+    /// <summary>One operation of a request.</summary>
+    /// <param name="now">NOW()'s value: the time the request started, the same for each of its operations.</param>
+    public UpdateExecutor(QuadStore store, ReadOnlySpan<char> source, UpdateOperation update, LoadExecutor? loadExecutor,
+        DateTimeOffset now)
     {
         _store = store;
         _source = source.ToString();
         _update = update;
         _loadExecutor = loadExecutor;
+        _now = now;
     }
 
     /// <summary>
@@ -85,7 +98,8 @@ internal class UpdateExecutor
     /// Operations run in order. A failing operation stops the sequence; a SILENT operation
     /// reports its own failure as success, so it does not stop it. Each operation commits on
     /// its own, so operations before a failure keep their effects: the request is sequential
-    /// with abort, not all-or-nothing.
+    /// with abort, not all-or-nothing. The request is one execution for NOW(): it reads the
+    /// time once, and every operation's NOW() is that value (SPARQL 1.1 §17.4.5.1).
     /// </summary>
     /// <param name="store">The quad store.</param>
     /// <param name="source">The original source string containing all operations.</param>
@@ -101,13 +115,14 @@ internal class UpdateExecutor
         if (operations == null || operations.Length == 0)
             return new UpdateResult { Success = true, AffectedCount = 0 };
 
+        var now = DateTimeOffset.UtcNow;
         var totalAffected = 0;
 
         for (int i = 0; i < operations.Length; i++)
         {
             QueryCancellation.ThrowIfCancellationRequested();
 
-            var executor = new UpdateExecutor(store, source, operations[i], loadExecutor);
+            var executor = new UpdateExecutor(store, source, operations[i], loadExecutor, now);
             var result = executor.Execute();
 
             if (!result.Success)
@@ -272,7 +287,7 @@ internal class UpdateExecutor
             int root = new SparqlParser(_source.AsSpan()).ParsePatternTreeAt(_update.WhereGroupStart, ref tree);
 
             var trigramCandidates = TreeJoinExecutor.ResolveTrigramCandidates(_store, ref tree, root, _source);
-            var executor = new TreeJoinExecutor(_store, _source, PrefixMappings, _source,
+            var executor = new TreeJoinExecutor(_store, _source, _now, PrefixMappings, _source,
                 namedGraphs: namedGraphs, defaultGraphs: defaultGraphs, trigramCandidatesByVar: trigramCandidates);
             return executor.Evaluate(ref tree, root, activeGraph: "");
         }

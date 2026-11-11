@@ -109,7 +109,7 @@ internal ref partial struct QueryResults
 
             // Evaluate the expression via the unified EvaluateToValue. Prefixes come from the outer buffer (main path) or,
             // when there is none, from the materialized prefixes the sub-SELECT path lends (C2).
-            var evaluator = new FilterEvaluator(expr);
+            var evaluator = new FilterEvaluator(expr, _now);
             var value = evaluator.EvaluateToValue(
                 _bindingTable.GetBindings(),
                 _bindingTable.Count,

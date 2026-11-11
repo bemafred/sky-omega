@@ -18,7 +18,7 @@ public class FilterEvaluatorTests
 {
     private static bool Evaluate(string filter)
     {
-        var evaluator = new FilterEvaluator(filter.AsSpan());
+        var evaluator = new FilterEvaluator(filter.AsSpan(), DateTimeOffset.UtcNow);
         return evaluator.Evaluate();
     }
 
@@ -675,7 +675,7 @@ public class FilterEvaluatorTests
         var stringBuffer = new char[256];
         var bindings = new BindingTable(bindingStorage, stringBuffer);
         bindings.Bind(varName, value);
-        var evaluator = new FilterEvaluator(filter.AsSpan());
+        var evaluator = new FilterEvaluator(filter.AsSpan(), DateTimeOffset.UtcNow);
         return evaluator.Evaluate(bindings.GetBindings(), bindings.Count, bindings.GetStringBuffer());
     }
 
@@ -685,7 +685,7 @@ public class FilterEvaluatorTests
         var stringBuffer = new char[256];
         var bindings = new BindingTable(bindingStorage, stringBuffer);
         bindings.Bind(varName, value);
-        var evaluator = new FilterEvaluator(filter.AsSpan());
+        var evaluator = new FilterEvaluator(filter.AsSpan(), DateTimeOffset.UtcNow);
         return evaluator.Evaluate(bindings.GetBindings(), bindings.Count, bindings.GetStringBuffer());
     }
 
@@ -695,7 +695,7 @@ public class FilterEvaluatorTests
         var stringBuffer = new char[256];
         var bindings = new BindingTable(bindingStorage, stringBuffer);
         bindings.Bind(varName, value);
-        var evaluator = new FilterEvaluator(filter.AsSpan());
+        var evaluator = new FilterEvaluator(filter.AsSpan(), DateTimeOffset.UtcNow);
         return evaluator.Evaluate(bindings.GetBindings(), bindings.Count, bindings.GetStringBuffer());
     }
 
@@ -705,7 +705,7 @@ public class FilterEvaluatorTests
         var stringBuffer = new char[256];
         var bindings = new BindingTable(bindingStorage, stringBuffer);
         bindings.Bind(varName, value.AsSpan());
-        var evaluator = new FilterEvaluator(filter.AsSpan());
+        var evaluator = new FilterEvaluator(filter.AsSpan(), DateTimeOffset.UtcNow);
         return evaluator.Evaluate(bindings.GetBindings(), bindings.Count, bindings.GetStringBuffer());
     }
 
@@ -725,7 +725,7 @@ public class FilterEvaluatorTests
                 case string s: bindings.Bind(name, s.AsSpan()); break;
             }
         }
-        var evaluator = new FilterEvaluator(filter.AsSpan());
+        var evaluator = new FilterEvaluator(filter.AsSpan(), DateTimeOffset.UtcNow);
         return evaluator.Evaluate(bindings.GetBindings(), bindings.Count, bindings.GetStringBuffer());
     }
 
@@ -734,7 +734,7 @@ public class FilterEvaluatorTests
         var bindingStorage = new Binding[16];
         var stringBuffer = new char[256];
         var bindings = new BindingTable(bindingStorage, stringBuffer);
-        var evaluator = new FilterEvaluator(filter.AsSpan());
+        var evaluator = new FilterEvaluator(filter.AsSpan(), DateTimeOffset.UtcNow);
         return evaluator.Evaluate(bindings.GetBindings(), bindings.Count, bindings.GetStringBuffer());
     }
 
@@ -1366,7 +1366,7 @@ public class FilterEvaluatorTests
         var stringBuffer = new char[256];
         var bindings = new BindingTable(bindingStorage, stringBuffer);
         bindings.BindUri("?x", "<http://example.org/test>".AsSpan());
-        var evaluator = new FilterEvaluator("isIRI(?x)".AsSpan());
+        var evaluator = new FilterEvaluator("isIRI(?x)".AsSpan(), DateTimeOffset.UtcNow);
         Assert.True(evaluator.Evaluate(bindings.GetBindings(), bindings.Count, bindings.GetStringBuffer()));
     }
 
@@ -1383,7 +1383,7 @@ public class FilterEvaluatorTests
         var stringBuffer = new char[256];
         var bindings = new BindingTable(bindingStorage, stringBuffer);
         bindings.BindUri("?x", "<http://example.org/test>".AsSpan());
-        var evaluator = new FilterEvaluator("isURI(?x)".AsSpan());
+        var evaluator = new FilterEvaluator("isURI(?x)".AsSpan(), DateTimeOffset.UtcNow);
         Assert.True(evaluator.Evaluate(bindings.GetBindings(), bindings.Count, bindings.GetStringBuffer()));
     }
 
@@ -1398,7 +1398,7 @@ public class FilterEvaluatorTests
         var stringBuffer = new char[256];
         var bindings = new BindingTable(bindingStorage, stringBuffer);
         bindings.BindUri("?x", "_:b1".AsSpan());
-        var evaluator = new FilterEvaluator("isBlank(?x)".AsSpan());
+        var evaluator = new FilterEvaluator("isBlank(?x)".AsSpan(), DateTimeOffset.UtcNow);
         Assert.True(evaluator.Evaluate(bindings.GetBindings(), bindings.Count, bindings.GetStringBuffer()));
     }
 
@@ -1409,7 +1409,7 @@ public class FilterEvaluatorTests
         var stringBuffer = new char[256];
         var bindings = new BindingTable(bindingStorage, stringBuffer);
         bindings.BindUri("?x", "<http://example.org/test>".AsSpan());
-        var evaluator = new FilterEvaluator("isBlank(?x)".AsSpan());
+        var evaluator = new FilterEvaluator("isBlank(?x)".AsSpan(), DateTimeOffset.UtcNow);
         Assert.False(evaluator.Evaluate(bindings.GetBindings(), bindings.Count, bindings.GetStringBuffer()));
     }
 
@@ -1454,7 +1454,7 @@ public class FilterEvaluatorTests
         var stringBuffer = new char[256];
         var bindings = new BindingTable(bindingStorage, stringBuffer);
         bindings.BindUri("?x", "<http://example.org/test>".AsSpan());
-        var evaluator = new FilterEvaluator("isLiteral(?x)".AsSpan());
+        var evaluator = new FilterEvaluator("isLiteral(?x)".AsSpan(), DateTimeOffset.UtcNow);
         Assert.False(evaluator.Evaluate(bindings.GetBindings(), bindings.Count, bindings.GetStringBuffer()));
     }
 

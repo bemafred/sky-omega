@@ -23,6 +23,9 @@ internal ref partial struct QueryResults
     private readonly PrefixMapping[]? _materializedPrefixes;
     private ReadOnlySpan<char> _source;
     private QuadStore? _store;
+    // NOW()'s value: the time of the query execution these results are part of (SPARQL 1.1 §17.4.5.1). Null for the
+    // results that evaluate no expression (Empty, FromMaterializedRows, FromMaterializedList).
+    private readonly DateTimeOffset? _now;
     private Binding[]? _bindings;
     private char[]? _stringBuffer;
     private BindingTable _bindingTable;
@@ -97,14 +100,14 @@ internal ref partial struct QueryResults
     /// </summary>
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     internal static QueryResults FromMaterializedSimple(List<MaterializedRow> rows,
-        ReadOnlySpan<char> source, QuadStore store, Binding[] bindings, char[] stringBuffer,
+        ReadOnlySpan<char> source, QuadStore store, DateTimeOffset now, Binding[] bindings, char[] stringBuffer,
         LimitOffsetClause limitOffset = default, bool distinct = false, OrderByClause orderBy = default,
         GroupByClause groupBy = default, SelectClause selectClause = default, HavingClause having = default,
         Patterns.QueryBuffer? buffer = null, PrefixMapping[]? prefixes = null, List<MaterializedRow>? trailingValues = null)
     {
         // ORDER BY sorts the solutions with their SELECT expressions (§18.2.5): the presentation does, on its first row
         // (MoveNextOrdered, or MoveNextGrouped for a grouped query's solutions)
-        return new QueryResults(rows, source, store, bindings, stringBuffer,
+        return new QueryResults(rows, source, store, now, bindings, stringBuffer,
             limitOffset, distinct, orderBy, groupBy, selectClause, having, buffer, prefixes, trailingValues);
     }
 
@@ -127,10 +130,10 @@ internal ref partial struct QueryResults
     /// </summary>
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     internal static QueryResults FromFinalizedGroups(List<GroupedRow> groups,
-        ReadOnlySpan<char> source, QuadStore store, Binding[] bindings, char[] stringBuffer,
+        ReadOnlySpan<char> source, QuadStore store, DateTimeOffset now, Binding[] bindings, char[] stringBuffer,
         LimitOffsetClause limitOffset, bool distinct, SelectClause selectClause)
     {
-        return new QueryResults(groups, source, store, bindings, stringBuffer, limitOffset, distinct, selectClause);
+        return new QueryResults(groups, source, store, now, bindings, stringBuffer, limitOffset, distinct, selectClause);
     }
 
     /// <summary>
@@ -161,7 +164,7 @@ internal ref partial struct QueryResults
     /// Used for simple materialized iteration where pattern access is not needed.
     /// </summary>
     private QueryResults(List<MaterializedRow> rows, ReadOnlySpan<char> source,
-        QuadStore store, Binding[] bindings, char[] stringBuffer,
+        QuadStore store, DateTimeOffset now, Binding[] bindings, char[] stringBuffer,
         LimitOffsetClause limitOffset, bool distinct, OrderByClause orderBy,
         GroupByClause groupBy, SelectClause selectClause, HavingClause having,
         Patterns.QueryBuffer? buffer = null, PrefixMapping[]? prefixes = null, List<MaterializedRow>? trailingValues = null)
@@ -175,6 +178,7 @@ internal ref partial struct QueryResults
         _materializedPrefixes = prefixes;
         _source = source;
         _store = store;
+        _now = now;
         _bindings = bindings;
         _stringBuffer = stringBuffer;
         _bindingTable = new BindingTable(bindings, stringBuffer);
@@ -210,12 +214,13 @@ internal ref partial struct QueryResults
     /// projects and applies LIMIT/OFFSET. The gated path has no GROUP BY / ORDER BY / HAVING (a single global group).
     /// </summary>
     private QueryResults(List<GroupedRow> groups, ReadOnlySpan<char> source,
-        QuadStore store, Binding[] bindings, char[] stringBuffer,
+        QuadStore store, DateTimeOffset now, Binding[] bindings, char[] stringBuffer,
         LimitOffsetClause limitOffset, bool distinct, SelectClause selectClause)
     {
         _buffer = null;
         _source = source;
         _store = store;
+        _now = now;
         _bindings = bindings;
         _stringBuffer = stringBuffer;
         _bindingTable = new BindingTable(bindings, stringBuffer);
@@ -517,7 +522,8 @@ internal sealed class GroupedRow
         }
     }
 
-    public void UpdateAggregates(BindingTable bindings, string source)
+    /// <param name="now">NOW()'s value: the time of the query execution the group is part of.</param>
+    public void UpdateAggregates(BindingTable bindings, string source, DateTimeOffset? now)
     {
         for (int i = 0; i < _aggCount; i++)
         {
@@ -535,7 +541,7 @@ internal sealed class GroupedRow
                 if (expr != null)
                 {
                     // Evaluate the complex expression (e.g., IF(isNumeric(?p), ?p, COALESCE(...)))
-                    var evaluator = new FilterEvaluator(expr.AsSpan());
+                    var evaluator = new FilterEvaluator(expr.AsSpan(), now);
                     // UpdateAggregates has no buffer/prefixes in scope — the aggregate-inner-expression path keeps the
                     // hardcoded xsd/rdf/rdfs prefixes only (a prologue-prefixed constant inside an aggregate is rare).
                     var value = evaluator.EvaluateToValue(

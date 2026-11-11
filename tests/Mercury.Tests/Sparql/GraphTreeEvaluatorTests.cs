@@ -881,7 +881,7 @@ internal sealed class GraphTreeEvaluator
             var table = new BindingTable(store, stringBuffer);
             Populate(ref table, sol);
 
-            var evaluator = new FilterEvaluator(exprText.AsSpan());
+            var evaluator = new FilterEvaluator(exprText.AsSpan(), DateTimeOffset.UtcNow);
             var value = evaluator.EvaluateToValue(
                 table.GetBindings(), table.Count, table.GetStringBuffer(), null, ReadOnlySpan<char>.Empty);
 
@@ -909,7 +909,7 @@ internal sealed class GraphTreeEvaluator
             var table = new BindingTable(store, stringBuffer);
             Populate(ref table, sol);
 
-            var evaluator = new FilterEvaluator(exprText.AsSpan());
+            var evaluator = new FilterEvaluator(exprText.AsSpan(), DateTimeOffset.UtcNow);
             bool pass = _prefixes is not null
                 ? evaluator.Evaluate(table.GetBindings(), table.Count, table.GetStringBuffer(), _prefixes, _prefixSource.AsSpan())
                 : evaluator.Evaluate(table.GetBindings(), table.Count, table.GetStringBuffer());
@@ -998,7 +998,7 @@ internal sealed class GraphTreeEvaluator
         var selectClause = sub.Select;
         var qrBindings = new Binding[64];
         var qrStringBuffer = new char[16384];
-        var qr = QueryResults.FromMaterializedSimple(rows, _source.AsSpan(), _store, qrBindings, qrStringBuffer,
+        var qr = QueryResults.FromMaterializedSimple(rows, _source.AsSpan(), _store, DateTimeOffset.UtcNow, qrBindings, qrStringBuffer,
             sub.Modifier.LimitOffset, sub.Select.Distinct, sub.Modifier.OrderBy, sub.Modifier.GroupBy, selectClause, sub.Modifier.Having);
 
         // Read the modified rows back over the projected/aggregated output variables.

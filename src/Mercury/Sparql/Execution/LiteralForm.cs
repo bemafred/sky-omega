@@ -54,7 +54,8 @@ internal static class LiteralForm
         if (constant.Length == 0 || constant[0] is '<' or '_' || IsStoredLiteral(constant))
             return constant;
 
-        var value = new Expressions.FilterEvaluator(constant).EvaluateToValue(
+        // A constant calls no function, so it reads no execution's time
+        var value = new Expressions.FilterEvaluator(constant, now: null).EvaluateToValue(
             ReadOnlySpan<Binding>.Empty, 0, ReadOnlySpan<char>.Empty, prefixes, source);
         if (value.Type == Expressions.ValueType.Unbound)
             return constant;

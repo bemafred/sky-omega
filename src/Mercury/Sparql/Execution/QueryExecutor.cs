@@ -75,6 +75,10 @@ internal partial class QueryExecutor : IDisposable
     private readonly DateTimeOffset _rangeStart;
     private readonly DateTimeOffset _rangeEnd;
 
+    // NOW()'s value (SPARQL 1.1 §17.4.5.1): read once, when the executor is made. One executor is one query
+    // execution, and every expression it evaluates, in a sub-SELECT too, reads this value.
+    private readonly DateTimeOffset _now;
+
     // Query optimization
     private readonly QueryPlanner? _planner;
 
@@ -103,6 +107,7 @@ internal partial class QueryExecutor : IDisposable
         if (maxJoinDepth <= 0)
             throw new ArgumentOutOfRangeException(nameof(maxJoinDepth), "Max join depth must be positive");
 
+        _now = DateTimeOffset.UtcNow;
         _store = store;
         _source = source.ToString();  // Copy to heap - enables class-based execution
         _bufferManager = bufferManager ?? PooledBufferManager.Shared;
@@ -255,7 +260,7 @@ internal partial class QueryExecutor : IDisposable
             return QueryResults.Empty();
 
         var bindings = new Binding[64];
-        return QueryResults.FromMaterializedSimple(rows, _source.AsSpan(), _store, bindings, _stringBuffer,
+        return QueryResults.FromMaterializedSimple(rows, _source.AsSpan(), _store, _now, bindings, _stringBuffer,
             _buffer.LimitOffset, _buffer.SelectDistinct,
             _buffer.GetOrderByClause(), _buffer.GetGroupByClause(),
             _buffer.GetSelectClause(), _buffer.GetHavingClause(), _buffer, trailingValues: groupedValues);
@@ -302,7 +307,7 @@ internal partial class QueryExecutor : IDisposable
             var groupBindings = new BindingTable(groupBindingArray, groupCharArray);
             var group = new GroupedRow(default, select, groupBindings, _source);
 
-            new TreeJoinExecutor(_store, _source, _prefixMappings, _source, _serviceExecutor,
+            new TreeJoinExecutor(_store, _source, _now, _prefixMappings, _source, _serviceExecutor,
                 _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _namedGraphs, _defaultGraphs, ReorderBgpInTree)
                 .FoldFlatBgpAggregate(ref tree, root, "", group);
 
@@ -310,7 +315,7 @@ internal partial class QueryExecutor : IDisposable
 
             var groups = new List<GroupedRow>(1) { group };
             var bindings = new Binding[64];
-            result = QueryResults.FromFinalizedGroups(groups, _source.AsSpan(), _store, bindings, _stringBuffer,
+            result = QueryResults.FromFinalizedGroups(groups, _source.AsSpan(), _store, _now, bindings, _stringBuffer,
                 _buffer.LimitOffset, _buffer.SelectDistinct, select);
             return true;
         }
@@ -386,13 +391,13 @@ internal partial class QueryExecutor : IDisposable
             if (!TreeJoinExecutor.IsFlatBgp(ref tree, root))
                 return false; // nested group / property path — full materialization handles those
 
-            var comparer = new MaterializedRowComparer(orderBy, _source, _prefixMappings);
-            var rows = new TreeJoinExecutor(_store, _source, _prefixMappings, _source, _serviceExecutor,
+            var comparer = new MaterializedRowComparer(orderBy, _source, _now, _prefixMappings);
+            var rows = new TreeJoinExecutor(_store, _source, _now, _prefixMappings, _source, _serviceExecutor,
                 _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _namedGraphs, _defaultGraphs, ReorderBgpInTree)
                 .StreamFlatBgpTopK(ref tree, root, "", comparer, capacity);
 
             var bindings = new Binding[64];
-            result = QueryResults.FromMaterializedSimple(rows, _source.AsSpan(), _store, bindings, _stringBuffer,
+            result = QueryResults.FromMaterializedSimple(rows, _source.AsSpan(), _store, _now, bindings, _stringBuffer,
                 _buffer.LimitOffset, distinct: false,
                 orderBy, default, select, default, _buffer);
             return true;
@@ -448,7 +453,7 @@ internal partial class QueryExecutor : IDisposable
             // tree's scan filters at the index level (candidate-narrowing that is mandatory at scale).
             var trigramMap = TreeJoinExecutor.ResolveTrigramCandidates(_store, ref tree, root, _source);
 
-            var executor = new TreeJoinExecutor(_store, _source, _prefixMappings, _source, _serviceExecutor,
+            var executor = new TreeJoinExecutor(_store, _source, _now, _prefixMappings, _source, _serviceExecutor,
                 _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _namedGraphs, _defaultGraphs, ReorderBgpInTree, trigramMap);
             var rows = executor.Evaluate(ref tree, root, "", maxRows);
 

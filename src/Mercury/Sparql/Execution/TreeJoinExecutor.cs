@@ -40,6 +40,8 @@ internal sealed class TreeJoinExecutor
 {
     private readonly QuadStore _store;
     private readonly string _source;
+    // NOW()'s value: the time of the query execution or update request this tree is part of (SPARQL 1.1 §17.4.5.1)
+    private readonly DateTimeOffset _now;
     private readonly PrefixMapping[]? _prefixes;
     private readonly string _prefixSource;
     private readonly ISparqlServiceExecutor? _serviceExecutor;
@@ -63,7 +65,7 @@ internal sealed class TreeJoinExecutor
     // object is one of these variables scans candidate-filtered (index-level candidate narrowing, done inline in the tree).
     private readonly Dictionary<string, HashSet<long>>? _trigramCandidatesByVar;
 
-    public TreeJoinExecutor(QuadStore store, string source, PrefixMapping[]? prefixes = null,
+    public TreeJoinExecutor(QuadStore store, string source, DateTimeOffset now, PrefixMapping[]? prefixes = null,
         string? prefixSource = null, ISparqlServiceExecutor? serviceExecutor = null,
         TemporalQueryMode temporalMode = TemporalQueryMode.Current,
         DateTimeOffset asOfTime = default, DateTimeOffset rangeStart = default, DateTimeOffset rangeEnd = default,
@@ -72,6 +74,7 @@ internal sealed class TreeJoinExecutor
     {
         _store = store;
         _source = source;
+        _now = now;
         _prefixes = prefixes;
         _prefixSource = prefixSource ?? source;
         _serviceExecutor = serviceExecutor;
@@ -414,7 +417,7 @@ internal sealed class TreeJoinExecutor
             {
                 table.TruncateTo(0);
                 row.RestoreBindings(ref table);
-                var evaluator = new FilterEvaluator(exprText.AsSpan());
+                var evaluator = new FilterEvaluator(exprText.AsSpan(), _now);
                 // The result is bound as its term ("2"^^xsd:integer), the form a stored literal has, so it matches a
                 // stored typed literal when it feeds a later pattern (W3C bind03)
                 var v = evaluator.EvaluateToValue(table.GetBindings(), table.Count, table.GetStringBuffer(), _prefixes, _prefixSource.AsSpan());
@@ -460,7 +463,7 @@ internal sealed class TreeJoinExecutor
             {
                 table.TruncateTo(0);
                 row.RestoreBindings(ref table);
-                var evaluator = new FilterEvaluator(exprText.AsSpan());
+                var evaluator = new FilterEvaluator(exprText.AsSpan(), _now);
                 bool pass = _prefixes is not null
                     ? evaluator.Evaluate(table.GetBindings(), table.Count, table.GetStringBuffer(), _prefixes, _prefixSource.AsSpan())
                     : evaluator.Evaluate(table.GetBindings(), table.Count, table.GetStringBuffer());
@@ -507,7 +510,7 @@ internal sealed class TreeJoinExecutor
 
                 table.TruncateTo(0);
                 row.RestoreBindings(ref table);
-                var evaluator = new FilterEvaluator(rewritten.AsSpan());
+                var evaluator = new FilterEvaluator(rewritten.AsSpan(), _now);
                 bool pass = _prefixes is not null
                     ? evaluator.Evaluate(table.GetBindings(), table.Count, table.GetStringBuffer(), _prefixes, _prefixSource.AsSpan())
                     : evaluator.Evaluate(table.GetBindings(), table.Count, table.GetStringBuffer());
@@ -764,7 +767,7 @@ internal sealed class TreeJoinExecutor
         // ADR-047 — one source/offset regime: the clauses are read at absolute offsets over _source, the string the
         // prologue prefixes index. ADR-055 D4 — the WHERE is the header's child subtree, parsed once with the query.
         var sub = new SparqlParser(_source.AsSpan()).ParseSubSelectClausesAt(slot.GraphTermStart, slot.SubSelectModifiersStart);
-        var innerBag = new TreeJoinExecutor(_store, _source, _prefixes, _prefixSource, _serviceExecutor,
+        var innerBag = new TreeJoinExecutor(_store, _source, _now, _prefixes, _prefixSource, _serviceExecutor,
                 _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _namedGraphs, _defaultGraphs)
             .Evaluate(ref pa, slot.ChildStartIndex, activeGraph);
 
@@ -790,7 +793,7 @@ internal sealed class TreeJoinExecutor
         // Lend the prefixes (there is no outer QueryBuffer here) so the modifier layer can evaluate a computed sub-SELECT
         // projection like ( CONCAT(?f," ",?l) AS ?full ) — without them EvaluateSelectExpressions never ran and the alias
         // came out unbound (W3C sq12, surfaced by the C2 CONSTRUCT-subquery cutover).
-        var qr = QueryResults.FromMaterializedSimple(innerBag, _source.AsSpan(), _store, qrBindings, qrStringBuffer,
+        var qr = QueryResults.FromMaterializedSimple(innerBag, _source.AsSpan(), _store, _now, qrBindings, qrStringBuffer,
             sub.Modifier.LimitOffset, sub.Select.Distinct || sub.Select.Reduced, sub.Modifier.OrderBy, sub.Modifier.GroupBy, selectClause, sub.Modifier.Having, buffer: null, prefixes: _prefixes,
             trailingValues: groupedValues);
 
@@ -1137,7 +1140,7 @@ internal sealed class TreeJoinExecutor
     {
         if (index == patterns.Length)
         {
-            group.UpdateAggregates(bindings, _source);
+            group.UpdateAggregates(bindings, _source, _now);
             return;
         }
 

@@ -13,7 +13,7 @@ public class FilterEvaluatorTextMatchTests
 {
     private static bool Evaluate(string expression)
     {
-        var evaluator = new FilterEvaluator(expression.AsSpan());
+        var evaluator = new FilterEvaluator(expression.AsSpan(), DateTimeOffset.UtcNow);
         return evaluator.Evaluate();
     }
 
@@ -23,7 +23,7 @@ public class FilterEvaluatorTextMatchTests
         var stringBuffer = new char[256];
         var bindings = new BindingTable(bindingStorage, stringBuffer);
         bindings.Bind(varName, value.AsSpan());
-        var evaluator = new FilterEvaluator(filter.AsSpan());
+        var evaluator = new FilterEvaluator(filter.AsSpan(), DateTimeOffset.UtcNow);
         return evaluator.Evaluate(bindings.GetBindings(), bindings.Count, bindings.GetStringBuffer());
     }
 
@@ -34,7 +34,7 @@ public class FilterEvaluatorTextMatchTests
         var bindings = new BindingTable(bindingStorage, stringBuffer);
         bindings.Bind(var1, val1.AsSpan());
         bindings.Bind(var2, val2.AsSpan());
-        var evaluator = new FilterEvaluator(filter.AsSpan());
+        var evaluator = new FilterEvaluator(filter.AsSpan(), DateTimeOffset.UtcNow);
         return evaluator.Evaluate(bindings.GetBindings(), bindings.Count, bindings.GetStringBuffer());
     }
 
@@ -168,7 +168,7 @@ public class FilterEvaluatorTextMatchTests
     public void TextMatch_UnboundVariable_ReturnsFalse()
     {
         // Unbound variable should return false
-        var evaluator = new FilterEvaluator("text:match(?unbound, \"hello\")".AsSpan());
+        var evaluator = new FilterEvaluator("text:match(?unbound, \"hello\")".AsSpan(), DateTimeOffset.UtcNow);
         Assert.False(evaluator.Evaluate());
     }
 

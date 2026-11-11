@@ -27,7 +27,7 @@ public class Adr049FunctionReconciliationProbeTests
 
     private static string ViaFilter(string expr)
     {
-        var e = new FilterEvaluator(expr.AsSpan());
+        var e = new FilterEvaluator(expr.AsSpan(), DateTimeOffset.UtcNow);
         return Render(e.EvaluateToValue(
             ReadOnlySpan<Binding>.Empty, 0, ReadOnlySpan<char>.Empty, null, ReadOnlySpan<char>.Empty));
     }
@@ -175,12 +175,12 @@ public class Adr049FunctionReconciliationProbeTests
     [Fact]
     public void Iri_ResolvesRelativeAgainstBase()
     {
-        var e1 = new FilterEvaluator("IRI(\"foo\")".AsSpan());
+        var e1 = new FilterEvaluator("IRI(\"foo\")".AsSpan(), DateTimeOffset.UtcNow);
         Assert.Equal("<http://example.org/foo>", Render(e1.EvaluateToValue(
             ReadOnlySpan<Binding>.Empty, 0, ReadOnlySpan<char>.Empty, null,
             ReadOnlySpan<char>.Empty, "http://example.org/".AsSpan())));
 
-        var e2 = new FilterEvaluator("IRI(\"http://other.org/x\")".AsSpan());
+        var e2 = new FilterEvaluator("IRI(\"http://other.org/x\")".AsSpan(), DateTimeOffset.UtcNow);
         Assert.Equal("<http://other.org/x>", Render(e2.EvaluateToValue(
             ReadOnlySpan<Binding>.Empty, 0, ReadOnlySpan<char>.Empty, null,
             ReadOnlySpan<char>.Empty, "http://example.org/".AsSpan())));

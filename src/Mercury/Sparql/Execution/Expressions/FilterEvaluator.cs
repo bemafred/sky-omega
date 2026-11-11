@@ -33,8 +33,17 @@ internal ref partial struct FilterEvaluator
     // When >= 0, exclude bindings from BINDs with BindScopeDepth < this value
     private int _filterScopeDepth;
 
-    public FilterEvaluator(ReadOnlySpan<char> expression)
+    // NOW()'s value: the time of the query execution this expression is part of, one value for every call in it
+    // (SPARQL 1.1 §17.4.5.1). Null when the expression is not part of an execution (a constant read for its stored
+    // form); NOW() is then an error.
+    private readonly DateTimeOffset? _now;
+
+    /// <param name="expression">The expression's text.</param>
+    /// <param name="now">The time of the query execution the expression is part of, read once when it started; null
+    /// when it is not part of one.</param>
+    public FilterEvaluator(ReadOnlySpan<char> expression, DateTimeOffset? now)
     {
+        _now = now;
         _expression = expression;
         _position = 0;
         _bindingData = ReadOnlySpan<Binding>.Empty;
@@ -525,13 +534,15 @@ internal ref partial struct FilterEvaluator
             return Value.FromString(Guid.CreateVersion7().ToString("D"));
         }
 
-        // NOW - the current dateTime
+        // NOW - the query execution's dateTime, in UTC ("…Z")
         if (funcName.Equals("now", StringComparison.OrdinalIgnoreCase))
         {
             SkipWhitespace();
             if (Peek() == ')')
                 Advance();
-            return Value.FromTyped(DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture), XsdDatatype.DateTime);
+            return _now is { } now
+                ? Value.FromTyped(now.UtcDateTime.ToString("O", CultureInfo.InvariantCulture), XsdDatatype.DateTime)
+                : Value.Error;
         }
 
         // RAND - a double in [0, 1)

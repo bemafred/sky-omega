@@ -111,7 +111,7 @@ public class TreeJoinExecutorTests : IDisposable
         var buffer = new byte[PatternSlot.Size * 256];
         var pa = new PatternArray(buffer);
         int root = new SparqlParser(where.AsSpan()).ParsePatternTree(ref pa);
-        var executor = new TreeJoinExecutor(_store, where);
+        var executor = new TreeJoinExecutor(_store, where, DateTimeOffset.UtcNow);
 
         _store.AcquireReadLock();
         try
@@ -142,7 +142,7 @@ public class TreeJoinExecutorTests : IDisposable
         _store.AcquireReadLock();
         try
         {
-            return new TreeJoinExecutor(_store, whereGroup, null, null, serviceExecutor).Evaluate(ref pa, root, activeGraph);
+            return new TreeJoinExecutor(_store, whereGroup, DateTimeOffset.UtcNow, null, null, serviceExecutor).Evaluate(ref pa, root, activeGraph);
         }
         finally
         {
@@ -229,7 +229,7 @@ public class TreeJoinExecutorTests : IDisposable
         _store.AcquireReadLock();
         try
         {
-            return new TreeJoinExecutor(_store, query, prefixes, query).Evaluate(ref pa, root, activeGraph);
+            return new TreeJoinExecutor(_store, query, DateTimeOffset.UtcNow, prefixes, query).Evaluate(ref pa, root, activeGraph);
         }
         finally
         {
