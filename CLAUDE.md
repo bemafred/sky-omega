@@ -20,7 +20,8 @@ git config submodule.recurse true
 # "(new commits)" can also mean the checkout moved PAST the pin (an IDE's update of every
 # repository pulls the submodule); update-submodules.sh resets that too. The pin is the W3C
 # data every instance and CI runs against: it moves only in a commit that runs the W3C suite
-# against the new data (ADR-059 D6).
+# against the new data (ADR-059 D6). tools/check-w3c-upstream.sh shows how far upstream has moved
+# (--run also runs the W3C suite against it); a weekly workflow runs it too.
 
 # Build entire solution
 dotnet build SkyOmega.sln

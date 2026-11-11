@@ -1,0 +1,34 @@
+# Weekly: compares the W3C test-data submodules' pins with upstream and, when upstream's test data changed, runs the
+# W3C suite against upstream's head (tools/check-w3c-upstream.sh --run). The report is in the run's summary.
+# It never moves a pin (ADR-059 D6): it shows what the next update will find, before anyone makes it. It fails when
+# tests fail against upstream's head, including the guard (ADR-059 D4), which fails on a manifest no suite loads.
+name: W3C upstream
+
+on:
+  schedule:
+    - cron: '23 4 * * 1'   # Mondays 04:23 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  upstream:
+    name: W3C test data upstream
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out, with the W3C test suites
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # Microsoft's build of .NET: the distribution's package links the system libunwind and crashes
+      # intermittently (docs/operations/runbook-linux-dotnet-runtime.md).
+      - name: Install .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Compare with upstream, and run the W3C suite against it
+        run: tools/check-w3c-upstream.sh --run
