@@ -70,7 +70,7 @@ for path in "${SUBMODULES[@]}"; do
   dirs="$(test_data "$path")"   # unquoted below: one path argument per directory
   all="$(git -C "$ROOT/$path" rev-list --count "$pin..$upstream")"
   data="$(git -C "$ROOT/$path" rev-list --count "$pin..$upstream" -- $dirs)"
-  say "- **$path**: pinned at ${pin:0:7}, upstream's head is ${upstream:0:7}: $all commits, $data of them in the test data ($dirs)."
+  say "- **$path**: pinned at ${pin:0:7}, upstream's head is ${upstream:0:7}. Commits since the pin: $all; in the test data ($dirs): $data."
   git -C "$ROOT/$path" log --format='  - %h %ad %s' --date=short "$pin..$upstream" -- $dirs >> "$report"
   if [ "$data" -gt 0 ]; then
     changed+=("$path:$upstream")
@@ -97,7 +97,7 @@ if $run && [ "${#changed[@]}" -gt 0 ]; then
   say ""
   say "### The W3C suite against upstream's head"
   say ""
-  say "The pinned suite's code, $(git -C "$ROOT" rev-parse --short HEAD), run against the new test data; the guard (ADR-059 D4) is part of it."
+  say "The suite at $(git -C "$ROOT" rev-parse --short HEAD), run against upstream's test data; the guard (ADR-059 D4) is part of it."
   say ""
   # The runner's summary: "  total: 2840", "  failed: 0", "  succeeded: 2685", "  skipped: 155"
   grep -E '^ +(total|failed|succeeded|skipped): ' "$results/w3c-upstream.txt" | sed -E 's/^ +/- /' >> "$report" || true
