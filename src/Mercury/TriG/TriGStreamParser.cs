@@ -1193,7 +1193,7 @@ internal sealed class TriGStreamParser : IDisposable, IAsyncDisposable
                 Consume();
             }
             if (!RdfLanguageTag.IsWellFormed(GetOutputSpan(tagStart)))
-                throw ParserException($"Language tag is not well-formed BCP 47: {GetOutputSpan(tagStart)}");
+                throw ParserException($"Not a well-formed language tag (BCP 47) or base direction (ltr, rtl): {GetOutputSpan(tagStart)}");
         }
         else if (ch == '^' && PeekAhead(1) == '^')
         {

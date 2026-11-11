@@ -595,7 +595,7 @@ internal sealed class NQuadsStreamParser : IDisposable, IAsyncDisposable
             }
 
             if (!RdfLanguageTag.IsWellFormed(GetOutputSpan(tagStart)))
-                throw ParserException($"Language tag is not well-formed BCP 47: {GetOutputSpan(tagStart)}");
+                throw ParserException($"Not a well-formed language tag (BCP 47) or base direction (ltr, rtl): {GetOutputSpan(tagStart)}");
         }
         else if (next == '^' && PeekAhead(1) == '^')
         {

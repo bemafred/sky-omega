@@ -296,7 +296,7 @@ internal sealed partial class TurtleStreamParser
             Consume();
             var langTag = ParseLangDir();
             if (!RdfLanguageTag.IsWellFormed(langTag))
-                throw ParserException($"Language tag is not well-formed BCP 47: {langTag}");
+                throw ParserException($"Not a well-formed language tag (BCP 47) or base direction (ltr, rtl): {langTag}");
             return string.Concat("\"", lexicalForm, "\"@", langTag);
         }
 
@@ -1109,7 +1109,7 @@ internal sealed partial class TurtleStreamParser
             int tagStart = _outputOffset;
             ParseLangDirSpan();
             if (!RdfLanguageTag.IsWellFormed(GetOutputSpan(tagStart)))
-                throw ParserException($"Language tag is not well-formed BCP 47: {GetOutputSpan(tagStart)}");
+                throw ParserException($"Not a well-formed language tag (BCP 47) or base direction (ltr, rtl): {GetOutputSpan(tagStart)}");
         }
         // Datatype
         else if (ch == '^' && PeekAhead(1) == '^')

@@ -31,7 +31,6 @@ public static class W3CTestContext
         // RDF 1.2 features not yet implemented
         ["turtle12-version"] = "VERSION directive not implemented (RDF 1.2 feature)",
         ["turtle12-ann"] = "Annotation syntax not implemented (RDF 1.2 feature)",
-        ["nt-ttl12-langdir"] = "Base direction (--ltr/--rtl) not implemented (RDF 1.2 feature)",
 
         // SPARQL 1.1 features not supported
         ["entailment"] = "Entailment regimes not supported",
@@ -67,16 +66,12 @@ public static class W3CTestContext
 
         // RDF 1.2 (ADR-059 phase 1, 2026-10-30): the format suites load the rdf12 manifests, which include the
         // RDF 1.1 tests. Each entry is one test IRI; its cause names the parser that fails.
-        ["rdf/rdf12/rdf-n-quads/syntax#nquads-langdir-bad-1>"] = "RDF 1.2: the N-Quads parser accepts invalid base direction (ADR-059 phase 2)",
-        ["rdf/rdf12/rdf-n-quads/syntax#nquads-langdir-bad-2>"] = "RDF 1.2: the N-Quads parser accepts invalid base direction (ADR-059 phase 2)",
         ["rdf/rdf12/rdf-n-quads/syntax#nquads12-01>"] = "RDF 1.2: the N-Quads parser does not read triple terms (ADR-059 phase 2)",
         ["rdf/rdf12/rdf-n-quads/syntax#nquads12-02>"] = "RDF 1.2: the N-Quads parser does not read triple terms (ADR-059 phase 2)",
         ["rdf/rdf12/rdf-n-quads/syntax#nquads12-03>"] = "RDF 1.2: the N-Quads parser does not read triple terms (ADR-059 phase 2)",
         ["rdf/rdf12/rdf-n-quads/syntax#nquads12-bnode-1>"] = "RDF 1.2: the N-Quads parser does not read triple terms (ADR-059 phase 2)",
         ["rdf/rdf12/rdf-n-quads/syntax#nquads12-nested-1>"] = "RDF 1.2: the N-Quads parser does not read triple terms (ADR-059 phase 2)",
-        ["rdf/rdf12/rdf-n-triples/syntax#ntriples-langdir-bad-1>"] = "RDF 1.2: the N-Triples parser accepts invalid base direction (ADR-059 phase 2)",
-        ["rdf/rdf12/rdf-n-triples/syntax#ntriples-langdir-bad-2>"] = "RDF 1.2: the N-Triples parser accepts invalid base direction (ADR-059 phase 2)",
-        ["rdf/rdf12/rdf-n-triples/syntax#ntriples-version-1>"] = "RDF 1.2: the N-Triples parser does not read base direction and VERSION (ADR-059 phase 2)",
+        ["rdf/rdf12/rdf-n-triples/syntax#ntriples-version-1>"] = "RDF 1.2: the N-Triples parser does not read VERSION (ADR-059 phase 2)",
         ["rdf/rdf12/rdf-n-triples/syntax#ntriples12-01>"] = "RDF 1.2: the N-Triples parser does not read triple terms (ADR-059 phase 2)",
         ["rdf/rdf12/rdf-n-triples/syntax#ntriples12-02>"] = "RDF 1.2: the N-Triples parser does not read triple terms (ADR-059 phase 2)",
         ["rdf/rdf12/rdf-n-triples/syntax#ntriples12-03>"] = "RDF 1.2: the N-Triples parser does not read triple terms (ADR-059 phase 2)",
@@ -90,8 +85,6 @@ public static class W3CTestContext
         ["rdf/rdf12/rdf-xml/eval#rdf12-xml-dir-04>"] = "RDF 1.2: the RDF/XML parser reads base direction into the wrong triples (ADR-059 phase 2)",
         ["rdf/rdf12/rdf-xml/eval#rdf12-xml-dir-05>"] = "RDF 1.2: the RDF/XML parser reads base direction into the wrong triples (ADR-059 phase 2)",
         ["rdf/rdf12/rdf-xml/eval#rdf12-xml-tt-01>"] = "RDF 1.2: the RDF/XML parser reads triple terms into the wrong triples (ADR-059 phase 2)",
-        ["rdf/rdf12/rdf-trig/syntax#trig12-base-bad-1>"] = "RDF 1.2: the TriG parser accepts invalid base direction (ADR-059 phase 2)",
-        ["rdf/rdf12/rdf-trig/syntax#trig12-base-bad-2>"] = "RDF 1.2: the TriG parser accepts invalid base direction (ADR-059 phase 2)",
         ["rdf/rdf12/rdf-trig/eval#trig12-annotation-01>"] = "RDF 1.2: the TriG parser does not read annotations (ADR-059 phase 2)",
         ["rdf/rdf12/rdf-trig/eval#trig12-annotation-02>"] = "RDF 1.2: the TriG parser does not read annotations (ADR-059 phase 2)",
         ["rdf/rdf12/rdf-trig/eval#trig12-annotation-03>"] = "RDF 1.2: the TriG parser does not read annotations (ADR-059 phase 2)",
@@ -143,8 +136,6 @@ public static class W3CTestContext
         ["rdf/rdf12/rdf-turtle/syntax#turtle12-version-bad-05>"] = "RDF 1.2: the Turtle parser accepts invalid VERSION (ADR-059 phase 2)",
         ["rdf/rdf12/rdf-turtle/syntax#turtle12-version-bad-06>"] = "RDF 1.2: the Turtle parser accepts invalid VERSION (ADR-059 phase 2)",
         ["rdf/rdf12/rdf-turtle/syntax#turtle12-bad-ann-2>"] = "RDF 1.2: the Turtle parser accepts invalid annotations (ADR-059 phase 2)",
-        ["rdf/rdf12/rdf-turtle/syntax#nt-ttl12-langdir-bad-1>"] = "RDF 1.2: the Turtle parser accepts invalid base direction (ADR-059 phase 2)",
-        ["rdf/rdf12/rdf-turtle/syntax#nt-ttl12-langdir-bad-2>"] = "RDF 1.2: the Turtle parser accepts invalid base direction (ADR-059 phase 2)",
         ["rdf/rdf12/rdf-turtle/syntax#turtle12-bad-4>"] = "RDF 1.2: the Turtle parser accepts invalid reified triples (ADR-059 phase 2)",
         ["rdf/rdf12/rdf-turtle/syntax#nt-ttl12-bad-02>"] = "RDF 1.2: the Turtle parser accepts invalid triple terms (ADR-059 phase 2)",
         ["rdf/rdf12/rdf-turtle/syntax#nt-ttl12-bad-03>"] = "RDF 1.2: the Turtle parser accepts invalid triple terms (ADR-059 phase 2)",
@@ -367,9 +358,13 @@ public static class W3CTestContext
         ["w3c-rdf-tests/rdf/rdf11/rdf-mt/manifest.ttl"] = "RDF 1.1 semantics, entailment tests: no test kind yet (ADR-059 phase 5, Q3)",
         ["w3c-rdf-tests/rdf/rdf11/rdf-mt/az-tests/manifest.ttl"] = "RDF 1.1 semantics, entailment tests: no test kind yet (ADR-059 phase 5, Q3)",
         ["w3c-rdf-tests/rdf/rdf12/rdf-semantics/manifest.ttl"] = "RDF 1.2 semantics, entailment tests: no test kind yet (ADR-059 phase 5, Q3)",
-        ["w3c-rdf-tests/sparql/sparql10/extended-manifest-evaluation.ttl"] = "SPARQL 1.0 tests of what the specification leaves to extensions, in no umbrella the suite loads (sort-11); not yet triaged, no ADR-059 phase",
-        ["w3c-rdf-tests/sparql/sparql10/sort/extended-manifest.ttl"] = "SPARQL 1.0 tests of what the specification leaves to extensions, in no umbrella the suite loads (sort-11); not yet triaged, no ADR-059 phase",
-        ["w3c-rdf-tests/sparql/sparql10/open-world/sameTerm-manifest.ttl"] = "SPARQL 1.0 sameTerm tests, some requiring mf:StringSimpleLiteralCmp, in no umbrella the suite loads; not yet triaged, no ADR-059 phase",
+
+        // Do not apply, triaged 2026-11-11. In no umbrella manifest, and written for RDF 1.0, where "xyz" and
+        // "xyz"^^xsd:string are two terms; since RDF 1.1 a simple literal is an xsd:string, so they are one.
+        ["w3c-rdf-tests/sparql/sparql10/extended-manifest-evaluation.ttl"] = "The umbrella of sort/extended-manifest.ttl, an extended test (sort-11); does not apply",
+        ["w3c-rdf-tests/sparql/sparql10/sort/extended-manifest.ttl"] = "sort-11, an extended test: it expects \"Alice\" … \"Fred\" sorted before \"Alice\"^^xsd:string … \"Fred\"^^xsd:string, which RDF 1.1 makes the same four terms; does not apply",
+        ["w3c-rdf-tests/sparql/sparql10/open-world/sameTerm-manifest.ttl"] = "Six sameTerm tests, three of them under mf:StringSimpleLiteralCmp: five expect \"xyz\" and \"xyz\"^^xsd:string to be two terms, and none can run, as their queries are not in open-world/ (expr-builtin/ has queries of the same names, for other data, in tests the suite runs); does not apply",
+
         ["w3c-rdf-tests/sparql/sparql11/manifest-sparql11-fed.ttl"] = "SPARQL 1.1 federation (ADR-059 phase 4)",
         ["w3c-rdf-tests/sparql/sparql11/syntax-fed/manifest.ttl"] = "SPARQL 1.1 federation (ADR-059 phase 4)",
         ["w3c-rdf-tests/sparql/sparql11/service/manifest.ttl"] = "SPARQL 1.1 federation (ADR-059 phase 4)",

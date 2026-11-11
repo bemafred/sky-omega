@@ -179,7 +179,7 @@ to [1.8.21](docs/releases/1.8.21.md).
 
 ## 💠 Project Purpose
 
-**Mercury** is a complete SPARQL 1.1 engine with zero external runtime dependencies (BCL-only core) and zero-GC hot paths. It passes all 993 tests of the W3C RDF 1.1 format suites and 187 of the 341 RDF 1.2 format tests (the other 154 test RDF 1.2 features it does not read yet), all 510 SPARQL 1.1 tests it runs, and the 461 JSON-LD 1.1 toRdf tests that apply to it; 6 of the 487 SPARQL 1.0 tests are known failures ([Standards Coverage](#-standards-coverage)). It gives AI assistants persistent, queryable memory on your machine — what your AI learns today, it knows tomorrow.
+**Mercury** is a complete SPARQL 1.1 engine with zero external runtime dependencies (BCL-only core) and zero-GC hot paths. It passes all 993 tests of the W3C RDF 1.1 format suites and 208 of the 351 RDF 1.2 format tests (the other 143 test RDF 1.2 features it does not read yet), all 510 SPARQL 1.1 tests it runs, and the 461 JSON-LD 1.1 toRdf tests that apply to it; 6 of the 487 SPARQL 1.0 tests are known failures ([Standards Coverage](#-standards-coverage)). It gives AI assistants persistent, queryable memory on your machine — what your AI learns today, it knows tomorrow.
 
 > *Scope of "BCL-only": Mercury core (`src/Mercury/`) and its 28-public-type embeddable surface have no `PackageReference` entries. Adjacent surfaces — `Mercury.Mcp` (depends on `ModelContextProtocol`), `DrHook.Engine` (admitted: `Microsoft.Diagnostics.NETCore.Client` managed + `Microsoft.Diagnostics.DbgShim.<rid>` native per-RID + `Microsoft.Diagnostics.Tracing.TraceEvent` for EventPipe parsing + `Microsoft.CodeAnalysis.CSharp` (Roslyn) for breakpoint-condition and logpoint expressions, all per ADR-009; **netcoredbg retired at 1.8.2**) — package the substrate for tooling and runtime observation. The substrate-independence claim applies to the core; the tooling layer is honest about its dependencies.*
 
@@ -200,16 +200,16 @@ Mercury is a full SPARQL 1.1 + RDF stack. Every standard listed below is impleme
 
 | Format | W3C tests passing | Use |
 |---|---|---|
-| **Turtle** | 371/419 (48 RDF 1.2 known failures) | Human-friendly, prefix support, the de-facto interchange format |
-| **TriG** | 368/418 (50 RDF 1.2 known failures) | Turtle with named graphs |
-| **N-Triples** | 130/145 (15 RDF 1.2 known failures) | Line-oriented, the Wikidata dump format |
-| **N-Quads** | 144/155 (11 RDF 1.2 known failures) | N-Triples with named graphs |
+| **Turtle** | 376/422 (46 RDF 1.2 known failures) | Human-friendly, prefix support, the de-facto interchange format |
+| **TriG** | 373/421 (48 RDF 1.2 known failures) | Turtle with named graphs |
+| **N-Triples** | 135/145 (10 RDF 1.2 known failures) | Line-oriented, the Wikidata dump format |
+| **N-Quads** | 150/159 (9 RDF 1.2 known failures) | N-Triples with named graphs |
 | **RDF/XML** | 167/197 (30 RDF 1.2 known failures) | Legacy interop, still required by many vocabularies |
 | **JSON-LD 1.1** | 461/467 (6 do not apply) | JSON-native RDF for web/API surfaces |
 
-The counts for the five RDF formats are of the W3C RDF 1.2 test suites, which include the RDF 1.1 ones; every RDF 1.1
-test passes (993). The 154 known failures test RDF 1.2 features Mercury does not read yet: triple terms outside
-Turtle, reified triples, annotations, base direction and `VERSION`
+The counts for the five RDF formats are of the W3C RDF 1.2 and RDF 1.1 test suites; every RDF 1.1 test passes (993).
+The 143 known failures test RDF 1.2 features Mercury does not read yet: triple terms outside Turtle, reified triples,
+annotations, `VERSION`, and RDF/XML's base direction
 ([ADR-059](docs/adrs/mercury/ADR-059-every-w3c-test-runs.md)). The N-Triples and N-Quads counts include the
 canonical-form tests, which check the writers' output. Of the JSON-LD tests, 5 are for
 JSON-LD 1.0 processors (their 1.1 versions run) and 1 needs generalized RDF, an optional feature.
@@ -251,11 +251,11 @@ two terms and a pattern constant matches a language tag by case
 | 100% W3C SPARQL 1.1 query evaluation | 532 passing of 535: the 247 SPARQL 1.1 tests and 285 of the 288 SPARQL 1.0 tests; the 3 skipped are SPARQL 1.0 known failures | `dotnet test --project tests/Mercury.Tests --filter "FullyQualifiedName~Sparql11_QueryEval"` |
 | 100% W3C SPARQL 1.1 Update       | 94 passing tests      | `dotnet test --project tests/Mercury.Tests --filter "FullyQualifiedName~Sparql11_UpdateEval"` |
 | 100% W3C SPARQL 1.1 query syntax | 302 passing of 305: the 106 SPARQL 1.1 tests and 196 of the 199 SPARQL 1.0 tests; the 3 skipped are SPARQL 1.0 known failures | `dotnet test --project tests/Mercury.Tests --filter "FullyQualifiedName~Sparql11_PositiveSyntax\|FullyQualifiedName~Sparql11_NegativeSyntax"` |
-| 100% W3C Turtle / TriG / N-Triples / N-Quads / RDF-XML, RDF 1.1 tests | 1,180 passing of 1,334 in the RDF 1.2 suites, every RDF 1.1 test among them; the 154 skipped are RDF 1.2 known failures | `dotnet test --project tests/Mercury.Tests --filter "FullyQualifiedName~TurtleConformanceTests\|FullyQualifiedName~TriGConformanceTests\|FullyQualifiedName~NTriplesConformanceTests\|FullyQualifiedName~NQuadsConformanceTests\|FullyQualifiedName~RdfXmlConformanceTests"` |
+| 100% W3C Turtle / TriG / N-Triples / N-Quads / RDF-XML, RDF 1.1 tests | 1,201 passing of 1,344 in the RDF 1.2 and RDF 1.1 suites, every RDF 1.1 test among them; the 143 skipped are RDF 1.2 known failures | `dotnet test --project tests/Mercury.Tests --filter "FullyQualifiedName~TurtleConformanceTests\|FullyQualifiedName~TriGConformanceTests\|FullyQualifiedName~NTriplesConformanceTests\|FullyQualifiedName~NQuadsConformanceTests\|FullyQualifiedName~RdfXmlConformanceTests"` |
 | 100% W3C JSON-LD 1.1 toRdf, of the tests that apply | 461 passing; the 6 skipped do not apply (JSON-LD 1.0 processors, generalized RDF) | `dotnet test --project tests/Mercury.Tests --filter "FullyQualifiedName~JsonLdConformanceTests"` |
 | SPARQL HTTP endpoint             | `mercury` CLI         | `mercury -m` then visit `http://localhost:3031/sparql` |
 | Zero external runtime deps       | Mercury.csproj        | `grep PackageReference src/Mercury/*.csproj` |
-| 6,145 Mercury tests passing      | 167 skipped on macOS: the 160 W3C known failures, the 6 JSON-LD tests that do not apply, and 1 test that needs a disk with less than 1 TB free | `dotnet test --project tests/Mercury.Tests` |
+| 6,276 Mercury tests passing      | 156 skipped on macOS: the 149 W3C known failures, the 6 JSON-LD tests that do not apply, and 1 test that needs a disk with less than 1 TB free | `dotnet test --project tests/Mercury.Tests` |
 | Six platforms                    | 6,660 tests on each GitHub Actions runner at 1.8.39, 0 failed on macOS x64, Linux x64 and arm64, and Windows x64 and arm64; on macOS arm64, 1 DrHook test timed out ([Platforms](#platforms)) | `dotnet test` on each, and the GitHub Actions workflow |
 | AI-assisted development          | Git history           | `git log --oneline \| grep "Co-Authored-By"` |
 | Development velocity             | ~255K lines           | See [STATISTICS.md](STATISTICS.md)           |

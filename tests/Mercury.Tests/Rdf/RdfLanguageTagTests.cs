@@ -13,9 +13,9 @@ namespace SkyOmega.Mercury.Tests.Rdf;
 
 /// <summary>
 /// A language-tagged literal is well-formed the same way in every format (docs/divergence S1f): its tag matches
-/// BCP 47's Language-Tag ABNF (RDF 1.2 Concepts §3.4, RFC 5646 §2.2.9), and <c>rdf:langString</c> and
-/// <c>rdf:dirLangString</c> are never written as an explicit datatype. The W3C negative syntax tests
-/// <c>*-langdir-bad-3/4/5</c> check one example of each; these check the rule.
+/// BCP 47's Language-Tag ABNF (RDF 1.2 Concepts §3.4, RFC 5646 §2.2.9), its base direction, if any, is <c>ltr</c> or
+/// <c>rtl</c>, and <c>rdf:langString</c> and <c>rdf:dirLangString</c> are never written as an explicit datatype. The
+/// W3C negative syntax tests <c>*-langdir-bad-1…5</c> check one example of each; these check the rule.
 /// </summary>
 public class RdfLanguageTagTests
 {
@@ -36,6 +36,8 @@ public class RdfLanguageTagTests
     [InlineData("i-klingon")]            // irregular grandfathered
     [InlineData("en-GB-oed")]            // irregular grandfathered
     [InlineData("en--ltr")]              // the base direction after "--" is not part of the tag
+    [InlineData("zh-Hant-TW--rtl")]
+    [InlineData("i-klingon--ltr")]       // a grandfathered tag with a direction
     public void WellFormedTags_AreAccepted(string tag)
     {
         Assert.True(RdfLanguageTag.IsWellFormed(tag));
@@ -57,6 +59,12 @@ public class RdfLanguageTagTests
     [InlineData("i-foo")]                // "i-" only in the irregular grandfathered tags
     [InlineData("en_US")]
     [InlineData("été")]                  // BCP 47 letters are ASCII
+    [InlineData("en--unk")]              // a direction is ltr or rtl
+    [InlineData("en--LTR")]              // in lower case, unlike the tag
+    [InlineData("en--")]                 // "--" and no direction
+    [InlineData("en--ltr--rtl")]
+    [InlineData("--ltr")]                // a direction and no tag
+    [InlineData("cantbethislong--ltr")]  // a valid direction does not make the tag valid
     public void IllFormedTags_AreRejected(string tag)
     {
         Assert.False(RdfLanguageTag.IsWellFormed(tag));
@@ -74,6 +82,8 @@ public class RdfLanguageTagTests
     [Theory]
     [InlineData("\"Hello\"@cantbethislong")]
     [InlineData("\"Hello\"@en-")]
+    [InlineData("\"Hello\"@en--unk")]
+    [InlineData("\"Hello\"@en--LTR")]
     [InlineData("\"Hello\"^^<http://www.w3.org/1999/02/22-rdf-syntax-ns#langString>")]
     [InlineData("\"Hello\"^^<http://www.w3.org/1999/02/22-rdf-syntax-ns#dirLangString>")]
     public async Task IllFormedLiteral_IsRejectedByEveryFormat(string literal)
@@ -141,11 +151,13 @@ public class RdfLanguageTagTests
         });
     }
 
-    [Fact]
-    public async Task WellFormedTag_IsKeptAsWrittenByEveryFormat()
+    [Theory]
+    [InlineData("zh-Hant-TW")]
+    [InlineData("ar-EG--rtl")]
+    public async Task WellFormedTag_IsKeptAsWrittenByEveryFormat(string langDir)
     {
-        const string triple = "<http://ex.org/s> <http://ex.org/p> \"Hello\"@zh-Hant-TW .";
-        const string expected = "\"Hello\"@zh-Hant-TW";
+        string triple = $"<http://ex.org/s> <http://ex.org/p> \"Hello\"@{langDir} .";
+        string expected = $"\"Hello\"@{langDir}";
         var cancellationToken = TestContext.Current.CancellationToken;
 
         string nt = null!;

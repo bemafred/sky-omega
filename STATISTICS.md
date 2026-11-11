@@ -153,22 +153,24 @@ DrHook's teardown changes. The macOS runners run the sparse-file test, which ome
 ## W3C Conformance
 
 Each row counts the tests of the W3C manifests the suite runs. See
-[ADR-010](docs/adrs/mercury/ADR-010-w3c-test-suite-integration.md) for the integration.
+[ADR-010](docs/adrs/mercury/ADR-010-w3c-test-suite-integration.md) for the integration. Measured 2026-11-11 on omega,
+against rdf-tests `202a74e` and json-ld-api `5551473`, after the base-direction check; the rest of this file is
+measured at 1.8.37.
 
-### RDF formats (RDF 1.2 test suites, `rdf/rdf12`, which include the RDF 1.1 suites)
+### RDF formats (the RDF 1.2 and RDF 1.1 test suites, `rdf/rdf12` and `rdf/rdf11`)
 
 | Format | Passing | Total | Known failures |
 |--------|--------:|------:|---------------:|
-| Turtle | 371 | 419 | 48 |
-| TriG | 368 | 418 | 50 |
-| N-Triples | 130 | 145 | 15 |
-| N-Quads | 144 | 155 | 11 |
+| Turtle | 376 | 422 | 46 |
+| TriG | 373 | 421 | 48 |
+| N-Triples | 135 | 145 | 10 |
+| N-Quads | 150 | 159 | 9 |
 | RDF/XML | 167 | 197 | 30 |
-| **RDF formats total** | **1,180** | **1,334** | **154** |
+| **RDF formats total** | **1,201** | **1,344** | **143** |
 
-The N-Triples and N-Quads rows each include 41 canonical-form tests. Every RDF 1.1 test passes (993). Each RDF 1.2
-manifest includes its RDF 1.1 manifest, so each test runs once
-([ADR-059](docs/adrs/mercury/ADR-059-every-w3c-test-runs.md)).
+The N-Triples and N-Quads rows each include 41 canonical-form tests. Every RDF 1.1 test passes (993); 208 of the 351
+RDF 1.2 tests pass. Each format loads its RDF 1.2 manifest and its RDF 1.1 manifest, which the RDF 1.2 one included
+until rdf-tests 9fafbec, 2026-11-01 ([ADR-059](docs/adrs/mercury/ADR-059-every-w3c-test-runs.md) D1).
 
 ### SPARQL
 
@@ -192,7 +194,7 @@ manifest includes its RDF 1.1 manifest, so each test runs once
 
 | Tests | Count | Reason |
 |-------|------:|--------|
-| RDF 1.2 tests in the five format suites | 154 | RDF 1.2 features not read yet: triple terms outside Turtle, reified triples, annotations, base direction, `VERSION`, and RDF/XML's `rdf:annotation` and `rdf:dir` ([ADR-059](docs/adrs/mercury/ADR-059-every-w3c-test-runs.md) phase 2) |
+| RDF 1.2 tests in the five format suites | 143 | RDF 1.2 features not read yet: triple terms outside Turtle, reified triples, annotations, `VERSION`, and RDF/XML's `rdf:annotation` and `rdf:dir` ([ADR-059](docs/adrs/mercury/ADR-059-every-w3c-test-runs.md) phase 2) |
 | SPARQL 1.0 `distinct-2`, `distinct-9`, `dawg-lang-3` | 3 | Term identity: a simple literal and its `xsd:string` form are two terms; a pattern constant matches a language tag by case ([ADR-053](docs/adrs/mercury/ADR-053-one-rdf-term-one-atom.md)) |
 | SPARQL 1.0 `syn-bad-26`, `syn-bad-29`, `syn-bad-30` | 3 | Malformed expressions accepted ([ADR-057](docs/adrs/mercury/ADR-057-expression-read-once.md)) |
 | JSON-LD `te014`, `te026`, `te038`, `te071`, `t0118` | 5 | `specVersion` json-ld-1.0: for JSON-LD 1.0 processors; the 1.1 versions run |
@@ -202,17 +204,19 @@ Each known failure is listed with its cause in `W3CTestContext.KnownFailures` an
 
 The test data holds W3C tests that are not loaded yet: SPARQL 1.2, the rest of SPARQL 1.1 (federation, result
 formats, entailment, protocol, Graph Store), the RDF semantics tests and the JSON-LD API manifests. ADR-059 phases 3
-to 6 load them.
+to 6 load them. Seven SPARQL 1.0 tests in no umbrella manifest, `sort-11` and six `sameTerm` tests, do not apply: they
+were written for RDF 1.0, where `"xyz"` and `"xyz"^^xsd:string` are two terms, and the queries the six `sameTerm`
+tests name are not in their directory. `W3CTestContext.ManifestsNotLoaded` lists each manifest that is not loaded, with why.
 
 ### Summary
 
 | Metric | Value |
 |--------|-------|
 | RDF formats, RDF 1.1 tests | 100% (993/993) |
-| RDF formats, RDF 1.2 suites with RDF 1.1 | 88.5% (1,180/1,334) |
+| RDF formats, RDF 1.2 and RDF 1.1 suites | 89.4% (1,201/1,344) |
 | SPARQL 1.0 and 1.1 | 99.4% (991/997) |
 | JSON-LD 1.1 toRdf, applicable tests | 100% (461/461) |
-| **All W3C tests run** | **2,632 passing of 2,798** (160 known failures, 6 not applicable) |
+| **All W3C tests run** | **2,653 passing of 2,808** (149 known failures, 6 not applicable) |
 
 ## NCrunch (Windows) Compatibility
 

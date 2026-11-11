@@ -37,7 +37,7 @@ the others are counts of test entries in the manifests.
 | SPARQL 1.1 HTTP RDF update (the protocol's earlier draft) | `http-rdf-update` | 18 | In no umbrella manifest |
 | JSON-LD fromRdf | `fromRdf-manifest.jsonld` | 54 | Not mapped |
 | JSON-LD expand, compact, flatten, HTML, remote documents | five manifests | 758 | Not mapped |
-| SPARQL 1.0 extended: sort-11, and sameTerm with `mf:StringSimpleLiteralCmp` | `sparql10/extended-manifest-evaluation.ttl` (`sort/extended-manifest.ttl`), `open-world/sameTerm-manifest.ttl` | 7 | In no umbrella manifest; found by the guard on 2026-11-10, not yet triaged |
+| SPARQL 1.0 extended: sort-11, and sameTerm with `mf:StringSimpleLiteralCmp` | `sparql10/extended-manifest-evaluation.ttl` (`sort/extended-manifest.ttl`), `open-world/sameTerm-manifest.ttl` | 7 | In no umbrella manifest; found by the guard on 2026-11-10. Triaged 2026-11-11: they do not apply. They were written for RDF 1.0, where `"xyz"` and `"xyz"^^xsd:string` are two terms, and the six `sameTerm` tests name queries that are not in their directory |
 
 Two more ways a test does not count:
 
@@ -107,6 +107,13 @@ Upstream is followed deliberately: one commit moves the pin, after a full W3C ru
 what that run requires: `KnownFailures` and `ManifestsNotLoaded` updated, a parser fixed where a new test finds a
 bug. Its message names the upstream range and the change in results.
 
+**Tracked from 2026-11-11.** `tools/check-w3c-upstream.sh` compares each pin with the head of its upstream default
+branch. With `--fetch`, it lists the commits between them that touch the test data. With `--run`, it also runs the W3C
+suite, the guard included, against upstream's head and then puts the pins back. It never moves a pin. The workflow
+`.github/workflows/w3c-upstream.yml` runs it with `--run` every Monday and fails when a test fails against upstream,
+so an update's work is seen when upstream lands it, not when a checkout happens to drift. On 2026-11-11, rdf-tests
+upstream was at `4158bca`, past the pin `202a74e`; json-ld-api was at its pin.
+
 ### D5. The counts follow
 
 STATISTICS.md and the README count every loaded test: passed, known failures and tests that do not apply, by suite.
@@ -136,7 +143,9 @@ STATISTICS.md and the README count every loaded test: passed, known failures and
    pass and are removed; the 8 triple-term tests remain. The format suites run 1,334 tests: 1,180 pass and 154 are
    known failures, all RDF 1.2 features.
 2. **RDF 1.2 features**, to fix phase 1's known failures. Its own ADR: the parsers, the writers, and how the store
-   holds triple terms and directional language strings.
+   holds triple terms and directional language strings. Done ahead of it, 2026-11-11: the N-Triples / N-Quads,
+   Turtle and TriG parsers check a base direction (`ltr` or `rtl`, in lower case) in the shared rule
+   `Rdf/RdfLanguageTag.cs`. The 8 `*-langdir-bad-1/2` and `trig12-base-bad-1/2` known failures pass.
 3. **SPARQL 1.2**: load, triage, list.
 4. **SPARQL 1.1, the rest**: federation (SERVICE against local endpoints built from each test's data), result
    formats, service description and protocol (against `SparqlHttpServer`), Graph Store protocol, entailment.
@@ -161,9 +170,9 @@ STATISTICS.md and the README count every loaded test: passed, known failures and
 
 ## Consequences
 
-- Known failures went from 6 to 186 at phase 1, to 160 when the bugs phase 1 found were fixed, and to 157 at the
-  update to rdf-tests 202a74e, when the language-tag fix passed three. They rise as each phase loads more; each is a
-  listed, countable gap.
+- Known failures went from 6 to 186 at phase 1, to 160 when the bugs phase 1 found were fixed, to 157 at the
+  update to rdf-tests 202a74e, when the language-tag fix passed three, and to 149 when the parsers checked the base
+  direction (2026-11-11). They rise as each phase loads more; each is a listed, countable gap.
 - The conformance counts grow to the whole test data and stop changing meaning when a submodule updates.
 - The suite takes longer to run.
 
@@ -211,5 +220,8 @@ suite itself.
 - `tests/Mercury.Tests/W3C/W3CTestContext.cs` — `SuitesOf`, `TestsOf`, `GetManifestPath`, `KnownFailures`,
   `ManifestsNotLoaded`, `ShouldSkip`.
 - `tests/Mercury.Tests/W3C/W3CManifestCoverageTests.cs` — the guard (D4).
+- `tools/check-w3c-upstream.sh`, `.github/workflows/w3c-upstream.yml` — the upstream tracking (D6).
+- [docs/limits/language-tag-check-unrun-on-dumps.md](../../limits/language-tag-check-unrun-on-dumps.md) — the
+  language-tag check, not yet run against a Wikidata dump.
 - [compression.md](../../architecture/technical/compression.md), Test fixtures — the measurement classes.
 - W3C rdf-tests, `rdf/rdf12/rdf-turtle/manifest.ttl` — the include of the RDF 1.1 tests.

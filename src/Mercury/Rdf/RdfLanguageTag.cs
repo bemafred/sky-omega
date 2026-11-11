@@ -6,8 +6,9 @@ namespace SkyOmega.Mercury.Rdf;
 /// What makes a language-tagged literal well-formed, the one rule the N-Triples / N-Quads, Turtle and TriG parsers
 /// share. RDF 1.2 Concepts §3.4: "The language tag MUST be well-formed according to section 2.2.9 of BCP47", and a
 /// literal's datatype IRI is <c>rdf:langString</c> or <c>rdf:dirLangString</c> "if and only if" it has a language
-/// tag, so neither can be written as an explicit <c>^^</c> datatype. The W3C RDF 1.2 negative syntax tests
-/// <c>*-langdir-bad-3/4/5</c> and <c>trig12-base-bad-3/4/5</c> check both.
+/// tag, so neither can be written as an explicit <c>^^</c> datatype; and a base direction, after <c>--</c>, is
+/// <c>ltr</c> or <c>rtl</c>. The W3C RDF 1.2 negative syntax tests <c>*-langdir-bad-1…5</c> and
+/// <c>trig12-base-bad-1…5</c> check all three.
 /// </summary>
 /// <remarks>
 /// Each parser scans the tag with its own grammar loop and asks this type whether what it read is well-formed, so
@@ -28,14 +29,16 @@ internal static class RdfLanguageTag
         datatypeIri.SequenceEqual(XsdDatatype.LangString) || datatypeIri.SequenceEqual(DirLangString);
 
     /// <summary>
-    /// True when the language tag of <paramref name="langDir"/>, the text after <c>@</c>, is well-formed BCP 47
-    /// (RFC 5646 §2.2.9: it matches the <c>Language-Tag</c> ABNF of §2.1). The text may end in <c>--</c> and a base
-    /// direction (RDF 1.2 <c>LANG_DIR</c>); the direction is not checked here yet (ADR-059 phase 2: the
-    /// <c>*-langdir-bad-1/2</c> tests are known failures).
+    /// True when <paramref name="langDir"/>, the text after <c>@</c>, is a well-formed language tag (BCP 47, RFC 5646
+    /// §2.2.9: it matches the <c>Language-Tag</c> ABNF of §2.1), and, when it goes on with <c>--</c> (RDF 1.2
+    /// <c>LANG_DIR</c>), a base direction: <c>ltr</c> or <c>rtl</c>, in lower case.
     /// </summary>
     public static bool IsWellFormed(ReadOnlySpan<char> langDir)
     {
         var direction = langDir.IndexOf("--");
+        if (direction >= 0 && !IsBaseDirection(langDir[(direction + 2)..]))
+            return false;
+
         var tag = direction < 0 ? langDir : langDir[..direction];
 
         if (IsIrregularGrandfathered(tag))
@@ -105,6 +108,11 @@ internal static class RdfLanguageTag
         // privateuse = "x" 1*("-" (1*8alphanum)), last
         return IsPrivateUseSingleton(subtag) && ReadPrivateUse(ref subtags);
     }
+
+    // RDF 1.2 Concepts §3.4: a base direction is "ltr" or "rtl". The section gives a case rule only for the tag (case-
+    // insensitive); the W3C tests trig12-base-bad-2 and *-langdir-bad-2 reject "LTR", so the direction matches exactly.
+    private static bool IsBaseDirection(ReadOnlySpan<char> direction) =>
+        direction.SequenceEqual("ltr") || direction.SequenceEqual("rtl");
 
     /// <summary>The subtags after an <c>x</c>: one or more, each one to eight alphanumerics, to the end of the tag.</summary>
     private static bool ReadPrivateUse(ref SubtagReader subtags)
