@@ -271,7 +271,7 @@ internal sealed class PruningTransfer
 
         if (!filter.ShouldInclude(
             quad.Graph, quad.Subject, quad.Predicate, quad.Object,
-            quad.ValidFrom, quad.ValidTo))
+            quad.MemorizedAt, quad.ForgottenAt))
         {
             auditWriter?.WriteQuad(quad.Subject, quad.Predicate, quad.Object, quad.Graph);
             return;
@@ -426,7 +426,7 @@ internal sealed class PruningTransfer
 
         if (!filter.ShouldInclude(
             quad.Graph, quad.Subject, quad.Predicate, quad.Object,
-            quad.ValidFrom, quad.ValidTo))
+            quad.MemorizedAt, quad.ForgottenAt))
         {
             auditWriter?.WriteQuad(quad.Subject, quad.Predicate, quad.Object, quad.Graph);
             return;
@@ -443,14 +443,14 @@ internal sealed class PruningTransfer
         {
             _target.AddBatched(
                 quad.Subject, quad.Predicate, quad.Object,
-                quad.ValidFrom, quad.ValidTo, quad.Graph);
+                quad.MemorizedAt, quad.ForgottenAt, quad.Graph);
 
             // PreserveAll keeps a retracted version (recorded in error, ADR-054 D2) as a retracted version: copied as
             // a plain Add it would hold again in the target.
             if (quad.IsDeleted)
                 _target.RetractBatched(
                     quad.Subject, quad.Predicate, quad.Object,
-                    quad.ValidFrom, quad.ValidTo, quad.Graph);
+                    quad.MemorizedAt, quad.ForgottenAt, quad.Graph);
 
             stats.Written++;
             batchCount++;

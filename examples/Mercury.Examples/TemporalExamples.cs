@@ -64,7 +64,7 @@ public static class TemporalExamples
         {
             var triple = current.Current;
             Console.WriteLine($"  {triple.Subject.ToString()} works for {triple.Object.ToString()}");
-            Console.WriteLine($"    Valid: {triple.ValidFrom:yyyy-MM-dd} to {triple.ValidTo:yyyy-MM-dd}");
+            Console.WriteLine($"    Valid: {triple.MemorizedAt:yyyy-MM-dd} to {triple.ForgottenAt:yyyy-MM-dd}");
         }
 
         Console.WriteLine();
@@ -173,7 +173,7 @@ public static class TemporalExamples
         {
             var triple = evolution.Current;
             Console.WriteLine($"  Version {version}: {triple.Object.ToString()}");
-            Console.WriteLine($"    Period: {triple.ValidFrom:yyyy-MM-dd} to {triple.ValidTo:yyyy-MM-dd}");
+            Console.WriteLine($"    Period: {triple.MemorizedAt:yyyy-MM-dd} to {triple.ForgottenAt:yyyy-MM-dd}");
             version++;
         }
 
@@ -225,7 +225,7 @@ public static class TemporalExamples
         {
             var triple = q2Results.Current;
             Console.WriteLine($"  {triple.Object.ToString()}");
-            Console.WriteLine($"    Duration: {triple.ValidFrom:yyyy-MM-dd} to {triple.ValidTo:yyyy-MM-dd}");
+            Console.WriteLine($"    Duration: {triple.MemorizedAt:yyyy-MM-dd} to {triple.ForgottenAt:yyyy-MM-dd}");
         }
 
         Console.WriteLine();
@@ -334,7 +334,7 @@ public static class TemporalExamples
         {
             var triple = evolution.Current;
             Console.WriteLine($"  {triple.Predicate.ToString()}: {triple.Object.ToString()}");
-            Console.WriteLine($"    {triple.ValidFrom:yyyy-MM-dd} to {triple.ValidTo:yyyy-MM-dd}");
+            Console.WriteLine($"    {triple.MemorizedAt:yyyy-MM-dd} to {triple.ForgottenAt:yyyy-MM-dd}");
             count++;
         }
 

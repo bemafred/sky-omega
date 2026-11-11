@@ -7,14 +7,14 @@ public enum HistoryMode
 {
     /// <summary>
     /// Only transfer current facts (valid at UtcNow).
-    /// Results in a single version per quad with ValidFrom=now, ValidTo=MaxValue.
+    /// Results in a single version per quad with MemorizedAt=now, ForgottenAt=MaxValue.
     /// Most compact output - discards all history.
     /// </summary>
     FlattenToCurrent,
 
     /// <summary>
     /// Transfer all versions including historical ones.
-    /// Preserves ValidFrom/ValidTo exactly as stored.
+    /// Preserves MemorizedAt/ForgottenAt exactly as stored.
     /// Excludes soft-deleted entries.
     /// </summary>
     PreserveVersions,

@@ -48,8 +48,8 @@ public class WriteAheadLogTests : IDisposable
         Assert.Equal(1, record.SubjectId);
         Assert.Equal(2, record.PredicateId);
         Assert.Equal(3, record.ObjectId);
-        Assert.Equal(now.UtcTicks, record.ValidFromTicks);
-        Assert.Equal(DateTimeOffset.MaxValue.UtcTicks, record.ValidToTicks);
+        Assert.Equal(now.UtcTicks, record.MemorizedAtTicks);
+        Assert.Equal(DateTimeOffset.MaxValue.UtcTicks, record.ForgottenAtTicks);
     }
 
     [Fact]
@@ -105,8 +105,8 @@ public class WriteAheadLogTests : IDisposable
         Assert.Equal(original.SubjectId, restored.SubjectId);
         Assert.Equal(original.PredicateId, restored.PredicateId);
         Assert.Equal(original.ObjectId, restored.ObjectId);
-        Assert.Equal(original.ValidFromTicks, restored.ValidFromTicks);
-        Assert.Equal(original.ValidToTicks, restored.ValidToTicks);
+        Assert.Equal(original.MemorizedAtTicks, restored.MemorizedAtTicks);
+        Assert.Equal(original.ForgottenAtTicks, restored.ForgottenAtTicks);
         Assert.Equal(original.Checksum, restored.Checksum);
         Assert.True(restored.IsValid());
     }

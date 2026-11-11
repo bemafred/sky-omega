@@ -32,8 +32,8 @@ internal sealed class PredicateFilter : IPruningFilter
         ReadOnlySpan<char> subject,
         ReadOnlySpan<char> predicate,
         ReadOnlySpan<char> obj,
-        DateTimeOffset validFrom,
-        DateTimeOffset validTo)
+        DateTimeOffset memorizedAt,
+        DateTimeOffset forgottenAt)
     {
         var predicateStr = predicate.ToString();
         var inSet = _predicateIris.Contains(predicateStr);

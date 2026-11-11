@@ -53,8 +53,8 @@ internal sealed class GraphFilter : IPruningFilter
         ReadOnlySpan<char> subject,
         ReadOnlySpan<char> predicate,
         ReadOnlySpan<char> obj,
-        DateTimeOffset validFrom,
-        DateTimeOffset validTo)
+        DateTimeOffset memorizedAt,
+        DateTimeOffset forgottenAt)
     {
         var isDefaultGraph = graph.IsEmpty;
 

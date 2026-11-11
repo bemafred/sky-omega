@@ -201,8 +201,8 @@ internal sealed class WriteAheadLog : IDisposable
             SubjectId = 0,
             PredicateId = 0,
             ObjectId = 0,
-            ValidFromTicks = 0,
-            ValidToTicks = 0,
+            MemorizedAtTicks = 0,
+            ForgottenAtTicks = 0,
             TransactionTimeTicks = 0
         };
         record.Checksum = record.ComputeChecksum();
@@ -408,7 +408,7 @@ internal enum LogOperation : byte
     Add = 1,
 
     /// <summary>
-    /// The version with exactly [ValidFrom, ValidTo) was recorded in error: it is marked IsDeleted (ADR-054 D2).
+    /// The version with exactly [MemorizedAt, ForgottenAt) was recorded in error: it is marked IsDeleted (ADR-054 D2).
     /// Records written before ADR-054 by DeleteCurrent carry [MinValue, MaxValue] and are replayed with their old
     /// meaning (mark the first overlapping version); a Retract written since always carries the exact interval.
     /// </summary>
@@ -418,7 +418,7 @@ internal enum LogOperation : byte
     CommitTx = 4,
 
     /// <summary>
-    /// The version whose ValidFrom is the record's ValidFrom stops holding at the record's ValidTo (ADR-054 D1). The
+    /// The version whose MemorizedAt is the record's MemorizedAt stops holding at the record's ForgottenAt (ADR-054 D1). The
     /// record names the version so a replay always applies to the same entry, and applying it twice is a no-op.
     /// </summary>
     End = 5,
@@ -437,8 +437,8 @@ internal enum LogOperation : byte
 /// [24-31] SubjectId (8 bytes)
 /// [32-39] PredicateId (8 bytes)
 /// [40-47] ObjectId (8 bytes)
-/// [48-55] ValidFromTicks (8 bytes)
-/// [56-63] ValidToTicks (8 bytes)
+/// [48-55] MemorizedAtTicks (8 bytes)
+/// [56-63] ForgottenAtTicks (8 bytes)
 /// [64-71] TransactionTimeTicks (8 bytes) - when the system recorded the fact
 /// [72-79] Checksum (8 bytes)
 /// </summary>
@@ -452,8 +452,8 @@ internal struct LogRecord
     [FieldOffset(24)] public long SubjectId;
     [FieldOffset(32)] public long PredicateId;
     [FieldOffset(40)] public long ObjectId;
-    [FieldOffset(48)] public long ValidFromTicks;
-    [FieldOffset(56)] public long ValidToTicks;
+    [FieldOffset(48)] public long MemorizedAtTicks;
+    [FieldOffset(56)] public long ForgottenAtTicks;
     [FieldOffset(64)] public long TransactionTimeTicks;
     [FieldOffset(72)] public long Checksum;
 
@@ -461,7 +461,7 @@ internal struct LogRecord
     /// Create a log record for an Add operation.
     /// </summary>
     public static LogRecord CreateAdd(long subjectId, long predicateId, long objectId,
-        DateTimeOffset validFrom, DateTimeOffset validTo, long graphId = 0,
+        DateTimeOffset memorizedAt, DateTimeOffset forgottenAt, long graphId = 0,
         long transactionTimeTicks = 0)
     {
         return new LogRecord
@@ -471,18 +471,18 @@ internal struct LogRecord
             SubjectId = subjectId,
             PredicateId = predicateId,
             ObjectId = objectId,
-            ValidFromTicks = validFrom.UtcTicks,
-            ValidToTicks = validTo.UtcTicks,
+            MemorizedAtTicks = memorizedAt.UtcTicks,
+            ForgottenAtTicks = forgottenAt.UtcTicks,
             TransactionTimeTicks = transactionTimeTicks
         };
     }
 
     /// <summary>
-    /// Create a log record that ends a version: the version starting at <paramref name="versionValidFrom"/> stops
+    /// Create a log record that ends a version: the version starting at <paramref name="versionMemorizedAt"/> stops
     /// holding at <paramref name="end"/> (ADR-054 D1).
     /// </summary>
     public static LogRecord CreateEnd(long subjectId, long predicateId, long objectId,
-        DateTimeOffset versionValidFrom, DateTimeOffset end, long graphId,
+        DateTimeOffset versionMemorizedAt, DateTimeOffset end, long graphId,
         long transactionTimeTicks)
     {
         return new LogRecord
@@ -492,17 +492,17 @@ internal struct LogRecord
             SubjectId = subjectId,
             PredicateId = predicateId,
             ObjectId = objectId,
-            ValidFromTicks = versionValidFrom.UtcTicks,
-            ValidToTicks = end.UtcTicks,
+            MemorizedAtTicks = versionMemorizedAt.UtcTicks,
+            ForgottenAtTicks = end.UtcTicks,
             TransactionTimeTicks = transactionTimeTicks
         };
     }
 
     /// <summary>
-    /// Create a log record that retracts the version with exactly [validFrom, validTo) (ADR-054 D2).
+    /// Create a log record that retracts the version with exactly [memorizedAt, forgottenAt) (ADR-054 D2).
     /// </summary>
     public static LogRecord CreateRetract(long subjectId, long predicateId, long objectId,
-        DateTimeOffset validFrom, DateTimeOffset validTo, long graphId = 0,
+        DateTimeOffset memorizedAt, DateTimeOffset forgottenAt, long graphId = 0,
         long transactionTimeTicks = 0)
     {
         return new LogRecord
@@ -512,8 +512,8 @@ internal struct LogRecord
             SubjectId = subjectId,
             PredicateId = predicateId,
             ObjectId = objectId,
-            ValidFromTicks = validFrom.UtcTicks,
-            ValidToTicks = validTo.UtcTicks,
+            MemorizedAtTicks = memorizedAt.UtcTicks,
+            ForgottenAtTicks = forgottenAt.UtcTicks,
             TransactionTimeTicks = transactionTimeTicks
         };
     }
@@ -533,8 +533,8 @@ internal struct LogRecord
         hash ^= SubjectId * prime;
         hash ^= PredicateId * prime;
         hash ^= ObjectId * prime;
-        hash ^= ValidFromTicks * prime;
-        hash ^= ValidToTicks * prime;
+        hash ^= MemorizedAtTicks * prime;
+        hash ^= ForgottenAtTicks * prime;
         hash ^= TransactionTimeTicks * prime;
         return hash;
     }
@@ -560,8 +560,8 @@ internal struct LogRecord
         BinaryPrimitives.WriteInt64LittleEndian(buffer[24..32], SubjectId);
         BinaryPrimitives.WriteInt64LittleEndian(buffer[32..40], PredicateId);
         BinaryPrimitives.WriteInt64LittleEndian(buffer[40..48], ObjectId);
-        BinaryPrimitives.WriteInt64LittleEndian(buffer[48..56], ValidFromTicks);
-        BinaryPrimitives.WriteInt64LittleEndian(buffer[56..64], ValidToTicks);
+        BinaryPrimitives.WriteInt64LittleEndian(buffer[48..56], MemorizedAtTicks);
+        BinaryPrimitives.WriteInt64LittleEndian(buffer[56..64], ForgottenAtTicks);
         BinaryPrimitives.WriteInt64LittleEndian(buffer[64..72], TransactionTimeTicks);
         BinaryPrimitives.WriteInt64LittleEndian(buffer[72..80], Checksum);
     }
@@ -579,8 +579,8 @@ internal struct LogRecord
             SubjectId = BinaryPrimitives.ReadInt64LittleEndian(buffer[24..32]),
             PredicateId = BinaryPrimitives.ReadInt64LittleEndian(buffer[32..40]),
             ObjectId = BinaryPrimitives.ReadInt64LittleEndian(buffer[40..48]),
-            ValidFromTicks = BinaryPrimitives.ReadInt64LittleEndian(buffer[48..56]),
-            ValidToTicks = BinaryPrimitives.ReadInt64LittleEndian(buffer[56..64]),
+            MemorizedAtTicks = BinaryPrimitives.ReadInt64LittleEndian(buffer[48..56]),
+            ForgottenAtTicks = BinaryPrimitives.ReadInt64LittleEndian(buffer[56..64]),
             TransactionTimeTicks = BinaryPrimitives.ReadInt64LittleEndian(buffer[64..72]),
             Checksum = BinaryPrimitives.ReadInt64LittleEndian(buffer[72..80])
         };

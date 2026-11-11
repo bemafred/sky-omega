@@ -58,8 +58,8 @@ public class DeleteEndsValidTimeTests : IDisposable
             var history = store.QueryEvolution(S, P, "\"open\"");
             Assert.True(history.MoveNext());
             Assert.False(history.Current.IsDeleted, "An ended version is not a retracted one");
-            Assert.Equal(t0.ToUnixTimeMilliseconds(), history.Current.ValidFrom.ToUnixTimeMilliseconds());
-            Assert.True(history.Current.ValidTo < afterDelete, "ValidTo is the delete's time");
+            Assert.Equal(t0.ToUnixTimeMilliseconds(), history.Current.MemorizedAt.ToUnixTimeMilliseconds());
+            Assert.True(history.Current.ForgottenAt < afterDelete, "ForgottenAt is the delete's time");
             Assert.False(history.MoveNext(), "Ending a version adds no entry");
             history.Dispose();
         }
@@ -217,7 +217,7 @@ public class DeleteEndsValidTimeTests : IDisposable
     [Fact]
     public void Retract_AdjacentVersions_MarksOnlyTheExactOne()
     {
-        // The first version's ValidTo equals the second's ValidFrom, so both overlap the second's exact interval.
+        // The first version's ForgottenAt equals the second's MemorizedAt, so both overlap the second's exact interval.
         var dir = Path.Combine(_testDir, "retract-adjacent");
         using var store = new QuadStore(dir);
         var t0 = DateTimeOffset.UtcNow.AddHours(-3);
@@ -244,7 +244,7 @@ public class DeleteEndsValidTimeTests : IDisposable
             while (history.MoveNext())
                 if (history.Current.IsDeleted)
                 {
-                    retractedFrom.Add(history.Current.ValidFrom.ToUnixTimeMilliseconds());
+                    retractedFrom.Add(history.Current.MemorizedAt.ToUnixTimeMilliseconds());
                     Assert.NotNull(history.Current.RetractedAt);
                 }
             history.Dispose();
@@ -366,8 +366,8 @@ public class DeleteEndsValidTimeTests : IDisposable
         {
             var history = store.QueryEvolution(S, P, "\"open\"");
             Assert.True(history.MoveNext());
-            Assert.Equal(t0.ToUnixTimeMilliseconds(), history.Current.ValidFrom.ToUnixTimeMilliseconds());
-            Assert.True(history.Current.ValidTo.Year > 9000, "Still current, with no boundary");
+            Assert.Equal(t0.ToUnixTimeMilliseconds(), history.Current.MemorizedAt.ToUnixTimeMilliseconds());
+            Assert.True(history.Current.ForgottenAt.Year > 9000, "Still current, with no boundary");
             Assert.False(history.MoveNext());
             history.Dispose();
         }
@@ -414,7 +414,7 @@ public class DeleteEndsValidTimeTests : IDisposable
             var history = store.QueryEvolution(S, P, "\"open\"");
             Assert.True(history.MoveNext());
             addTx = history.Current.TransactionTime.ToUnixTimeMilliseconds();
-            endMs = history.Current.ValidTo.ToUnixTimeMilliseconds();
+            endMs = history.Current.ForgottenAt.ToUnixTimeMilliseconds();
             history.Dispose();
             store.ReleaseReadLock();
         }
@@ -435,7 +435,7 @@ public class DeleteEndsValidTimeTests : IDisposable
             {
                 var history = store.QueryEvolution(S, P, "\"open\"");
                 Assert.True(history.MoveNext());
-                Assert.Equal(endMs, history.Current.ValidTo.ToUnixTimeMilliseconds());
+                Assert.Equal(endMs, history.Current.ForgottenAt.ToUnixTimeMilliseconds());
                 Assert.False(history.Current.IsDeleted);
                 Assert.False(history.MoveNext(), "The replayed Add did not bring the ended version back");
                 history.Dispose();
@@ -455,7 +455,7 @@ public class DeleteEndsValidTimeTests : IDisposable
     public void Replay_DeleteAndReinsertInTheSameMillisecond_EndsTheOldVersionOnly()
     {
         // The re-insert starts at the delete's time T, so it also "holds at T". The End record names the old version
-        // by its ValidFrom, so replay cannot end the re-insert instead.
+        // by its MemorizedAt, so replay cannot end the re-insert instead.
         var dir = Path.Combine(_testDir, "replay-same-ms");
         var t0 = DateTimeOffset.UtcNow.AddHours(-2);
         long subjectId, predicateId, objectId, firstTx, endMs, secondTx;
@@ -470,7 +470,7 @@ public class DeleteEndsValidTimeTests : IDisposable
             var history = store.QueryEvolution(S, P, "\"a\"");
             Assert.True(history.MoveNext());
             firstTx = history.Current.TransactionTime.ToUnixTimeMilliseconds();
-            endMs = history.Current.ValidTo.ToUnixTimeMilliseconds();
+            endMs = history.Current.ForgottenAt.ToUnixTimeMilliseconds();
             history.Dispose();
             store.ReleaseReadLock();
 
@@ -504,11 +504,11 @@ public class DeleteEndsValidTimeTests : IDisposable
 
                 var history = store.QueryEvolution(S, P, "\"a\"");
                 Assert.True(history.MoveNext());
-                Assert.Equal(t0.ToUnixTimeMilliseconds(), history.Current.ValidFrom.ToUnixTimeMilliseconds());
-                Assert.Equal(endMs, history.Current.ValidTo.ToUnixTimeMilliseconds());
+                Assert.Equal(t0.ToUnixTimeMilliseconds(), history.Current.MemorizedAt.ToUnixTimeMilliseconds());
+                Assert.Equal(endMs, history.Current.ForgottenAt.ToUnixTimeMilliseconds());
                 Assert.True(history.MoveNext());
-                Assert.Equal(endMs, history.Current.ValidFrom.ToUnixTimeMilliseconds());
-                Assert.True(history.Current.ValidTo.Year > 9000);
+                Assert.Equal(endMs, history.Current.MemorizedAt.ToUnixTimeMilliseconds());
+                Assert.True(history.Current.ForgottenAt.Year > 9000);
                 Assert.False(history.MoveNext());
                 history.Dispose();
             }
@@ -545,7 +545,7 @@ public class DeleteEndsValidTimeTests : IDisposable
                 var history = store.QueryEvolution(S, P, "\"old\"");
                 Assert.True(history.MoveNext());
                 Assert.True(history.Current.IsDeleted);
-                Assert.True(history.Current.ValidTo.Year > 9000, "The old meaning left ValidTo open");
+                Assert.True(history.Current.ForgottenAt.Year > 9000, "The old meaning left ForgottenAt open");
                 history.Dispose();
             }
             finally
@@ -628,7 +628,7 @@ public class DeleteEndsValidTimeTests : IDisposable
 
             var left = store.QueryEvolution(S, P, "\"future\"", "<http://ex.org/g1>");
             Assert.True(left.MoveNext());
-            Assert.True(left.Current.IsDeleted, "Deleted before its ValidFrom: left as it was");
+            Assert.True(left.Current.IsDeleted, "Deleted before its MemorizedAt: left as it was");
             left.Dispose();
         }
         finally

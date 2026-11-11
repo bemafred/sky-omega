@@ -129,8 +129,8 @@ store.Add(
     "<http://example.org/alice>",
     "<http://example.org/worksFor>",
     "<http://example.org/Acme>",
-    validFrom: new DateTimeOffset(2020, 1, 1, 0, 0, 0, TimeSpan.Zero),
-    validTo: new DateTimeOffset(2023, 6, 30, 0, 0, 0, TimeSpan.Zero));
+    memorizedAt: new DateTimeOffset(2020, 1, 1, 0, 0, 0, TimeSpan.Zero),
+    forgottenAt: new DateTimeOffset(2023, 6, 30, 0, 0, 0, TimeSpan.Zero));
 ```
 
 ---

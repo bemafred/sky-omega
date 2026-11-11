@@ -21,6 +21,6 @@ internal sealed class AllPassFilter : IPruningFilter
         ReadOnlySpan<char> subject,
         ReadOnlySpan<char> predicate,
         ReadOnlySpan<char> obj,
-        DateTimeOffset validFrom,
-        DateTimeOffset validTo) => true;
+        DateTimeOffset memorizedAt,
+        DateTimeOffset forgottenAt) => true;
 }

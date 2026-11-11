@@ -230,10 +230,10 @@ public class QuadStoreTests : IDisposable
     {
         var store = CreateStore();
 
-        var validFrom = DateTimeOffset.UtcNow.AddDays(-10);
-        var validTo = DateTimeOffset.UtcNow.AddDays(10);
+        var memorizedAt = DateTimeOffset.UtcNow.AddDays(-10);
+        var forgottenAt = DateTimeOffset.UtcNow.AddDays(10);
 
-        store.Add("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", validFrom, validTo);
+        store.Add("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", memorizedAt, forgottenAt);
 
         store.AcquireReadLock();
         try
@@ -251,7 +251,7 @@ public class QuadStoreTests : IDisposable
                 results.Dispose();
             }
 
-            // Query as of 20 days ago (before validFrom, should not match)
+            // Query as of 20 days ago (before memorizedAt, should not match)
             var pastResults = store.QueryAsOf(
                 "<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>",
                 DateTimeOffset.UtcNow.AddDays(-20));
@@ -341,23 +341,23 @@ public class QuadStoreTests : IDisposable
     #region Temporal Boundary Conditions
 
     [Fact]
-    public void QueryAsOf_ExactlyAtValidFrom_Matches()
+    public void QueryAsOf_ExactlyAtMemorizedAt_Matches()
     {
         var store = CreateStore();
 
-        var validFrom = new DateTimeOffset(2024, 6, 1, 0, 0, 0, TimeSpan.Zero);
-        var validTo = new DateTimeOffset(2024, 12, 31, 23, 59, 59, TimeSpan.Zero);
+        var memorizedAt = new DateTimeOffset(2024, 6, 1, 0, 0, 0, TimeSpan.Zero);
+        var forgottenAt = new DateTimeOffset(2024, 12, 31, 23, 59, 59, TimeSpan.Zero);
 
-        store.Add("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", validFrom, validTo);
+        store.Add("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", memorizedAt, forgottenAt);
 
         store.AcquireReadLock();
         try
         {
-            // Query exactly at ValidFrom - should match (closed start: ValidFrom <= time)
-            var results = store.QueryAsOf("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", validFrom);
+            // Query exactly at MemorizedAt - should match (closed start: MemorizedAt <= time)
+            var results = store.QueryAsOf("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", memorizedAt);
             try
             {
-                Assert.True(results.MoveNext(), "Should match when querying exactly at ValidFrom");
+                Assert.True(results.MoveNext(), "Should match when querying exactly at MemorizedAt");
             }
             finally
             {
@@ -371,23 +371,23 @@ public class QuadStoreTests : IDisposable
     }
 
     [Fact]
-    public void QueryAsOf_ExactlyAtValidTo_DoesNotMatch()
+    public void QueryAsOf_ExactlyAtForgottenAt_DoesNotMatch()
     {
         var store = CreateStore();
 
-        var validFrom = new DateTimeOffset(2024, 6, 1, 0, 0, 0, TimeSpan.Zero);
-        var validTo = new DateTimeOffset(2024, 12, 31, 23, 59, 59, TimeSpan.Zero);
+        var memorizedAt = new DateTimeOffset(2024, 6, 1, 0, 0, 0, TimeSpan.Zero);
+        var forgottenAt = new DateTimeOffset(2024, 12, 31, 23, 59, 59, TimeSpan.Zero);
 
-        store.Add("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", validFrom, validTo);
+        store.Add("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", memorizedAt, forgottenAt);
 
         store.AcquireReadLock();
         try
         {
-            // Query exactly at ValidTo - should NOT match (open end: time < ValidTo)
-            var results = store.QueryAsOf("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", validTo);
+            // Query exactly at ForgottenAt - should NOT match (open end: time < ForgottenAt)
+            var results = store.QueryAsOf("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", forgottenAt);
             try
             {
-                Assert.False(results.MoveNext(), "Should NOT match when querying exactly at ValidTo (exclusive)");
+                Assert.False(results.MoveNext(), "Should NOT match when querying exactly at ForgottenAt (exclusive)");
             }
             finally
             {
@@ -401,24 +401,24 @@ public class QuadStoreTests : IDisposable
     }
 
     [Fact]
-    public void QueryAsOf_OneTickBeforeValidTo_Matches()
+    public void QueryAsOf_OneTickBeforeForgottenAt_Matches()
     {
         var store = CreateStore();
 
-        var validFrom = new DateTimeOffset(2024, 6, 1, 0, 0, 0, TimeSpan.Zero);
-        var validTo = new DateTimeOffset(2024, 12, 31, 23, 59, 59, TimeSpan.Zero);
+        var memorizedAt = new DateTimeOffset(2024, 6, 1, 0, 0, 0, TimeSpan.Zero);
+        var forgottenAt = new DateTimeOffset(2024, 12, 31, 23, 59, 59, TimeSpan.Zero);
 
-        store.Add("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", validFrom, validTo);
+        store.Add("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", memorizedAt, forgottenAt);
 
         store.AcquireReadLock();
         try
         {
-            // Query one tick before ValidTo - should match
-            var queryTime = new DateTimeOffset(validTo.UtcTicks - 1, TimeSpan.Zero);
+            // Query one tick before ForgottenAt - should match
+            var queryTime = new DateTimeOffset(forgottenAt.UtcTicks - 1, TimeSpan.Zero);
             var results = store.QueryAsOf("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", queryTime);
             try
             {
-                Assert.True(results.MoveNext(), "Should match one tick before ValidTo");
+                Assert.True(results.MoveNext(), "Should match one tick before ForgottenAt");
             }
             finally
             {
@@ -432,24 +432,24 @@ public class QuadStoreTests : IDisposable
     }
 
     [Fact]
-    public void QueryAsOf_OneTickBeforeValidFrom_DoesNotMatch()
+    public void QueryAsOf_OneTickBeforeMemorizedAt_DoesNotMatch()
     {
         var store = CreateStore();
 
-        var validFrom = new DateTimeOffset(2024, 6, 1, 0, 0, 0, TimeSpan.Zero);
-        var validTo = new DateTimeOffset(2024, 12, 31, 23, 59, 59, TimeSpan.Zero);
+        var memorizedAt = new DateTimeOffset(2024, 6, 1, 0, 0, 0, TimeSpan.Zero);
+        var forgottenAt = new DateTimeOffset(2024, 12, 31, 23, 59, 59, TimeSpan.Zero);
 
-        store.Add("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", validFrom, validTo);
+        store.Add("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", memorizedAt, forgottenAt);
 
         store.AcquireReadLock();
         try
         {
-            // Query one tick before ValidFrom - should NOT match
-            var queryTime = new DateTimeOffset(validFrom.UtcTicks - 1, TimeSpan.Zero);
+            // Query one tick before MemorizedAt - should NOT match
+            var queryTime = new DateTimeOffset(memorizedAt.UtcTicks - 1, TimeSpan.Zero);
             var results = store.QueryAsOf("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", queryTime);
             try
             {
-                Assert.False(results.MoveNext(), "Should NOT match one tick before ValidFrom");
+                Assert.False(results.MoveNext(), "Should NOT match one tick before MemorizedAt");
             }
             finally
             {
@@ -463,29 +463,29 @@ public class QuadStoreTests : IDisposable
     }
 
     [Fact]
-    public void QueryChanges_RangeEndEqualsValidFrom_DoesNotMatch()
+    public void QueryChanges_RangeEndEqualsMemorizedAt_DoesNotMatch()
     {
         var store = CreateStore();
 
-        var validFrom = new DateTimeOffset(2024, 6, 1, 0, 0, 0, TimeSpan.Zero);
-        var validTo = new DateTimeOffset(2024, 12, 31, 23, 59, 59, TimeSpan.Zero);
+        var memorizedAt = new DateTimeOffset(2024, 6, 1, 0, 0, 0, TimeSpan.Zero);
+        var forgottenAt = new DateTimeOffset(2024, 12, 31, 23, 59, 59, TimeSpan.Zero);
 
-        store.Add("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", validFrom, validTo);
+        store.Add("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", memorizedAt, forgottenAt);
 
         store.AcquireReadLock();
         try
         {
-            // Query range [Jan 1, June 1) - RangeEnd equals ValidFrom
-            // Overlap condition: ValidFrom < RangeEnd && ValidTo > RangeStart
+            // Query range [Jan 1, June 1) - RangeEnd equals MemorizedAt
+            // Overlap condition: MemorizedAt < RangeEnd && ForgottenAt > RangeStart
             // Here: June 1 < June 1 is FALSE, so no match
             var rangeStart = new DateTimeOffset(2024, 1, 1, 0, 0, 0, TimeSpan.Zero);
-            var rangeEnd = validFrom;  // June 1
+            var rangeEnd = memorizedAt;  // June 1
 
             var results = store.QueryChanges(rangeStart, rangeEnd,
                 "<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
             try
             {
-                Assert.False(results.MoveNext(), "Should NOT match when RangeEnd equals ValidFrom (no overlap)");
+                Assert.False(results.MoveNext(), "Should NOT match when RangeEnd equals MemorizedAt (no overlap)");
             }
             finally
             {
@@ -499,29 +499,29 @@ public class QuadStoreTests : IDisposable
     }
 
     [Fact]
-    public void QueryChanges_RangeStartEqualsValidTo_DoesNotMatch()
+    public void QueryChanges_RangeStartEqualsForgottenAt_DoesNotMatch()
     {
         var store = CreateStore();
 
-        var validFrom = new DateTimeOffset(2024, 6, 1, 0, 0, 0, TimeSpan.Zero);
-        var validTo = new DateTimeOffset(2024, 12, 31, 23, 59, 59, TimeSpan.Zero);
+        var memorizedAt = new DateTimeOffset(2024, 6, 1, 0, 0, 0, TimeSpan.Zero);
+        var forgottenAt = new DateTimeOffset(2024, 12, 31, 23, 59, 59, TimeSpan.Zero);
 
-        store.Add("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", validFrom, validTo);
+        store.Add("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", memorizedAt, forgottenAt);
 
         store.AcquireReadLock();
         try
         {
-            // Query range [Dec 31, Feb 1 2025) - RangeStart equals ValidTo
-            // Overlap condition: ValidFrom < RangeEnd && ValidTo > RangeStart
+            // Query range [Dec 31, Feb 1 2025) - RangeStart equals ForgottenAt
+            // Overlap condition: MemorizedAt < RangeEnd && ForgottenAt > RangeStart
             // Here: Dec 31 > Dec 31 is FALSE, so no match
-            var rangeStart = validTo;  // Dec 31
+            var rangeStart = forgottenAt;  // Dec 31
             var rangeEnd = new DateTimeOffset(2025, 2, 1, 0, 0, 0, TimeSpan.Zero);
 
             var results = store.QueryChanges(rangeStart, rangeEnd,
                 "<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
             try
             {
-                Assert.False(results.MoveNext(), "Should NOT match when RangeStart equals ValidTo (no overlap)");
+                Assert.False(results.MoveNext(), "Should NOT match when RangeStart equals ForgottenAt (no overlap)");
             }
             finally
             {
@@ -634,7 +634,7 @@ public class QuadStoreTests : IDisposable
     {
         var store = CreateStore();
 
-        // Zero-duration fact: ValidFrom == ValidTo
+        // Zero-duration fact: MemorizedAt == ForgottenAt
         var instant = new DateTimeOffset(2024, 6, 15, 12, 0, 0, TimeSpan.Zero);
         store.Add("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", instant, instant);
 
@@ -642,7 +642,7 @@ public class QuadStoreTests : IDisposable
         try
         {
             // Query at exact instant
-            // Condition: ValidFrom <= time && ValidTo > time
+            // Condition: MemorizedAt <= time && ForgottenAt > time
             // Here: June 15 <= June 15 is TRUE, but June 15 > June 15 is FALSE
             var results = store.QueryAsOf("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", instant);
             try
@@ -697,9 +697,9 @@ public class QuadStoreTests : IDisposable
         try
         {
             // Query range containing the instant
-            // Overlap condition: ValidFrom < RangeEnd && ValidTo > RangeStart
+            // Overlap condition: MemorizedAt < RangeEnd && ForgottenAt > RangeStart
             // For zero-duration: instant < RangeEnd && instant > RangeStart
-            // But since ValidFrom == ValidTo, can't satisfy both conditions simultaneously
+            // But since MemorizedAt == ForgottenAt, can't satisfy both conditions simultaneously
             // unless instant is strictly between RangeStart and RangeEnd
             var rangeStart = new DateTimeOffset(2024, 6, 1, 0, 0, 0, TimeSpan.Zero);
             var rangeEnd = new DateTimeOffset(2024, 7, 1, 0, 0, 0, TimeSpan.Zero);
@@ -708,10 +708,10 @@ public class QuadStoreTests : IDisposable
                 "<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
             try
             {
-                // Zero duration means ValidFrom < RangeEnd (June 15 < July 1 = true)
-                // AND ValidTo > RangeStart (June 15 > June 1 = true)
+                // Zero duration means MemorizedAt < RangeEnd (June 15 < July 1 = true)
+                // AND ForgottenAt > RangeStart (June 15 > June 1 = true)
                 // Actually this WOULD match! Let me reconsider...
-                // The condition is: ValidFrom < RangeEnd && ValidTo > RangeStart
+                // The condition is: MemorizedAt < RangeEnd && ForgottenAt > RangeStart
                 // For instant June 15: June 15 < July 1 (true) && June 15 > June 1 (true)
                 // So a zero-duration fact DOES match range queries if the point is inside the range
                 Assert.True(results.MoveNext(), "Zero-duration fact inside range should match QueryChanges");
@@ -757,13 +757,13 @@ public class QuadStoreTests : IDisposable
     }
 
     [Fact]
-    public void QueryAsOf_DateTimeMaxValue_AsValidTo()
+    public void QueryAsOf_DateTimeMaxValue_AsForgottenAt()
     {
         var store = CreateStore();
 
         // Fact valid forever (common pattern)
-        var validFrom = new DateTimeOffset(2024, 1, 1, 0, 0, 0, TimeSpan.Zero);
-        store.Add("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", validFrom, DateTimeOffset.MaxValue);
+        var memorizedAt = new DateTimeOffset(2024, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        store.Add("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", memorizedAt, DateTimeOffset.MaxValue);
 
         store.AcquireReadLock();
         try
@@ -773,7 +773,7 @@ public class QuadStoreTests : IDisposable
             var results = store.QueryAsOf("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", farFuture);
             try
             {
-                Assert.True(results.MoveNext(), "Fact with MaxValue ValidTo should match far future queries");
+                Assert.True(results.MoveNext(), "Fact with MaxValue ForgottenAt should match far future queries");
             }
             finally
             {
@@ -787,24 +787,24 @@ public class QuadStoreTests : IDisposable
     }
 
     [Fact]
-    public void QueryAsOf_EarlyValidFrom_MatchesLaterQuery()
+    public void QueryAsOf_EarlyMemorizedAt_MatchesLaterQuery()
     {
         var store = CreateStore();
 
         // Fact that started in the past and continues to present
-        var validFrom = DateTimeOffset.UtcNow.AddYears(-5);
-        var validTo = DateTimeOffset.UtcNow.AddYears(5);
-        store.Add("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", validFrom, validTo);
+        var memorizedAt = DateTimeOffset.UtcNow.AddYears(-5);
+        var forgottenAt = DateTimeOffset.UtcNow.AddYears(5);
+        store.Add("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", memorizedAt, forgottenAt);
 
         store.AcquireReadLock();
         try
         {
-            // Query a time between validFrom and now - should match
+            // Query a time between memorizedAt and now - should match
             var queryTime = DateTimeOffset.UtcNow.AddYears(-2);
             var results = store.QueryAsOf("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", queryTime);
             try
             {
-                Assert.True(results.MoveNext(), "Fact with past ValidFrom should match queries within valid period");
+                Assert.True(results.MoveNext(), "Fact with past MemorizedAt should match queries within valid period");
             }
             finally
             {
@@ -1216,12 +1216,12 @@ public class QuadStoreTests : IDisposable
     {
         var store = CreateStore();
 
-        var validFrom = DateTimeOffset.UtcNow.AddDays(-10);
-        var validTo = DateTimeOffset.UtcNow.AddDays(10);
+        var memorizedAt = DateTimeOffset.UtcNow.AddDays(-10);
+        var forgottenAt = DateTimeOffset.UtcNow.AddDays(10);
 
-        store.Add("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", validFrom, validTo);
+        store.Add("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", memorizedAt, forgottenAt);
 
-        var deleted = store.Retract("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", validFrom, validTo);
+        var deleted = store.Retract("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", memorizedAt, forgottenAt);
 
         Assert.True(deleted);
 
@@ -1357,7 +1357,7 @@ public class QuadStoreTests : IDisposable
     [Fact]
     public void QueryEvolution_DeletedTriple_IsVisibleWithClosedInterval()
     {
-        // ADR-054 D1: a delete ends the version (ValidTo = the delete's time); it is not a retraction.
+        // ADR-054 D1: a delete ends the version (ForgottenAt = the delete's time); it is not a retraction.
         var store = CreateStore();
         var before = DateTimeOffset.UtcNow;
         store.AddCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
@@ -1372,7 +1372,7 @@ public class QuadStoreTests : IDisposable
             {
                 Assert.True(results.MoveNext(), "Deleted triple should be visible in QueryEvolution");
                 Assert.False(results.Current.IsDeleted, "An ended version is not a retracted one");
-                Assert.InRange(results.Current.ValidTo, before.AddMilliseconds(-1), after.AddMilliseconds(1));
+                Assert.InRange(results.Current.ForgottenAt, before.AddMilliseconds(-1), after.AddMilliseconds(1));
                 Assert.Null(results.Current.RetractedAt);
                 Assert.False(results.MoveNext(), "The delete ends the version; it adds none");
             }
@@ -1411,7 +1411,7 @@ public class QuadStoreTests : IDisposable
                 while (results.MoveNext())
                 {
                     count++;
-                    if (results.Current.ValidTo < DateTimeOffset.MaxValue.AddYears(-1000))
+                    if (results.Current.ForgottenAt < DateTimeOffset.MaxValue.AddYears(-1000))
                         endedCount++;
                     if (results.Current.IsDeleted)
                         retractedCount++;

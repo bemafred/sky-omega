@@ -40,15 +40,15 @@ Bitemporal allows:
 
 ```
 TemporalKey (56 bytes):
-┌────────┬──────────┬────────────┬──────────┬──────────┬─────────┬───────────────┐
-│Graph(8)│Subject(8)│Predicate(8)│Object(8) │ValidFrom │ValidTo  │TransactionTime│
-│        │          │            │          │  (8)     │  (8)    │     (8)       │
-└────────┴──────────┴────────────┴──────────┴──────────┴─────────┴───────────────┘
+┌────────┬──────────┬────────────┬──────────┬───────────┬───────────┬───────────────┐
+│Graph(8)│Subject(8)│Predicate(8)│Object(8) │MemorizedAt│ForgottenAt│TransactionTime│
+│        │          │            │          │    (8)    │    (8)    │     (8)       │
+└────────┴──────────┴────────────┴──────────┴───────────┴───────────┴───────────────┘
 
 Sorted lexicographically (GSPO ordering):
   1. Graph (0 = default graph, enables named graph isolation)
   2. Subject, Predicate, Object (spatial)
-  3. ValidFrom, ValidTo (temporal)
+  3. MemorizedAt, ForgottenAt (temporal)
   4. TransactionTime (versioning)
 ```
 
@@ -106,7 +106,7 @@ mydb/
 The single B+Tree index uses **GSPO ordering** (Graph-Subject-Predicate-Object-Time):
 
 ```
-Order: G → S → P → O → ValidFrom → ValidTo → TransactionTime
+Order: G → S → P → O → MemorizedAt → ForgottenAt → TransactionTime
 ```
 
 ### Query Patterns
@@ -152,7 +152,7 @@ var results = store.QueryAsOf(
 );
 ```
 
-**Semantics**: Return triples where `ValidFrom <= T < ValidTo`
+**Semantics**: Return triples where `MemorizedAt <= T < ForgottenAt`
 
 ### 2. Temporal Range Query
 
@@ -168,7 +168,7 @@ var results = store.QueryChanges(
 );
 ```
 
-**Semantics**: Return triples where `ValidFrom < T2 AND ValidTo > T1`
+**Semantics**: Return triples where `MemorizedAt < T2 AND ForgottenAt > T1`
 
 ### 3. Evolution Query
 
@@ -182,7 +182,7 @@ var results = store.QueryEvolution(
 );
 ```
 
-**Semantics**: Return all versions, ordered by ValidFrom
+**Semantics**: Return all versions, ordered by MemorizedAt
 
 ### 4. Current State Query
 
@@ -226,7 +226,7 @@ var results = store.QueryAsOf(
 
 ```csharp
 // Every insert has transaction time
-store.Add(subject, predicate, obj, validFrom, validTo);
+store.Add(subject, predicate, obj, memorizedAt, forgottenAt);
 // Transaction time automatically recorded
 
 // Later: Who changed what and when?
@@ -235,7 +235,7 @@ while (evolution.MoveNext())
 {
     var triple = evolution.Current;
     Console.WriteLine($"Changed to {triple.Object}");
-    Console.WriteLine($"  Valid: {triple.ValidFrom} to {triple.ValidTo}");
+    Console.WriteLine($"  Valid: {triple.MemorizedAt} to {triple.ForgottenAt}");
     Console.WriteLine($"  Recorded: {triple.TransactionTime}");
 }
 ```
@@ -276,7 +276,7 @@ while (employees.MoveNext())
 {
     var emp = employees.Current;
     // emp.Subject = employee who worked at Anthropic at targetTime
-    // emp.ValidFrom/ValidTo = their employment period
+    // emp.MemorizedAt/ForgottenAt = their employment period
 }
 ```
 
@@ -411,12 +411,12 @@ var results = store.Query(
 
 ```csharp
 // Insert facts in chronological order for better page locality
-var facts = GetFacts().OrderBy(f => f.ValidFrom);
+var facts = GetFacts().OrderBy(f => f.MemorizedAt);
 
 foreach (var fact in facts)
 {
     store.Add(fact.Subject, fact.Predicate, fact.Object,
-        fact.ValidFrom, fact.ValidTo);
+        fact.MemorizedAt, fact.ForgottenAt);
 }
 ```
 

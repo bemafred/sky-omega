@@ -13,14 +13,14 @@ internal interface IPruningFilter
     /// <param name="subject">Subject IRI or blank node</param>
     /// <param name="predicate">Predicate IRI</param>
     /// <param name="obj">Object (IRI, blank node, or literal)</param>
-    /// <param name="validFrom">Valid-time start</param>
-    /// <param name="validTo">Valid-time end</param>
+    /// <param name="memorizedAt">When the version was memorized</param>
+    /// <param name="forgottenAt">When it was forgotten; the far future while it is remembered</param>
     /// <returns>True to include the quad, false to exclude</returns>
     bool ShouldInclude(
         ReadOnlySpan<char> graph,
         ReadOnlySpan<char> subject,
         ReadOnlySpan<char> predicate,
         ReadOnlySpan<char> obj,
-        DateTimeOffset validFrom,
-        DateTimeOffset validTo);
+        DateTimeOffset memorizedAt,
+        DateTimeOffset forgottenAt);
 }

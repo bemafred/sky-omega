@@ -35,15 +35,15 @@ internal sealed class CompositeFilter : IPruningFilter
         ReadOnlySpan<char> subject,
         ReadOnlySpan<char> predicate,
         ReadOnlySpan<char> obj,
-        DateTimeOffset validFrom,
-        DateTimeOffset validTo)
+        DateTimeOffset memorizedAt,
+        DateTimeOffset forgottenAt)
     {
         if (_requireAll)
         {
             // AND logic: all must pass
             foreach (var filter in _filters)
             {
-                if (!filter.ShouldInclude(graph, subject, predicate, obj, validFrom, validTo))
+                if (!filter.ShouldInclude(graph, subject, predicate, obj, memorizedAt, forgottenAt))
                     return false;
             }
             return true;
@@ -53,7 +53,7 @@ internal sealed class CompositeFilter : IPruningFilter
             // OR logic: any can pass
             foreach (var filter in _filters)
             {
-                if (filter.ShouldInclude(graph, subject, predicate, obj, validFrom, validTo))
+                if (filter.ShouldInclude(graph, subject, predicate, obj, memorizedAt, forgottenAt))
                     return true;
             }
             return false;

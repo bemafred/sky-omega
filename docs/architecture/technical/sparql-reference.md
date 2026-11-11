@@ -174,9 +174,9 @@ One file per type in `Sparql/Execution/Operators/`:
 - Temporal clauses come after LIMIT/OFFSET in solution modifiers
 - DateTime literals support both `xsd:date` and `xsd:dateTime` formats; the time is a literal, not an expression
 - Default mode is `Current` (equivalent to calling `QueryCurrent()`)
-- `AS OF t` is the store as it stood at the instant t (ValidFrom ≤ t < ValidTo): it keeps what was older than t and
+- `AS OF t` is the store as it stood at the instant t (MemorizedAt ≤ t < ForgottenAt): it keeps what was older than t and
   leaves out what came later.
-- `DURING [s, e]` is every version valid at some moment in the range (ValidFrom < e and ValidTo > s). A triple
+- `DURING [s, e]` is every version valid at some moment in the range (MemorizedAt < e and ForgottenAt > s). A triple
   recorded before s and still valid is in it, so neither clause selects "recorded since t". Filter on a recorded time
   instead: `FILTER(?created >= NOW() - "P7D"^^xsd:dayTimeDuration)` keeps the last week's records.
 

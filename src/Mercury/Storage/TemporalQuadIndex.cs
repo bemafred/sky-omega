@@ -114,8 +114,8 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
         ReadOnlySpan<char> primary,
         ReadOnlySpan<char> secondary,
         ReadOnlySpan<char> tertiary,
-        long validFrom,
-        long validTo,
+        long memorizedAt,
+        long forgottenAt,
         long transactionTime,
         ReadOnlySpan<char> graph = default)
     {
@@ -130,8 +130,8 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
             Primary = a,
             Secondary = b,
             Tertiary = c,
-            ValidFrom = validFrom,
-            ValidTo = validTo,
+            MemorizedAt = memorizedAt,
+            ForgottenAt = forgottenAt,
             TransactionTime = transactionTime
         };
 
@@ -143,7 +143,7 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
     {
         /// <summary>A new row was written.</summary>
         Inserted,
-        /// <summary>The same Add (same ValidFrom and TransactionTime) was already in the tree: a WAL replay.</summary>
+        /// <summary>The same Add (same MemorizedAt and TransactionTime) was already in the tree: a WAL replay.</summary>
         AlreadyPresent,
         /// <summary>A current entry with the same dimensions exists (RDF idempotency); nothing was written.</summary>
         Duplicate,
@@ -156,7 +156,7 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
     /// by secondary index rebuild, to avoid re-interning strings whose atom IDs are known.
     /// </summary>
     internal InsertOutcome AddRaw(long graph, long primary, long secondary, long tertiary,
-        long validFrom, long validTo, long transactionTime)
+        long memorizedAt, long forgottenAt, long transactionTime)
     {
         var temporalKey = new TemporalKey
         {
@@ -164,8 +164,8 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
             Primary = primary,
             Secondary = secondary,
             Tertiary = tertiary,
-            ValidFrom = validFrom,
-            ValidTo = validTo,
+            MemorizedAt = memorizedAt,
+            ForgottenAt = forgottenAt,
             TransactionTime = transactionTime
         };
 
@@ -187,31 +187,31 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
     internal void CountRecoveredEntry() => _file.IncrementEntryCount();
 
     /// <summary>
-    /// End a version (ADR-054 D1): the live entry with these dimensions and exactly <paramref name="validFrom"/> stops
+    /// End a version (ADR-054 D1): the live entry with these dimensions and exactly <paramref name="memorizedAt"/> stops
     /// holding at <paramref name="end"/>. Returns false, changing nothing, when no such entry exists or it already ends
     /// at or before <paramref name="end"/>, so applying the same End twice (WAL replay) is a no-op.
     /// </summary>
     internal bool EndRaw(long graph, long primary, long secondary, long tertiary,
-        long validFrom, long end, long transactionTime)
+        long memorizedAt, long end, long transactionTime)
     {
-        var entry = FindLiveEntry(graph, primary, secondary, tertiary, validFrom, validTo: null);
-        if (entry == null || entry->Key.ValidTo <= end)
+        var entry = FindLiveEntry(graph, primary, secondary, tertiary, memorizedAt, forgottenAt: null);
+        if (entry == null || entry->Key.ForgottenAt <= end)
             return false;
 
-        entry->Key.ValidTo = end;
+        entry->Key.ForgottenAt = end;
         entry->ModifiedAt = transactionTime;
         _file.FlushPage();
         return true;
     }
 
     /// <summary>
-    /// Retract a version (ADR-054 D2): the live entry with these dimensions and exactly [validFrom, validTo) is marked
+    /// Retract a version (ADR-054 D2): the live entry with these dimensions and exactly [memorizedAt, forgottenAt) is marked
     /// as recorded in error. Returns false when no such live entry exists.
     /// </summary>
     internal bool RetractRaw(long graph, long primary, long secondary, long tertiary,
-        long validFrom, long validTo, long transactionTime)
+        long memorizedAt, long forgottenAt, long transactionTime)
     {
-        var entry = FindLiveEntry(graph, primary, secondary, tertiary, validFrom, validTo);
+        var entry = FindLiveEntry(graph, primary, secondary, tertiary, memorizedAt, forgottenAt);
         if (entry == null)
             return false;
 
@@ -227,7 +227,7 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
     /// such a record any more; only <see cref="QuadStore"/> recovery calls this.
     /// </summary>
     internal bool ReplayPreAdr054Delete(long graph, long primary, long secondary, long tertiary,
-        long validFrom, long validTo, long transactionTime)
+        long memorizedAt, long forgottenAt, long transactionTime)
     {
         var key = new TemporalKey
         {
@@ -235,8 +235,8 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
             Primary = primary,
             Secondary = secondary,
             Tertiary = tertiary,
-            ValidFrom = validFrom,
-            ValidTo = validTo,
+            MemorizedAt = memorizedAt,
+            ForgottenAt = forgottenAt,
             TransactionTime = transactionTime
         };
 
@@ -244,7 +244,7 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
     }
 
     /// <summary>
-    /// The ValidFrom of the live version that holds at <paramref name="at"/> (ValidFrom ≤ at &lt; ValidTo), or null.
+    /// The MemorizedAt of the live version that holds at <paramref name="at"/> (MemorizedAt ≤ at &lt; ForgottenAt), or null.
     /// Walks every version of the quad across leaf pages. Only an EntityFirst index keeps a quad's versions together,
     /// so QuadStore asks its GSPO index.
     /// </summary>
@@ -254,9 +254,9 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
             throw new InvalidOperationException("FindVersionHoldingAt needs an EntityFirst index: a TimeFirst index does not keep a quad's versions together.");
 
         var lo = new TemporalKey { Graph = graph, Primary = primary, Secondary = secondary, Tertiary = tertiary,
-            ValidFrom = long.MinValue, ValidTo = long.MinValue, TransactionTime = long.MinValue };
+            MemorizedAt = long.MinValue, ForgottenAt = long.MinValue, TransactionTime = long.MinValue };
         var hi = new TemporalKey { Graph = graph, Primary = primary, Secondary = secondary, Tertiary = tertiary,
-            ValidFrom = long.MaxValue, ValidTo = long.MaxValue, TransactionTime = long.MaxValue };
+            MemorizedAt = long.MaxValue, ForgottenAt = long.MaxValue, TransactionTime = long.MaxValue };
 
         for (var pageId = FindLeafPage(_file.RootPageId, lo); pageId != 0;)
         {
@@ -266,8 +266,8 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
                 ref var entry = ref page->GetEntry(i);
                 if (CompareKeys(in entry.Key, in lo) < 0) continue;
                 if (CompareKeys(in entry.Key, in hi) > 0) return null;
-                if (!entry.IsDeleted && entry.Key.ValidFrom <= at && entry.Key.ValidTo > at)
-                    return entry.Key.ValidFrom;
+                if (!entry.IsDeleted && entry.Key.MemorizedAt <= at && entry.Key.ForgottenAt > at)
+                    return entry.Key.MemorizedAt;
             }
             pageId = page->NextLeaf;
         }
@@ -275,17 +275,17 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
     }
 
     /// <summary>
-    /// The live entry with these dimensions and exactly this ValidFrom (and, when given, this ValidTo), or null.
-    /// Entries sharing dimensions and ValidFrom are adjacent in both sort orders; the walk follows the leaf chain
+    /// The live entry with these dimensions and exactly this MemorizedAt (and, when given, this ForgottenAt), or null.
+    /// Entries sharing dimensions and MemorizedAt are adjacent in both sort orders; the walk follows the leaf chain
     /// because they can straddle a page boundary.
     /// </summary>
     private TemporalBTreeEntry* FindLiveEntry(long graph, long primary, long secondary, long tertiary,
-        long validFrom, long? validTo)
+        long memorizedAt, long? forgottenAt)
     {
         var lo = new TemporalKey { Graph = graph, Primary = primary, Secondary = secondary, Tertiary = tertiary,
-            ValidFrom = validFrom, ValidTo = validTo ?? long.MinValue, TransactionTime = long.MinValue };
+            MemorizedAt = memorizedAt, ForgottenAt = forgottenAt ?? long.MinValue, TransactionTime = long.MinValue };
         var hi = new TemporalKey { Graph = graph, Primary = primary, Secondary = secondary, Tertiary = tertiary,
-            ValidFrom = validFrom, ValidTo = validTo ?? long.MaxValue, TransactionTime = long.MaxValue };
+            MemorizedAt = memorizedAt, ForgottenAt = forgottenAt ?? long.MaxValue, TransactionTime = long.MaxValue };
 
         for (var pageId = FindLeafPage(_file.RootPageId, lo); pageId != 0;)
         {
@@ -303,31 +303,31 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
         return null;
     }
 
-    /// <summary>Whether a live entry with these dimensions and exactly [validFrom, validTo) exists.</summary>
-    internal bool HoldsLiveEntry(long graph, long primary, long secondary, long tertiary, long validFrom, long validTo) =>
-        FindLiveEntry(graph, primary, secondary, tertiary, validFrom, validTo) != null;
+    /// <summary>Whether a live entry with these dimensions and exactly [memorizedAt, forgottenAt) exists.</summary>
+    internal bool HoldsLiveEntry(long graph, long primary, long secondary, long tertiary, long memorizedAt, long forgottenAt) =>
+        FindLiveEntry(graph, primary, secondary, tertiary, memorizedAt, forgottenAt) != null;
 
     /// <summary>What <see cref="RepairDeleted"/> does with one flagged entry (ADR-054 D7).</summary>
     internal enum DeletedEntryRepair : byte
     {
         /// <summary>Leave the entry as it is.</summary>
         Leave,
-        /// <summary>The fact ended when it was deleted: ValidTo = ModifiedAt, IsDeleted = false.</summary>
+        /// <summary>The fact ended when it was deleted: ForgottenAt = ModifiedAt, IsDeleted = false.</summary>
         End,
-        /// <summary>The delete was the mistake: IsDeleted = false, ValidTo unchanged.</summary>
+        /// <summary>The delete was the mistake: IsDeleted = false, ForgottenAt unchanged.</summary>
         Restore
     }
 
     /// <summary>
     /// Visit every IsDeleted leaf entry and apply what <paramref name="decide"/> returns for it. The callback gets the
-    /// entry's dimensions in this index's order, its ValidFrom, ValidTo and ModifiedAt (the deletion's transaction
+    /// entry's dimensions in this index's order, its MemorizedAt, ForgottenAt and ModifiedAt (the deletion's transaction
     /// time). Each index is repaired on its own entries, so an interrupted repair can be rerun: entries already
     /// repaired are no longer flagged. Returns the number of entries changed.
     /// </summary>
     internal int RepairDeleted(Func<long, long, long, long, long, long, long, DeletedEntryRepair> decide)
     {
         var first = new TemporalKey { Graph = long.MinValue, Primary = long.MinValue, Secondary = long.MinValue,
-            Tertiary = long.MinValue, ValidFrom = long.MinValue, ValidTo = long.MinValue, TransactionTime = long.MinValue };
+            Tertiary = long.MinValue, MemorizedAt = long.MinValue, ForgottenAt = long.MinValue, TransactionTime = long.MinValue };
         int changed = 0;
         for (var pageId = FindLeafPage(_file.RootPageId, first); pageId != 0;)
         {
@@ -337,10 +337,10 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
                 ref var entry = ref page->GetEntry(i);
                 if (!entry.IsDeleted) continue;
                 var k = entry.Key;
-                switch (decide(k.Graph, k.Primary, k.Secondary, k.Tertiary, k.ValidFrom, k.ValidTo, entry.ModifiedAt))
+                switch (decide(k.Graph, k.Primary, k.Secondary, k.Tertiary, k.MemorizedAt, k.ForgottenAt, entry.ModifiedAt))
                 {
                     case DeletedEntryRepair.End:
-                        entry.Key.ValidTo = entry.ModifiedAt;
+                        entry.Key.ForgottenAt = entry.ModifiedAt;
                         entry.IsDeleted = false;
                         changed++;
                         break;
@@ -379,15 +379,15 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
         ReadOnlySpan<char> primary,
         ReadOnlySpan<char> secondary,
         ReadOnlySpan<char> tertiary,
-        DateTimeOffset validFrom,
-        DateTimeOffset validTo,
+        DateTimeOffset memorizedAt,
+        DateTimeOffset forgottenAt,
         long transactionTime = 0,
         ReadOnlySpan<char> graph = default)
     {
         var tt = transactionTime != 0 ? transactionTime : DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         Add(primary, secondary, tertiary,
-            validFrom.ToUnixTimeMilliseconds(),
-            validTo.ToUnixTimeMilliseconds(),
+            memorizedAt.ToUnixTimeMilliseconds(),
+            forgottenAt.ToUnixTimeMilliseconds(),
             transactionTime: tt,
             graph: graph);
     }
@@ -400,8 +400,8 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
         ReadOnlySpan<char> primary,
         ReadOnlySpan<char> secondary,
         ReadOnlySpan<char> tertiary,
-        long validFrom,
-        long validTo,
+        long memorizedAt,
+        long forgottenAt,
         long transactionTime = 0,
         ReadOnlySpan<char> graph = default)
     {
@@ -418,7 +418,7 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
 
         var tt = transactionTime != 0 ? transactionTime : DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
-        return RetractRaw(g, a, b, c, validFrom, validTo, tt);
+        return RetractRaw(g, a, b, c, memorizedAt, forgottenAt, tt);
     }
 
     /// <summary>
@@ -429,14 +429,14 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
         ReadOnlySpan<char> primary,
         ReadOnlySpan<char> secondary,
         ReadOnlySpan<char> tertiary,
-        DateTimeOffset validFrom,
-        DateTimeOffset validTo,
+        DateTimeOffset memorizedAt,
+        DateTimeOffset forgottenAt,
         long transactionTime = 0,
         ReadOnlySpan<char> graph = default)
     {
         return Retract(primary, secondary, tertiary,
-            validFrom.ToUnixTimeMilliseconds(),
-            validTo.ToUnixTimeMilliseconds(),
+            memorizedAt.ToUnixTimeMilliseconds(),
+            forgottenAt.ToUnixTimeMilliseconds(),
             transactionTime,
             graph);
     }
@@ -458,7 +458,7 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
             if (IsSameDimensions(entry.Key, key) && !entry.IsDeleted)
             {
                 // Check for time overlap
-                if (entry.Key.ValidFrom <= key.ValidTo && entry.Key.ValidTo >= key.ValidFrom)
+                if (entry.Key.MemorizedAt <= key.ForgottenAt && entry.Key.ForgottenAt >= key.MemorizedAt)
                 {
                     entry.IsDeleted = true;
                     entry.ModifiedAt = key.TransactionTime;
@@ -635,10 +635,10 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
     /// </summary>
     internal enum KeySortOrder
     {
-        /// <summary>Graph → Primary → Secondary → Tertiary → ValidFrom → ValidTo → TransactionTime</summary>
+        /// <summary>Graph → Primary → Secondary → Tertiary → MemorizedAt → ForgottenAt → TransactionTime</summary>
         EntityFirst,
 
-        /// <summary>ValidFrom → Graph → Primary → Secondary → Tertiary → ValidTo → TransactionTime</summary>
+        /// <summary>MemorizedAt → Graph → Primary → Secondary → Tertiary → ForgottenAt → TransactionTime</summary>
         TimeFirst
     }
 
@@ -659,8 +659,10 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
         public long Primary;         // 64-bit, first dimension (e.g., subject in GSPO)
         public long Secondary;       // 64-bit, second dimension (e.g., predicate in GSPO)
         public long Tertiary;        // 64-bit, third dimension (e.g., object in GSPO)
-        public long ValidFrom;       // Valid-time start (milliseconds since epoch)
-        public long ValidTo;         // Valid-time end (milliseconds since epoch)
+        // The version's two times on the memory's own axis (ADR-061 D1, D11), in milliseconds since the epoch.
+        // Until ADR-061 D2 is done a caller can still state them, and they then hold a stated valid time.
+        public long MemorizedAt;     // When the version was memorized
+        public long ForgottenAt;     // When it was forgotten; the far future while it is remembered
         public long TransactionTime; // Transaction-time (when recorded)
 
         /// <summary>
@@ -671,7 +673,7 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
         public readonly int CompareTo(TemporalKey other) => CompareEntityFirst(in this, in other);
 
         /// <summary>
-        /// Graph → Primary → Secondary → Tertiary → ValidFrom → ValidTo → TransactionTime
+        /// Graph → Primary → Secondary → Tertiary → MemorizedAt → ForgottenAt → TransactionTime
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal static int CompareEntityFirst(in TemporalKey a, in TemporalKey b)
@@ -688,22 +690,22 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
             cmp = a.Tertiary.CompareTo(b.Tertiary);
             if (cmp != 0) return cmp;
 
-            cmp = a.ValidFrom.CompareTo(b.ValidFrom);
+            cmp = a.MemorizedAt.CompareTo(b.MemorizedAt);
             if (cmp != 0) return cmp;
 
-            cmp = a.ValidTo.CompareTo(b.ValidTo);
+            cmp = a.ForgottenAt.CompareTo(b.ForgottenAt);
             if (cmp != 0) return cmp;
 
             return a.TransactionTime.CompareTo(b.TransactionTime);
         }
 
         /// <summary>
-        /// ValidFrom → Graph → Primary → Secondary → Tertiary → ValidTo → TransactionTime
+        /// MemorizedAt → Graph → Primary → Secondary → Tertiary → ForgottenAt → TransactionTime
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal static int CompareTimeFirst(in TemporalKey a, in TemporalKey b)
         {
-            var cmp = a.ValidFrom.CompareTo(b.ValidFrom);
+            var cmp = a.MemorizedAt.CompareTo(b.MemorizedAt);
             if (cmp != 0) return cmp;
 
             cmp = a.Graph.CompareTo(b.Graph);
@@ -718,7 +720,7 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
             cmp = a.Tertiary.CompareTo(b.Tertiary);
             if (cmp != 0) return cmp;
 
-            cmp = a.ValidTo.CompareTo(b.ValidTo);
+            cmp = a.ForgottenAt.CompareTo(b.ForgottenAt);
             if (cmp != 0) return cmp;
 
             return a.TransactionTime.CompareTo(b.TransactionTime);
@@ -819,7 +821,7 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
                     {
                         // Check temporal bounds AND the bound spatial dimensions. The spatial check is
                         // load-bearing for the TGSP (time-leading) index that DURING/Range selects: there
-                        // ValidFrom leads, so the graph/S/P/O key range cannot gate those dimensions and a
+                        // MemorizedAt leads, so the graph/S/P/O key range cannot gate those dimensions and a
                         // pure CompareKeys scan would leak entries from every graph/S/P/O in the time window
                         // (the DURING over-count bug). For the spatial-leading indexes (GSPO/GPOS/GOSP) the
                         // key range already constrains them, so MatchesSpatialBounds is a redundant no-op.
@@ -850,13 +852,13 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
                 // AsOf and Range queries exclude deleted entries
                 TemporalQueryType.AsOf =>
                     !entry.IsDeleted &&
-                    key.ValidFrom <= _query.AsOfTime &&
-                    key.ValidTo > _query.AsOfTime,
+                    key.MemorizedAt <= _query.AsOfTime &&
+                    key.ForgottenAt > _query.AsOfTime,
 
                 TemporalQueryType.Range =>
                     !entry.IsDeleted &&
-                    key.ValidFrom < _query.RangeEnd &&
-                    key.ValidTo > _query.RangeStart,
+                    key.MemorizedAt < _query.RangeEnd &&
+                    key.ForgottenAt > _query.RangeStart,
 
                 // AllTime (history/audit) includes deleted entries
                 TemporalQueryType.AllTime => true,
@@ -884,8 +886,8 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
                 Primary = _currentKey.Primary,
                 Secondary = _currentKey.Secondary,
                 Tertiary = _currentKey.Tertiary,
-                ValidFrom = _currentKey.ValidFrom,
-                ValidTo = _currentKey.ValidTo,
+                MemorizedAt = _currentKey.MemorizedAt,
+                ForgottenAt = _currentKey.ForgottenAt,
                 TransactionTime = _currentKey.TransactionTime,
                 IsDeleted = _currentIsDeleted,
                 ModifiedAt = _currentModifiedAt
@@ -1010,20 +1012,20 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
             ref var prevEntry = ref page->GetEntry(insertPos - 1);
             if (IsSameDimensions(key, prevEntry.Key))
             {
-                // Case A: the same Add applied again (WAL replay) — same ValidFrom and TransactionTime. ValidTo is not
+                // Case A: the same Add applied again (WAL replay) — same MemorizedAt and TransactionTime. ForgottenAt is not
                 // compared: an End may have shortened it since (ADR-054 D1), and the replayed Add must not bring the
                 // ended version back.
-                if (prevEntry.Key.ValidFrom == key.ValidFrom &&
+                if (prevEntry.Key.MemorizedAt == key.MemorizedAt &&
                     prevEntry.Key.TransactionTime == key.TransactionTime)
                 {
                     _lastInsertOutcome = InsertOutcome.AlreadyPresent;
                     return default;
                 }
 
-                // Case B: Both entries are "current" (ValidTo is far future) — RDF idempotency. A retracted entry is
+                // Case B: Both entries are "current" (ForgottenAt is far future) — RDF idempotency. A retracted entry is
                 // not current and never blocks an insert (ADR-054 D3).
                 const long FarFutureThreshold = 253370764800000L; // Year 9000 in Unix ms
-                if (!prevEntry.IsDeleted && prevEntry.Key.ValidTo >= FarFutureThreshold && key.ValidTo >= FarFutureThreshold)
+                if (!prevEntry.IsDeleted && prevEntry.Key.ForgottenAt >= FarFutureThreshold && key.ForgottenAt >= FarFutureThreshold)
                 {
                     _lastInsertOutcome = InsertOutcome.Duplicate;
                     return default;
@@ -1077,10 +1079,10 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
         ref var existing = ref page->GetEntry(existingIndex);
 
         // Temporal update: adjust valid time of existing entry
-        if (newKey.ValidFrom < existing.Key.ValidTo)
+        if (newKey.MemorizedAt < existing.Key.ForgottenAt)
         {
             // Truncate existing entry
-            existing.Key.ValidTo = newKey.ValidFrom;
+            existing.Key.ForgottenAt = newKey.MemorizedAt;
             existing.ModifiedAt = newKey.TransactionTime;
             _file.FlushPage();
         }
@@ -1307,17 +1309,17 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
         else
             graphValue = graph;
 
-        // For TimeFirst sort order, ValidFrom is the leading dimension.
-        // Temporal overlap semantics: ValidFrom < rangeEnd AND ValidTo > rangeStart.
-        // minKey.ValidFrom stays 0 because entries starting before the query window
-        // may still overlap (their ValidTo extends into the window).
-        // maxKey.ValidFrom = rangeEnd/asOfTime to skip entries that can't overlap.
+        // For TimeFirst sort order, MemorizedAt is the leading dimension.
+        // Temporal overlap semantics: MemorizedAt < rangeEnd AND ForgottenAt > rangeStart.
+        // minKey.MemorizedAt stays 0 because entries starting before the query window
+        // may still overlap (their ForgottenAt extends into the window).
+        // maxKey.MemorizedAt = rangeEnd/asOfTime to skip entries that can't overlap.
         // This narrows the scan from O(N) to O(log N + k') where k' = entries with
-        // ValidFrom < rangeEnd. MatchesTemporalQuery post-filters ValidTo > rangeStart.
-        long validFrom;
+        // MemorizedAt < rangeEnd. MatchesTemporalQuery post-filters ForgottenAt > rangeStart.
+        long memorizedAt;
         if (_sortOrder == KeySortOrder.TimeFirst && !isMin)
         {
-            validFrom = query.Type switch
+            memorizedAt = query.Type switch
             {
                 TemporalQueryType.Range => query.RangeEnd,
                 TemporalQueryType.AsOf => query.AsOfTime,
@@ -1326,7 +1328,7 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
         }
         else
         {
-            validFrom = unboundValue;
+            memorizedAt = unboundValue;
         }
 
         return new TemporalKey
@@ -1335,8 +1337,8 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
             Primary = primary < 0 ? unboundValue : primary,
             Secondary = secondary < 0 ? unboundValue : secondary,
             Tertiary = tertiary < 0 ? unboundValue : tertiary,
-            ValidFrom = validFrom,
-            ValidTo = isMin ? 0 : long.MaxValue,
+            MemorizedAt = memorizedAt,
+            ForgottenAt = isMin ? 0 : long.MaxValue,
             TransactionTime = isMin ? 0 : long.MaxValue
         };
     }
@@ -1418,8 +1420,8 @@ internal struct TemporalQuad
     public long Primary;        // 64-bit, first dimension
     public long Secondary;      // 64-bit, second dimension
     public long Tertiary;       // 64-bit, third dimension
-    public long ValidFrom;
-    public long ValidTo;
+    public long MemorizedAt;
+    public long ForgottenAt;
     public long TransactionTime;
     public bool IsDeleted;      // Retracted (ADR-054 D2); visible in AllTime queries only
     public long ModifiedAt;     // Transaction time of the last End or Retract, else of the insert

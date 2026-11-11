@@ -549,8 +549,8 @@ public sealed class QuadStore : IDisposable
         ReadOnlySpan<char> subject,
         ReadOnlySpan<char> predicate,
         ReadOnlySpan<char> @object,
-        DateTimeOffset validFrom,
-        DateTimeOffset validTo,
+        DateTimeOffset memorizedAt,
+        DateTimeOffset forgottenAt,
         ReadOnlySpan<char> graph = default)
     {
         ThrowIfDisposed();
@@ -570,7 +570,7 @@ public sealed class QuadStore : IDisposable
             MakeAtomsDurable();
 
             // 3. Write to WAL (fsync ensures durability)
-            var record = LogRecord.CreateAdd(subjectId, predicateId, objectId, validFrom, validTo, graphId,
+            var record = LogRecord.CreateAdd(subjectId, predicateId, objectId, memorizedAt, forgottenAt, graphId,
                 transactionTimeTicks: transactionTime);
             _wal.Append(record);
 
@@ -604,7 +604,7 @@ public sealed class QuadStore : IDisposable
     }
 
     /// <summary>
-    /// Retract the version of a quad valid for exactly [validFrom, validTo): it was recorded in error, and leaves every
+    /// Retract the version of a quad valid for exactly [memorizedAt, forgottenAt): it was recorded in error, and leaves every
     /// AS OF and DURING view while ALL VERSIONS keeps it, flagged (ADR-054 D2). This is not what a SPARQL delete does;
     /// that is <see cref="DeleteCurrent"/>. Thread-safe: acquires write lock.
     /// Returns true if that live version was found and retracted, false otherwise.
@@ -613,8 +613,8 @@ public sealed class QuadStore : IDisposable
         ReadOnlySpan<char> subject,
         ReadOnlySpan<char> predicate,
         ReadOnlySpan<char> @object,
-        DateTimeOffset validFrom,
-        DateTimeOffset validTo,
+        DateTimeOffset memorizedAt,
+        DateTimeOffset forgottenAt,
         ReadOnlySpan<char> graph = default)
     {
         ThrowIfDisposed();
@@ -630,10 +630,10 @@ public sealed class QuadStore : IDisposable
             // live version, so a retract that finds nothing writes nothing.
             if (_schema.Profile != StoreProfile.Graph &&
                 !_gspoIndex!.HoldsLiveEntry(graphId, subjectId, predicateId, objectId,
-                    UtcTicksToUnixMs(validFrom.UtcTicks), UtcTicksToUnixMs(validTo.UtcTicks)))
+                    UtcTicksToUnixMs(memorizedAt.UtcTicks), UtcTicksToUnixMs(forgottenAt.UtcTicks)))
                 return false;
 
-            var record = LogRecord.CreateRetract(subjectId, predicateId, objectId, validFrom, validTo, graphId,
+            var record = LogRecord.CreateRetract(subjectId, predicateId, objectId, memorizedAt, forgottenAt, graphId,
                 transactionTimeTicks: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
             _wal!.Append(record);
             var retracted = ApplyRecordToIndexesById(record);
@@ -649,7 +649,7 @@ public sealed class QuadStore : IDisposable
 
     /// <summary>
     /// Delete a current fact — a SPARQL delete. On a Cognitive store the version that holds now stops holding now: its
-    /// ValidTo becomes the delete's transaction time, so AS OF before the delete still returns it and ALL VERSIONS
+    /// ForgottenAt becomes the delete's transaction time, so AS OF before the delete still returns it and ALL VERSIONS
     /// shows the closed interval (ADR-054 D1). On a Graph store (no valid time) the entry is soft-deleted.
     /// Thread-safe: acquires write lock.
     /// Returns true if a version held and was ended, false otherwise (nothing to delete).
@@ -678,11 +678,11 @@ public sealed class QuadStore : IDisposable
             }
             else
             {
-                var versionValidFrom = _gspoIndex!.FindVersionHoldingAt(graphId, subjectId, predicateId, objectId, nowMs);
-                if (versionValidFrom is null)
+                var versionMemorizedAt = _gspoIndex!.FindVersionHoldingAt(graphId, subjectId, predicateId, objectId, nowMs);
+                if (versionMemorizedAt is null)
                     return false;
                 record = LogRecord.CreateEnd(subjectId, predicateId, objectId,
-                    DateTimeOffset.FromUnixTimeMilliseconds(versionValidFrom.Value),
+                    DateTimeOffset.FromUnixTimeMilliseconds(versionMemorizedAt.Value),
                     DateTimeOffset.FromUnixTimeMilliseconds(nowMs), graphId, transactionTimeTicks: nowMs);
             }
 
@@ -715,11 +715,11 @@ public sealed class QuadStore : IDisposable
 
     /// <summary>
     /// Repair the valid-time history a pre-ADR-054 SPARQL delete erased (ADR-054 D7). Before ADR-054 every delete
-    /// flagged the entry IsDeleted and left ValidTo open, so the fact left every AS OF view. Each flagged entry becomes
-    /// what an End would have written (ValidTo = the deletion's transaction time, IsDeleted = false), except entries of a
+    /// flagged the entry IsDeleted and left ForgottenAt open, so the fact left every AS OF view. Each flagged entry becomes
+    /// what an End would have written (ForgottenAt = the deletion's transaction time, IsDeleted = false), except entries of a
     /// deletion event named in <paramref name="restore"/> (graph IRI, or "" for the default graph, and the deletion time
     /// as the report prints it, in milliseconds). Those are restored: the delete was the mistake and the facts never
-    /// stopped holding. An entry deleted before its ValidFrom is left and listed.
+    /// stopped holding. An entry deleted before its MemorizedAt is left and listed.
     /// Writes the report (every deletion event with its entries and action) to <paramref name="report"/>; with
     /// <paramref name="dryRun"/> it changes nothing. Run on a store no other process has open. No WAL record is
     /// written: each index is repaired on its own entries, so an interrupted run can be repeated.
@@ -744,8 +744,8 @@ public sealed class QuadStore : IDisposable
                 restoreEvents.Add((graphId, deletedAt.ToUnixTimeMilliseconds()));
             }
 
-            TemporalQuadIndex.DeletedEntryRepair Decide(long graph, long validFrom, long deletedAt) =>
-                deletedAt < validFrom ? TemporalQuadIndex.DeletedEntryRepair.Leave
+            TemporalQuadIndex.DeletedEntryRepair Decide(long graph, long memorizedAt, long deletedAt) =>
+                deletedAt < memorizedAt ? TemporalQuadIndex.DeletedEntryRepair.Leave
                 : restoreEvents.Contains((graph, deletedAt)) ? TemporalQuadIndex.DeletedEntryRepair.Restore
                 : TemporalQuadIndex.DeletedEntryRepair.End;
 
@@ -778,7 +778,7 @@ public sealed class QuadStore : IDisposable
                     {
                         TemporalQuadIndex.DeletedEntryRepair.End => $"[{FormatRepairTime(e.From)}, {FormatRepairTime(e.DeletedAt)})",
                         TemporalQuadIndex.DeletedEntryRepair.Restore => $"[{FormatRepairTime(e.From)}, {FormatRepairTime(e.To)}) current",
-                        _ => "left: deleted before its ValidFrom",
+                        _ => "left: deleted before its MemorizedAt",
                     };
                     report.WriteLine($"   {_atoms.GetAtomString(e.S)} {_atoms.GetAtomString(e.P)} {_atoms.GetAtomString(e.O)}");
                     report.WriteLine($"      valid [{FormatRepairTime(e.From)}, {FormatRepairTime(e.To)}) deleted -> {after}");
@@ -791,7 +791,7 @@ public sealed class QuadStore : IDisposable
 
             if (!dryRun && entries.Count > 0)
             {
-                // Each index is repaired on its own entries. The decision depends only on graph, ValidFrom and the
+                // Each index is repaired on its own entries. The decision depends only on graph, MemorizedAt and the
                 // deletion time, which every index holds in the same fields, so all four reach the same result.
                 _gspoIndex.RepairDeleted((g, _, _, _, from, _, deletedAt) => Decide(g, from, deletedAt));
                 _gposIndex!.RepairDeleted((g, _, _, _, from, _, deletedAt) => Decide(g, from, deletedAt));
@@ -947,8 +947,8 @@ public sealed class QuadStore : IDisposable
         ReadOnlySpan<char> subject,
         ReadOnlySpan<char> predicate,
         ReadOnlySpan<char> @object,
-        DateTimeOffset validFrom,
-        DateTimeOffset validTo,
+        DateTimeOffset memorizedAt,
+        DateTimeOffset forgottenAt,
         ReadOnlySpan<char> graph = default)
     {
         // Reference-profile bulk: write directly to the two indexes, no WAL buffering.
@@ -977,7 +977,7 @@ public sealed class QuadStore : IDisposable
         var objectId = _atoms.Intern(@object);
 
         // 2. Write to WAL without fsync — transaction time captured at BeginBatch
-        var record = LogRecord.CreateAdd(subjectId, predicateId, objectId, validFrom, validTo, graphId,
+        var record = LogRecord.CreateAdd(subjectId, predicateId, objectId, memorizedAt, forgottenAt, graphId,
             transactionTimeTicks: _batchTransactionTimeTicks);
         _wal.AppendBatch(record, _activeBatchTxId);
 
@@ -1108,7 +1108,7 @@ public sealed class QuadStore : IDisposable
     }
 
     /// <summary>
-    /// Retract, in the current batch, the version valid for exactly [validFrom, validTo) (ADR-054 D2; see
+    /// Retract, in the current batch, the version valid for exactly [memorizedAt, forgottenAt) (ADR-054 D2; see
     /// <see cref="Retract"/>). Must be called between BeginBatch() and CommitBatch()/RollbackBatch(); the index change
     /// is applied at CommitBatch. Returns true if that live version exists and is not already retracted in this batch.
     /// </summary>
@@ -1116,8 +1116,8 @@ public sealed class QuadStore : IDisposable
         ReadOnlySpan<char> subject,
         ReadOnlySpan<char> predicate,
         ReadOnlySpan<char> @object,
-        DateTimeOffset validFrom,
-        DateTimeOffset validTo,
+        DateTimeOffset memorizedAt,
+        DateTimeOffset forgottenAt,
         ReadOnlySpan<char> graph = default)
     {
         RequireWriteCapableProfile(nameof(RetractBatched));
@@ -1131,13 +1131,13 @@ public sealed class QuadStore : IDisposable
         {
             // The version may be in the indexes or added earlier in this batch (a pruning copy adds a version and
             // retracts it in one batch); a Retract of it already buffered means there is nothing left to retract.
-            var fromMs = UtcTicksToUnixMs(validFrom.UtcTicks);
-            var toMs = UtcTicksToUnixMs(validTo.UtcTicks);
+            var fromMs = UtcTicksToUnixMs(memorizedAt.UtcTicks);
+            var toMs = UtcTicksToUnixMs(forgottenAt.UtcTicks);
             bool addedInBatch = false;
             foreach (var buffered in _batchBuffer!)
             {
                 if (!IsSameQuad(buffered, graphId, subjectId, predicateId, objectId)
-                    || UtcTicksToUnixMs(buffered.ValidFromTicks) != fromMs || UtcTicksToUnixMs(buffered.ValidToTicks) != toMs)
+                    || UtcTicksToUnixMs(buffered.MemorizedAtTicks) != fromMs || UtcTicksToUnixMs(buffered.ForgottenAtTicks) != toMs)
                     continue;
                 if (buffered.Operation == LogOperation.Retract)
                     return false;
@@ -1148,7 +1148,7 @@ public sealed class QuadStore : IDisposable
                 return false;
         }
 
-        var record = LogRecord.CreateRetract(subjectId, predicateId, objectId, validFrom, validTo, graphId,
+        var record = LogRecord.CreateRetract(subjectId, predicateId, objectId, memorizedAt, forgottenAt, graphId,
             transactionTimeTicks: _batchTransactionTimeTicks);
         _wal!.AppendBatch(record, _activeBatchTxId);
         _batchBuffer!.Add(record);
@@ -1196,17 +1196,17 @@ public sealed class QuadStore : IDisposable
         if (newest is { Operation: LogOperation.End })
             return false;
 
-        long? versionValidFrom = endedInBatch
+        long? versionMemorizedAt = endedInBatch
             ? null
             : _gspoIndex!.FindVersionHoldingAt(graphId, subjectId, predicateId, objectId, atMs);
-        if (versionValidFrom is null && newest is { Operation: LogOperation.Add } add
-            && UtcTicksToUnixMs(add.ValidFromTicks) <= atMs && UtcTicksToUnixMs(add.ValidToTicks) > atMs)
-            versionValidFrom = UtcTicksToUnixMs(add.ValidFromTicks);
-        if (versionValidFrom is null)
+        if (versionMemorizedAt is null && newest is { Operation: LogOperation.Add } add
+            && UtcTicksToUnixMs(add.MemorizedAtTicks) <= atMs && UtcTicksToUnixMs(add.ForgottenAtTicks) > atMs)
+            versionMemorizedAt = UtcTicksToUnixMs(add.MemorizedAtTicks);
+        if (versionMemorizedAt is null)
             return false;
 
         var record = LogRecord.CreateEnd(subjectId, predicateId, objectId,
-            DateTimeOffset.FromUnixTimeMilliseconds(versionValidFrom.Value),
+            DateTimeOffset.FromUnixTimeMilliseconds(versionMemorizedAt.Value),
             DateTimeOffset.FromUnixTimeMilliseconds(atMs), graphId, transactionTimeTicks: atMs);
         _wal!.AppendBatch(record, _activeBatchTxId);
         _batchBuffer.Add(record);
@@ -1774,7 +1774,7 @@ public sealed class QuadStore : IDisposable
                 var (primary, secondary, tertiary) = remapDimensions(quad);
 
                 target.AddRaw(quad.Graph, primary, secondary, tertiary,
-                    quad.ValidFrom, quad.ValidTo, quad.TransactionTime);
+                    quad.MemorizedAt, quad.ForgottenAt, quad.TransactionTime);
                 count++;
             }
         }
@@ -2299,7 +2299,7 @@ public sealed class QuadStore : IDisposable
 
     /// <summary>
     /// Apply an add to all indexes using pre-resolved atom IDs (no string round-trip,
-    /// no re-intern). Reads validFrom/validTo/transactionTime and all four atom IDs
+    /// no re-intern). Reads memorizedAt/forgottenAt/transactionTime and all four atom IDs
     /// directly from the WAL record. Preconditions: caller has gone through
     /// <see cref="RequireWriteCapableProfile"/> (via Add/Delete/CommitBatch/Recover),
     /// so all four temporal indexes are non-null.
@@ -2311,7 +2311,7 @@ public sealed class QuadStore : IDisposable
         _sessionMutated = true;
 
         // ADR-029 Graph profile: dispatch by profile. VersionedQuadIndex has no
-        // temporal fields, so the WAL's ValidFrom/ValidTo/TransactionTime are
+        // temporal fields, so the WAL's MemorizedAt/ForgottenAt/TransactionTime are
         // ignored on the Graph path. CreatedAt/ModifiedAt/Version are recorded
         // inside VersionedQuadIndex from `DateTimeOffset.UtcNow` at insert time.
         if (_schema.Profile == StoreProfile.Graph)
@@ -2336,16 +2336,16 @@ public sealed class QuadStore : IDisposable
         // Cognitive profile path.
         // LogRecord stores valid-time as .UtcTicks (100-ns since year 1); the B+Tree
         // keys are Unix milliseconds. Convert once per record instead of per index.
-        var validFromMs = UtcTicksToUnixMs(record.ValidFromTicks);
-        var validToMs = UtcTicksToUnixMs(record.ValidToTicks);
+        var memorizedAtMs = UtcTicksToUnixMs(record.MemorizedAtTicks);
+        var forgottenAtMs = UtcTicksToUnixMs(record.ForgottenAtTicks);
 
-        AddToTemporalIndex(_gspoIndex!, record, record.SubjectId, record.PredicateId, record.ObjectId, validFromMs, validToMs);
+        AddToTemporalIndex(_gspoIndex!, record, record.SubjectId, record.PredicateId, record.ObjectId, memorizedAtMs, forgottenAtMs);
 
         if (!_bulkLoadMode)
         {
-            AddToTemporalIndex(_gposIndex!, record, record.PredicateId, record.ObjectId, record.SubjectId, validFromMs, validToMs);
-            AddToTemporalIndex(_gospIndex!, record, record.ObjectId, record.SubjectId, record.PredicateId, validFromMs, validToMs);
-            AddToTemporalIndex(_tgspIndex!, record, record.SubjectId, record.PredicateId, record.ObjectId, validFromMs, validToMs);
+            AddToTemporalIndex(_gposIndex!, record, record.PredicateId, record.ObjectId, record.SubjectId, memorizedAtMs, forgottenAtMs);
+            AddToTemporalIndex(_gospIndex!, record, record.ObjectId, record.SubjectId, record.PredicateId, memorizedAtMs, forgottenAtMs);
+            AddToTemporalIndex(_tgspIndex!, record, record.SubjectId, record.PredicateId, record.ObjectId, memorizedAtMs, forgottenAtMs);
 
             // Full-text trigram indexing for literal objects. Peek the first UTF-8
             // byte directly from the atom store; avoids the GetAtomSpan → re-check
@@ -2364,22 +2364,22 @@ public sealed class QuadStore : IDisposable
     /// was inserted by the crashed process but never counted: count it, once (ADR-058).
     /// </summary>
     private void AddToTemporalIndex(TemporalQuadIndex index, in LogRecord record,
-        long primary, long secondary, long tertiary, long validFromMs, long validToMs)
+        long primary, long secondary, long tertiary, long memorizedAtMs, long forgottenAtMs)
     {
         var outcome = index.AddRaw(record.GraphId, primary, secondary, tertiary,
-            validFromMs, validToMs, record.TransactionTimeTicks);
+            memorizedAtMs, forgottenAtMs, record.TransactionTimeTicks);
 
         if (_recovering && outcome == TemporalQuadIndex.InsertOutcome.AlreadyPresent && record.TxId > index.CountTxId)
         {
             _countedDuringRecovery ??= new HashSet<(TemporalQuadIndex, TemporalKeyIds)>();
-            var key = new TemporalKeyIds(record.GraphId, primary, secondary, tertiary, validFromMs, record.TransactionTimeTicks);
+            var key = new TemporalKeyIds(record.GraphId, primary, secondary, tertiary, memorizedAtMs, record.TransactionTimeTicks);
             if (_countedDuringRecovery.Add((index, key)))
                 index.CountRecoveredEntry();
         }
     }
 
     /// <summary>The identity of a Cognitive index entry for <see cref="AddToTemporalIndex"/>.</summary>
-    private readonly record struct TemporalKeyIds(long Graph, long Primary, long Secondary, long Tertiary, long ValidFrom, long TransactionTime);
+    private readonly record struct TemporalKeyIds(long Graph, long Primary, long Secondary, long Tertiary, long MemorizedAt, long TransactionTime);
 
     /// <summary>
     /// Make the atoms interned so far durable before a WAL commit that references them
@@ -2453,29 +2453,29 @@ public sealed class QuadStore : IDisposable
             return g1 || g2 || g3 || g4;
         }
 
-        var validFromMs = UtcTicksToUnixMs(record.ValidFromTicks);
-        var validToMs = UtcTicksToUnixMs(record.ValidToTicks);
+        var memorizedAtMs = UtcTicksToUnixMs(record.MemorizedAtTicks);
+        var forgottenAtMs = UtcTicksToUnixMs(record.ForgottenAtTicks);
         var tt = record.TransactionTimeTicks;
 
-        if (record.ValidFromTicks == DateTimeOffset.MinValue.UtcTicks && record.ValidToTicks == DateTimeOffset.MaxValue.UtcTicks)
+        if (record.MemorizedAtTicks == DateTimeOffset.MinValue.UtcTicks && record.ForgottenAtTicks == DateTimeOffset.MaxValue.UtcTicks)
         {
-            var o1 = _gspoIndex!.ReplayPreAdr054Delete(record.GraphId, record.SubjectId, record.PredicateId, record.ObjectId, validFromMs, validToMs, tt);
-            var o2 = _gposIndex!.ReplayPreAdr054Delete(record.GraphId, record.PredicateId, record.ObjectId, record.SubjectId, validFromMs, validToMs, tt);
-            var o3 = _gospIndex!.ReplayPreAdr054Delete(record.GraphId, record.ObjectId, record.SubjectId, record.PredicateId, validFromMs, validToMs, tt);
-            var o4 = _tgspIndex!.ReplayPreAdr054Delete(record.GraphId, record.SubjectId, record.PredicateId, record.ObjectId, validFromMs, validToMs, tt);
+            var o1 = _gspoIndex!.ReplayPreAdr054Delete(record.GraphId, record.SubjectId, record.PredicateId, record.ObjectId, memorizedAtMs, forgottenAtMs, tt);
+            var o2 = _gposIndex!.ReplayPreAdr054Delete(record.GraphId, record.PredicateId, record.ObjectId, record.SubjectId, memorizedAtMs, forgottenAtMs, tt);
+            var o3 = _gospIndex!.ReplayPreAdr054Delete(record.GraphId, record.ObjectId, record.SubjectId, record.PredicateId, memorizedAtMs, forgottenAtMs, tt);
+            var o4 = _tgspIndex!.ReplayPreAdr054Delete(record.GraphId, record.SubjectId, record.PredicateId, record.ObjectId, memorizedAtMs, forgottenAtMs, tt);
             return o1 || o2 || o3 || o4;
         }
 
-        var r1 = _gspoIndex!.RetractRaw(record.GraphId, record.SubjectId, record.PredicateId, record.ObjectId, validFromMs, validToMs, tt);
-        var r2 = _gposIndex!.RetractRaw(record.GraphId, record.PredicateId, record.ObjectId, record.SubjectId, validFromMs, validToMs, tt);
-        var r3 = _gospIndex!.RetractRaw(record.GraphId, record.ObjectId, record.SubjectId, record.PredicateId, validFromMs, validToMs, tt);
-        var r4 = _tgspIndex!.RetractRaw(record.GraphId, record.SubjectId, record.PredicateId, record.ObjectId, validFromMs, validToMs, tt);
+        var r1 = _gspoIndex!.RetractRaw(record.GraphId, record.SubjectId, record.PredicateId, record.ObjectId, memorizedAtMs, forgottenAtMs, tt);
+        var r2 = _gposIndex!.RetractRaw(record.GraphId, record.PredicateId, record.ObjectId, record.SubjectId, memorizedAtMs, forgottenAtMs, tt);
+        var r3 = _gospIndex!.RetractRaw(record.GraphId, record.ObjectId, record.SubjectId, record.PredicateId, memorizedAtMs, forgottenAtMs, tt);
+        var r4 = _tgspIndex!.RetractRaw(record.GraphId, record.SubjectId, record.PredicateId, record.ObjectId, memorizedAtMs, forgottenAtMs, tt);
         return r1 || r2 || r3 || r4;
     }
 
     /// <summary>
-    /// Apply an End record (Cognitive only): the version whose ValidFrom is the record's ValidFrom stops holding at the
-    /// record's ValidTo, in all four indexes (ADR-054 D1). Applying it again is a no-op.
+    /// Apply an End record (Cognitive only): the version whose MemorizedAt is the record's MemorizedAt stops holding at the
+    /// record's ForgottenAt, in all four indexes (ADR-054 D1). Applying it again is a no-op.
     /// </summary>
     private bool ApplyEndToIndexesById(in LogRecord record)
     {
@@ -2483,8 +2483,8 @@ public sealed class QuadStore : IDisposable
             throw new InvalidDataException($"WAL record (TxId {record.TxId}) is an End, which a Graph store (no valid time) never writes.");
 
         _sessionMutated = true;
-        var versionFromMs = UtcTicksToUnixMs(record.ValidFromTicks);
-        var endMs = UtcTicksToUnixMs(record.ValidToTicks);
+        var versionFromMs = UtcTicksToUnixMs(record.MemorizedAtTicks);
+        var endMs = UtcTicksToUnixMs(record.ForgottenAtTicks);
         var tt = record.TransactionTimeTicks;
 
         var e1 = _gspoIndex!.EndRaw(record.GraphId, record.SubjectId, record.PredicateId, record.ObjectId, versionFromMs, endMs, tt);
@@ -3401,8 +3401,8 @@ public struct TemporalResultEnumerator
 
     /// <summary>
     /// Wrap a Reference-profile enumeration. Temporal fields in the projected
-    /// <see cref="ResolvedTemporalQuad"/> are synthesized (ValidFrom=MinValue,
-    /// ValidTo=MaxValue, TransactionTime=MinValue, IsDeleted=false) because a Reference
+    /// <see cref="ResolvedTemporalQuad"/> are synthesized (MemorizedAt=MinValue,
+    /// ForgottenAt=MaxValue, TransactionTime=MinValue, IsDeleted=false) because a Reference
     /// store has no temporal dimension — every triple is current by construction.
     /// </summary>
     internal TemporalResultEnumerator(
@@ -3633,7 +3633,7 @@ public struct TemporalResultEnumerator
                 }
 
                 // Graph has versioning (CreatedAt/ModifiedAt/Version/IsDeleted) but no
-                // bitemporal time dimension. Project ValidFrom/ValidTo/TransactionTime
+                // bitemporal time dimension. Project MemorizedAt/ForgottenAt/TransactionTime
                 // as synthesized "always current" values (same shape as Reference); the
                 // IsDeleted flag flows through from the entry — though under live queries
                 // (the default) only live entries reach here, so it's always false.
@@ -3691,8 +3691,8 @@ public struct TemporalResultEnumerator
                 DecodeAtomToBuffer(s),
                 DecodeAtomToBuffer(p),
                 DecodeAtomToBuffer(o),
-                DateTimeOffset.FromUnixTimeMilliseconds(Math.Min(quad.ValidFrom, MaxValidMs)),
-                DateTimeOffset.FromUnixTimeMilliseconds(Math.Min(quad.ValidTo, MaxValidMs)),
+                DateTimeOffset.FromUnixTimeMilliseconds(Math.Min(quad.MemorizedAt, MaxValidMs)),
+                DateTimeOffset.FromUnixTimeMilliseconds(Math.Min(quad.ForgottenAt, MaxValidMs)),
                 DateTimeOffset.FromUnixTimeMilliseconds(Math.Min(quad.TransactionTime, MaxValidMs)),
                 quad.IsDeleted,
                 quad.IsDeleted ? DateTimeOffset.FromUnixTimeMilliseconds(Math.Min(quad.ModifiedAt, MaxValidMs)) : null
@@ -3765,11 +3765,13 @@ public readonly ref struct ResolvedTemporalQuad
     public readonly ReadOnlySpan<char> Subject;
     public readonly ReadOnlySpan<char> Predicate;
     public readonly ReadOnlySpan<char> Object;
-    public readonly DateTimeOffset ValidFrom;
-    public readonly DateTimeOffset ValidTo;
+    /// <summary>When the version was memorized (ADR-061 D1).</summary>
+    public readonly DateTimeOffset MemorizedAt;
+    /// <summary>When the version was forgotten; the far future while it is remembered (ADR-061 D1).</summary>
+    public readonly DateTimeOffset ForgottenAt;
     public readonly DateTimeOffset TransactionTime;
 
-    /// <summary>The version was retracted (recorded in error, ADR-054 D2). An ended version is not deleted: its ValidTo is its end.</summary>
+    /// <summary>The version was retracted (recorded in error, ADR-054 D2). An ended version is not deleted: its ForgottenAt is its end.</summary>
     public readonly bool IsDeleted;
 
     /// <summary>When the version was retracted (Cognitive profile); null unless <see cref="IsDeleted"/>.</summary>
@@ -3780,8 +3782,8 @@ public readonly ref struct ResolvedTemporalQuad
         ReadOnlySpan<char> subject,
         ReadOnlySpan<char> predicate,
         ReadOnlySpan<char> @object,
-        DateTimeOffset validFrom,
-        DateTimeOffset validTo,
+        DateTimeOffset memorizedAt,
+        DateTimeOffset forgottenAt,
         DateTimeOffset transactionTime,
         bool isDeleted = false,
         DateTimeOffset? retractedAt = null)
@@ -3790,8 +3792,8 @@ public readonly ref struct ResolvedTemporalQuad
         Subject = subject;
         Predicate = predicate;
         Object = @object;
-        ValidFrom = validFrom;
-        ValidTo = validTo;
+        MemorizedAt = memorizedAt;
+        ForgottenAt = forgottenAt;
         TransactionTime = transactionTime;
         IsDeleted = isDeleted;
         RetractedAt = retractedAt;

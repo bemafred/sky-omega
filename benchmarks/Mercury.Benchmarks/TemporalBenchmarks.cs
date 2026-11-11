@@ -42,15 +42,15 @@ public class TemporalWriteBenchmarks
 
         for (int i = 0; i < TripleCount; i++)
         {
-            var validFrom = baseTime.AddDays(i);
-            var validTo = baseTime.AddDays(i + 365);
+            var memorizedAt = baseTime.AddDays(i);
+            var forgottenAt = baseTime.AddDays(i + 365);
 
             _store.Add(
                 $"<http://ex.org/entity{i % 100}>",
                 $"<http://ex.org/property{i % 10}>",
                 $"\"value{i}\"",
-                validFrom,
-                validTo
+                memorizedAt,
+                forgottenAt
             );
         }
     }
@@ -81,15 +81,15 @@ public class TemporalQueryBenchmarks
         // Pre-populate with temporal data
         for (int i = 0; i < DataSize; i++)
         {
-            var validFrom = _baseTime.AddDays(i);
-            var validTo = _baseTime.AddDays(i + 365);
+            var memorizedAt = _baseTime.AddDays(i);
+            var forgottenAt = _baseTime.AddDays(i + 365);
 
             _store.Add(
                 $"<http://ex.org/entity{i % 100}>",
                 $"<http://ex.org/property{i % 10}>",
                 $"\"value{i}\"",
-                validFrom,
-                validTo
+                memorizedAt,
+                forgottenAt
             );
         }
     }

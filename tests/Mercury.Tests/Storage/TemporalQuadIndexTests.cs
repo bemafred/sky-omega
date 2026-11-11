@@ -87,10 +87,10 @@ public class TemporalQuadIndexTests : IDisposable
     {
         var index = CreateIndex();
 
-        var validFrom = DateTimeOffset.UtcNow.AddDays(-10);
-        var validTo = DateTimeOffset.UtcNow.AddDays(10);
+        var memorizedAt = DateTimeOffset.UtcNow.AddDays(-10);
+        var forgottenAt = DateTimeOffset.UtcNow.AddDays(10);
 
-        index.AddHistorical("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", validFrom, validTo);
+        index.AddHistorical("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", memorizedAt, forgottenAt);
 
         // Query as of now - should match
         var results = index.QueryAsOf("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", DateTimeOffset.UtcNow);
@@ -98,14 +98,14 @@ public class TemporalQuadIndexTests : IDisposable
     }
 
     [Fact]
-    public void AddHistorical_QueryAsOfBeforeValidFrom_ReturnsEmpty()
+    public void AddHistorical_QueryAsOfBeforeMemorizedAt_ReturnsEmpty()
     {
         var index = CreateIndex();
 
-        var validFrom = DateTimeOffset.UtcNow;
-        var validTo = DateTimeOffset.UtcNow.AddDays(10);
+        var memorizedAt = DateTimeOffset.UtcNow;
+        var forgottenAt = DateTimeOffset.UtcNow.AddDays(10);
 
-        index.AddHistorical("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", validFrom, validTo);
+        index.AddHistorical("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", memorizedAt, forgottenAt);
 
         // Query as of yesterday - should not match
         var results = index.QueryAsOf(
@@ -115,16 +115,16 @@ public class TemporalQuadIndexTests : IDisposable
     }
 
     [Fact]
-    public void AddHistorical_QueryAsOfAfterValidTo_ReturnsEmpty()
+    public void AddHistorical_QueryAsOfAfterForgottenAt_ReturnsEmpty()
     {
         var index = CreateIndex();
 
-        var validFrom = DateTimeOffset.UtcNow.AddDays(-10);
-        var validTo = DateTimeOffset.UtcNow.AddDays(-5);
+        var memorizedAt = DateTimeOffset.UtcNow.AddDays(-10);
+        var forgottenAt = DateTimeOffset.UtcNow.AddDays(-5);
 
-        index.AddHistorical("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", validFrom, validTo);
+        index.AddHistorical("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", memorizedAt, forgottenAt);
 
-        // Query as of now - should not match (validTo passed)
+        // Query as of now - should not match (forgottenAt passed)
         var results = index.QueryAsOf("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", DateTimeOffset.UtcNow);
         Assert.False(results.MoveNext());
     }
@@ -409,21 +409,21 @@ public class TemporalQuadIndexTests : IDisposable
     #region Temporal Triple Enumerator
 
     [Fact]
-    public void TemporalTripleEnumerator_ValidFromValidTo_Set()
+    public void TemporalTripleEnumerator_MemorizedAtForgottenAt_Set()
     {
         var index = CreateIndex();
 
-        var validFrom = DateTimeOffset.UtcNow.AddDays(-5);
-        var validTo = DateTimeOffset.UtcNow.AddDays(5);
+        var memorizedAt = DateTimeOffset.UtcNow.AddDays(-5);
+        var forgottenAt = DateTimeOffset.UtcNow.AddDays(5);
 
-        index.AddHistorical("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", validFrom, validTo);
+        index.AddHistorical("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", memorizedAt, forgottenAt);
 
         var results = index.QueryHistory("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
         Assert.True(results.MoveNext());
 
         var triple = results.Current;
-        Assert.True(triple.ValidFrom > 0);
-        Assert.True(triple.ValidTo > triple.ValidFrom);
+        Assert.True(triple.MemorizedAt > 0);
+        Assert.True(triple.ForgottenAt > triple.MemorizedAt);
         Assert.True(triple.TransactionTime > 0);
     }
 
@@ -451,12 +451,12 @@ public class TemporalQuadIndexTests : IDisposable
     public void Retract_ExistingVersion_ReturnsTrue()
     {
         var index = CreateIndex();
-        var validFrom = DateTimeOffset.UtcNow.AddDays(-10);
-        var validTo = DateTimeOffset.UtcNow.AddDays(10);
+        var memorizedAt = DateTimeOffset.UtcNow.AddDays(-10);
+        var forgottenAt = DateTimeOffset.UtcNow.AddDays(10);
 
-        index.AddHistorical("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", validFrom, validTo);
+        index.AddHistorical("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", memorizedAt, forgottenAt);
 
-        var retracted = index.RetractHistorical("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", validFrom, validTo);
+        var retracted = index.RetractHistorical("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", memorizedAt, forgottenAt);
 
         Assert.True(retracted);
     }
@@ -465,12 +465,12 @@ public class TemporalQuadIndexTests : IDisposable
     public void Retract_OtherSubject_ReturnsFalse()
     {
         var index = CreateIndex();
-        var validFrom = DateTimeOffset.UtcNow.AddDays(-10);
-        var validTo = DateTimeOffset.UtcNow.AddDays(10);
-        index.AddHistorical("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", validFrom, validTo);
-        index.AddHistorical("<http://ex.org/other>", "<http://ex.org/p>", "<http://ex.org/x>", validFrom, validTo);
+        var memorizedAt = DateTimeOffset.UtcNow.AddDays(-10);
+        var forgottenAt = DateTimeOffset.UtcNow.AddDays(10);
+        index.AddHistorical("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", memorizedAt, forgottenAt);
+        index.AddHistorical("<http://ex.org/other>", "<http://ex.org/p>", "<http://ex.org/x>", memorizedAt, forgottenAt);
 
-        var retracted = index.RetractHistorical("<http://ex.org/other>", "<http://ex.org/p>", "<http://ex.org/o>", validFrom, validTo);
+        var retracted = index.RetractHistorical("<http://ex.org/other>", "<http://ex.org/p>", "<http://ex.org/o>", memorizedAt, forgottenAt);
 
         Assert.False(retracted);
     }
@@ -480,9 +480,9 @@ public class TemporalQuadIndexTests : IDisposable
     {
         // Retract names one version by its exact interval (ADR-054 D2); an interval that only overlaps it is not that version.
         var index = CreateIndex();
-        var validFrom = DateTimeOffset.UtcNow.AddDays(-10);
-        var validTo = DateTimeOffset.UtcNow.AddDays(10);
-        index.AddHistorical("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", validFrom, validTo);
+        var memorizedAt = DateTimeOffset.UtcNow.AddDays(-10);
+        var forgottenAt = DateTimeOffset.UtcNow.AddDays(10);
+        index.AddHistorical("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", memorizedAt, forgottenAt);
 
         var retracted = index.RetractHistorical("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>",
             DateTimeOffset.MinValue, DateTimeOffset.MaxValue);
@@ -496,11 +496,11 @@ public class TemporalQuadIndexTests : IDisposable
     public void Retract_AfterRetract_NotInQueryCurrent()
     {
         var index = CreateIndex();
-        var validFrom = DateTimeOffset.UtcNow.AddDays(-10);
-        var validTo = DateTimeOffset.UtcNow.AddDays(10);
-        index.AddHistorical("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", validFrom, validTo);
+        var memorizedAt = DateTimeOffset.UtcNow.AddDays(-10);
+        var forgottenAt = DateTimeOffset.UtcNow.AddDays(10);
+        index.AddHistorical("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", memorizedAt, forgottenAt);
 
-        index.RetractHistorical("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", validFrom, validTo);
+        index.RetractHistorical("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", memorizedAt, forgottenAt);
 
         var results = index.QueryCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
         Assert.False(results.MoveNext(), "A retracted version does not appear in QueryCurrent");
@@ -521,12 +521,12 @@ public class TemporalQuadIndexTests : IDisposable
     public void Retract_AlreadyRetracted_ReturnsFalse()
     {
         var index = CreateIndex();
-        var validFrom = DateTimeOffset.UtcNow.AddDays(-10);
-        var validTo = DateTimeOffset.UtcNow.AddDays(10);
-        index.AddHistorical("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", validFrom, validTo);
+        var memorizedAt = DateTimeOffset.UtcNow.AddDays(-10);
+        var forgottenAt = DateTimeOffset.UtcNow.AddDays(10);
+        index.AddHistorical("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", memorizedAt, forgottenAt);
 
-        var retracted1 = index.RetractHistorical("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", validFrom, validTo);
-        var retracted2 = index.RetractHistorical("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", validFrom, validTo);
+        var retracted1 = index.RetractHistorical("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", memorizedAt, forgottenAt);
+        var retracted2 = index.RetractHistorical("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", memorizedAt, forgottenAt);
 
         Assert.True(retracted1);
         Assert.False(retracted2, "Retracting an already-retracted version returns false");
@@ -537,7 +537,7 @@ public class TemporalQuadIndexTests : IDisposable
     #region TimeFirst Sort Order (ADR-022)
 
     [Fact]
-    public void TimeFirst_SortOrder_EnumeratesByValidFromFirst()
+    public void TimeFirst_SortOrder_EnumeratesByMemorizedAtFirst()
     {
         // Create a TimeFirst index
         var timeFirstPath = Path.Combine(_testDir, "timefirst.tdb");
@@ -568,9 +568,9 @@ public class TemporalQuadIndexTests : IDisposable
 
         Assert.False(results.MoveNext(), "Expected only two results");
 
-        // TimeFirst: ValidFrom should be ascending across results
-        Assert.True(first.ValidFrom < second.ValidFrom,
-            $"TimeFirst sort should yield lower ValidFrom first. Got {first.ValidFrom} then {second.ValidFrom}");
+        // TimeFirst: MemorizedAt should be ascending across results
+        Assert.True(first.MemorizedAt < second.MemorizedAt,
+            $"TimeFirst sort should yield lower MemorizedAt first. Got {first.MemorizedAt} then {second.MemorizedAt}");
 
         // The first result should be the zzz entry (low time) and second should be aaa (high time)
         var firstPrimary = index.Atoms.GetAtomString(first.Primary);
@@ -624,21 +624,21 @@ public class TemporalQuadIndexTests : IDisposable
         var baseTime = new DateTimeOffset(2020, 1, 1, 0, 0, 0, TimeSpan.Zero);
         for (int i = 0; i < 5000; i++)
         {
-            var validFrom = baseTime.AddHours(i * 18); // ~18-hour intervals over 10 years
-            var validTo = validFrom.AddDays(7);         // each valid for 7 days
+            var memorizedAt = baseTime.AddHours(i * 18); // ~18-hour intervals over 10 years
+            var forgottenAt = memorizedAt.AddDays(7);         // each valid for 7 days
 
             entityIndex.AddHistorical(
                 $"<http://ex.org/s{i:D5}>", "<http://ex.org/p>", "<http://ex.org/o>",
-                validFrom, validTo);
+                memorizedAt, forgottenAt);
             timeIndex.AddHistorical(
                 $"<http://ex.org/s{i:D5}>", "<http://ex.org/p>", "<http://ex.org/o>",
-                validFrom, validTo);
+                memorizedAt, forgottenAt);
         }
 
         // Query a narrow window near the START: [2020-03-01, 2020-06-01]
-        // With maxKey.ValidFrom = rangeEnd, the TimeFirst index stops scanning
-        // after ValidFrom passes 2020-06-01 (~5% of the 10-year range).
-        // EntityFirst has maxKey.ValidFrom = MAX and must scan all leaf pages.
+        // With maxKey.MemorizedAt = rangeEnd, the TimeFirst index stops scanning
+        // after MemorizedAt passes 2020-06-01 (~5% of the 10-year range).
+        // EntityFirst has maxKey.MemorizedAt = MAX and must scan all leaf pages.
         var rangeStart = new DateTimeOffset(2020, 3, 1, 0, 0, 0, TimeSpan.Zero);
         var rangeEnd = new DateTimeOffset(2020, 6, 1, 0, 0, 0, TimeSpan.Zero);
 
