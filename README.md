@@ -255,7 +255,7 @@ two terms and a pattern constant matches a language tag by case
 | 100% W3C JSON-LD 1.1 toRdf, of the tests that apply | 461 passing; the 6 skipped do not apply (JSON-LD 1.0 processors, generalized RDF) | `dotnet test --project tests/Mercury.Tests --filter "FullyQualifiedName~JsonLdConformanceTests"` |
 | SPARQL HTTP endpoint             | `mercury` CLI         | `mercury -m` then visit `http://localhost:3031/sparql` |
 | Zero external runtime deps       | Mercury.csproj        | `grep PackageReference src/Mercury/*.csproj` |
-| 6,276 Mercury tests passing      | 156 skipped on macOS: the 149 W3C known failures, the 6 JSON-LD tests that do not apply, and 1 test that needs a disk with less than 1 TB free | `dotnet test --project tests/Mercury.Tests` |
+| 6,285 Mercury tests passing      | 156 skipped on macOS: the 149 W3C known failures, the 6 JSON-LD tests that do not apply, and 1 test that needs a disk with less than 1 TB free | `dotnet test --project tests/Mercury.Tests` |
 | Six platforms                    | 6,660 tests on each GitHub Actions runner at 1.8.39, 0 failed on macOS x64, Linux x64 and arm64, and Windows x64 and arm64; on macOS arm64, 1 DrHook test timed out ([Platforms](#platforms)) | `dotnet test` on each, and the GitHub Actions workflow |
 | AI-assisted development          | Git history           | `git log --oneline \| grep "Co-Authored-By"` |
 | Development velocity             | ~255K lines           | See [STATISTICS.md](STATISTICS.md)           |

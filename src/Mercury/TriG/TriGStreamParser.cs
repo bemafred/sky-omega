@@ -180,7 +180,7 @@ internal sealed class TriGStreamParser : IDisposable, IAsyncDisposable
             SkipWhitespaceAndComments();
 
             // Parse graph IRI
-            var graphIri = ParseIriOrPrefixedName();
+            var graphIri = ParseGraphLabel();
             if (graphIri.IsEmpty)
                 throw ParserException("Expected graph IRI after GRAPH");
 
@@ -461,9 +461,6 @@ internal sealed class TriGStreamParser : IDisposable, IAsyncDisposable
     {
         var ch = Peek();
 
-        if (ch == '<')
-            return ParseIriRef();
-
         if (ch == '_')
             return ParseBlankNode();
 
@@ -488,10 +485,7 @@ internal sealed class TriGStreamParser : IDisposable, IAsyncDisposable
         // Collection () cannot be a graph label - only accept if it's followed by a predicate
         // This will be validated at the block level
 
-        if (IsPnCharsBase(ch) || ch == ':')
-            return ParsePrefixedName();
-
-        return ReadOnlySpan<char>.Empty;
+        return ParseIri();
     }
 
     private bool IsEmptyBlankNode()
@@ -514,9 +508,6 @@ internal sealed class TriGStreamParser : IDisposable, IAsyncDisposable
     {
         var ch = Peek();
 
-        if (ch == '<')
-            return ParseIriRef();
-
         if (ch == '_')
             return ParseBlankNode();
 
@@ -526,10 +517,7 @@ internal sealed class TriGStreamParser : IDisposable, IAsyncDisposable
         if (ch == '(')
             return ParseCollectionWithHandler(graph, handler);
 
-        if (IsPnCharsBase(ch) || ch == ':')
-            return ParsePrefixedName();
-
-        return ReadOnlySpan<char>.Empty;
+        return ParseIri();
     }
 
     private ReadOnlySpan<char> ParsePredicate()
@@ -549,13 +537,7 @@ internal sealed class TriGStreamParser : IDisposable, IAsyncDisposable
             return "<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>".AsSpan();
         }
 
-        if (ch == '<')
-            return ParseIriRef();
-
-        if (IsPnCharsBase(ch) || ch == ':')
-            return ParsePrefixedName();
-
-        return ReadOnlySpan<char>.Empty;
+        return ParseIri();
     }
 
     private ReadOnlySpan<char> ParseObject()
@@ -566,9 +548,6 @@ internal sealed class TriGStreamParser : IDisposable, IAsyncDisposable
     private ReadOnlySpan<char> ParseObjectWithHandler(ReadOnlySpan<char> graph, QuadHandler? handler)
     {
         var ch = Peek();
-
-        if (ch == '<')
-            return ParseIriRef();
 
         if (ch == '_')
             return ParseBlankNode();
@@ -589,26 +568,19 @@ internal sealed class TriGStreamParser : IDisposable, IAsyncDisposable
         if (ch == '.' && char.IsDigit((char)PeekAhead(1)))
             return ParseNumericLiteral();
 
-        if (IsPnCharsBase(ch) || ch == ':')
-        {
-            // Could be prefixed name or boolean
-            // Boolean literals must be lowercase (case-sensitive)
-            if (MatchKeyword("true", caseSensitive: true) || MatchKeyword("false", caseSensitive: true))
-            {
-                return RdfNumeric.BooleanLiteral(ch == 't').AsSpan();
-            }
-            return ParsePrefixedName();
-        }
+        // BooleanLiteral, before iri: true and false, in lower case, would otherwise read as prefixed names
+        if (MatchKeyword("true", caseSensitive: true) || MatchKeyword("false", caseSensitive: true))
+            return RdfNumeric.BooleanLiteral(ch == 't').AsSpan();
 
-        return ReadOnlySpan<char>.Empty;
+        return ParseIri();
     }
 
-    private ReadOnlySpan<char> ParseIriOrPrefixedName()
+    /// <summary>
+    /// [7g] labelOrSubject after the GRAPH keyword: an iri or a blank node, and [] but not a blankNodePropertyList.
+    /// </summary>
+    private ReadOnlySpan<char> ParseGraphLabel()
     {
         var ch = Peek();
-
-        if (ch == '<')
-            return ParseIriRef();
 
         if (ch == '_')
             return ParseBlankNode();
@@ -627,6 +599,20 @@ internal sealed class TriGStreamParser : IDisposable, IAsyncDisposable
             // Non-empty [...] cannot be graph name - throw error
             throw ParserException("A graph may not be named with a blankNodePropertyList");
         }
+
+        return ParseIri();
+    }
+
+    /// <summary>
+    /// [135s] iri ::= IRIREF | PrefixedName, the one place TriG reads it. Empty when the input starts neither, so the
+    /// caller, which knows what it expected, says what is wrong.
+    /// </summary>
+    private ReadOnlySpan<char> ParseIri()
+    {
+        var ch = Peek();
+
+        if (ch == '<')
+            return ParseIriRef();
 
         if (IsPnCharsBase(ch) || ch == ':')
             return ParsePrefixedName();
@@ -1172,7 +1158,9 @@ internal sealed class TriGStreamParser : IDisposable, IAsyncDisposable
 
         AppendToOutput('"');
 
-        // Check for language tag or datatype
+        // Check for language tag or datatype. They are tokens of their own (RDFLiteral [128s]), so whitespace and
+        // comments may come before each and after '^^', as Turtle reads them.
+        SkipWhitespaceAndComments();
         ch = Peek();
         if (ch == '@')
         {
@@ -1201,7 +1189,10 @@ internal sealed class TriGStreamParser : IDisposable, IAsyncDisposable
             Consume();
             AppendToOutput('^');
             Consume();
-            var datatype = ParseIriOrPrefixedName(); // Datatype IRI (appended to output)
+            SkipWhitespaceAndComments();
+            var datatype = ParseIri(); // [128s] '^^' iri, appended to the output
+            if (datatype.IsEmpty)
+                throw ParserException("A literal's datatype is an IRI: expected '<' or a prefixed name after '^^'");
             if (RdfLanguageTag.IsTagOnlyDatatype(datatype))
                 throw ParserException($"A literal has the datatype {datatype} only with a language tag");
         }

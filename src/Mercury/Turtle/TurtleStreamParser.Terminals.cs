@@ -305,6 +305,8 @@ internal sealed partial class TurtleStreamParser
             Consume(); // ^
             Consume(); // ^
             var datatype = ParseIri();  // Already includes angle brackets
+            if (datatype.Length == 0)
+                throw ParserException("A literal's datatype is an IRI: expected '<' or a prefixed name after '^^'");
             if (RdfLanguageTag.IsTagOnlyDatatype(datatype))
                 throw ParserException($"A literal has the datatype {datatype} only with a language tag");
             return string.Concat("\"", lexicalForm, "\"^^", datatype);
@@ -1117,6 +1119,8 @@ internal sealed partial class TurtleStreamParser
             Consume(); Consume();
             AppendToOutput("^^".AsSpan());
             var dtSpan = ParseIriSpan();  // Already includes angle brackets
+            if (dtSpan.IsEmpty)
+                throw ParserException("A literal's datatype is an IRI: expected '<' or a prefixed name after '^^'");
             if (RdfLanguageTag.IsTagOnlyDatatype(dtSpan))
                 throw ParserException($"A literal has the datatype {dtSpan} only with a language tag");
         }

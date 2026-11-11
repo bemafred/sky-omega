@@ -4,6 +4,7 @@ using System.IO;
 using System.Text;
 using System.Threading.Tasks;
 using SkyOmega.Mercury.NQuads;
+using SkyOmega.Mercury.Rdf.Turtle;
 using SkyOmega.Mercury.TriG;
 using Xunit;
 
@@ -571,6 +572,75 @@ public class TriGStreamParserTests
         }, TestContext.Current.CancellationToken);
 
         Assert.Single(quads);
+    }
+
+    #endregion
+
+    #region Literal Datatypes and Tags
+
+    // RDFLiteral [128s] ::= String (LANG_DIR | '^^' iri), in TriG as in Turtle: a datatype is an IRIREF or a prefixed
+    // name, and the tag and the datatype are tokens of their own, so whitespace and comments may come before them and
+    // after '^^'. TriG used to read the datatype with the graph-label rule, which took a blank node, and gave an empty
+    // datatype for anything else; it rejected whitespace there. Turtle, in both its literal paths, gave an empty
+    // datatype when '^^' was followed by neither. Each case is checked against both formats.
+
+    [Theory]
+    [InlineData("\"x\"^^_:b")]
+    [InlineData("\"x\"^^[]")]
+    [InlineData("\"x\"^^42")]
+    [InlineData("\"x\"^^")]
+    public async Task ParseAsync_DatatypeThatIsNotAnIri_IsRejected_AsByTurtle(string literal)
+    {
+        var document = $"<http://example.org/s> <http://example.org/p> {literal} .";
+        var cancellationToken = TestContext.Current.CancellationToken;
+
+        await Assert.ThrowsAnyAsync<Exception>(async () =>
+        {
+            await using var stream = new MemoryStream(Encoding.UTF8.GetBytes(document));
+            await new TriGStreamParser(stream).ParseAsync((_, _, _, _) => { }, cancellationToken);
+        });
+
+        // Turtle reads literals in two places: the handler API through spans, the enumerable API through strings
+        await Assert.ThrowsAnyAsync<Exception>(async () =>
+        {
+            await using var stream = new MemoryStream(Encoding.UTF8.GetBytes(document));
+            await new TurtleStreamParser(stream).ParseAsync((_, _, _) => { }, cancellationToken);
+        });
+
+        await Assert.ThrowsAnyAsync<Exception>(async () =>
+        {
+            await using var stream = new MemoryStream(Encoding.UTF8.GetBytes(document));
+            await foreach (var _ in new TurtleStreamParser(stream).ParseAsync(cancellationToken)) { }
+        });
+    }
+
+    [Theory]
+    [InlineData("\"x\"^^ <http://example.org/dt>", "\"x\"^^<http://example.org/dt>")]
+    [InlineData("\"x\" ^^<http://example.org/dt>", "\"x\"^^<http://example.org/dt>")]
+    [InlineData("\"x\" # a comment\n    ^^ ex:dt", "\"x\"^^<http://example.org/dt>")]
+    [InlineData("\"x\" @en", "\"x\"@en")]
+    [InlineData("\"x\"\n    @en-GB--ltr", "\"x\"@en-GB--ltr")]
+    public async Task ParseAsync_WhitespaceBeforeTagOrDatatype_IsRead_AsByTurtle(string literal, string expected)
+    {
+        var document = $"PREFIX ex: <http://example.org/>\n<http://example.org/s> <http://example.org/p> {literal} .";
+        var cancellationToken = TestContext.Current.CancellationToken;
+
+        string trig = null!;
+        await using (var stream = new MemoryStream(Encoding.UTF8.GetBytes(document)))
+            await new TriGStreamParser(stream).ParseAsync((_, _, o, _) => trig = o.ToString(), cancellationToken);
+
+        string turtleSpans = null!;
+        await using (var stream = new MemoryStream(Encoding.UTF8.GetBytes(document)))
+            await new TurtleStreamParser(stream).ParseAsync((_, _, o) => turtleSpans = o.ToString(), cancellationToken);
+
+        string turtleStrings = null!;
+        await using (var stream = new MemoryStream(Encoding.UTF8.GetBytes(document)))
+            await foreach (var t in new TurtleStreamParser(stream).ParseAsync(cancellationToken))
+                turtleStrings = t.Object;
+
+        Assert.Equal(expected, trig);
+        Assert.Equal(expected, turtleSpans);
+        Assert.Equal(expected, turtleStrings);
     }
 
     #endregion
