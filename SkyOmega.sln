@@ -87,6 +87,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Technical", "Technical", "{
 		docs\architecture\technical\production-hardening.md = docs\architecture\technical\production-hardening.md
 		docs\architecture\technical\sparql-reference.md = docs\architecture\technical\sparql-reference.md
 		docs\architecture\technical\temporal-rdf.md = docs\architecture\technical\temporal-rdf.md
+		docs\architecture\technical\time-is-not-identity-cookbook.md = docs\architecture\technical\time-is-not-identity-cookbook.md
 	EndProjectSection
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Editorial", "Editorial", "{1E5C8B91-3F47-4D2A-9C1B-100000000004}"
