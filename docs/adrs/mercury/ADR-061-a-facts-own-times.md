@@ -406,9 +406,13 @@ this situation", then "Legacy" and "All five, clear intent."
    - Tests: each word alone and combined; both orders of the bounds; the empty range; joins where each pattern keeps its
      own times; the error on Graph, Reference and Minimal.
    - Every W3C result unchanged.
+   - **Order** ([ADR-062](ADR-062-what-a-read-yields.md) D8, decided 2026-11-12): the cursor of ADR-062, its part one,
+     comes before this step. The words are built once, on the cursor.
 6. **One removal** (D2): `Retract`, `RetractBatched` and `RetractedAt` go, and nothing writes `LegacyIsDeleted`. The public
    store methods follow the words: `Add` with a stated time, `QueryAsOf`, `TimeTravelTo`, `QueryChanges` and
    `QueryEvolution` go or change.
+   - **One change with ADR-062's part two** (ADR-062 D8): the two result types and the public names change here, so the
+     public surface changes once.
 7. **Pruning carries both times** (D12), with a test that a pruned store answers a period question as its source did.
 8. **Consumers:**
    - the `lucy` skill's recency recall uses `MEMORIZED`, and its temporal modes are rewritten;
@@ -503,6 +507,8 @@ automatic, on open. We do not need to mind other stores, there are only ours in 
 - [ADR-053](ADR-053-one-rdf-term-one-atom.md): its migration uses Retract (Q8).
 - [ADR-054](ADR-054-delete-ends-valid-time.md): a delete ends a fact. D2 and D6 are replaced by D2 here.
 - [ADR-059](ADR-059-every-w3c-test-runs.md): every W3C test runs.
+- [ADR-062](ADR-062-what-a-read-yields.md): what a read yields on each profile; its D8 sets the order against Steps 5
+  and 6 here.
 - C-SPARQL: Barbieri, Braga, Ceri, Della Valle, Grossniklaus, "C-SPARQL: SPARQL for Continuous Querying", WWW 2009.
 - T-SPARQL: Grandi, "T-SPARQL: A TSQL2-like Temporal Query Language for RDF", ADBIS 2010 (CEUR Vol-639); Tappolet and
   Bernstein, "Applied Temporal RDF", ESWC 2009.
