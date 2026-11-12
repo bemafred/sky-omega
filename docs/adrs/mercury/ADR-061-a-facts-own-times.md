@@ -22,6 +22,9 @@ Martin's first review, the same day, decided six more things:
 - the dialect is called Cognitive SPARQL (D14);
 - the rename is the first step. It is done (Step 2), on his direction, while the rest is under review.
 
+On 2026-11-12, after reading this text, Martin decided one more thing: the five attributes that leave carry the
+prefix `Legacy` in the code until they are removed (D15). That rename is done too (Step 2).
+
 The file keeps its name: the changelog, the 1.8.41 release notes, the solution file and the ADR index link to it.
 
 ## Why
@@ -99,6 +102,9 @@ every `ValidFrom` in them should be the time of its write.
 
 **Not verified:** that no entry of the live memory store has `ValidFrom` different from `TransactionTime`, or
 `IsDeleted` set. Step 3 counts them.
+
+This section names the attributes as they were on 2026-11-10. In the code they are now `MemorizedAt`, `ForgottenAt`
+(D11) and `LegacyTransactionTime`, `LegacyCreatedAt`, `LegacyModifiedAt`, `LegacyVersion`, `LegacyIsDeleted` (D15).
 
 ### Profiles
 
@@ -273,7 +279,7 @@ Martin: "If we rename ValidFrom and ValidTo to more suitable names, at start, I 
 - It is a rename: no behaviour changes and no stored byte moves. It is the first code step, so the words are built on
   names that say what the times are.
 - 360 lines in 16 files of `src`, `tests`, `benchmarks` and `examples` used the old names.
-- `TransactionTime`, `CreatedAt`, `ModifiedAt` and `Version` keep their names until the later part removes them.
+- The other five attributes are marked as leaving (D15).
 - **Until D2 is done the names say more than the code does.** A caller can still state both times (`Add` with a stated
   time), and they then hold a stated valid time, not the time of the write.
 - This text still says `ValidFrom` and `ValidTo` where it describes the store before the rename.
@@ -298,8 +304,8 @@ section of this ADR over an ADR of its own.
 - The words do not need a new layout. The two times are already stored.
 - Reducing the entry to the two times, and converting existing stores, is
   [Later: the stored layout](#later-the-stored-layout). Nothing in it starts before the words are in use.
-- Until then `TransactionTime`, `CreatedAt`, `ModifiedAt`, `Version` and `IsDeleted` stay in the entry. D2 removes what
-  writes `IsDeleted`; the later part removes the field.
+- Until then the five other attributes stay in the entry, under their `Legacy` names (D15). D2 removes what writes
+  `LegacyIsDeleted`; the later part removes the field.
 
 ### D14. The dialect is called Cognitive SPARQL — Decided
 
@@ -314,6 +320,38 @@ Martin: "Cognitive SPARQL it is."
     and Bernstein's temporal RDF (ESWC 2009). Both are about valid time in the world.
   - "Temporal SPARQL" is the general term for querying valid time in the world, which D3 leaves to triples.
 - One web search on 2026-11-11 found no other language called Cognitive SPARQL.
+
+### D15. The attributes that leave are named `Legacy` until they are removed — Decided
+
+Martin, 2026-11-12: "we should probably rename the timestamps that will be removed later … so that their names convey
+this situation", then "Legacy" and "All five, clear intent."
+
+- The five are `LegacyTransactionTime`, `LegacyCreatedAt`, `LegacyModifiedAt`, `LegacyVersion` and `LegacyIsDeleted`.
+- **Why:** between the rename and the layout change the entry holds two kinds of attribute, the two that stay and five
+  that go. With the prefix, a line of new code that reads one of the five shows it. Steps 5 to 7 are written on this
+  code.
+- **Where:** the Cognitive key and entry (`TemporalKey`, `TemporalBTreeEntry`), the quad an index scan returns
+  (`TemporalQuad`), and the two copies on the public result `ResolvedTemporalQuad` (`LegacyTransactionTime`,
+  `LegacyIsDeleted`).
+- **A comment on each field** says what still reads it and which step removes it:
+
+  | Field | Still read by | Removed |
+  |-------|---------------|---------|
+  | `LegacyTransactionTime` | the last sort tie-breaker; the test for a WAL replay of the same Add | the later part (L1) |
+  | `LegacyCreatedAt` | nothing | the later part (L1) |
+  | `LegacyModifiedAt` | `RetractedAt` (until Step 6), the ADR-054 repair, and the conversion (L3) | the later part (L1) |
+  | `LegacyVersion` | nothing | the later part (L1) |
+  | `LegacyIsDeleted` | every scan, the ADR-054 repair, and the conversion (L3). Step 6 removes what writes it | the later part (L1) |
+
+- **Not marked:**
+  - the Graph profile's `CreatedAt`, `ModifiedAt`, `Version` and `IsDeleted` in `VersionedQuadIndex`. They have the
+    same names and they stay;
+  - the `transactionTime` parameters of the write path. They carry the batch's clock reading, which is where
+    `MemorizedAt` comes from;
+  - the WAL record's `TransactionTimeTicks`. Both profiles use it, and replay needs it (L1);
+  - `RetractedAt`. It goes with `Retract` in Step 6, and its name already says what it belongs to.
+- `[Obsolete]` was not used: the build treats warnings as errors, and the fields are still read.
+- It is a rename: no behaviour changes and no stored byte moves. 109 lines in 9 files of `src` and `tests` changed.
 
 ## Open questions
 
@@ -355,10 +393,12 @@ Martin: "Cognitive SPARQL it is."
 2. **The rename** (D11) — **done 2026-11-11.** `MemorizedAt` and `ForgottenAt` in the code and in the four current
    technical documents that name the fields, with no change of behaviour. Every test passes with only the names
    changed. ADRs, release notes and the changelog keep the old names: they describe the store as it was.
+   - **The `Legacy` prefix** (D15) — **done 2026-11-12**, the same way: the code, and the two current technical
+     documents that name `TransactionTime`. Every test passes with only the names changed.
 3. **Count the live store**, read-only, as a probe reviewed before it runs:
    - versions in total;
-   - versions whose memorized time differs from `TransactionTime`;
-   - versions with `IsDeleted` set.
+   - versions whose memorized time differs from `LegacyTransactionTime`;
+   - versions with `LegacyIsDeleted` set.
 4. **Tests for D5 on today's code:** insert, delete, insert of one quad in one request and one millisecond; a delete
    that follows an insert in the same millisecond. Fix what fails.
 5. **The words:** the grammar in `SparqlParser`, the bounds and time variables carried to the scan, the times bound from
@@ -366,7 +406,7 @@ Martin: "Cognitive SPARQL it is."
    - Tests: each word alone and combined; both orders of the bounds; the empty range; joins where each pattern keeps its
      own times; the error on Graph, Reference and Minimal.
    - Every W3C result unchanged.
-6. **One removal** (D2): `Retract`, `RetractBatched` and `RetractedAt` go, and nothing writes `IsDeleted`. The public
+6. **One removal** (D2): `Retract`, `RetractBatched` and `RetractedAt` go, and nothing writes `LegacyIsDeleted`. The public
    store methods follow the words: `Add` with a stated time, `QueryAsOf`, `TimeTravelTo`, `QueryChanges` and
    `QueryEvolution` go or change.
 7. **Pruning carries both times** (D12), with a test that a pruned store answers a period question as its source did.
@@ -389,11 +429,11 @@ Until then the store keeps five more attributes per version that nothing will re
 
 | Attribute | After Steps 1 to 9 |
 |-----------|--------------------|
-| `TransactionTime` | A copy of the memorized time. |
-| `CreatedAt` | A copy of the memorized time. |
-| `ModifiedAt` | Read only to date a retraction. D2 removes retraction. |
-| `Version` | Not read. |
-| `IsDeleted` | Not written once D2 is done. |
+| `LegacyTransactionTime` | A copy of the memorized time. |
+| `LegacyCreatedAt` | A copy of the memorized time. |
+| `LegacyModifiedAt` | Read only to date a retraction. D2 removes retraction. |
+| `LegacyVersion` | Not read. |
+| `LegacyIsDeleted` | Not written once D2 is done. |
 
 Each is a second statement of something the two times already say, and a second statement can disagree with the
 first.
@@ -404,7 +444,8 @@ Martin allowed the redesign: "we can redesign and reduce the temporal properties
 
 - **An entry holds:** graph, subject, predicate, object, `MemorizedAt`, `ForgottenAt`, and the tree's child pointer.
   That is 56 bytes, from 88.
-- **Dropped:** `TransactionTime`, `CreatedAt`, `ModifiedAt`, `Version`, `IsDeleted`, and the flags and reserved bytes.
+- **Dropped:** `LegacyTransactionTime`, `LegacyCreatedAt`, `LegacyModifiedAt`, `LegacyVersion`, `LegacyIsDeleted`, and
+  the flags and reserved bytes.
 - **The four indexes stay.** TGSP leads with the memorized time, so `MEMORIZED SINCE a BEFORE b` on an otherwise open
   pattern is a range scan. A `FORGOTTEN` range has no index and filters while it scans.
 - **The WAL record** carries what replay needs: the operation, the quad and its time.
@@ -420,8 +461,8 @@ Martin: "We can translate old data, convert/migrate it to a preferred state. Reb
 automatic, on open. We do not need to mind other stores, there are only ours in use."
 
 - **Both times are carried unchanged — Decided** (D12).
-- An entry with `IsDeleted` set: forgotten = the earlier of `ForgottenAt` and `ModifiedAt`, the time of its
-  retraction.
+- An entry with `LegacyIsDeleted` set: forgotten = the earlier of `ForgottenAt` and `LegacyModifiedAt`, the time of
+  its retraction.
 
 ### L4. The conversion cannot damage the store it reads
 
@@ -432,7 +473,7 @@ automatic, on open. We do not need to mind other stores, there are only ours in 
 
 ### Open questions of the later part
 
-- **LQ1. Entries whose `MemorizedAt` differs from `TransactionTime`** are the ones where the stored time could be a
+- **LQ1. Entries whose `MemorizedAt` differs from `LegacyTransactionTime`** are the ones where the stored time could be a
   stated one. The memory stores have never been pruned, so none is expected. Step 3 counts them.
 - **LQ2. Automatic or by command.** Martin: "possibly … automatic, on open". An open that converts takes longer than
   any other open, and the MCP server opens the store at start. Does the server convert, or does a command do it first?
@@ -444,7 +485,7 @@ automatic, on open. We do not need to mind other stores, there are only ours in 
 
 1. The version 2 entry and key, with every index and the WAL record.
 2. The conversion, with tests:
-   - a version 1 store with remembered, forgotten and `IsDeleted` entries gives the same answers to every query of D6
+   - a version 1 store with remembered, forgotten and `LegacyIsDeleted` entries gives the same answers to every query of D6
      after it is converted;
    - a conversion stopped part-way leaves the version 1 store openable.
 3. The live memory stores are converted, each after a copy is taken.
