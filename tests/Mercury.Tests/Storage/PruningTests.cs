@@ -300,7 +300,7 @@ public class PruningTests : IDisposable
             past.Dispose();
             var history = _target.QueryEvolution("<http://example.org/s>", "<http://example.org/p>", "\"wrong\"");
             Assert.True(history.MoveNext());
-            Assert.True(history.Current.IsDeleted, "It is kept, as a retraction");
+            Assert.True(history.Current.LegacyIsDeleted, "It is kept, as a retraction");
             history.Dispose();
         }
         finally

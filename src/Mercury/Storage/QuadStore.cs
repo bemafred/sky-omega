@@ -715,8 +715,8 @@ public sealed class QuadStore : IDisposable
 
     /// <summary>
     /// Repair the valid-time history a pre-ADR-054 SPARQL delete erased (ADR-054 D7). Before ADR-054 every delete
-    /// flagged the entry IsDeleted and left ForgottenAt open, so the fact left every AS OF view. Each flagged entry becomes
-    /// what an End would have written (ForgottenAt = the deletion's transaction time, IsDeleted = false), except entries of a
+    /// flagged the entry LegacyIsDeleted and left ForgottenAt open, so the fact left every AS OF view. Each flagged entry becomes
+    /// what an End would have written (ForgottenAt = the deletion's transaction time, LegacyIsDeleted = false), except entries of a
     /// deletion event named in <paramref name="restore"/> (graph IRI, or "" for the default graph, and the deletion time
     /// as the report prints it, in milliseconds). Those are restored: the delete was the mistake and the facts never
     /// stopped holding. An entry deleted before its MemorizedAt is left and listed.
@@ -1774,7 +1774,7 @@ public sealed class QuadStore : IDisposable
                 var (primary, secondary, tertiary) = remapDimensions(quad);
 
                 target.AddRaw(quad.Graph, primary, secondary, tertiary,
-                    quad.MemorizedAt, quad.ForgottenAt, quad.TransactionTime);
+                    quad.MemorizedAt, quad.ForgottenAt, quad.LegacyTransactionTime);
                 count++;
             }
         }
@@ -2379,7 +2379,7 @@ public sealed class QuadStore : IDisposable
     }
 
     /// <summary>The identity of a Cognitive index entry for <see cref="AddToTemporalIndex"/>.</summary>
-    private readonly record struct TemporalKeyIds(long Graph, long Primary, long Secondary, long Tertiary, long MemorizedAt, long TransactionTime);
+    private readonly record struct TemporalKeyIds(long Graph, long Primary, long Secondary, long Tertiary, long MemorizedAt, long LegacyTransactionTime);
 
     /// <summary>
     /// Make the atoms interned so far durable before a WAL commit that references them
@@ -2436,7 +2436,7 @@ public sealed class QuadStore : IDisposable
 
     /// <summary>
     /// Apply a Retract record. Graph (no valid time): the versioned soft delete. Cognitive: the version with exactly the
-    /// record's interval is marked IsDeleted (ADR-054 D2); a record written before ADR-054 by DeleteCurrent carries
+    /// record's interval is marked LegacyIsDeleted (ADR-054 D2); a record written before ADR-054 by DeleteCurrent carries
     /// [MinValue, MaxValue] and is replayed with the meaning it had then (mark the first overlapping version).
     /// </summary>
     private bool ApplyRetractToIndexesById(in LogRecord record)
@@ -3402,7 +3402,7 @@ public struct TemporalResultEnumerator
     /// <summary>
     /// Wrap a Reference-profile enumeration. Temporal fields in the projected
     /// <see cref="ResolvedTemporalQuad"/> are synthesized (MemorizedAt=MinValue,
-    /// ForgottenAt=MaxValue, TransactionTime=MinValue, IsDeleted=false) because a Reference
+    /// ForgottenAt=MaxValue, LegacyTransactionTime=MinValue, LegacyIsDeleted=false) because a Reference
     /// store has no temporal dimension — every triple is current by construction.
     /// </summary>
     internal TemporalResultEnumerator(
@@ -3431,7 +3431,7 @@ public struct TemporalResultEnumerator
     /// VersionedQuad's <c>IsDeleted</c> flag flows through into the projected
     /// <see cref="ResolvedTemporalQuad"/>. Soft-deleted entries are filtered out
     /// by <see cref="VersionedQuadIndex.Query"/> before they reach this enumerator,
-    /// so the IsDeleted flag here is always false for live queries.
+    /// so <see cref="ResolvedTemporalQuad.LegacyIsDeleted"/> is always false for live queries.
     /// </summary>
     internal TemporalResultEnumerator(
         VersionedQuadIndex.VersionedQuadEnumerator graphEnumerator,
@@ -3633,7 +3633,7 @@ public struct TemporalResultEnumerator
                 }
 
                 // Graph has versioning (CreatedAt/ModifiedAt/Version/IsDeleted) but no
-                // bitemporal time dimension. Project MemorizedAt/ForgottenAt/TransactionTime
+                // bitemporal time dimension. Project MemorizedAt/ForgottenAt/LegacyTransactionTime
                 // as synthesized "always current" values (same shape as Reference); the
                 // IsDeleted flag flows through from the entry — though under live queries
                 // (the default) only live entries reach here, so it's always false.
@@ -3693,9 +3693,9 @@ public struct TemporalResultEnumerator
                 DecodeAtomToBuffer(o),
                 DateTimeOffset.FromUnixTimeMilliseconds(Math.Min(quad.MemorizedAt, MaxValidMs)),
                 DateTimeOffset.FromUnixTimeMilliseconds(Math.Min(quad.ForgottenAt, MaxValidMs)),
-                DateTimeOffset.FromUnixTimeMilliseconds(Math.Min(quad.TransactionTime, MaxValidMs)),
-                quad.IsDeleted,
-                quad.IsDeleted ? DateTimeOffset.FromUnixTimeMilliseconds(Math.Min(quad.ModifiedAt, MaxValidMs)) : null
+                DateTimeOffset.FromUnixTimeMilliseconds(Math.Min(quad.LegacyTransactionTime, MaxValidMs)),
+                quad.LegacyIsDeleted,
+                quad.LegacyIsDeleted ? DateTimeOffset.FromUnixTimeMilliseconds(Math.Min(quad.LegacyModifiedAt, MaxValidMs)) : null
             );
         }
     }
@@ -3769,12 +3769,24 @@ public readonly ref struct ResolvedTemporalQuad
     public readonly DateTimeOffset MemorizedAt;
     /// <summary>When the version was forgotten; the far future while it is remembered (ADR-061 D1).</summary>
     public readonly DateTimeOffset ForgottenAt;
-    public readonly DateTimeOffset TransactionTime;
 
-    /// <summary>The version was retracted (recorded in error, ADR-054 D2). An ended version is not deleted: its ForgottenAt is its end.</summary>
-    public readonly bool IsDeleted;
+    /// <summary>
+    /// Legacy (ADR-061 D11): the transaction time in the Cognitive entry's key; the earliest time on the Graph and
+    /// Reference profiles. Only tests read it from a result. Leaves with the stored layout change (ADR-061, the later
+    /// part, L1).
+    /// </summary>
+    public readonly DateTimeOffset LegacyTransactionTime;
 
-    /// <summary>When the version was retracted (Cognitive profile); null unless <see cref="IsDeleted"/>.</summary>
+    /// <summary>
+    /// Legacy (ADR-061 D11): the version was retracted (recorded in error, ADR-054 D2). An ended version is not
+    /// deleted: its ForgottenAt is its end. Leaves when Retract is removed (ADR-061 D2, Step 6).
+    /// </summary>
+    public readonly bool LegacyIsDeleted;
+
+    /// <summary>
+    /// When the version was retracted (Cognitive profile); null unless <see cref="LegacyIsDeleted"/>. Leaves with
+    /// Retract (ADR-061 D2, Step 6).
+    /// </summary>
     public readonly DateTimeOffset? RetractedAt;
 
     public ResolvedTemporalQuad(
@@ -3784,8 +3796,8 @@ public readonly ref struct ResolvedTemporalQuad
         ReadOnlySpan<char> @object,
         DateTimeOffset memorizedAt,
         DateTimeOffset forgottenAt,
-        DateTimeOffset transactionTime,
-        bool isDeleted = false,
+        DateTimeOffset legacyTransactionTime,
+        bool legacyIsDeleted = false,
         DateTimeOffset? retractedAt = null)
     {
         Graph = graph;
@@ -3794,8 +3806,8 @@ public readonly ref struct ResolvedTemporalQuad
         Object = @object;
         MemorizedAt = memorizedAt;
         ForgottenAt = forgottenAt;
-        TransactionTime = transactionTime;
-        IsDeleted = isDeleted;
+        LegacyTransactionTime = legacyTransactionTime;
+        LegacyIsDeleted = legacyIsDeleted;
         RetractedAt = retractedAt;
     }
 }

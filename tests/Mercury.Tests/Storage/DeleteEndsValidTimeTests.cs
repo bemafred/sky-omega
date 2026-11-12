@@ -57,7 +57,7 @@ public class DeleteEndsValidTimeTests : IDisposable
 
             var history = store.QueryEvolution(S, P, "\"open\"");
             Assert.True(history.MoveNext());
-            Assert.False(history.Current.IsDeleted, "An ended version is not a retracted one");
+            Assert.False(history.Current.LegacyIsDeleted, "An ended version is not a retracted one");
             Assert.Equal(t0.ToUnixTimeMilliseconds(), history.Current.MemorizedAt.ToUnixTimeMilliseconds());
             Assert.True(history.Current.ForgottenAt < afterDelete, "ForgottenAt is the delete's time");
             Assert.False(history.MoveNext(), "Ending a version adds no entry");
@@ -100,7 +100,7 @@ public class DeleteEndsValidTimeTests : IDisposable
             while (history.MoveNext())
             {
                 versions++;
-                if (history.Current.IsDeleted) retracted++;
+                if (history.Current.LegacyIsDeleted) retracted++;
             }
             history.Dispose();
             Assert.Equal(2, versions);
@@ -242,7 +242,7 @@ public class DeleteEndsValidTimeTests : IDisposable
             var history = store.QueryEvolution(S, P, "\"v\"");
             var retractedFrom = new List<long>();
             while (history.MoveNext())
-                if (history.Current.IsDeleted)
+                if (history.Current.LegacyIsDeleted)
                 {
                     retractedFrom.Add(history.Current.MemorizedAt.ToUnixTimeMilliseconds());
                     Assert.NotNull(history.Current.RetractedAt);
@@ -413,7 +413,7 @@ public class DeleteEndsValidTimeTests : IDisposable
             store.AcquireReadLock();
             var history = store.QueryEvolution(S, P, "\"open\"");
             Assert.True(history.MoveNext());
-            addTx = history.Current.TransactionTime.ToUnixTimeMilliseconds();
+            addTx = history.Current.LegacyTransactionTime.ToUnixTimeMilliseconds();
             endMs = history.Current.ForgottenAt.ToUnixTimeMilliseconds();
             history.Dispose();
             store.ReleaseReadLock();
@@ -436,7 +436,7 @@ public class DeleteEndsValidTimeTests : IDisposable
                 var history = store.QueryEvolution(S, P, "\"open\"");
                 Assert.True(history.MoveNext());
                 Assert.Equal(endMs, history.Current.ForgottenAt.ToUnixTimeMilliseconds());
-                Assert.False(history.Current.IsDeleted);
+                Assert.False(history.Current.LegacyIsDeleted);
                 Assert.False(history.MoveNext(), "The replayed Add did not bring the ended version back");
                 history.Dispose();
 
@@ -469,7 +469,7 @@ public class DeleteEndsValidTimeTests : IDisposable
             store.AcquireReadLock();
             var history = store.QueryEvolution(S, P, "\"a\"");
             Assert.True(history.MoveNext());
-            firstTx = history.Current.TransactionTime.ToUnixTimeMilliseconds();
+            firstTx = history.Current.LegacyTransactionTime.ToUnixTimeMilliseconds();
             endMs = history.Current.ForgottenAt.ToUnixTimeMilliseconds();
             history.Dispose();
             store.ReleaseReadLock();
@@ -479,7 +479,7 @@ public class DeleteEndsValidTimeTests : IDisposable
             history = store.QueryEvolution(S, P, "\"a\"");
             Assert.True(history.MoveNext());
             Assert.True(history.MoveNext());
-            secondTx = history.Current.TransactionTime.ToUnixTimeMilliseconds();
+            secondTx = history.Current.LegacyTransactionTime.ToUnixTimeMilliseconds();
             history.Dispose();
             store.ReleaseReadLock();
         }
@@ -544,7 +544,7 @@ public class DeleteEndsValidTimeTests : IDisposable
             {
                 var history = store.QueryEvolution(S, P, "\"old\"");
                 Assert.True(history.MoveNext());
-                Assert.True(history.Current.IsDeleted);
+                Assert.True(history.Current.LegacyIsDeleted);
                 Assert.True(history.Current.ForgottenAt.Year > 9000, "The old meaning left ForgottenAt open");
                 history.Dispose();
             }
@@ -578,7 +578,7 @@ public class DeleteEndsValidTimeTests : IDisposable
     [Fact]
     public void RepairDeletes_EndsFlaggedEntries_AndRestoresTheNamedEvent()
     {
-        // Retract flags entries exactly as a pre-ADR-054 delete did (IsDeleted, ModifiedAt = the deletion's time).
+        // Retract flags entries exactly as a pre-ADR-054 delete did (LegacyIsDeleted, LegacyModifiedAt = the deletion's time).
         var dir = Path.Combine(_testDir, "repair");
         using var store = new QuadStore(dir);
         var t0 = DateTimeOffset.UtcNow.AddHours(-2);
@@ -628,7 +628,7 @@ public class DeleteEndsValidTimeTests : IDisposable
 
             var left = store.QueryEvolution(S, P, "\"future\"", "<http://ex.org/g1>");
             Assert.True(left.MoveNext());
-            Assert.True(left.Current.IsDeleted, "Deleted before its MemorizedAt: left as it was");
+            Assert.True(left.Current.LegacyIsDeleted, "Deleted before its MemorizedAt: left as it was");
             left.Dispose();
         }
         finally

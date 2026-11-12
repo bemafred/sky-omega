@@ -424,7 +424,7 @@ public class TemporalQuadIndexTests : IDisposable
         var triple = results.Current;
         Assert.True(triple.MemorizedAt > 0);
         Assert.True(triple.ForgottenAt > triple.MemorizedAt);
-        Assert.True(triple.TransactionTime > 0);
+        Assert.True(triple.LegacyTransactionTime > 0);
     }
 
     [Fact]

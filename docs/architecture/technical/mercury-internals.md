@@ -46,7 +46,7 @@ QuadStore supports RDF named graphs for domain isolation. See [api-usage.md#name
 **Design notes:**
 - **Multiple index paths**: GSPO, GPOS, GOSP, TGSP for efficient query patterns from any entry point
 - **Graph isolation**: Default graph (atom 0) and named graphs are fully isolated
-- **TemporalKey**: 56 bytes (GraphAtom + SubjectAtom + PredicateAtom + ObjectAtom + MemorizedAt + ForgottenAt + TransactionTime)
+- **TemporalKey**: 56 bytes (GraphAtom + SubjectAtom + PredicateAtom + ObjectAtom + MemorizedAt + ForgottenAt + LegacyTransactionTime)
 - **WAL record**: 80 bytes (v2: includes GraphId, TransactionTimeTicks, BeginTx/CommitTx markers)
 
 ## Pruning (`SkyOmega.Mercury.Pruning`)

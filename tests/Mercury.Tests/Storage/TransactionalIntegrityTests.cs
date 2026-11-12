@@ -222,14 +222,14 @@ public class TransactionalIntegrityTests : IDisposable
             try
             {
                 if (results1.MoveNext())
-                    tt1 = results1.Current.TransactionTime;
+                    tt1 = results1.Current.LegacyTransactionTime;
             }
             finally { results1.Dispose(); }
 
             try
             {
                 if (results2.MoveNext())
-                    tt2 = results2.Current.TransactionTime;
+                    tt2 = results2.Current.LegacyTransactionTime;
             }
             finally { results2.Dispose(); }
 
@@ -260,7 +260,7 @@ public class TransactionalIntegrityTests : IDisposable
                 try
                 {
                     Assert.True(results.MoveNext());
-                    originalTt = results.Current.TransactionTime;
+                    originalTt = results.Current.LegacyTransactionTime;
                     Assert.NotEqual(default, originalTt);
                 }
                 finally { results.Dispose(); }
@@ -279,7 +279,7 @@ public class TransactionalIntegrityTests : IDisposable
             try
             {
                 Assert.True(results.MoveNext());
-                Assert.Equal(originalTt, results.Current.TransactionTime);
+                Assert.Equal(originalTt, results.Current.LegacyTransactionTime);
             }
             finally { results.Dispose(); }
         }

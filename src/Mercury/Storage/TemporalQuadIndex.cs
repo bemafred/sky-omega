@@ -132,7 +132,7 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
             Tertiary = c,
             MemorizedAt = memorizedAt,
             ForgottenAt = forgottenAt,
-            TransactionTime = transactionTime
+            LegacyTransactionTime = transactionTime
         };
 
         InsertIntoTree(temporalKey, _file.RootPageId);
@@ -143,7 +143,7 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
     {
         /// <summary>A new row was written.</summary>
         Inserted,
-        /// <summary>The same Add (same MemorizedAt and TransactionTime) was already in the tree: a WAL replay.</summary>
+        /// <summary>The same Add (same MemorizedAt and LegacyTransactionTime) was already in the tree: a WAL replay.</summary>
         AlreadyPresent,
         /// <summary>A current entry with the same dimensions exists (RDF idempotency); nothing was written.</summary>
         Duplicate,
@@ -166,7 +166,7 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
             Tertiary = tertiary,
             MemorizedAt = memorizedAt,
             ForgottenAt = forgottenAt,
-            TransactionTime = transactionTime
+            LegacyTransactionTime = transactionTime
         };
 
         _lastInsertOutcome = InsertOutcome.Inserted;
@@ -199,7 +199,7 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
             return false;
 
         entry->Key.ForgottenAt = end;
-        entry->ModifiedAt = transactionTime;
+        entry->LegacyModifiedAt = transactionTime;
         _file.FlushPage();
         return true;
     }
@@ -215,8 +215,8 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
         if (entry == null)
             return false;
 
-        entry->IsDeleted = true;
-        entry->ModifiedAt = transactionTime;
+        entry->LegacyIsDeleted = true;
+        entry->LegacyModifiedAt = transactionTime;
         _file.FlushPage();
         return true;
     }
@@ -237,7 +237,7 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
             Tertiary = tertiary,
             MemorizedAt = memorizedAt,
             ForgottenAt = forgottenAt,
-            TransactionTime = transactionTime
+            LegacyTransactionTime = transactionTime
         };
 
         return DeleteFromTree(key);
@@ -254,9 +254,9 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
             throw new InvalidOperationException("FindVersionHoldingAt needs an EntityFirst index: a TimeFirst index does not keep a quad's versions together.");
 
         var lo = new TemporalKey { Graph = graph, Primary = primary, Secondary = secondary, Tertiary = tertiary,
-            MemorizedAt = long.MinValue, ForgottenAt = long.MinValue, TransactionTime = long.MinValue };
+            MemorizedAt = long.MinValue, ForgottenAt = long.MinValue, LegacyTransactionTime = long.MinValue };
         var hi = new TemporalKey { Graph = graph, Primary = primary, Secondary = secondary, Tertiary = tertiary,
-            MemorizedAt = long.MaxValue, ForgottenAt = long.MaxValue, TransactionTime = long.MaxValue };
+            MemorizedAt = long.MaxValue, ForgottenAt = long.MaxValue, LegacyTransactionTime = long.MaxValue };
 
         for (var pageId = FindLeafPage(_file.RootPageId, lo); pageId != 0;)
         {
@@ -266,7 +266,7 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
                 ref var entry = ref page->GetEntry(i);
                 if (CompareKeys(in entry.Key, in lo) < 0) continue;
                 if (CompareKeys(in entry.Key, in hi) > 0) return null;
-                if (!entry.IsDeleted && entry.Key.MemorizedAt <= at && entry.Key.ForgottenAt > at)
+                if (!entry.LegacyIsDeleted && entry.Key.MemorizedAt <= at && entry.Key.ForgottenAt > at)
                     return entry.Key.MemorizedAt;
             }
             pageId = page->NextLeaf;
@@ -283,9 +283,9 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
         long memorizedAt, long? forgottenAt)
     {
         var lo = new TemporalKey { Graph = graph, Primary = primary, Secondary = secondary, Tertiary = tertiary,
-            MemorizedAt = memorizedAt, ForgottenAt = forgottenAt ?? long.MinValue, TransactionTime = long.MinValue };
+            MemorizedAt = memorizedAt, ForgottenAt = forgottenAt ?? long.MinValue, LegacyTransactionTime = long.MinValue };
         var hi = new TemporalKey { Graph = graph, Primary = primary, Secondary = secondary, Tertiary = tertiary,
-            MemorizedAt = memorizedAt, ForgottenAt = forgottenAt ?? long.MaxValue, TransactionTime = long.MaxValue };
+            MemorizedAt = memorizedAt, ForgottenAt = forgottenAt ?? long.MaxValue, LegacyTransactionTime = long.MaxValue };
 
         for (var pageId = FindLeafPage(_file.RootPageId, lo); pageId != 0;)
         {
@@ -295,7 +295,7 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
                 ref var entry = ref page->GetEntry(i);
                 if (CompareKeys(in entry.Key, in lo) < 0) continue;
                 if (CompareKeys(in entry.Key, in hi) > 0) return null;
-                if (!entry.IsDeleted)
+                if (!entry.LegacyIsDeleted)
                     return (TemporalBTreeEntry*)Unsafe.AsPointer(ref entry);
             }
             pageId = page->NextLeaf;
@@ -312,22 +312,22 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
     {
         /// <summary>Leave the entry as it is.</summary>
         Leave,
-        /// <summary>The fact ended when it was deleted: ForgottenAt = ModifiedAt, IsDeleted = false.</summary>
+        /// <summary>The fact ended when it was deleted: ForgottenAt = LegacyModifiedAt, LegacyIsDeleted = false.</summary>
         End,
-        /// <summary>The delete was the mistake: IsDeleted = false, ForgottenAt unchanged.</summary>
+        /// <summary>The delete was the mistake: LegacyIsDeleted = false, ForgottenAt unchanged.</summary>
         Restore
     }
 
     /// <summary>
-    /// Visit every IsDeleted leaf entry and apply what <paramref name="decide"/> returns for it. The callback gets the
-    /// entry's dimensions in this index's order, its MemorizedAt, ForgottenAt and ModifiedAt (the deletion's transaction
+    /// Visit every LegacyIsDeleted leaf entry and apply what <paramref name="decide"/> returns for it. The callback gets the
+    /// entry's dimensions in this index's order, its MemorizedAt, ForgottenAt and LegacyModifiedAt (the deletion's transaction
     /// time). Each index is repaired on its own entries, so an interrupted repair can be rerun: entries already
     /// repaired are no longer flagged. Returns the number of entries changed.
     /// </summary>
     internal int RepairDeleted(Func<long, long, long, long, long, long, long, DeletedEntryRepair> decide)
     {
         var first = new TemporalKey { Graph = long.MinValue, Primary = long.MinValue, Secondary = long.MinValue,
-            Tertiary = long.MinValue, MemorizedAt = long.MinValue, ForgottenAt = long.MinValue, TransactionTime = long.MinValue };
+            Tertiary = long.MinValue, MemorizedAt = long.MinValue, ForgottenAt = long.MinValue, LegacyTransactionTime = long.MinValue };
         int changed = 0;
         for (var pageId = FindLeafPage(_file.RootPageId, first); pageId != 0;)
         {
@@ -335,17 +335,17 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
             for (int i = 0; i < page->EntryCount; i++)
             {
                 ref var entry = ref page->GetEntry(i);
-                if (!entry.IsDeleted) continue;
+                if (!entry.LegacyIsDeleted) continue;
                 var k = entry.Key;
-                switch (decide(k.Graph, k.Primary, k.Secondary, k.Tertiary, k.MemorizedAt, k.ForgottenAt, entry.ModifiedAt))
+                switch (decide(k.Graph, k.Primary, k.Secondary, k.Tertiary, k.MemorizedAt, k.ForgottenAt, entry.LegacyModifiedAt))
                 {
                     case DeletedEntryRepair.End:
-                        entry.Key.ForgottenAt = entry.ModifiedAt;
-                        entry.IsDeleted = false;
+                        entry.Key.ForgottenAt = entry.LegacyModifiedAt;
+                        entry.LegacyIsDeleted = false;
                         changed++;
                         break;
                     case DeletedEntryRepair.Restore:
-                        entry.IsDeleted = false;
+                        entry.LegacyIsDeleted = false;
                         changed++;
                         break;
                 }
@@ -455,13 +455,13 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
             ref var entry = ref page->GetEntry(i);
 
             // Check if this is the exact entry (same graph + dimensions and overlapping time)
-            if (IsSameDimensions(entry.Key, key) && !entry.IsDeleted)
+            if (IsSameDimensions(entry.Key, key) && !entry.LegacyIsDeleted)
             {
                 // Check for time overlap
                 if (entry.Key.MemorizedAt <= key.ForgottenAt && entry.Key.ForgottenAt >= key.MemorizedAt)
                 {
-                    entry.IsDeleted = true;
-                    entry.ModifiedAt = key.TransactionTime;
+                    entry.LegacyIsDeleted = true;
+                    entry.LegacyModifiedAt = key.LegacyTransactionTime;
                     _file.FlushPage();
                     return true;
                 }
@@ -635,10 +635,10 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
     /// </summary>
     internal enum KeySortOrder
     {
-        /// <summary>Graph → Primary → Secondary → Tertiary → MemorizedAt → ForgottenAt → TransactionTime</summary>
+        /// <summary>Graph → Primary → Secondary → Tertiary → MemorizedAt → ForgottenAt → LegacyTransactionTime</summary>
         EntityFirst,
 
-        /// <summary>MemorizedAt → Graph → Primary → Secondary → Tertiary → ForgottenAt → TransactionTime</summary>
+        /// <summary>MemorizedAt → Graph → Primary → Secondary → Tertiary → ForgottenAt → LegacyTransactionTime</summary>
         TimeFirst
     }
 
@@ -648,7 +648,7 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
     internal delegate int KeyComparer(in TemporalKey a, in TemporalKey b);
 
     /// <summary>
-    /// Temporal key: Graph + 3 generic dimensions + ValidTime + TransactionTime (56 bytes)
+    /// Temporal key: Graph + 3 generic dimensions + MemorizedAt + ForgottenAt + LegacyTransactionTime (56 bytes)
     /// TemporalQuadIndex is a generic multi-dimensional B+Tree. The RDF-to-dimension mapping
     /// (Subject→Primary, Predicate→Secondary, Object→Tertiary) lives in QuadStore.
     /// </summary>
@@ -663,7 +663,10 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
         // Until ADR-061 D2 is done a caller can still state them, and they then hold a stated valid time.
         public long MemorizedAt;     // When the version was memorized
         public long ForgottenAt;     // When it was forgotten; the far future while it is remembered
-        public long TransactionTime; // Transaction-time (when recorded)
+        // Legacy (ADR-061 D11): the batch's clock reading, in milliseconds since the epoch. Still read as the last sort
+        // tie-breaker and to recognize a WAL replay of the same Add (InsertIntoLeaf, Case A). Leaves with the stored
+        // layout change (ADR-061, the later part, L1).
+        public long LegacyTransactionTime;
 
         /// <summary>
         /// Default comparison: EntityFirst order.
@@ -673,7 +676,7 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
         public readonly int CompareTo(TemporalKey other) => CompareEntityFirst(in this, in other);
 
         /// <summary>
-        /// Graph → Primary → Secondary → Tertiary → MemorizedAt → ForgottenAt → TransactionTime
+        /// Graph → Primary → Secondary → Tertiary → MemorizedAt → ForgottenAt → LegacyTransactionTime
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal static int CompareEntityFirst(in TemporalKey a, in TemporalKey b)
@@ -696,11 +699,11 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
             cmp = a.ForgottenAt.CompareTo(b.ForgottenAt);
             if (cmp != 0) return cmp;
 
-            return a.TransactionTime.CompareTo(b.TransactionTime);
+            return a.LegacyTransactionTime.CompareTo(b.LegacyTransactionTime);
         }
 
         /// <summary>
-        /// MemorizedAt → Graph → Primary → Secondary → Tertiary → ForgottenAt → TransactionTime
+        /// MemorizedAt → Graph → Primary → Secondary → Tertiary → ForgottenAt → LegacyTransactionTime
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal static int CompareTimeFirst(in TemporalKey a, in TemporalKey b)
@@ -723,7 +726,7 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
             cmp = a.ForgottenAt.CompareTo(b.ForgottenAt);
             if (cmp != 0) return cmp;
 
-            return a.TransactionTime.CompareTo(b.TransactionTime);
+            return a.LegacyTransactionTime.CompareTo(b.LegacyTransactionTime);
         }
     }
 
@@ -757,11 +760,14 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
         public TemporalKey Key;
         public long ChildOrValue;
         
-        // Metadata for temporal operations
-        public long CreatedAt;       // When this version was created
-        public long ModifiedAt;      // When this version was modified
-        public int Version;          // Version number
-        public bool IsDeleted;       // Soft delete flag
+        // Legacy (ADR-061 D11): the four fields below leave the entry with the stored layout change (ADR-061, the later
+        // part, L1). New code does not read them.
+        public long LegacyCreatedAt;       // The write's transaction time. Written, read by nothing.
+        public long LegacyModifiedAt;      // Transaction time of the last End or Retract, else of the insert. Read to date
+                                           // a retraction: RetractedAt (until Step 6) and the ADR-054 repair.
+        public int LegacyVersion;          // Always 1. Written, read by nothing.
+        public bool LegacyIsDeleted;       // Set by Retract (ADR-054 D2); every scan skips the entry, and the ADR-054
+                                           // repair visits it. Nothing writes it once Retract goes (Step 6).
         public byte Flags;           // Future use
         public short Reserved;       // Padding
     }
@@ -779,8 +785,8 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
         private readonly TemporalKey _maxKey;
         private readonly TemporalQuery _query;
         private TemporalKey _currentKey;
-        private bool _currentIsDeleted;
-        private long _currentModifiedAt;
+        private bool _currentLegacyIsDeleted;
+        private long _currentLegacyModifiedAt;
 
         internal TemporalQuadEnumerator(
             TemporalQuadIndex store,
@@ -796,8 +802,8 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
             _maxKey = maxKey;
             _query = query;
             _currentKey = default;
-            _currentIsDeleted = false;
-            _currentModifiedAt = 0;
+            _currentLegacyIsDeleted = false;
+            _currentLegacyModifiedAt = 0;
         }
 
         public bool MoveNext()
@@ -810,8 +816,8 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
                 {
                     ref var entry = ref page->GetEntry(_currentSlot);
                     _currentKey = entry.Key;
-                    _currentIsDeleted = entry.IsDeleted;
-                    _currentModifiedAt = entry.ModifiedAt;
+                    _currentLegacyIsDeleted = entry.LegacyIsDeleted;
+                    _currentLegacyModifiedAt = entry.LegacyModifiedAt;
 
                     // Check spatial bounds using the index's sort order
                     if (_store.CompareKeys(in _currentKey, in _maxKey) > 0)
@@ -851,12 +857,12 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
             {
                 // AsOf and Range queries exclude deleted entries
                 TemporalQueryType.AsOf =>
-                    !entry.IsDeleted &&
+                    !entry.LegacyIsDeleted &&
                     key.MemorizedAt <= _query.AsOfTime &&
                     key.ForgottenAt > _query.AsOfTime,
 
                 TemporalQueryType.Range =>
-                    !entry.IsDeleted &&
+                    !entry.LegacyIsDeleted &&
                     key.MemorizedAt < _query.RangeEnd &&
                     key.ForgottenAt > _query.RangeStart,
 
@@ -888,9 +894,9 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
                 Tertiary = _currentKey.Tertiary,
                 MemorizedAt = _currentKey.MemorizedAt,
                 ForgottenAt = _currentKey.ForgottenAt,
-                TransactionTime = _currentKey.TransactionTime,
-                IsDeleted = _currentIsDeleted,
-                ModifiedAt = _currentModifiedAt
+                LegacyTransactionTime = _currentKey.LegacyTransactionTime,
+                LegacyIsDeleted = _currentLegacyIsDeleted,
+                LegacyModifiedAt = _currentLegacyModifiedAt
             };
         }
 
@@ -1012,11 +1018,11 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
             ref var prevEntry = ref page->GetEntry(insertPos - 1);
             if (IsSameDimensions(key, prevEntry.Key))
             {
-                // Case A: the same Add applied again (WAL replay) — same MemorizedAt and TransactionTime. ForgottenAt is not
+                // Case A: the same Add applied again (WAL replay) — same MemorizedAt and LegacyTransactionTime. ForgottenAt is not
                 // compared: an End may have shortened it since (ADR-054 D1), and the replayed Add must not bring the
                 // ended version back.
                 if (prevEntry.Key.MemorizedAt == key.MemorizedAt &&
-                    prevEntry.Key.TransactionTime == key.TransactionTime)
+                    prevEntry.Key.LegacyTransactionTime == key.LegacyTransactionTime)
                 {
                     _lastInsertOutcome = InsertOutcome.AlreadyPresent;
                     return default;
@@ -1025,14 +1031,14 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
                 // Case B: Both entries are "current" (ForgottenAt is far future) — RDF idempotency. A retracted entry is
                 // not current and never blocks an insert (ADR-054 D3).
                 const long FarFutureThreshold = 253370764800000L; // Year 9000 in Unix ms
-                if (!prevEntry.IsDeleted && prevEntry.Key.ForgottenAt >= FarFutureThreshold && key.ForgottenAt >= FarFutureThreshold)
+                if (!prevEntry.LegacyIsDeleted && prevEntry.Key.ForgottenAt >= FarFutureThreshold && key.ForgottenAt >= FarFutureThreshold)
                 {
                     _lastInsertOutcome = InsertOutcome.Duplicate;
                     return default;
                 }
 
                 // Case C: Same dimensions, different temporal key — truncate a live predecessor, then insert new row
-                if (!prevEntry.IsDeleted)
+                if (!prevEntry.LegacyIsDeleted)
                     HandleTemporalUpdate(page, insertPos - 1, key);
                 // Fall through to insert the new committed row
             }
@@ -1053,10 +1059,10 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
         ref var newEntry = ref page->GetEntry(insertPos);
         newEntry.Key = key;
         newEntry.ChildOrValue = 0;
-        newEntry.CreatedAt = key.TransactionTime;
-        newEntry.ModifiedAt = key.TransactionTime;
-        newEntry.Version = 1;
-        newEntry.IsDeleted = false;
+        newEntry.LegacyCreatedAt = key.LegacyTransactionTime;
+        newEntry.LegacyModifiedAt = key.LegacyTransactionTime;
+        newEntry.LegacyVersion = 1;
+        newEntry.LegacyIsDeleted = false;
 
         page->EntryCount++;
         _file.IncrementEntryCount();
@@ -1083,7 +1089,7 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
         {
             // Truncate existing entry
             existing.Key.ForgottenAt = newKey.MemorizedAt;
-            existing.ModifiedAt = newKey.TransactionTime;
+            existing.LegacyModifiedAt = newKey.LegacyTransactionTime;
             _file.FlushPage();
         }
     }
@@ -1165,10 +1171,10 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
         ref var newEntry = ref page->GetEntry(insertPos);
         newEntry.Key = key;
         newEntry.ChildOrValue = rightChildPageId;
-        newEntry.CreatedAt = key.TransactionTime;
-        newEntry.ModifiedAt = key.TransactionTime;
-        newEntry.Version = 1;
-        newEntry.IsDeleted = false;
+        newEntry.LegacyCreatedAt = key.LegacyTransactionTime;
+        newEntry.LegacyModifiedAt = key.LegacyTransactionTime;
+        newEntry.LegacyVersion = 1;
+        newEntry.LegacyIsDeleted = false;
 
         page->EntryCount++;
 
@@ -1339,7 +1345,7 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
             Tertiary = tertiary < 0 ? unboundValue : tertiary,
             MemorizedAt = memorizedAt,
             ForgottenAt = isMin ? 0 : long.MaxValue,
-            TransactionTime = isMin ? 0 : long.MaxValue
+            LegacyTransactionTime = isMin ? 0 : long.MaxValue
         };
     }
 
@@ -1422,7 +1428,8 @@ internal struct TemporalQuad
     public long Tertiary;       // 64-bit, third dimension
     public long MemorizedAt;
     public long ForgottenAt;
-    public long TransactionTime;
-    public bool IsDeleted;      // Retracted (ADR-054 D2); visible in AllTime queries only
-    public long ModifiedAt;     // Transaction time of the last End or Retract, else of the insert
+    // Legacy (ADR-061 D11): the three fields below are copies of the entry's fields of the same names and leave with them.
+    public long LegacyTransactionTime;
+    public bool LegacyIsDeleted;      // Retracted (ADR-054 D2); visible in AllTime queries only. Goes with Retract (Step 6).
+    public long LegacyModifiedAt;     // Transaction time of the last End or Retract, else of the insert
 }

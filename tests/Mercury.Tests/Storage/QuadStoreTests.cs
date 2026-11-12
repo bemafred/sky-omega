@@ -1371,7 +1371,7 @@ public class QuadStoreTests : IDisposable
             try
             {
                 Assert.True(results.MoveNext(), "Deleted triple should be visible in QueryEvolution");
-                Assert.False(results.Current.IsDeleted, "An ended version is not a retracted one");
+                Assert.False(results.Current.LegacyIsDeleted, "An ended version is not a retracted one");
                 Assert.InRange(results.Current.ForgottenAt, before.AddMilliseconds(-1), after.AddMilliseconds(1));
                 Assert.Null(results.Current.RetractedAt);
                 Assert.False(results.MoveNext(), "The delete ends the version; it adds none");
@@ -1413,7 +1413,7 @@ public class QuadStoreTests : IDisposable
                     count++;
                     if (results.Current.ForgottenAt < DateTimeOffset.MaxValue.AddYears(-1000))
                         endedCount++;
-                    if (results.Current.IsDeleted)
+                    if (results.Current.LegacyIsDeleted)
                         retractedCount++;
                 }
 
@@ -1501,7 +1501,7 @@ public class QuadStoreTests : IDisposable
             try
             {
                 Assert.True(results.MoveNext());
-                Assert.False(results.Current.IsDeleted, "Active triple should have IsDeleted=false");
+                Assert.False(results.Current.LegacyIsDeleted, "Active triple should have LegacyIsDeleted=false");
             }
             finally
             {

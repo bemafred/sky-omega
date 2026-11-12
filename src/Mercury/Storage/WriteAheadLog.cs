@@ -408,7 +408,7 @@ internal enum LogOperation : byte
     Add = 1,
 
     /// <summary>
-    /// The version with exactly [MemorizedAt, ForgottenAt) was recorded in error: it is marked IsDeleted (ADR-054 D2).
+    /// The version with exactly [MemorizedAt, ForgottenAt) was recorded in error: it is marked LegacyIsDeleted (ADR-054 D2).
     /// Records written before ADR-054 by DeleteCurrent carry [MinValue, MaxValue] and are replayed with their old
     /// meaning (mark the first overlapping version); a Retract written since always carries the exact interval.
     /// </summary>

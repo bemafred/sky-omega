@@ -421,7 +421,7 @@ internal sealed class PruningTransfer
         stats.Scanned++;
 
         // Skip deleted unless preserving all
-        if (quad.IsDeleted && !includeDeleted)
+        if (quad.LegacyIsDeleted && !includeDeleted)
             return;
 
         if (!filter.ShouldInclude(
@@ -447,7 +447,7 @@ internal sealed class PruningTransfer
 
             // PreserveAll keeps a retracted version (recorded in error, ADR-054 D2) as a retracted version: copied as
             // a plain Add it would hold again in the target.
-            if (quad.IsDeleted)
+            if (quad.LegacyIsDeleted)
                 _target.RetractBatched(
                     quad.Subject, quad.Predicate, quad.Object,
                     quad.MemorizedAt, quad.ForgottenAt, quad.Graph);
