@@ -3,7 +3,9 @@
 
 *A practical guide to reasoning about time without inventing unnecessary complexity.*
 
-**Version 0.1 — November 2026**
+**Version 0.2 — 13 November 2026**
+
+*Revision note: Adds an explicit separation between domain knowledge and agent-behavior diagnostics, and derives same-clock membership behavior from set semantics rather than event-history assumptions. The Mercury examples are modeling guidance, not a replacement for its ADRs.*
 
 ### Preface: The Timestamp That Wasn't a Problem
 
@@ -22,6 +24,8 @@ But before solving that problem, the engineer has neglected to ask a more fundam
 **What, exactly, needs to be distinguished — and why?**
 
 If the system represents a set of facts, it does not necessarily represent a sequence of operations.
+
+A memorize-and-forget sequence within one clock reading may be an observable *client behavior* without producing any nonempty interval of remembered *knowledge*. The database need not turn the behavior into another fact merely because it can detect it.
 
 The engineer may be attempting to preserve distinctions that do not exist in the domain model.
 
@@ -138,7 +142,9 @@ However, if the application must distinguish separate periods of membership, its
 
 The key insight is:
 
-**Fact identity, membership interval identity, and operation identity are separate design decisions.**
+**Fact identity, temporal membership, and operation history are different concepts.**
+
+A membership interval is a way to describe when a fact belongs to a set. It is not automatically a separately identified entity. Introduce an interval identifier only if the domain actually requires one.
 
 Do not conflate them.
 
@@ -264,11 +270,9 @@ This may solve a real problem — or it may solve one that the domain never had.
 
 For a set-based model, several operations may be observationally equivalent at the chosen temporal resolution.
 
-If only the resulting set matters, distinguishing those operations provides no additional state information.
+If the temporal contract describes set membership at representable clock readings, a sequence within one reading need not create separately queryable membership periods. Increasing clock precision or manufacturing operation identifiers would change the contract, not repair an RDF identity defect.
 
-But the converse also matters:
-
-If a system promises to preserve every transition, including transitions within one clock tick, the representation must support that promise.
+The converse also matters: a different system may explicitly promise every transition, including ones within one clock tick. That is an event-history or finer-grained observation requirement, and its representation must support that promise. **Do not silently impose that requirement on a temporal set.**
 
 **Method:**
 
@@ -285,6 +289,10 @@ Choose temporal resolution only after establishing these requirements.
 If no such query exists, do not manufacture a collision problem.
 
 If such a query exists, specify the missing information explicitly rather than assuming higher clock precision is always the answer.
+
+**Same-clock example (for a temporal RDF set):** A newly memorized quad that is forgotten within the same clock reading has no nonempty `[m, f)` membership period when `m = f`. No zero-duration historical version is needed. If a quad is forgotten and then memorized again within the same reading, the intermediate removal need not split its membership period. This is a *temporal observation policy*, not a claim that the operations never occurred.
+
+**Concurrency caveat:** A clock reading is not inherently a transaction or isolation boundary. Live readers may observe intermediate operations if the write/read contract permits it; that separate visibility contract does not entail retaining every intermediate operation as historical RDF membership.
 
 ---
 
@@ -308,9 +316,9 @@ An open-ended interval can represent current membership.
 
 This convention is useful because adjacent intervals meet without overlapping at their shared boundary.
 
-However, the convention alone does not determine the meaning of simultaneous changes, clock granularity, or repeated operations.
+However, the convention alone does not determine the meaning of simultaneous changes, clock granularity, repeated operations, or visibility to concurrent readers.
 
-Those require separate decisions.
+Those require separate decisions. In particular, `[m, m)` is empty; storing it as a historical membership period would add a distinct semantic promise beyond ordinary interval membership.
 
 **Method:**
 
@@ -364,7 +372,7 @@ Then identify the minimum information required to answer them.
 
 These have different semantics.
 
-A memory may cease to contain q while preserving evidence that q was previously remembered.
+A memory may cease to contain q while preserving a **nonempty** historical period during which q was remembered. A newly added fact removed in the same clock reading need not leave any such period.
 
 A later assertion may contradict q without necessarily removing q.
 
@@ -540,7 +548,10 @@ Test deliberately difficult cases:
 - Repeated addition of an existing fact.
 - Repeated removal of an absent fact.
 - Removal followed by readdition.
-- Equal timestamps.
+- Equal timestamps, including memorize-then-forget in one reading (no zero-length membership period).
+- Forget-then-memorize in one reading (no artificial gap for an otherwise continuing period).
+- An absent fact memorized, forgotten, and memorized again in one reading (one resulting period, not an event sequence).
+- An existing fact forgotten, memorized, and forgotten in one reading (correct final membership without synthetic history).
 - Adjacent intervals.
 - Open-ended intervals.
 - Different world-event and observation times.
@@ -549,6 +560,44 @@ Test deliberately difficult cases:
 - Competing updates, where concurrency is supported.
 
 A passing test demonstrates conformity to a specified invariant. It does not establish the correctness of an unstated assumption.
+
+---
+
+## Recipe 15: Do Not Confuse Observable Agent Behavior With Domain Knowledge
+
+**Problem:** A memory system detects suspicious client operations and preserves them as extra RDF history, even though they do not express additional knowledge in its domain.
+
+**Example:** An agent submits `Memorize(q)` followed by `Forget(q)` within a single clock reading, for a quad that was previously absent.
+
+Under a temporal set-membership model with half-open intervals, the proposed membership period is `[m, m)`, which is empty. There is no interval during which q is remembered at the represented temporal granularity.
+
+Nevertheless, the operations happened. That fact may be useful **as a diagnostic about the client**, rather than as a historical RDF membership fact. Treating it as a zero-length memory period would cross an architectural boundary: it would turn an observation of agent behavior into purported memory history.
+
+**Method:** Separate three layers explicitly.
+
+| Layer | Represents | Example question |
+|---|---|---|
+| Domain / RDF memory | Which RDF quads belong to memory at represented times | “Was q remembered at t?” |
+| Runtime diagnostics | Which operations, retries, anomalies, or errors were observed | “Did the client immediately undo its own write?” |
+| Agent reasoning / governance | Why the behavior occurred and whether it is warranted | “Did James make a poor memory-management decision?” |
+
+A diagnostic log can report something like `MemoryChurnWithinClock`, **only if the implementation actually observed the relevant operations**. Equal timestamps in stored rows alone do not prove misbehavior. Do not automatically treat all same-clock churn as an error: retries, batch semantics, and legitimate corrections may account for it. The interpretation belongs at the behavioral layer.
+
+A diagnostic entry is not automatically RDF knowledge about the external world. It could become a deliberate RDF statement *about an agent's observed behavior* if such provenance is part of another explicitly defined knowledge domain; that requires its own semantics, not an accidental side effect of storage.
+
+In the Sky Omega architecture, Mercury can expose a structured observation, while James can investigate the cause. DrHook or other runtime-observation tools may supply corroborating evidence. None of these obligations requires Mercury to retain a zero-duration RDF memory version.
+
+**Design tests:**
+
+- Does the RDF query layer return the same temporal membership for histories equivalent under its contract?
+- Can diagnostics describe a suspicious operation sequence without changing RDF membership?
+- Is diagnostic emission based on observed operations rather than inferred solely from timestamp equality?
+- Can the agent distinguish a behavioral anomaly from a demonstrated reasoning defect?
+- Can diagnostics be disabled or retained separately without changing domain-query answers?
+
+**Rule:**
+
+> **Do not preserve an operational anomaly as domain knowledge merely because it is observable. Observe it through diagnostics; interpret it at the layer responsible for the behavior.**
 
 ---
 
@@ -571,6 +620,9 @@ Before approving a design that introduces time, answer the following questions.
 | What does a missing timestamp mean? | Unknown, unavailable, or inapplicable |
 | What belongs to storage? | Logical data versus implementation machinery |
 | Which invariants apply? | Executable acceptance criteria |
+| Is an anomaly domain knowledge? | Whether it changes set membership or merely describes client behavior |
+| Who observes and interprets anomalies? | Diagnostic instrumentation versus agent reasoning |
+| What can concurrent readers see? | Visibility and isolation guarantees, independently of clock resolution |
 
 A design is not complete merely because it answers all these questions.
 
@@ -621,9 +673,24 @@ For example, retaining every change operation is an additional requirement. So i
 
 None follows automatically from the existence of temporal RDF data.
 
-The next design task is to specify precisely how M(t) is represented, updated, and queried — including the treatment of simultaneous or observationally equivalent changes.
+The next design task is to specify precisely how M(t) is represented, updated, and queried — including the treatment of changes that share a clock reading.
 
-That decision belongs to the semantics of the memory, not to assumptions imported from another architecture.
+### An illustrative same-clock policy
+
+Assume a chosen memory-time resolution, half-open membership intervals, and a historical query contract that does **not** preserve every intermediate client operation. For a quad `q`:
+
+| Starting membership | Operations within one reading `t` | Resulting represented membership |
+|---|---|---|
+| Absent | `Memorize(q); Forget(q)` | Absent; no `[t, t)` period |
+| Present | `Forget(q); Memorize(q)` | Present; existing period continues |
+| Absent | `Memorize(q); Forget(q); Memorize(q)` | Present; one period begins at `t` |
+| Present | `Forget(q); Memorize(q); Forget(q)` | Absent; preceding period ends at `t` |
+
+These rows describe a *possible temporal-set policy* for the resulting membership, not an event-log reconstruction. They assume the indicated sequence is observed by the writer in that order. They do **not** assert that one clock reading is one atomic request, nor do they define what a concurrent live reader may see in between operations.
+
+If the implementation can diagnose client churn, it may log it separately. It must not invent additional historical RDF facts to account for the diagnostic.
+
+That separation belongs to the semantics of the system, not to assumptions imported from another architecture.
 
 ### The critical distinction
 
@@ -639,9 +706,13 @@ Event history answers:
 
 **What happened to change the collection?**
 
+Behavioral diagnostics answers:
+
+**What did the client do, and what might warrant investigation?**
+
 These questions may be related.
 
-They are not interchangeable.
+They are not interchangeable. In particular, behavioral observations are not automatically domain facts, and clock resolution does not define identity.
 
 ---
 
@@ -690,10 +761,12 @@ It is to build the simplest system whose behavior faithfully represents its doma
 
 **A timestamp is not an explanation.**
 
+**An operational anomaly is not automatically domain knowledge.**
+
 And a problem is not established merely because an engineer knows how to solve it.
 
 ---
 
 *Canyala Research Foundation — Laboratory 1*
 
-*Working draft. Specific temporal semantics should be validated against formal domain requirements before using these recipes as an implementation specification.*
+*Working draft. The same-clock policy is an illustrative interpretation of temporal RDF set membership; production guarantees, concurrency behavior, diagnostic retention, and Mercury-specific decisions must be established in their respective ADRs.*
