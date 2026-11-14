@@ -108,8 +108,9 @@ The memory stores have never been pruned (Martin, 2026-11-11). So nothing has wr
 every `ValidFrom` in them should be the time of its write.
 
 **Counted 2026-11-14 (Step 3), on a copy of the live memory store:** of 8,187 entries, 84 have a memorized time
-different from `LegacyTransactionTime`, and none has `LegacyIsDeleted` set. The 84 are not explained yet, so "every
-`ValidFrom` should be the time of its write" is not established for them.
+different from `LegacyTransactionTime`, and none has `LegacyIsDeleted` set. In all 84 the memorized time is earlier
+by less than 10 ms, and all were memorized between 2026-03-29 and 2026-04-19. So no entry holds a stated time that is
+far from its write.
 
 This section names the attributes as they were on 2026-11-10. In the code they are now `MemorizedAt`, `ForgottenAt`
 (D11) and `LegacyTransactionTime`, `LegacyCreatedAt`, `LegacyModifiedAt`, `LegacyVersion`, `LegacyIsDeleted` (D15).
@@ -369,9 +370,30 @@ The causes, read from the code:
 - Read through GSPO, none breaks I2, I5 or I6: no entry with equal times, none forgotten before it was memorized, no
   two periods that touch or overlap, no quad with two open periods.
 - **I13 is broken for 187 quads.** Their periods read through TGSP differ from those read through GSPO, and in each
-  TGSP has more open periods. TGSP holds 47 more entries than GSPO. The 187 are not broken down yet.
-- **Not explained:** the 84 entries whose memorized time differs from `LegacyTransactionTime`; and the entry counts in
-  the index files (8,238 for GSPO, GPOS and GOSP, 8,285 for TGSP), which are 51 higher than the entries read.
+  TGSP has more open periods. TGSP holds 47 more entries than GSPO. A second count the same day put each quad in one
+  group:
+
+  | Quads | GSPO | TGSP | Forgotten or memorized |
+  |-------|------|------|------------------------|
+  | 146 | one period, forgotten | the same period, open | forgotten between 2026-04-19 and 2026-10-27 |
+  | 9 | one open period | the same, and a second open entry memorized later | 2026-05-21 to 2026-10-28 |
+  | 32 | not one of the two above | | not grouped further |
+
+  - **The 146** were all forgotten before [ADR-054](ADR-054-delete-ends-valid-time.md) (1.8.23, 2026-10-27). Its
+    repair ended the entries a delete had flagged, one index at a time. In TGSP these entries are still open. Whether
+    the old delete never flagged them there is not established.
+  - **The 9** are the fourth row of the table above.
+  - **The 32:** the three examples printed are one subject on 2026-04-19. GSPO has one forgotten period; TGSP has that
+    period open and a second open entry memorized 32 seconds after the delete. Before ADR-054 a re-insert after a
+    delete was dropped (its context says so). If that is what these are, TGSP alone still holds facts the memory was
+    told again and lost. A query for one of them on the live store returns nothing.
+  - **So a read through TGSP returns forgotten facts as remembered**, for up to 187 quads of the live memory store.
+    `DURING` reads TGSP today, and `MEMORIZED SINCE … BEFORE …` would under L1.
+- **The 84 entries** whose memorized time differs from `LegacyTransactionTime` differ by less than 10 ms, the memorized
+  time being the earlier, and are from 2026-03-29 to 2026-04-19. Two clock readings at one write would give that. The
+  code of that time was not read.
+- **Not explained:** the entry counts in the index files (8,238 for GSPO, GPOS and GOSP, 8,285 for TGSP) are 51 higher
+  than the entries read, in GSPO and in TGSP alike.
 
 ## Decision
 
@@ -691,10 +713,10 @@ this situation", then "Legacy" and "All five, clear intent."
   the words of D6 it takes two patterns and a `UNION`: memorized at or before `t` and still remembered, or memorized at
   or before `t` and forgotten after it. Is that enough?
 - **Q11. "What is new since my last look" — Proposed.** A reader that asks this again and again misses nothing when
-  its bound is the store's clock, read no later than the end of its previous look. `NOW()` inside the reading query is such
-  a bound. A write stamped in the same millisecond as the bound can come back twice, and is never skipped. A bound read
-  after the query returned, or from another clock, can skip a write. The `lucy` skill's recency recall is the first
-  such reader (Step 8). Is this a rule of the words?
+  its bound is the store's clock, read no later than the end of its previous look. `NOW()` inside the reading query is
+  such a bound. A write stamped in the same millisecond as the bound can come back twice, and is never skipped. A bound
+  read after the query returned, or from another clock, can skip a write. The `lucy` skill's recency recall is the
+  first such reader (Step 8). Is this a rule of the words?
 - **Q12. What a reader sees during writes** (M9): the contract is not written.
 - **Q13. The diagnostic** (M8): its form, and whether and where it is kept.
 - **Q14. Tests that need one clock reading** (Step 4). A batch has one by construction. A sequence of requests does
@@ -712,11 +734,12 @@ this situation", then "Legacy" and "All five, clear intent."
 3. **Count the live store**, read-only, as a probe reviewed before it runs — **done 2026-11-14**, on a copy. The
    numbers are in M11:
    - entries in total: 8,187;
-   - entries whose memorized time differs from `LegacyTransactionTime`: 84, not explained;
+   - entries whose memorized time differs from `LegacyTransactionTime`: 84, each by less than 10 ms;
    - entries with `LegacyIsDeleted` set: 0;
    - and, against the model: 187 quads whose periods differ between TGSP and GSPO.
-   - **Open:** a second read-only count that breaks down the 187 and the 84, and explains the 51 entries the index
-     files count and the read does not find.
+   - a second count the same day broke down the 187 and the 84 (M11).
+   - **Open:** the 51 entries the index files count and the read does not find. GPOS and GOSP were not compared with
+     GSPO.
 4. **Tests for the model on today's code.** Every row of M6, and the four rows of M11, each with the result the model
    gives. A batch gives one clock reading by construction (Q14). Fix what fails: the rows of M11 fail today.
 5. **The words:** the grammar in `SparqlParser`, the bounds and time variables carried to the scan, the times bound from
@@ -802,7 +825,7 @@ automatic, on open. We do not need to mind other stores, there are only ours in 
 
 - **LQ1. Entries whose `MemorizedAt` differs from `LegacyTransactionTime`** are the ones where the stored time could be a
   stated one. The memory stores have never been pruned, so none was expected. Step 3 counted 84 in the live memory
-  store (2026-11-14). They are not explained yet.
+  store (2026-11-14), each less than 10 ms before its transaction time (M11).
 - **LQ2. Automatic or by command.** Martin: "possibly … automatic, on open". An open that converts takes longer than
   any other open, and the MCP server opens the store at start. Does the server convert, or does a command do it first?
 - **LQ3. Disk space.** The conversion needs room for both layouts at once. It checks before it starts
@@ -810,7 +833,9 @@ automatic, on open. We do not need to mind other stores, there are only ours in 
 - **LQ4. The Graph profile** uses `VersionedQuadIndex` and has no times. The later part does not change it.
 - **LQ5. Entries the model has no place for.** A version 1 store can hold an entry with equal times, two periods of
   one quad that touch, and an extra open entry in TGSP (M11). The conversion needs a rule for each. The live memory
-  store holds none of the first two and 187 quads of the third. Other stores are not counted.
+  store holds none of the first two and 187 quads whose TGSP entries differ from GSPO's (M11). Which index the
+  conversion reads decides what the converted store remembers: GSPO is what a default query reads today, and TGSP alone
+  may hold up to 32 facts that were told again and lost. Other stores are not counted.
 
 ### Steps of the later part
 
