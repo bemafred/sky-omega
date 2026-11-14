@@ -31,6 +31,10 @@ form derived from that decision. It is [The model](#the-model), written into thi
 - D1, D2, D5 and D10 said things the model contradicts. Their wording is corrected, and each correction is dated.
 - The logical thing is now called a **period**, where this text said "version". The stored thing is an **entry**.
 - The store was run against the model on 2026-11-14 (M11), and the live memory store was counted (Step 3).
+- Later that day the store's four index files were compared entry by entry (M11, LQ5), and four things that follow
+  from the model were added as proposals: what each pruning mode keeps (D12), the query that gives `M(t)` (Q10), what
+  the stored shape Martin chose asks of M7 and I13 (the later part), and the path where a committed write is not
+  applied (M7).
 
 The file keeps its name: the changelog, the 1.8.41 release notes, the solution file and the ADR index link to it.
 
@@ -282,9 +286,21 @@ So the log holds the change that was decided at the write, and not the operation
 - Applying a record reads no clock and compares no times for order.
 - **The start of recovery (read, not run).** The checkpoint moves it. `CheckpointInternal` runs only under the write
   lock, or at open after recovery; it saves every index to disk before it truncates the log. So the start moves only to
-  a point every index has reached. One path is not closed: if applying a committed record throws part-way in
-  `CommitBatch` and the process lives on, nothing refuses later writes, and a later checkpoint would move the start
-  past a record some indexes never received. What can throw there is not established.
+  a point every index has reached.
+- **One path is not closed (read 2026-11-14, not run):** a committed record that is not applied, in a process that
+  lives on.
+  - `CommitBatch` makes the commit durable in the log first. It then applies each record of the batch to GSPO, GPOS,
+    GOSP, TGSP and the trigram index, one after the other.
+  - If that throws part-way, the records after it reach no index, and the one being applied may have reached some.
+    Nothing is set that refuses later writes. The next batch discards the records still waiting.
+  - A later checkpoint, or the one a clean close makes, then moves the start past them, and they are gone. If the
+    process restarts before any checkpoint, recovery applies them. So what the store remembers depends on which comes
+    first, and I13 and I15 can both be broken without a crash.
+  - The one throw that the code names on that path is the trigram table's overflow (`TrigramIndex`, after 1,024
+    probes). It comes after the four indexes of one record and before the rest of the batch.
+  - **Proposed:** a write that cannot be applied stops the store from writing and from checkpointing, until recovery
+    has run. Whether recovery then runs in the same process or at the next open is open. A test that makes this path
+    fail on purpose needs a way into production code, which is not proposed yet (Q14).
 
 ### M8. Knowledge, diagnostics and judgement are three layers
 
@@ -328,6 +344,8 @@ This checks the reasoning. It does not check Mercury.
   in all 2,652,185 cases.
 - **By a second implementation**, written by sky-zbook from the description alone: the same agreement, and also for a
   recovery that is itself interrupted and started again. It ran on zbook and was not repeated on omega.
+- **`M(t)` from the words** (Q10), added 2026-11-14: for each of those sequences and each time, 393,222 cases, the
+  query of Q10 matches the one period that holds the time, or nothing.
 - **The bounds are small.** Quads are independent in the model, so one quad is enough. Nothing shows that 8 operations
   and 4 readings are.
 - The script is not in the repository.
@@ -364,36 +382,55 @@ The causes, read from the code:
 - **I12 (read, not run):** `AddCurrent` reads the clock before `Add` takes the write lock. The batch path reads it
   under the lock.
 
-**The live memory store**, counted on 2026-11-14 on a copy (Step 3):
+**The live memory store**, counted on 2026-11-14 on a copy taken at 04:51 UTC (Step 3). The first two counts that day
+read through the store's own queries. They reached 81 graphs and 8,187 entries, and found 187 quads whose periods
+differ between TGSP and GSPO. The third count read the four index files as bytes and reached everything. Its numbers
+stand:
 
-- 8,187 entries of 8,185 distinct quads, in 81 named graphs, read through GSPO.
-- Read through GSPO, none breaks I2, I5 or I6: no entry with equal times, none forgotten before it was memorized, no
-  two periods that touch or overlap, no quad with two open periods.
-- **I13 is broken for 187 quads.** Their periods read through TGSP differ from those read through GSPO, and in each
-  TGSP has more open periods. TGSP holds 47 more entries than GSPO. A second count the same day put each quad in one
-  group:
+- **8,238 entries of 8,236 distinct quads in 89 graphs**, in GSPO, GPOS and GOSP alike. TGSP holds 8,285. The counts in
+  the file headers are right: every entry is on a leaf page that a scan reaches, and none is flagged deleted.
+- **GSPO, GPOS and GOSP hold exactly the same periods.** That fits the cause named above for the fourth row, which
+  exists only where the memorized time leads the key.
+- **In GSPO nothing breaks I2, I5 or I6:** no entry with equal times, none forgotten before it was memorized, no two
+  periods that touch or overlap, no quad with two open periods. Two quads have more than one period.
+- **No read reaches 51 of the entries.** They are in 8 graphs in which nothing is remembered now.
+  - `GRAPH ?g` lists the graphs by a scan of what is remembered now (`NamedGraphEnumerator`), under `ALL VERSIONS` too.
+    A graph that is wholly forgotten is found by no query with a graph variable. `INCLUDING FORGOTTEN` would inherit
+    that.
+  - Pruning lists the graphs the same way (`PruningTransfer`; read, not run). A prune that keeps history would leave
+    such a graph out, against I14.
+  - All 8 are test and scratch graphs, with 25, 9, 6, 5, 3, 1, 1 and 1 entries.
+- **I13 is broken in two ways, and in no other.** TGSP against GSPO, entry by entry:
 
-  | Quads | GSPO | TGSP | Forgotten or memorized |
-  |-------|------|------|------------------------|
-  | 146 | one period, forgotten | the same period, open | forgotten between 2026-04-19 and 2026-10-27 |
-  | 9 | one open period | the same, and a second open entry memorized later | 2026-05-21 to 2026-10-28 |
-  | 32 | not one of the two above | | not grouped further |
+  | Entries | In GSPO | In TGSP | What they are |
+  |---------|---------|---------|---------------|
+  | 204 | forgotten | open, with the same memorized time | as many as the repair of [ADR-054](ADR-054-delete-ends-valid-time.md) ended |
+  | 47 | no entry at that memorized time | open | 9 repeat a fact that is remembered; 38 are later tellings of 32 facts that GSPO holds as forgotten |
 
-  - **The 146** were all forgotten before [ADR-054](ADR-054-delete-ends-valid-time.md) (1.8.23, 2026-10-27). Its
-    repair ended the entries a delete had flagged, one index at a time. In TGSP these entries are still open. Whether
-    the old delete never flagged them there is not established.
-  - **The 9** are the fourth row of the table above.
-  - **The 32:** the three examples printed are one subject on 2026-04-19. GSPO has one forgotten period; TGSP has that
-    period open and a second open entry memorized 32 seconds after the delete. Before ADR-054 a re-insert after a
-    delete was dropped (its context says so). If that is what these are, TGSP alone still holds facts the memory was
-    told again and lost. A query for one of them on the live store returns nothing.
-  - **So a read through TGSP returns forgotten facts as remembered**, for up to 187 quads of the live memory store.
-    `DURING` reads TGSP today, and `MEMORIZED SINCE … BEFORE …` would under L1.
+  - **The 204.** ADR-054 records that its repair ended 204 entries on this store and restored 119. The repair works
+    on each index's own flagged entries, and its code assumes all four reach the same result. The equal number says
+    these are those entries, and that TGSP held none flagged, so nothing changed there. That is a reading of the
+    number, not of the entries. Why the old delete would not have flagged an entry in TGSP is not established.
+  - **The 9** are the fourth row of the table above: a fact told again while it was remembered.
+  - **The 32 facts** were told, forgotten and told again, before ADR-054 (1.8.23, 2026-10-27). A re-insert after a
+    delete was dropped then (ADR-054's context says so), and only TGSP kept it.
+    - 26 are in the graph of the session of 2026-04-19: the session, three bugs and one observation. They were told at
+      08:23:42, forgotten at 08:25:52 and told again at 08:26:24.
+    - 6 describe `urn:sky-omega:data:conformance-vs-dogfood`. They were told on 2026-05-17 at 09:52:16, forgotten at
+      09:53:23, and told again one to three times in the next nine minutes.
+    - A query for any of them returns nothing today. The log of that time is gone, so the store cannot show whether a
+      delete followed the last telling.
+  - **A delete reaches TGSP today.** The one graph forgotten after ADR-054 was released is equal in GSPO and TGSP.
+  - **So the two kinds of read disagree.** A read through TGSP returns 204 forgotten entries as remembered: `DURING`
+    reads TGSP today, and `MEMORIZED SINCE … BEFORE …` would under L1. A default read does not return 32 facts the
+    memory was told again.
 - **The 84 entries** whose memorized time differs from `LegacyTransactionTime` differ by less than 10 ms, the memorized
   time being the earlier, and are from 2026-03-29 to 2026-04-19. Two clock readings at one write would give that. The
   code of that time was not read.
-- **Not explained:** the entry counts in the index files (8,238 for GSPO, GPOS and GOSP, 8,285 for TGSP) are 51 higher
-  than the entries read, in GSPO and in TGSP alike.
+- **The copy is kept**, with its hashes, the probes and their outputs, on omega in
+  `~/diag/mcp-omega-snapshot-20261114T0451Z`. The live store keeps changing; the numbers above are the copy's.
+- **Until the differences are resolved (LQ5)**, two commands would resolve them without saying so, each by reading
+  GSPO: `mercury --rebuild-indexes` and a prune. Nothing runs them automatically.
 
 ## Decision
 
@@ -610,6 +647,15 @@ Martin: "Prune must preserve temporality."
 - Pruning, a rebuild and a conversion copy a period's memorized and forgotten times as they are (I14). Pruning chooses
   which periods to copy, never what their times become.
 - **Proposed:** with two times and no retraction, pruning has two modes: copy the remembered memories, or copy all.
+- **Proposed 2026-11-14: the two modes keep different things, and each says which.**
+  - *Copy all* keeps `M(t)` for every `t`. The pruned store answers every question of D6 as its source did. Step 7's
+    test is a test of this mode.
+  - *Copy the remembered* keeps what is remembered now, each fact with the memorized time of its present period. It
+    loses every forgotten period on purpose. For an earlier `t` it answers with only the facts that are still
+    remembered, and no `FORGOTTEN` question finds anything.
+  - A selection by graph or predicate narrows either mode. Within what is selected the mode's guarantee holds.
+- **Today's code against this (read 2026-11-14, not run):** the modes that keep history list the graphs by what is
+  remembered now, so a graph that is wholly forgotten is not copied (M11).
 - A copy between stores needs a way to carry the two times that no ordinary writer has. It is internal to Mercury.
 
 ### D13. The stored layout changes later — Decided
@@ -712,6 +758,19 @@ this situation", then "Legacy" and "All five, clear intent."
 - **Q10. `M(t)` has no word.** "Was `q` remembered at `t`" is the model's first question, and `AS OF` is gone (D8). With
   the words of D6 it takes two patterns and a `UNION`: memorized at or before `t` and still remembered, or memorized at
   or before `t` and forgotten after it. Is that enough?
+  - **Shown on the model, 2026-11-14** (M10). With `b` one millisecond after `t`:
+
+    ```sparql
+    { ?s ?p ?o MEMORIZED ?m BEFORE b }
+    UNION
+    { ?s ?p ?o MEMORIZED ?m BEFORE b FORGOTTEN ?f SINCE b }
+    ```
+
+    It gives each quad of `M(t)` once, with the bounds of the period that holds `t`. With `b` a date it gives what was
+    remembered just before that day began.
+  - It rests on two rules of D10 that are still Proposed: both words may follow one pattern, and a pattern that
+    carries `FORGOTTEN` matches forgotten memories.
+  - It is not shown on a store: the words are not built (Step 5).
 - **Q11. "What is new since my last look" — Proposed.** A reader that asks this again and again misses nothing when
   its bound is the store's clock, read no later than the end of its previous look. `NOW()` inside the reading query is
   such a bound. A write stamped in the same millisecond as the bound can come back twice, and is never skipped. A bound
@@ -722,6 +781,10 @@ this situation", then "Legacy" and "All five, clear intent."
 - **Q14. Tests that need one clock reading** (Step 4). A batch has one by construction. A sequence of requests does
   not: on omega they were at least 4 ms apart. Testing the request path inside one reading needs a clock the test
   controls, which is a change to production code and is not proposed yet.
+- **Q15. A graph that is wholly forgotten — Proposed 2026-11-14.** Today a graph variable ranges over the graphs that
+  hold something remembered now, also under `ALL VERSIONS` (M11). In a query with `INCLUDING FORGOTTEN`, and in a
+  pattern that carries `FORGOTTEN`, it ranges over every graph that holds a period. Otherwise forgetting the last
+  fact of a graph hides the graph's whole history from every query that does not name it.
 
 ## Steps
 
@@ -738,8 +801,10 @@ this situation", then "Legacy" and "All five, clear intent."
    - entries with `LegacyIsDeleted` set: 0;
    - and, against the model: 187 quads whose periods differ between TGSP and GSPO.
    - a second count the same day broke down the 187 and the 84 (M11).
-   - **Open:** the 51 entries the index files count and the read does not find. GPOS and GOSP were not compared with
-     GSPO.
+   - a third count the same day read the index files as bytes and closed what the first two left open (M11): the
+     store holds 8,238 entries in 89 graphs, 51 of them in 8 wholly forgotten graphs that no read lists; GPOS and GOSP
+     equal GSPO; TGSP differs from GSPO in 204 entries that are open there and in 47 that only it holds.
+   - **Open:** why the old delete left TGSP's entries unflagged, and the rule for each difference (LQ5).
 4. **Tests for the model on today's code.** Every row of M6, and the four rows of M11, each with the result the model
    gives. A batch gives one clock reading by construction (Q14). Fix what fails: the rows of M11 fail today.
 5. **The words:** the grammar in `SparqlParser`, the bounds and time variables carried to the scan, the times bound from
@@ -772,8 +837,32 @@ Sky's proposal, except where it is marked **Decided**. It starts when Steps 1 to
 
 **Since this part was written** Martin has chosen another shape for the stored form than L1's four indexes: a set
 keyed by the quad alone, holding its latest period, and a timeline in time order that a search by time can cut by
-binary search. It is not written here yet, and its analysis against the model (M4, M7) is outstanding. L1 stands as it
-was proposed until then.
+binary search. It is not written here yet. L1 stands as it was proposed until then.
+
+A first analysis of that shape against the model, 2026-11-14. The first two points are checked by enumeration, in a
+script that touches no store (65,537 sequences, 2,652,185 cases of a stop and a replay). The rest is reasoning.
+
+- **The set fits M5.** The rule of M5 looks only at a quad's latest period, and that is what the set holds. I1 and I2
+  hold by construction: one key per quad, one period per key. The fourth row of M11 cannot happen, because the
+  decision is made once, on the set, and the timeline receives what was decided.
+- **M7's "remove" record needs one more thing.** Removing a period that began in this clock reading uncovers the
+  quad's earlier period, and the set no longer holds it. With M7's records as written a set ends wrong in 126,009
+  cases: memorize at 1, forget at 2, memorize at 3, forget at 3 leaves it empty, where the latest period is `[1, 2)`.
+  When the record carries the period it uncovers, every case ends right. The writer knows that period: it replaced it
+  in the same clock reading.
+- **M7's other claim holds.** Applying a record to the set needs no comparison of times. A check that expected to
+  need one found no failing case.
+- **I13 needs other words.** The set holds one period per quad and the timeline holds all. What must agree is each
+  quad's latest period.
+- **A quad's earlier periods are only in the timeline.** A question about the past on a narrow pattern, such as the
+  query of Q10 for one subject, reads the timeline up to that time. The live store has two quads with an earlier
+  period.
+- **What an entry of the timeline is, is open:** a period, or a boundary of a period. With periods, a `FORGOTTEN`
+  range has no order to search, and ending a period changes an entry in the middle. With boundaries, both ranges can
+  be cut by binary search, and the timeline only grows at its end, except for the entries of the current clock
+  reading (I10). A boundary is the beginning or the end of a period in `M`. It is not an operation: operations that
+  leave no period leave no boundary.
+- **Not analysed yet:** the conversion into this shape, and its cost on a store of real size.
 
 Until then the store keeps five more attributes per entry that nothing will read:
 
@@ -833,9 +922,19 @@ automatic, on open. We do not need to mind other stores, there are only ours in 
 - **LQ4. The Graph profile** uses `VersionedQuadIndex` and has no times. The later part does not change it.
 - **LQ5. Entries the model has no place for.** A version 1 store can hold an entry with equal times, two periods of
   one quad that touch, and an extra open entry in TGSP (M11). The conversion needs a rule for each. The live memory
-  store holds none of the first two and 187 quads whose TGSP entries differ from GSPO's (M11). Which index the
-  conversion reads decides what the converted store remembers: GSPO is what a default query reads today, and TGSP alone
-  may hold up to 32 facts that were told again and lost. Other stores are not counted.
+  store holds none of the first two. Its TGSP differs from GSPO in two ways (M11), and neither index alone is right:
+  GSPO is what a default query reads today, and only TGSP holds 32 facts that were told again and lost. Other stores
+  are not counted.
+  - **Proposed 2026-11-14, a rule for each difference.** Martin has not decided it.
+    - *Forgotten in GSPO, open in TGSP (204 entries):* GSPO's forgotten time stands. The fact was deleted, and GPOS
+      and GOSP say the same.
+    - *An extra open entry for a fact GSPO remembers (9):* dropped. Memorizing a remembered fact changes nothing (I3).
+    - *A later telling of a fact GSPO holds as forgotten (38 entries, 32 facts):* the fact gets a second period, open,
+      from its first later telling. That is what the model gives for memorize, forget, memorize, and the last thing
+      the store was asked about each of them was to remember it. What cannot be known: whether a delete followed
+      that the store did not record.
+  - **The conversion reads every graph**, also one that is wholly forgotten (M11).
+  - **Nothing is resolved before the rule is decided**, and the copy the counts were made on is kept (M11).
 
 ### Steps of the later part
 
