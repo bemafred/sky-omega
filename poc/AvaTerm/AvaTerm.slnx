@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/AvaTerm.App/AvaTerm.App.csproj" />
+    <Project Path="src/AvaTerm.Core/AvaTerm.Core.csproj" />
+    <Project Path="src/AvaTerm.Pty/AvaTerm.Pty.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/AvaTerm.Tests/AvaTerm.Tests.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="..\AvaTerm.Core\AvaTerm.Core.csproj" />
+  </ItemGroup>
+</Project>

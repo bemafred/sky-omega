@@ -132,8 +132,11 @@ These are not rejected forever. They are uncommitted hypotheses, to be revisited
 
 Acceptance of this ADR should be based on recorded evidence, not on the attractiveness of the vision:
 
-- [ ] Import the original AvaTerm POC into `poc/AvaTerm/` and record its provenance.
+- [x] Import the original AvaTerm POC into `poc/AvaTerm/` and record its provenance.
+  - **Imported 2026-11-14** from `github.com/bemafred/AvaTerm`, commit `cac1ecf41e04a6f1ed3de472288000f6b12a4cf6` ("First commit", 2026-11-11): its 24 tracked files, unchanged, checked by SHA-256 against the source. The history was not carried over, and it is not a submodule.
+  - **Decided by Martin, 2026-11-14:** the copy in `poc/AvaTerm/` is the master for Sky Omega. The original repository goes its own way from here, and the two are not kept in step.
 - [ ] Run the POC and its tests on Windows, Ubuntu, and macOS; record the commands, environment, outcomes, and known gaps.
+  - **Ubuntu, 2026-11-14, from `poc/AvaTerm/`:** zbook, Ubuntu 26.04.1 LTS x86_64, .NET SDK 10.0.403, bash, tmux 3.6. `dotnet build AvaTerm.slnx` gave 0 warnings and 0 errors. `dotnet run --project tests/AvaTerm.Tests` gave 30 passed, 0 failed, 1 skipped (the comparison with tmux's rendering of vim; vim is not installed). The application itself was not started in this run.
 - [ ] Verify basic shell operation and terminal interaction on each platform, including keyboard layout, resizing, copy/paste, process exit, and common full-screen terminal applications.
 - [ ] Verify Claude Code or Codex can run as an ordinary terminal process where installed, without special Omega integration.
 - [ ] Verify tmux behavior on supported hosts, including a reconnect workflow if one is exercised; distinguish local, WSL, and SSH cases.
