@@ -107,7 +107,9 @@ internal partial class QueryExecutor : IDisposable
         if (maxJoinDepth <= 0)
             throw new ArgumentOutOfRangeException(nameof(maxJoinDepth), "Max join depth must be positive");
 
-        _now = DateTimeOffset.UtcNow;
+        // NOW() is a reading of the store's clock: every write this query does not see is stamped at or after it
+        // (ADR-061 M9).
+        _now = store.Clock.GetUtcNow();
         _store = store;
         _source = source.ToString();  // Copy to heap - enables class-based execution
         _bufferManager = bufferManager ?? PooledBufferManager.Shared;

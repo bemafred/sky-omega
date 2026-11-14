@@ -525,9 +525,9 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
     /// Query current state across all graphs (default + named).
     /// Internal method for named graph enumeration.
     /// </summary>
-    internal TemporalQuadEnumerator QueryCurrentAllGraphs()
+    /// <param name="now">The store's clock reading, in Unix milliseconds. The index has no clock of its own.</param>
+    internal TemporalQuadEnumerator QueryCurrentAllGraphs(long now)
     {
-        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
         // g = -1 means wildcard for graph (all graphs)
         return Query(-1, -1, -1, -1, new TemporalQuery

@@ -93,6 +93,14 @@ public sealed class QuadStore : IDisposable
     // same moment"), and it removes one UtcNow call per triple from AddBatched.
     private long _batchTransactionTimeTicks;
     private DateTimeOffset _batchCurrentFrom;
+    // The store's one clock (ADR-061 D4). Every stamp is a reading of it taken under the write lock (I12).
+    private readonly TimeProvider _clock;
+
+    /// <summary>
+    /// The store's clock (ADR-061 D4, <see cref="StorageOptions.Clock"/>). A query's <c>NOW()</c> is a reading of it,
+    /// so every write the query did not see is stamped at or after that reading (ADR-061 M9).
+    /// </summary>
+    internal TimeProvider Clock => _clock;
     private bool _disposed;
     private bool _diskSpaceLow; // Set when disk space drops below threshold
     private bool _bulkLoadMode; // When true: skip fsync on CommitBatch, skip secondary indexes in ApplyToIndexes
@@ -148,6 +156,7 @@ public sealed class QuadStore : IDisposable
         _logger = logger ?? NullLogger.Instance;
         _bufferManager = bufferManager ?? PooledBufferManager.Shared;
         _minimumFreeDiskSpace = (storageOptions ?? StorageOptions.Default).MinimumFreeDiskSpace;
+        _clock = (storageOptions ?? StorageOptions.Default).Clock;
         _maxResultRows = (storageOptions ?? StorageOptions.Default).MaxResultRows;
 
         if (!Directory.Exists(baseDirectory))
@@ -559,35 +568,51 @@ public sealed class QuadStore : IDisposable
         _lock.EnterWriteLock();
         try
         {
-            // 1. Intern atoms first
-            var graphId = graph.IsEmpty ? 0 : _atoms.Intern(graph);
-            var subjectId = _atoms.Intern(subject);
-            var predicateId = _atoms.Intern(predicate);
-            var objectId = _atoms.Intern(@object);
-            var transactionTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-
-            // 2. The WAL record holds only atom IDs, so the atoms must be durable first (ADR-058 D6)
-            MakeAtomsDurable();
-
-            // 3. Write to WAL (fsync ensures durability)
-            var record = LogRecord.CreateAdd(subjectId, predicateId, objectId, memorizedAt, forgottenAt, graphId,
-                transactionTimeTicks: transactionTime);
-            _wal.Append(record);
-
-            // 4. Apply to indexes using pre-resolved IDs (no re-intern), then save their counts
-            ApplyToIndexesById(record);
-            CommitIndexCounts(_wal.CurrentTxId, durable: false);
-
-            // 4. Check if checkpoint needed
-            CheckpointIfNeeded();
-
-            // 5. Check disk space AFTER write (current op succeeds, next may be refused)
-            CheckDiskSpaceAfterWrite();
+            AddHoldingWriteLock(subject, predicate, @object, memorizedAt, forgottenAt, graph,
+                transactionTime: _clock.GetUtcNow().ToUnixTimeMilliseconds());
         }
         finally
         {
             _lock.ExitWriteLock();
         }
+    }
+
+    /// <summary>
+    /// One single write, with the write lock held: log the Add, apply it, save the counts. The caller read
+    /// <paramref name="transactionTime"/> from the store's clock after it took the lock (ADR-061 I12).
+    /// </summary>
+    private void AddHoldingWriteLock(
+        ReadOnlySpan<char> subject,
+        ReadOnlySpan<char> predicate,
+        ReadOnlySpan<char> @object,
+        DateTimeOffset memorizedAt,
+        DateTimeOffset forgottenAt,
+        ReadOnlySpan<char> graph,
+        long transactionTime)
+    {
+        // 1. Intern atoms first
+        var graphId = graph.IsEmpty ? 0 : _atoms.Intern(graph);
+        var subjectId = _atoms.Intern(subject);
+        var predicateId = _atoms.Intern(predicate);
+        var objectId = _atoms.Intern(@object);
+
+        // 2. The WAL record holds only atom IDs, so the atoms must be durable first (ADR-058 D6)
+        MakeAtomsDurable();
+
+        // 3. Write to WAL (fsync ensures durability)
+        var record = LogRecord.CreateAdd(subjectId, predicateId, objectId, memorizedAt, forgottenAt, graphId,
+            transactionTimeTicks: transactionTime);
+        _wal!.Append(record);
+
+        // 4. Apply to indexes using pre-resolved IDs (no re-intern), then save their counts
+        ApplyToIndexesById(record);
+        CommitIndexCounts(_wal.CurrentTxId, durable: false);
+
+        // 5. Check if checkpoint needed
+        CheckpointIfNeeded();
+
+        // 6. Check disk space AFTER write (current op succeeds, next may be refused)
+        CheckDiskSpaceAfterWrite();
     }
 
     /// <summary>
@@ -600,7 +625,23 @@ public sealed class QuadStore : IDisposable
         ReadOnlySpan<char> @object,
         ReadOnlySpan<char> graph = default)
     {
-        Add(subject, predicate, @object, DateTimeOffset.UtcNow, DateTimeOffset.MaxValue, graph);
+        ThrowIfDisposed();
+        RequireWriteCapableProfile(nameof(AddCurrent));
+        ThrowIfDiskSpaceLow();
+        _lock.EnterWriteLock();
+        try
+        {
+            // One reading of the clock, taken under the lock, is both the memorized time and the transaction
+            // time (ADR-061 I12). Reading it before the lock let a write carry a stamp earlier than the NOW()
+            // of a query that did not see it, and gave the two times different readings.
+            var now = _clock.GetUtcNow();
+            AddHoldingWriteLock(subject, predicate, @object, now, DateTimeOffset.MaxValue, graph,
+                transactionTime: now.ToUnixTimeMilliseconds());
+        }
+        finally
+        {
+            _lock.ExitWriteLock();
+        }
     }
 
     /// <summary>
@@ -634,7 +675,7 @@ public sealed class QuadStore : IDisposable
                 return false;
 
             var record = LogRecord.CreateRetract(subjectId, predicateId, objectId, memorizedAt, forgottenAt, graphId,
-                transactionTimeTicks: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+                transactionTimeTicks: _clock.GetUtcNow().ToUnixTimeMilliseconds());
             _wal!.Append(record);
             var retracted = ApplyRecordToIndexesById(record);
             CheckpointIfNeeded();
@@ -669,7 +710,7 @@ public sealed class QuadStore : IDisposable
             if (!TryResolveQuadIds(subject, predicate, @object, graph, out var graphId, out var subjectId, out var predicateId, out var objectId))
                 return false;
 
-            var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            var nowMs = _clock.GetUtcNow().ToUnixTimeMilliseconds();
             LogRecord record;
             if (_schema.Profile == StoreProfile.Graph)
             {
@@ -928,7 +969,7 @@ public sealed class QuadStore : IDisposable
             _activeBatchTxId = _wal.BeginBatch();
             _batchBuffer ??= new();
             _batchBuffer.Clear();
-            _batchCurrentFrom = DateTimeOffset.UtcNow;
+            _batchCurrentFrom = _clock.GetUtcNow();
             _batchTransactionTimeTicks = _batchCurrentFrom.ToUnixTimeMilliseconds();
         }
         catch
@@ -2652,7 +2693,7 @@ public sealed class QuadStore : IDisposable
                 ReadOnlySpan<char>.Empty,  // All predicates
                 ReadOnlySpan<char>.Empty,  // All objects (Secondary in GPOS)
                 ReadOnlySpan<char>.Empty,  // All subjects (Tertiary in GPOS)
-                DateTimeOffset.UtcNow);
+                _clock.GetUtcNow());
 
             while (enumerator.MoveNext())
             {
@@ -2780,7 +2821,7 @@ public sealed class QuadStore : IDisposable
         {
             TemporalQueryType.AsOf =>
                 selectedIndex.QueryAsOf(arg1, arg2, arg3,
-                    asOfTime ?? DateTimeOffset.UtcNow, graph),
+                    asOfTime ?? _clock.GetUtcNow(), graph),
 
             TemporalQueryType.Range =>
                 selectedIndex.QueryRange(arg1, arg2, arg3,
@@ -2921,7 +2962,7 @@ public sealed class QuadStore : IDisposable
                 break;
         }
 
-        var enumerator = selectedIndex.QueryAsOf(arg1, arg2, arg3, DateTimeOffset.UtcNow, graph);
+        var enumerator = selectedIndex.QueryAsOf(arg1, arg2, arg3, _clock.GetUtcNow(), graph);
         return new TemporalResultEnumerator(enumerator, indexType, _atoms, candidateObjectAtomIds);
     }
 
@@ -2937,7 +2978,8 @@ public sealed class QuadStore : IDisposable
         // Dispatch to whichever B+Tree GSPO the profile built. (Dogfood fix, 2026-06-28: a Graph-profile store
         // could not enumerate its own named graphs because the path was only ever wired for the temporal
         // index — surfaced by DrHook.Capture.)
-        if (_gspoIndex is not null) return new NamedGraphEnumerator(_gspoIndex, _atoms);   // Cognitive (temporal)
+        if (_gspoIndex is not null)                                                         // Cognitive (temporal)
+            return new NamedGraphEnumerator(_gspoIndex, _atoms, _clock.GetUtcNow().ToUnixTimeMilliseconds());
         if (_gspoGraph is not null) return new NamedGraphEnumerator(_gspoGraph, _atoms);   // Graph (versioned)
         if (_gspoMinimal is not null) return new NamedGraphEnumerator(_atoms);             // Minimal: single-graph → no named graphs
         throw new ProfileCapabilityException(
@@ -3832,9 +3874,9 @@ public ref struct NamedGraphEnumerator
     private string? _current;
 
     /// <summary>Cognitive (temporal) named graphs — all current quads across all graphs.</summary>
-    internal NamedGraphEnumerator(TemporalQuadIndex index, IAtomStore atoms)
+    internal NamedGraphEnumerator(TemporalQuadIndex index, IAtomStore atoms, long nowMs)
     {
-        _temporal = index.QueryCurrentAllGraphs();
+        _temporal = index.QueryCurrentAllGraphs(nowMs);
         _versioned = default;
         _mode = Mode.Temporal;
         _atoms = atoms;

@@ -47,13 +47,13 @@ internal class UpdateExecutor
 
     /// <summary>An operation executed on its own: it is the whole request, and reads the time now.</summary>
     public UpdateExecutor(QuadStore store, ReadOnlySpan<char> source, UpdateOperation update)
-        : this(store, source, update, null, DateTimeOffset.UtcNow)
+        : this(store, source, update, null, store.Clock.GetUtcNow())
     {
     }
 
     /// <summary>An operation executed on its own, with LOAD: it is the whole request, and reads the time now.</summary>
     public UpdateExecutor(QuadStore store, ReadOnlySpan<char> source, UpdateOperation update, LoadExecutor? loadExecutor)
-        : this(store, source, update, loadExecutor, DateTimeOffset.UtcNow)
+        : this(store, source, update, loadExecutor, store.Clock.GetUtcNow())
     {
     }
 
@@ -115,7 +115,7 @@ internal class UpdateExecutor
         if (operations == null || operations.Length == 0)
             return new UpdateResult { Success = true, AffectedCount = 0 };
 
-        var now = DateTimeOffset.UtcNow;
+        var now = store.Clock.GetUtcNow();
         var totalAffected = 0;
 
         for (int i = 0; i < operations.Length; i++)

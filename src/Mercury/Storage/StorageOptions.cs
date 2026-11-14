@@ -110,6 +110,14 @@ public sealed class StorageOptions
     public bool ForceAtomHashCapacity { get; init; }
 
     /// <summary>
+    /// The store's clock (ADR-061 D4, I11, I12). Every memorized and forgotten time is a reading of it, taken
+    /// while the writer holds the write lock; <c>NOW()</c> and "now" in a read come from it too. A store has
+    /// one clock and no writer states a time. Default: the system clock. A test supplies the readings to put
+    /// operations inside one clock reading or in different ones without waiting.
+    /// </summary>
+    public TimeProvider Clock { get; init; } = TimeProvider.System;
+
+    /// <summary>
     /// Default options with reasonable limits.
     /// </summary>
     public static StorageOptions Default { get; } = new();
