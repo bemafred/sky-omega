@@ -574,7 +574,7 @@ internal sealed class TreeJoinExecutor
         }
         else
         {
-            var en = _store.GetNamedGraphs();
+            var en = new TemporalScope(_temporalMode, _asOfTime, _rangeStart, _rangeEnd).NamedGraphs(_store);
             while (en.MoveNext()) graphNames.Add(en.Current.ToString());
         }
 

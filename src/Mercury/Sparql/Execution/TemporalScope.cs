@@ -23,6 +23,14 @@ internal readonly struct TemporalScope
         RangeEnd = rangeEnd;
     }
 
+    /// <summary>
+    /// The named graphs a graph variable ranges over in this scope (ADR-061 D10, Q15). The current state: the graphs
+    /// that hold something remembered now. Any other scope reads what is forgotten too, so it ranges over every graph
+    /// that holds a period; a graph with nothing in the scope then gives no solution. Caller must hold read lock.
+    /// </summary>
+    public NamedGraphEnumerator NamedGraphs(QuadStore store) =>
+        Mode == TemporalQueryMode.Current ? store.GetNamedGraphs() : store.GetNamedGraphsHoldingAPeriod();
+
     /// <summary>The triples of <paramref name="graph"/> (empty: the default graph) that match, as this scope sees them.</summary>
     public TemporalResultEnumerator Query(QuadStore store, ReadOnlySpan<char> subject, ReadOnlySpan<char> predicate,
         ReadOnlySpan<char> @object, ReadOnlySpan<char> graph) => Mode switch

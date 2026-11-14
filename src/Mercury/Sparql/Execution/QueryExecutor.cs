@@ -687,7 +687,7 @@ internal partial class QueryExecutor : IDisposable
             return graphs;
         }
         graphs.Add("");
-        var named = _store.GetNamedGraphs();
+        var named = new TemporalScope(_temporalMode, _asOfTime, _rangeStart, _rangeEnd).NamedGraphs(_store);
         while (named.MoveNext())
         {
             var g = named.Current;

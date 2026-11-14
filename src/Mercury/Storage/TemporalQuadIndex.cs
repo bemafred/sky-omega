@@ -712,6 +712,16 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
     }
 
     /// <summary>
+    /// Every entry of every graph (default + named), whatever its times. Internal method for the listing of the
+    /// graphs that hold a period, remembered or forgotten (ADR-061 D10).
+    /// </summary>
+    internal TemporalQuadEnumerator QueryEveryEntryAllGraphs()
+    {
+        // g = -1 means wildcard for graph (all graphs)
+        return Query(-1, -1, -1, -1, new TemporalQuery { Type = TemporalQueryType.AllTime });
+    }
+
+    /// <summary>
     /// Query historical state (as of specific time)
     /// </summary>
     public TemporalQuadEnumerator QueryAsOf(

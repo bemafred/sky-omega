@@ -3175,6 +3175,19 @@ public sealed class QuadStore : IDisposable
     }
 
     /// <summary>
+    /// The named graphs that hold a period, remembered or forgotten (ADR-061 D10, Q15): what a graph variable ranges
+    /// over when a query asks for forgotten memories too. A graph in which everything is forgotten is in this
+    /// listing and not in <see cref="GetNamedGraphs"/>. A store without times has no forgotten memories, so there the
+    /// two are the same. Default graph (empty) is not included. Caller must hold read lock.
+    /// </summary>
+    internal NamedGraphEnumerator GetNamedGraphsHoldingAPeriod()
+    {
+        if (_gspoIndex is not null)
+            return new NamedGraphEnumerator(_gspoIndex.QueryEveryEntryAllGraphs(), _atoms);
+        return GetNamedGraphs();
+    }
+
+    /// <summary>
     /// Get all named graph IRIs in the store.
     /// Returns graph IRIs as strings. Default graph (empty) is not included.
     /// Caller must hold read lock.
@@ -3187,7 +3200,7 @@ public sealed class QuadStore : IDisposable
         // could not enumerate its own named graphs because the path was only ever wired for the temporal
         // index — surfaced by DrHook.Capture.)
         if (_gspoIndex is not null)                                                         // Cognitive (temporal)
-            return new NamedGraphEnumerator(_gspoIndex, _atoms, _clock.GetUtcNow().ToUnixTimeMilliseconds());
+            return new NamedGraphEnumerator(_gspoIndex.QueryCurrentAllGraphs(_clock.GetUtcNow().ToUnixTimeMilliseconds()), _atoms);
         if (_gspoGraph is not null) return new NamedGraphEnumerator(_gspoGraph, _atoms);   // Graph (versioned)
         if (_gspoMinimal is not null) return new NamedGraphEnumerator(_atoms);             // Minimal: single-graph → no named graphs
         throw new ProfileCapabilityException(
@@ -4082,9 +4095,11 @@ public ref struct NamedGraphEnumerator
     private string? _current;
 
     /// <summary>Cognitive (temporal) named graphs — all current quads across all graphs.</summary>
-    internal NamedGraphEnumerator(TemporalQuadIndex index, IAtomStore atoms, long nowMs)
+    /// <param name="entries">The entries to take the graphs from, in GSPO order: what is remembered now, or every
+    /// entry (<see cref="QuadStore.GetNamedGraphsHoldingAPeriod"/>).</param>
+    internal NamedGraphEnumerator(TemporalQuadIndex.TemporalQuadEnumerator entries, IAtomStore atoms)
     {
-        _temporal = index.QueryCurrentAllGraphs(nowMs);
+        _temporal = entries;
         _versioned = default;
         _mode = Mode.Temporal;
         _atoms = atoms;

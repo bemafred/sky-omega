@@ -976,6 +976,13 @@ this ADR do not answer goes to Martin.
     8,926 ms; the same triples sent again 15,480 ms and 14,724 ms. Rounds vary by a factor of two on omega in both
     runs, so this shows no large change and settles nothing finer. Outside bulk mode a write is dominated by its
     syncs to disk (`BatchWriteBenchmarks`: 10,000 batched triples in 17.4 s).
+- **P3: done 2026-11-14**, on omega.
+  - A graph variable ranges over the graphs that hold something remembered in the default view, and over every graph
+    that holds a period in any other scope: `ALL VERSIONS`, and `AS OF` and `DURING` until they go. `DESCRIBE` lists
+    its graphs the same way.
+  - The listing for `mercury_graphs`, for `CLEAR`, and for pruning stays what is remembered now.
+  - Three tests (`ForgottenGraphTests`); two of them fail with the old listing. `Mercury.Tests`: 6,416 passed, 156
+    skipped, 0 failed.
 
 1. **Martin's review** of this text — **done 2026-11-14**, with the decision closure. The later part is reviewed on
    its own.
