@@ -64,7 +64,7 @@ public static class DashboardScreen
 
         var rows = new List<string>(height) { TitleRow(snapshot, seq, status, width, connected) };
 
-        List<string> stack = StackLines(snapshot), sourceLines = SourceLines(snapshot, source, hA - 1, out string sourceTitle);
+        List<string> stack = StackLines(snapshot, splitAB), sourceLines = SourceLines(snapshot, source, hA - 1, out string sourceTitle);
         rows.AddRange(SplitSection("STACK", stack, sourceTitle, sourceLines, hA, splitAB, inner));
         rows.Add(Separator('├', splitAB, '┼', '┤', inner));
 
@@ -105,11 +105,36 @@ public static class DashboardScreen
         return connected ? state : $"last: {state}";
     }
 
-    private static List<string> StackLines(WireSnapshot? s)
+    private static List<string> StackLines(WireSnapshot? s, int paneWidth)
     {
         if (s is null) return ["waiting for debug-state…"];
         if (s.Position.Stop is null) return [DebugStateTextRenderer.FormatEnd(s.Session) is { } end ? $"{end} — no frame" : "running — no frame"];
-        return s.Position.CallStack.Select((f, i) => $"{(i == 0 ? "▸" : " ")}{f.Display}").ToList();
+        // A row has a leading space and the marker before the frame.
+        return s.Position.CallStack.Select((f, i) => $"{(i == 0 ? "▸" : " ")}{FrameText(f.Display, paneWidth - 2)}").ToList();
+    }
+
+    /// <summary>A frame's display text for a pane of <paramref name="width"/> cells. A frame that does not fit loses
+    /// what a reader needs least, in this order: the namespace ("Type.Method @ file:line"), the type ("Method @
+    /// file:line"), the file name ("Method:line"). The method and the line are kept; what still does not fit is cut
+    /// at the right by the pane.</summary>
+    internal static string FrameText(string display, int width)
+    {
+        if (display.Length <= width || display.StartsWith('[')) return display;
+        int at = display.IndexOf(" @ ", StringComparison.Ordinal);
+        string name = at < 0 ? display : display[..at];
+        string location = at < 0 ? "" : display[at..];
+
+        int methodDot = name.LastIndexOf('.');
+        if (methodDot > 0 && name[methodDot - 1] == '.') methodDot--; // "Type..ctor": the method is ".ctor"
+        if (methodDot <= 0) return display;
+        string method = name[(methodDot + 1)..];
+        int typeDot = name.LastIndexOf('.', methodDot - 1);
+        string typeAndMethod = name[(typeDot + 1)..];
+
+        if (typeAndMethod.Length + location.Length <= width) return typeAndMethod + location;
+        if (method.Length + location.Length <= width) return method + location;
+        int colon = location.LastIndexOf(':');
+        return colon < 0 ? method : method + location[colon..];
     }
 
     /// <summary>The braid pane's lines, oldest first. A hypothesis or a log record is one line. The lifecycle events
@@ -140,7 +165,7 @@ public static class DashboardScreen
             else if (d.Kind is "hypothesis" or "log")
             {
                 EndRun();
-                lines.Add($"Δ {d.Kind,-10} {DebugStateTextRenderer.FormatDeltaDetail(d)}");
+                lines.AddRange(Wrap($"Δ {d.Kind,-10} ", DebugStateTextRenderer.FormatDeltaDetail(d), paneWidth));
             }
         }
         EndRun();
@@ -152,7 +177,7 @@ public static class DashboardScreen
     /// newline of its last line, or end in the middle of a line that the stream's next delta continues.</summary>
     internal static List<string> ConsoleLines(IEnumerable<WireDelta> deltas)
     {
-        var lines = new List<string>();
+        var entries = new List<(string Stream, StringBuilder Text)>();
         var open = new Dictionary<string, int>(); // per stream: the index of its line that no newline has ended yet
         foreach (WireDelta d in deltas)
         {
@@ -164,17 +189,52 @@ public static class DashboardScreen
                 bool last = i == parts.Length - 1;
                 if (i == 0 && open.TryGetValue(stream, out int at))
                 {
-                    lines[at] += parts[i];
+                    entries[at].Text.Append(parts[i]);
                     if (!last) open.Remove(stream);
                 }
                 else if (!last || parts[i].Length > 0) // the empty piece after a final newline is not a line
                 {
-                    lines.Add($"[{stream}] {parts[i]}");
-                    if (last) open[stream] = lines.Count - 1;
+                    entries.Add((stream, new StringBuilder(parts[i])));
+                    if (last) open[stream] = entries.Count - 1;
                 }
             }
         }
+
+        // Escape sequences are removed, and so is a line that held nothing else (a colour reset on a line of its
+        // own): it would be an empty row. A line that is empty in the target's output stays.
+        var lines = new List<string>(entries.Count);
+        foreach ((string stream, StringBuilder text) in entries)
+        {
+            string stripped = StripEscapes(text.ToString());
+            if (stripped.Length > 0 || text.Length == 0) lines.Add($"[{stream}] {stripped}");
+        }
         return lines;
+    }
+
+    /// <summary>Text without its terminal escape sequences: CSI (ESC [ … final byte, a colour change for example),
+    /// OSC (ESC ] … ended by BEL or ESC \) and the two-character ESC sequences. A target that colours its output
+    /// prints them, and in a pane they are noise: the frame shows no colour of the target's. A sequence that the
+    /// text ends inside is removed to the end.</summary>
+    internal static string StripEscapes(string text)
+    {
+        if (text.IndexOf('\u001b') < 0) return text;
+        var sb = new StringBuilder(text.Length);
+        for (int i = 0; i < text.Length; i++)
+        {
+            if (text[i] != '\u001b') { sb.Append(text[i]); continue; }
+            if (i + 1 >= text.Length) break;
+            char kind = text[++i];
+            if (kind == '[')
+            {
+                while (++i < text.Length && (text[i] < 0x40 || text[i] > 0x7E)) { } // parameters, then the final byte
+            }
+            else if (kind == ']')
+            {
+                while (++i < text.Length && text[i] != '\u0007' && !(text[i] == '\u001b' && i + 1 < text.Length && text[i + 1] == '\\')) { }
+                if (i < text.Length && text[i] == '\u001b') i++; // the backslash of ESC \
+            }
+        }
+        return sb.ToString();
     }
 
     private static List<string> SourceLines(WireSnapshot? s, SourceWindowReader source, int rowsAvailable, out string title)
@@ -216,8 +276,10 @@ public static class DashboardScreen
     private static List<string> BreakpointLines(WireSnapshot? s)
     {
         if (s is null) return [];
-        var lines = s.Breakpoints.Select(DebugStateTextRenderer.FormatBreakpoint).ToList();
-        lines.AddRange(s.ExceptionFilters.Select(f => $"id={f.Id} exception {f.TypeName} ({f.Phase}) hits={f.HitCount}"));
+        // The hit count comes before the location: the location is the part a narrow pane cuts.
+        var lines = s.Breakpoints.Select(b => $"id={b.Id} hits={b.HitCount} {b.Kind} " +
+            (b.Kind == "line" ? $"{Path.GetFileName(b.File)}:{b.Line}" : $"{b.Type}.{b.Method}")).ToList();
+        lines.AddRange(s.ExceptionFilters.Select(f => $"id={f.Id} hits={f.HitCount} exception {f.TypeName} ({f.Phase})"));
         if (lines.Count == 0) lines.Add("(none)");
         return lines;
     }
@@ -240,6 +302,27 @@ public static class DashboardScreen
             onLine++;
         }
         if (onLine > 0) lines.Add(line.ToString());
+        return lines;
+    }
+
+    // Text wrapped at spaces onto lines no wider than the pane, the label leading the first line and the later
+    // lines indented to the label's width. A word longer than a line is cut by the pane.
+    private static List<string> Wrap(string label, string text, int paneWidth)
+    {
+        int room = Math.Max(8, paneWidth - 2 - label.Length);
+        var lines = new List<string>();
+        var line = new StringBuilder();
+        foreach (string word in text.Split(' '))
+        {
+            if (line.Length > 0 && line.Length + 1 + word.Length > room)
+            {
+                lines.Add((lines.Count == 0 ? label : new string(' ', label.Length)) + line);
+                line.Clear();
+            }
+            if (line.Length > 0) line.Append(' ');
+            line.Append(word);
+        }
+        lines.Add((lines.Count == 0 ? label : new string(' ', label.Length)) + line);
         return lines;
     }
 

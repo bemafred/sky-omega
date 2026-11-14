@@ -61,7 +61,7 @@ public sealed class DashboardScreenTests : IDisposable
         Assert.Contains("doubled=2", screen);
         Assert.Contains("tags={List<String>}", screen);     // the SHARED formatter (DebugStateTextRenderer.FormatVar)
         Assert.Contains("n=1", screen);
-        Assert.Contains("id=1 line Worker.cs:42 hits=3", screen);
+        Assert.Contains("id=1 hits=3 line Worker.cs:42", screen); // the count first: the location is what a narrow pane cuts
         Assert.Contains("▸ navigation: next stop is beat 2", screen);
         Assert.Contains("ExitThread", screen);
         Assert.Contains("[stdout] tick 1", screen);
@@ -101,7 +101,7 @@ public sealed class DashboardScreenTests : IDisposable
         string[] rows = DashboardScreen.Compose(null, deltas, 0, "connected", 80, 24, _source);
 
         Assert.DoesNotContain(rows, r => r.Any(c => c < 0x20 || c == 0x7F));
-        Assert.Contains(rows, r => r.Contains("·[2Jwiped    col·"));
+        Assert.Contains(rows, r => r.Contains("[stdout] wiped    col·")); // the escape sequence is removed, the BEL is a dot
     }
 
     [Fact]
@@ -173,6 +173,83 @@ public sealed class DashboardScreenTests : IDisposable
         Assert.All(lines.Skip(1), l => Assert.StartsWith("             ", l));
         string all = string.Join(" ", lines);
         Assert.All(names, n => Assert.Contains(n, all));
+    }
+
+    [Fact]
+    public void BraidLines_AHypothesisWiderThanThePane_WrapsAtSpaces_UnderItsOwnText()
+    {
+        WireDelta[] deltas = [Hypothesis("RenderDelta is entered once, with d.Kind = console and d.ConsoleText holding two lines")];
+
+        List<string> lines = DashboardScreen.BraidLines(deltas, paneWidth: 60);
+
+        Assert.True(lines.Count > 1);
+        Assert.All(lines, l => Assert.True(l.Length <= 58, l)); // the pane's width less its two margin cells
+        Assert.StartsWith("Δ hypothesis ▸ navigation: RenderDelta is entered once,", lines[0]);
+        Assert.All(lines.Skip(1), l => Assert.StartsWith(new string(' ', 13), l));
+        Assert.Equal("▸ navigation: RenderDelta is entered once, with d.Kind = console and d.ConsoleText holding two lines",
+            string.Join(' ', lines.Select(l => l[13..]))); // no word lost or split
+    }
+
+    [Theory]
+    // Wide enough: the frame as the engine gave it.
+    [InlineData(85, "SkyOmega.DrHook.Viz.DebugStateTextRenderer.RenderDelta @ DebugStateTextRenderer.cs:74")]
+    // The namespace goes first, then the type, then the file name. The method and the line stay.
+    [InlineData(70, "DebugStateTextRenderer.RenderDelta @ DebugStateTextRenderer.cs:74")]
+    [InlineData(45, "RenderDelta @ DebugStateTextRenderer.cs:74")]
+    [InlineData(26, "RenderDelta:74")]
+    public void FrameText_AFrameThatDoesNotFit_KeepsItsMethodAndLine(int width, string expected)
+        => Assert.Equal(expected, DashboardScreen.FrameText(
+            "SkyOmega.DrHook.Viz.DebugStateTextRenderer.RenderDelta @ DebugStateTextRenderer.cs:74", width));
+
+    [Theory]
+    [InlineData("[external]", "[external]")]                                              // not a method: left as it is
+    [InlineData("System.Reflection.MethodBaseInvoker.InvokeWithNoArgs", "InvokeWithNoArgs")] // no source location
+    [InlineData("SkyOmega.DrHook.Engine.DebugSession..ctor @ DebugSession.cs:120", ".ctor:120")]
+    [InlineData("<>c__DisplayClass18_0.<InvokeTest>b__1", "<InvokeTest>b__1")]
+    public void FrameText_FramesOfOtherShapes(string display, string expected)
+        => Assert.Equal(expected, DashboardScreen.FrameText(display, width: 10));
+
+    [Fact]
+    public void Compose_AtPhoneWidth_TheStackShowsMethodsAndLines_NotNamespaces()
+    {
+        WireSnapshot snapshot = Snap("Stopped", "Breakpoint");
+        snapshot = snapshot with
+        {
+            Position = snapshot.Position with
+            {
+                CallStack =
+                [
+                    new("SkyOmega.DrHook.Viz.DebugStateTextRenderer.RenderDelta @ DebugStateTextRenderer.cs:74", null, 74),
+                    new("SkyOmega.DrHook.Viz.Tests.DebugStateTextRendererTests.RenderDelta_Prints @ DebugStateTextRendererTests.cs:46", null, 46),
+                ],
+            },
+        };
+
+        string screen = string.Join('\n', DashboardScreen.Compose(snapshot, [], 1, "connected", 75, 36, _source));
+
+        Assert.Contains("▸RenderDelta:74", screen);
+        Assert.Contains(" RenderDelta_Prints:46", screen);
+    }
+
+    [Fact]
+    public void ConsoleLines_HaveNoTerminalEscapeSequences()
+    {
+        // xunit's runner colours its output; the sequences were shown as "·[93m".
+        WireDelta[] deltas =
+        [
+            Out("\u001b[93m* Note: long running\u001b[0m\n"),
+            Out("\u001b[0m\u001b[37m  Discovering: Tests\n"),
+            Out("\u001b]0;a title\u0007plain\n"),          // OSC ended by BEL
+            Out("\u001b]8;;http://x\u001b\\link\n"),       // OSC ended by ESC \
+            Out("\u001b[0m\n"),                              // a colour reset on a line of its own: no row
+            Out("\n"),                                       // an empty line of output: a row
+            Out("half \u001b[3"),                            // the chunk ends inside a sequence
+            Out("1mred\n"),                                  // and the next one finishes it
+        ];
+
+        Assert.Equal(
+            ["[Stdout] * Note: long running", "[Stdout]   Discovering: Tests", "[Stdout] plain", "[Stdout] link", "[Stdout] ", "[Stdout] half red"],
+            DashboardScreen.ConsoleLines(deltas));
     }
 
     [Fact]

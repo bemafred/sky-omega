@@ -39,6 +39,29 @@ public sealed class DebugStateTextRendererTests
     }
 
     [Fact]
+    public void RenderDelta_PrintsAConsoleChunkAsItsLines_EachLedByItsStream()
+    {
+        // A console delta is what one read of the target's pipe returned: here two lines, the first ended by CR LF.
+        var sw = new StringWriter();
+        DebugStateTextRenderer.RenderDelta(sw, new WireDelta("console", "t",
+            ConsoleStream: "Stdout", ConsoleText: "working\r\ndone 14\n"));
+
+        Assert.Equal("  Δ console    [Stdout] working\n  Δ console    [Stdout] done 14\n",
+            sw.ToString().ReplaceLineEndings("\n"));
+    }
+
+    [Theory]
+    [InlineData("no newline yet", "  Δ console    [Stderr] no newline yet\n")]   // a line the next chunk continues
+    [InlineData("\n", "  Δ console    [Stderr] \n")]                             // an empty line of output is a line
+    [InlineData("a\n\nb\n", "  Δ console    [Stderr] a\n  Δ console    [Stderr] \n  Δ console    [Stderr] b\n")]
+    public void RenderDelta_ConsoleChunksOfOtherShapes(string chunk, string expected)
+    {
+        var sw = new StringWriter();
+        DebugStateTextRenderer.RenderDelta(sw, new WireDelta("console", "t", ConsoleStream: "Stderr", ConsoleText: chunk));
+        Assert.Equal(expected, sw.ToString().ReplaceLineEndings("\n"));
+    }
+
+    [Fact]
     public void RenderDelta_RendersHypothesisWithItsLens()
     {
         var sw = new StringWriter();

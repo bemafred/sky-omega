@@ -69,9 +69,22 @@ public static class DebugStateTextRenderer
         o.WriteLine($"  streams : console={st.Console}(+{st.ConsoleDropped}) logs={st.Logs}(+{st.LogsDropped}) anomalies={st.Anomalies}(+{st.AnomaliesDropped})");
     }
 
-    /// <summary>Render one live delta as a single line (lifecycle event / log / anomaly / console / hypothesis).</summary>
+    /// <summary>Render one live delta as a single line (lifecycle event / log / anomaly / hypothesis). A console
+    /// delta is what one read of the target's pipe returned, so it can hold several lines and usually ends with
+    /// its last line's newline: it is rendered as one line per line of output, each led by the stream. The part
+    /// after the last newline, when there is one, is a line too; the delta that continues it starts a new one.</summary>
     public static void RenderDelta(TextWriter o, WireDelta d)
-        => o.WriteLine($"  Δ {d.Kind,-10} {FormatDeltaDetail(d)}");
+    {
+        if (d.Kind != "console")
+        {
+            o.WriteLine($"  Δ {d.Kind,-10} {FormatDeltaDetail(d)}");
+            return;
+        }
+        string[] lines = (d.ConsoleText ?? "").Replace("\r\n", "\n").Split('\n');
+        int count = lines.Length > 1 && lines[^1].Length == 0 ? lines.Length - 1 : lines.Length; // no line after a final newline
+        for (int i = 0; i < count; i++)
+            o.WriteLine($"  Δ {d.Kind,-10} [{d.ConsoleStream}] {lines[i]}");
+    }
 
     // ── Per-item formatters — SHARED by every text projection (this block/line renderer, the image tool through it,
     //    and the TUI dashboard's panes), so a value, delta or breakpoint reads the same on every surface. ──
