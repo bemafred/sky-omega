@@ -38,7 +38,7 @@ Cycle 10 r4 production validation: [docs/validations/cycle10-phase3-r4-21b-2026-
 
 - DrHook: `drhook-viz-tui` and `drhook-viz-console` are global tools (`SkyOmega.DrHook.Viz.Tui`, `SkyOmega.DrHook.Viz.Console`), installed by `tools/install-tools.sh` and `.ps1`; both answer `--version`.
 - DrHook: a view outlives a session. The dashboard always waits for a session and for the next one; the console view does with `--follow`. `DebugStateClientOptions.Reconnect` and `ReconnectDelay`.
-- DrHook: a view that connects late is sent the session's most recent deltas (1,000 by default, `replayCapacity`) before its snapshot; `DebugStateServer.ReplayDropped` counts what fell off.
+- DrHook: a view that connects late is sent the session's most recent deltas (1,000 by default, `replayCapacity`) before its snapshot; `DebugStateServer.ReplayDropped` counts what fell off. A view that does not take the history within the send timeout is dropped.
 - Mercury: date arithmetic in SPARQL: a dateTime or date plus or minus a duration, the difference of two dateTimes or two dates, durations compared by value (XPath 3.1's operators, as an extension).
 - `poc/avalonia-term`: the AvaTerm terminal emulator, imported and renamed (`AvaloniaTerm.*`), the evidence for Mira ADR-004. Not in the solution.
 

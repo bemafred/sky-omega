@@ -295,22 +295,46 @@ public sealed class DebugStateServerTests
         using (JsonDocument m = ReadMessage(client)) Assert.Equal("from the second session", Field(m, "event"));
     }
 
+    // A view as the real client is: it reads through a buffer, on a thread of its own. ReadMessage above takes
+    // one byte per call, which is fine for a handful of messages and far too slow for thousands of them.
+    private sealed class BufferedView : IDisposable
+    {
+        private readonly Socket _socket;
+        private readonly StreamReader _reader;
+
+        public BufferedView(string path, int receiveTimeoutMs = 30_000)
+        {
+            _socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified) { ReceiveTimeout = receiveTimeoutMs };
+            _socket.Connect(new UnixDomainSocketEndPoint(path));
+            _reader = new StreamReader(new NetworkStream(_socket, ownsSocket: false), Encoding.UTF8);
+        }
+
+        /// <summary>The next message, or null when the server closed the connection.</summary>
+        public JsonDocument? Read() => _reader.ReadLine() is { } line ? JsonDocument.Parse(line) : null;
+
+        public void Dispose() { _reader.Dispose(); _socket.Dispose(); }
+    }
+
+    private static string Number(int i) => i.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
     [Fact]
     public async Task ConnectingWhileTheSessionEmits_EveryDeltaArrivesOnce_InOrder()
     {
         // The join has to hand over from the replayed history to the live stream without a gap and without a
         // repeat, while the publisher is busy. A writer emits numbered events throughout; views connect at
         // arbitrary moments; each must be sent 0, 1, 2, … with nothing missing and nothing twice.
+        // The timeouts are long on purpose: this test is about order and completeness, and a loaded runner
+        // must not turn it into a test of speed (the bound on a slow view has its own test below).
         const int total = 4000;
         string sock = TempSocketPath();
-        using var server = new DebugStateServer(sock, queueCapacity: total * 2, replayCapacity: total * 2);
+        using var server = new DebugStateServer(sock, queueCapacity: total * 2, sendTimeoutMs: 30_000, replayCapacity: total * 2);
         server.Start();
 
         var writer = new Thread(() =>
         {
             for (int i = 0; i < total; i++)
             {
-                server.OnEvent(i.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                server.OnEvent(Number(i));
                 if (i % 200 == 0) server.PublishSnapshot(Snapshot(ExecutionState.Running));
                 if (i % 50 == 0) Thread.Sleep(1);
             }
@@ -321,31 +345,76 @@ public sealed class DebugStateServerTests
         for (int c = 0; c < 4; c++)
         {
             Thread.Sleep(15); // each view joins at a different point of the stream
-            Socket client = Connect(sock);
-            readers.Add(Task.Run(() =>
+            var view = new BufferedView(sock);
+            readers.Add(Task.Factory.StartNew(() =>
             {
-                using (client)
+                using (view)
                 {
                     int expected = 0;
                     long lastSeq = 0;
                     while (expected < total)
                     {
-                        using JsonDocument m = ReadMessage(client);
+                        using JsonDocument? m = view.Read();
+                        Assert.True(m is not null, $"the server closed the connection at event {expected}");
                         Assert.True(Seq(m) > lastSeq, $"seq went from {lastSeq} to {Seq(m)}");
                         lastSeq = Seq(m);
                         if (Type(m) != "delta") continue;
-                        Assert.Equal(expected.ToString(System.Globalization.CultureInfo.InvariantCulture), Field(m, "event"));
+                        Assert.Equal(Number(expected), Field(m, "event"));
                         expected++;
                     }
                 }
-            }, TestContext.Current.CancellationToken));
+            }, TestContext.Current.CancellationToken, TaskCreationOptions.LongRunning, TaskScheduler.Default));
         }
 
         // A view that is not sent the whole stream fails here: its read times out, or this wait does.
-        await Task.WhenAll(readers).WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+        await Task.WhenAll(readers).WaitAsync(TimeSpan.FromSeconds(60), TestContext.Current.CancellationToken);
         writer.Join();
         Assert.Equal(0, server.DroppedMessages);
         Assert.Equal(0, server.ReplayDropped);
         Assert.Equal(0, server.WorkerErrors);
+    }
+
+    [Fact]
+    public void AViewThatTakesTheHistoryTooSlowly_IsDropped_AndTheNextViewIsServed()
+    {
+        // The other views wait while one view is sent the history, so the history has to be taken within the
+        // send timeout. This view keeps reading, a little at a time: no single send to it times out, and it
+        // would need half a minute for the whole history. It is dropped at the bound instead.
+        const int count = 6000;
+        string pad = new('x', 80);
+        string sock = TempSocketPath();
+        using var server = new DebugStateServer(sock, sendTimeoutMs: 2000, replayCapacity: count);
+        server.Start();
+        for (int i = 0; i < count; i++) server.OnEvent($"{Number(i)}-{pad}"); // about 900 kB on the wire
+
+        using (Socket slow = Connect(sock))
+        {
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            byte[] buf = new byte[512];
+            long taken = 0;
+            bool closed = false;
+            while (clock.Elapsed < TimeSpan.FromSeconds(15))
+            {
+                int n;
+                try { n = slow.Receive(buf); } catch (SocketException) { closed = true; break; }
+                if (n == 0) { closed = true; break; }
+                taken += n;
+                Thread.Sleep(20); // at most 25 kB a second
+            }
+            Assert.True(closed, "the slow view was still being served after 15 s");
+            Assert.True(taken < 600_000, $"the slow view was sent {taken} bytes, most of the history");
+        }
+        Assert.Equal(0, server.ClientCount); // it was never registered
+
+        using var view = new BufferedView(sock);
+        for (int i = 0; i < count; i++)
+        {
+            using JsonDocument? m = view.Read();
+            Assert.True(m is not null, $"the server closed the connection at event {i}");
+            Assert.StartsWith(Number(i) + "-", Field(m, "event"));
+        }
+        server.OnEvent("live");
+        using (JsonDocument? m = view.Read()) Assert.Equal("live", Field(m!, "event"));
+        Assert.Equal(1, server.ClientCount);
     }
 }

@@ -103,7 +103,7 @@ While a session is active, the engine binds a fixed, well-known Unix-domain sock
 - **macOS:** `~/Library/SkyOmega/drhook/session.sock`
 - **Other POSIX:** `~/.local/share/sky-omega/drhook/session.sock` (Windows AF_UNIX is a later refinement)
 
-One active session at a time, so a fixed path is the whole rendezvous — no broker, no registry. The socket is created on `drhook_launch` / `drhook_attach` and unlinked on session end (a stale socket is unlinked on bind). A connecting view receives the session's **delta history** (what the session emitted before the view connected: hypotheses, console output, log and anomaly records, events; the most recent 1,000), then a **snapshot** of the current state, then the live **delta stream**, as **NDJSON** — one JSON message per line (`{"type":"snapshot"|"delta", …}`). The sequence numbers on one connection only rise. Before the first stop there is no snapshot yet, and the history is sent alone.
+One active session at a time, so a fixed path is the whole rendezvous — no broker, no registry. The socket is created on `drhook_launch` / `drhook_attach` and unlinked on session end (a stale socket is unlinked on bind). A connecting view receives the session's **delta history** (what the session emitted before the view connected: hypotheses, console output, log and anomaly records, events; the most recent 1,000), then a **snapshot** of the current state, then the live **delta stream**, as **NDJSON** — one JSON message per line (`{"type":"snapshot"|"delta", …}`). The sequence numbers on one connection only rise. Before the first stop there is no snapshot yet, and the history is sent alone. The other views wait while one view is sent the history, so a view that does not take it within the send timeout (2 s) is dropped.
 
 ### The console view: `drhook-viz-console`
 
@@ -290,7 +290,7 @@ dotnet test --project tests/Mercury.Tests --filter "FullyQualifiedName~BasicSele
 | Project | Command | Count |
 |---------|---------|-------|
 | Mercury (W3C conformance + unit) | `dotnet test --project tests/Mercury.Tests` | ~4,700 |
-| DrHook.Engine (unit) | `dotnet test --project tests/DrHook.Engine.Tests` | 226 |
+| DrHook.Engine (unit) | `dotnet test --project tests/DrHook.Engine.Tests` | 227 |
 | DrHook.Viz | `dotnet test --project tests/DrHook.Viz.Tests` | 47 |
 | DrHook.Wire | `dotnet test --project tests/DrHook.Wire.Tests` | 5 |
 | DrHook.Capture | `dotnet test --project tests/DrHook.Capture.Tests` | 1 |

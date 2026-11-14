@@ -15,7 +15,8 @@ namespace SkyOmega.DrHook.Engine.Transport;
 /// session started — every view that was waiting for a session connects a moment after it starts — never
 /// shows the target's first output or the hypothesis the session was launched with. The history holds the
 /// last <c>replayCapacity</c> deltas of the running session; the oldest fall off past that
-/// (<see cref="ReplayDropped"/>), and it is emptied when the session ends.</para>
+/// (<see cref="ReplayDropped"/>), and it is emptied when the session ends. The other views wait while one
+/// view is sent the history, so a view that does not take it within the send timeout is dropped.</para>
 ///
 /// <para><b>Why this is concurrency-safe.</b> The server handles ONLY immutable snapshots + deltas — it
 /// never calls into <see cref="DebugSession"/>. The session <i>driver</i> (the MCP request thread that owns
@@ -263,6 +264,11 @@ public sealed class DebugStateServer : IDebugEventSink, IDisposable
                         joinedSeq = _seq;
                     }
 
+                    // The other views get nothing while this lock is held, so the whole history has the
+                    // time one message has (the send timeout). A view that takes it slower than that is
+                    // dropped, as a view that cannot take one message is; without the bound a slow reader
+                    // whose every send just succeeds would hold the others back for as long as it liked.
+                    long deadline = _sendTimeoutMs > 0 ? Environment.TickCount64 + _sendTimeoutMs : long.MaxValue;
                     bool sent = true;
                     foreach (Outbound m in replay)
                     {
@@ -271,7 +277,7 @@ public sealed class DebugStateServer : IDebugEventSink, IDisposable
                         // the session: count it, leave it out, send the rest.
                         try { line = DebugStateWireMapper.DeltaLine(m.Delta!, m.Seq); }
                         catch { Interlocked.Increment(ref _workerErrors); continue; }
-                        if (!TrySend(client, line)) { sent = false; break; }
+                        if (!TrySend(client, line) || Environment.TickCount64 > deadline) { sent = false; break; }
                     }
                     if (sent && snap is not null) sent = TrySend(client, DebugStateWireMapper.SnapshotLine(snap, snapshotSeq));
                     if (!sent) { SafeClose(client); continue; }
