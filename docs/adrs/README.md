@@ -33,4 +33,5 @@ Foundational decisions affecting the entire repository:
 | James | [ADR-002](James/ADR-002-linguistic-phase-signatures.md) | Linguistic Phase Signatures and Epistemic Lubricants | Proposed |
 | Lucy — semantic memory | [ADR-001](Lucy/ADR-001-semantic-memory-architecture.md) | Semantic Memory Architecture | Proposed |
 | Mira — interaction surface | [ADR-001](Mira/ADR-001-interaction-surface-architecture.md) | Interaction Surface Architecture | Proposed |
+| Mira | [ADR-004](Mira/ADR-004-omega-terminal-first.md) | Omega — Terminal-First Mira Application and Under-Engineering | Proposed |
 | Sky — language and LLM interaction | [ADR-001](Sky/ADR-001-llm-pool-architecture.md) | LLM Pool Architecture | Proposed |
