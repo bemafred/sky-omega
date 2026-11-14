@@ -221,6 +221,180 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
         return true;
     }
 
+    // ---- ADR-061 M5, M7: the write rule's lookup, and the four decided changes --------------------------------------
+
+    /// <summary>The stored form of "no forgotten time": what a remembered period's ForgottenAt holds.</summary>
+    internal static readonly long OpenForgottenAt = DateTimeOffset.MaxValue.ToUnixTimeMilliseconds();
+
+    /// <summary>A ForgottenAt at or above this is "no forgotten time" (year 9000 in Unix milliseconds).</summary>
+    private const long OpenThreshold = 253370764800000L;
+
+    /// <summary>
+    /// What the write rule needs to know about one quad at one clock reading (ADR-061 M5).
+    /// </summary>
+    /// <param name="HoldingMemorizedAt">The memorized time of the entry that holds at the reading, or null.</param>
+    /// <param name="HoldingIsOpen">Whether that entry has no forgotten time. An entry that holds and is not open
+    /// was written with a stated end, which only <c>Add</c> with a stated time can do.</param>
+    /// <param name="ForgottenAtReadingMemorizedAt">The memorized time of the entry whose forgotten time is exactly
+    /// the reading, or null.</param>
+    internal readonly record struct QuadAtReading(long? HoldingMemorizedAt, bool HoldingIsOpen, long? ForgottenAtReadingMemorizedAt);
+
+    /// <summary>
+    /// Look at one quad at clock reading <paramref name="at"/>: one walk over its entries. Only an EntityFirst index
+    /// keeps a quad's entries together, so QuadStore asks its GSPO index.
+    /// </summary>
+    internal QuadAtReading FindQuadAtReading(long graph, long primary, long secondary, long tertiary, long at)
+    {
+        if (_sortOrder != KeySortOrder.EntityFirst)
+            throw new InvalidOperationException("FindQuadAtReading needs an EntityFirst index: a TimeFirst index does not keep a quad's entries together.");
+
+        var lo = new TemporalKey { Graph = graph, Primary = primary, Secondary = secondary, Tertiary = tertiary,
+            MemorizedAt = long.MinValue, ForgottenAt = long.MinValue, LegacyTransactionTime = long.MinValue };
+        var hi = new TemporalKey { Graph = graph, Primary = primary, Secondary = secondary, Tertiary = tertiary,
+            MemorizedAt = long.MaxValue, ForgottenAt = long.MaxValue, LegacyTransactionTime = long.MaxValue };
+
+        long? holding = null;
+        bool holdingIsOpen = false;
+        long? forgottenAtReading = null;
+        for (var pageId = FindLeafPage(_file.RootPageId, lo); pageId != 0;)
+        {
+            var page = GetPage(pageId);
+            for (int i = 0; i < page->EntryCount; i++)
+            {
+                ref var entry = ref page->GetEntry(i);
+                if (CompareKeys(in entry.Key, in lo) < 0) continue;
+                if (CompareKeys(in entry.Key, in hi) > 0)
+                    return new QuadAtReading(holding, holdingIsOpen, forgottenAtReading);
+                if (entry.LegacyIsDeleted) continue;
+                if (entry.Key.MemorizedAt <= at && entry.Key.ForgottenAt > at)
+                {
+                    holding = entry.Key.MemorizedAt;
+                    holdingIsOpen = entry.Key.ForgottenAt >= OpenThreshold;
+                }
+                else if (entry.Key.ForgottenAt == at)
+                {
+                    forgottenAtReading = entry.Key.MemorizedAt;
+                }
+            }
+            pageId = page->NextLeaf;
+        }
+        return new QuadAtReading(holding, holdingIsOpen, forgottenAtReading);
+    }
+
+    // Set while BeginPeriod inserts. A decided period is inserted as it is: the neighbour logic of InsertIntoLeaf
+    // decides nothing for it. That logic stays for Add with a stated time until ADR-061 Step 6 removes it.
+    private bool _insertingDecidedPeriod;
+
+    /// <summary>
+    /// A period of the quad begins at <paramref name="memorizedAt"/> (ADR-061 M7). Returns false, changing nothing,
+    /// when the quad already has an entry that began then.
+    /// </summary>
+    internal bool BeginPeriod(long graph, long primary, long secondary, long tertiary, long memorizedAt)
+    {
+        if (FindLiveEntry(graph, primary, secondary, tertiary, memorizedAt, forgottenAt: null) != null)
+            return false;
+
+        var key = new TemporalKey
+        {
+            Graph = graph,
+            Primary = primary,
+            Secondary = secondary,
+            Tertiary = tertiary,
+            MemorizedAt = memorizedAt,
+            ForgottenAt = OpenForgottenAt,
+            LegacyTransactionTime = memorizedAt
+        };
+
+        _insertingDecidedPeriod = true;
+        try
+        {
+            InsertIntoTree(key, _file.RootPageId);
+        }
+        finally
+        {
+            _insertingDecidedPeriod = false;
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// The period of the quad that began at <paramref name="memorizedAt"/> ends at <paramref name="forgottenAt"/>
+    /// (ADR-061 M7). Returns false, changing nothing, when there is no such entry or it is not open.
+    /// </summary>
+    internal bool EndPeriod(long graph, long primary, long secondary, long tertiary, long memorizedAt, long forgottenAt)
+    {
+        var entry = FindLiveEntry(graph, primary, secondary, tertiary, memorizedAt, forgottenAt: null);
+        if (entry == null || entry->Key.ForgottenAt < OpenThreshold)
+            return false;
+
+        entry->Key.ForgottenAt = forgottenAt;
+        entry->LegacyModifiedAt = forgottenAt;
+        _file.FlushPage();
+        return true;
+    }
+
+    /// <summary>
+    /// The period of the quad that began at <paramref name="memorizedAt"/> and ended at <paramref name="forgottenAt"/>
+    /// continues: it has no forgotten time again (ADR-061 M2, M7). Returns false, changing nothing, when there is
+    /// no such entry or its forgotten time is another.
+    /// </summary>
+    internal bool ContinuePeriod(long graph, long primary, long secondary, long tertiary, long memorizedAt, long forgottenAt)
+    {
+        var entry = FindLiveEntry(graph, primary, secondary, tertiary, memorizedAt, forgottenAt: null);
+        if (entry == null || entry->Key.ForgottenAt != forgottenAt)
+            return false;
+
+        entry->Key.ForgottenAt = OpenForgottenAt;
+        entry->LegacyModifiedAt = entry->Key.LegacyTransactionTime;
+        _file.FlushPage();
+        return true;
+    }
+
+    /// <summary>
+    /// The period of the quad that began at <paramref name="memorizedAt"/> is removed: its entry leaves the tree
+    /// (ADR-061 M2, M7). Returns false, changing nothing, when there is no such entry or it is not open. The leaf
+    /// keeps its place in the tree when it becomes empty; the keys above it stay valid as bounds.
+    /// </summary>
+    internal bool RemovePeriod(long graph, long primary, long secondary, long tertiary, long memorizedAt)
+    {
+        var lo = new TemporalKey { Graph = graph, Primary = primary, Secondary = secondary, Tertiary = tertiary,
+            MemorizedAt = memorizedAt, ForgottenAt = long.MinValue, LegacyTransactionTime = long.MinValue };
+        var hi = new TemporalKey { Graph = graph, Primary = primary, Secondary = secondary, Tertiary = tertiary,
+            MemorizedAt = memorizedAt, ForgottenAt = long.MaxValue, LegacyTransactionTime = long.MaxValue };
+
+        for (var pageId = FindLeafPage(_file.RootPageId, lo); pageId != 0;)
+        {
+            var page = GetPage(pageId);
+            for (int i = 0; i < page->EntryCount; i++)
+            {
+                ref var entry = ref page->GetEntry(i);
+                if (CompareKeys(in entry.Key, in lo) < 0) continue;
+                if (CompareKeys(in entry.Key, in hi) > 0) return false;
+                if (entry.LegacyIsDeleted) continue;
+                if (entry.Key.ForgottenAt < OpenThreshold) return false;
+
+                for (int j = i; j < page->EntryCount - 1; j++)
+                    page->GetEntry(j) = page->GetEntry(j + 1);
+                page->EntryCount--;
+                _file.DecrementEntryCount();
+                _file.FlushPage();
+                return true;
+            }
+            pageId = page->NextLeaf;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Change the entry count by one without touching the tree. WAL recovery uses it: a decided change counts by the
+    /// transaction it belongs to, whatever the page already held (ADR-058, ADR-061 M7).
+    /// </summary>
+    internal void AdjustRecoveredEntryCount(int delta)
+    {
+        if (delta > 0) _file.IncrementEntryCount();
+        else if (delta < 0) _file.DecrementEntryCount();
+    }
+
     /// <summary>
     /// Replay a delete record written before ADR-054 (operation 2 with [MinValue, MaxValue], from DeleteCurrent): mark
     /// the first live entry whose interval overlaps, which is what that record did when it was written. Nothing writes
@@ -1012,8 +1186,9 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
             insertPos++;
         }
 
-        // Check for updates (same GSPO dimensions)
-        if (insertPos > 0)
+        // Check for updates (same GSPO dimensions). Not for a decided period (ADR-061 M7): BeginPeriod inserts it as
+        // it is.
+        if (insertPos > 0 && !_insertingDecidedPeriod)
         {
             ref var prevEntry = ref page->GetEntry(insertPos - 1);
             if (IsSameDimensions(key, prevEntry.Key))

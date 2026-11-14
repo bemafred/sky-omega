@@ -143,7 +143,8 @@ internal class UpdateExecutor
         return new UpdateResult { Success = true, AffectedCount = totalAffected };
     }
 
-    /// <summary>INSERT DATA: the data instantiated once, as a template with no variables, in one batch.</summary>
+    /// <summary>INSERT DATA: the data instantiated once, as a template with no variables, in one batch; the count is
+    /// the quads that were not remembered and are now (ADR-061 D2).</summary>
     private UpdateResult ExecuteInsertData()
     {
         var quads = InstantiateData(_update.InsertData);
@@ -153,10 +154,14 @@ internal class UpdateExecutor
         _store.BeginBatch();
         try
         {
+            var insertedCount = 0;
             foreach (var (s, p, o, g) in quads)
-                _store.AddCurrentBatched(s, p, o, g);
+            {
+                if (_store.AddCurrentBatched(s, p, o, g))
+                    insertedCount++;
+            }
             _store.CommitBatch();
-            return new UpdateResult { Success = true, AffectedCount = quads.Count };
+            return new UpdateResult { Success = true, AffectedCount = insertedCount };
         }
         catch (Exception ex)
         {
@@ -354,8 +359,8 @@ internal class UpdateExecutor
         return ExpandPrefixedName(termSpan).ToString();
     }
 
-    /// <summary>Apply the deletions, then the insertions, in one batch. The affected count is the triples deleted
-    /// plus the triples inserted.</summary>
+    /// <summary>Apply the deletions, then the insertions, in one batch. The affected count is the quads that were
+    /// remembered and are not any more, plus the quads that were not remembered and are now (ADR-061 D2).</summary>
     private UpdateResult ApplyChanges(List<(string s, string p, string o, string? g)> toDelete,
         List<(string s, string p, string o, string? g)>? toInsert)
     {
@@ -396,9 +401,9 @@ internal class UpdateExecutor
                 foreach (var (s, p, o, g) in toInsert)
                 {
                     var graphSpan = g != null ? g.AsSpan() : ReadOnlySpan<char>.Empty;
-                    _store.AddCurrentBatched(s.AsSpan(), p.AsSpan(), o.AsSpan(), graphSpan);
+                    if (_store.AddCurrentBatched(s.AsSpan(), p.AsSpan(), o.AsSpan(), graphSpan))
+                        insertedCount++;
                 }
-                insertedCount = toInsert.Count;
             }
             _store.CommitBatch();
 
@@ -785,12 +790,14 @@ internal class UpdateExecutor
         try
         {
             var dstGraphSpan = dstGraph != null ? dstGraph.AsSpan() : ReadOnlySpan<char>.Empty;
+            var copiedCount = 0;
             foreach (var (s, p, o) in toCopy)
             {
-                _store.AddCurrentBatched(s.AsSpan(), p.AsSpan(), o.AsSpan(), dstGraphSpan);
+                if (_store.AddCurrentBatched(s.AsSpan(), p.AsSpan(), o.AsSpan(), dstGraphSpan))
+                    copiedCount++;
             }
             _store.CommitBatch();
-            return new UpdateResult { Success = true, AffectedCount = toCopy.Count };
+            return new UpdateResult { Success = true, AffectedCount = copiedCount };
         }
         catch (Exception ex)
         {

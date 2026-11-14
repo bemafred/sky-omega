@@ -601,9 +601,9 @@ This is a rule for the write logic, and does not touch the clock.
 whether the operations came in one request or in several. A request is not a moment (I17): its operations can fall in
 different readings, and then each reading has its own result (M6).
 
-**Observed 2026-11-14 (M11):** today's code breaks the rule. One batch that adds, deletes and adds a new quad leaves it
-forgotten, in 50 of 50 runs, because `InsertIntoLeaf` takes the second add for a WAL replay of the first. Step 4 holds
-the tests.
+**Observed 2026-11-14 (M11):** the code of that day broke the rule. One batch that adds, deletes and adds a new quad
+left it forgotten, in 50 of 50 runs, because `InsertIntoLeaf` took the second add for a WAL replay of the first. The
+write rule of P1 replaced that path the same day (Steps, Progress), and the tests of Step 4 hold the rows.
 
 ### D6. The words — Decided
 
@@ -953,6 +953,29 @@ this ADR do not answer goes to Martin.
   - Left on the system clock: the timestamps of diagnostics events, and `TemporalQuadIndex`'s own convenience methods
     (`AddCurrent`, `QueryCurrent`), which no store path calls.
   - Six tests supply the readings (`StoreClockTests`). `Mercury.Tests` on omega: 6,365 passed, 156 skipped, 0 failed.
+- **P1: done 2026-11-14**, on omega; the other platforms have not run it.
+  - **The decision** is made once, in `QuadStore`, from one walk over the quad's entries in GSPO: the entry that holds
+    at the clock reading, and the entry forgotten exactly at it. In a batch it is made at the commit, once per quad,
+    from what the store held before the batch and the last operation the batch asked (I9).
+  - **The log** has four new records: begin, end, remove and continue a period. `Add` with a stated time, `Retract`
+    and logs written before this keep the old records.
+  - **Each index** applies a record by the quad and the memorized time, only in the state M7 names. "Remove" takes
+    the entry out of its leaf. An entry with equal times is no longer written.
+  - **Entry counts in recovery** (ADR-058): a decided change after an index's saved count counts by what it means,
+    whatever the page held; one at or before it changes no count.
+  - **Affected counts** follow D2. `AddCurrent` and `AddCurrentBatched` now return whether the fact became remembered.
+  - **A stated end** on an entry that holds (only `Add` with a stated time writes one) is ended by the old record,
+    until P7.
+  - **Tests:** every row of M6 on three write paths, the fourth row of M11, the counts, and a reopen
+    (`MemoryTimeWriteRuleTests`, 38 tests). Recovery after a killed process, with the four index files at six
+    different combinations of an earlier and a later point of the log, and with a saved count behind and ahead of
+    its pages (`MemoryTimeRecoveryTests`, 10 tests). The four count tests fail when the count rule is switched off.
+    `Mercury.Tests`: 6,413 passed, 156 skipped, 0 failed.
+  - **Not tested:** a process killed between two index writes of one record. That needs a way to stop it there (P2).
+  - **Measured**, bulk mode, 500,000 triples, the fastest of six rounds before and after: new triples 8,476 ms and
+    8,926 ms; the same triples sent again 15,480 ms and 14,724 ms. Rounds vary by a factor of two on omega in both
+    runs, so this shows no large change and settles nothing finer. Outside bulk mode a write is dominated by its
+    syncs to disk (`BatchWriteBenchmarks`: 10,000 batched triples in 17.4 s).
 
 1. **Martin's review** of this text — **done 2026-11-14**, with the decision closure. The later part is reviewed on
    its own.

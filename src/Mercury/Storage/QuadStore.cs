@@ -96,6 +96,26 @@ public sealed class QuadStore : IDisposable
     // The store's one clock (ADR-061 D4). Every stamp is a reading of it taken under the write lock (I12).
     private readonly TimeProvider _clock;
 
+    // ADR-061 M5, I9: a batch has one clock reading, so only the last operation on a quad in the batch counts, as
+    // if it were the only one. The batch keeps, per quad it touches, what the store held for the quad before the
+    // batch and the last operation asked. CommitBatch decides one change per quad from those two and logs it.
+    private Dictionary<QuadIds, int>? _batchQuadPositions;
+    private List<BatchQuad>? _batchQuads;
+
+    /// <summary>What a write asks of a quad (ADR-061 D2): <c>INSERT</c> memorizes, <c>DELETE</c> forgets.</summary>
+    private enum Asked : byte { Memorize, Forget }
+
+    /// <summary>A quad by its four atoms: its identity until ADR-053 makes one term one atom (ADR-061 I1).</summary>
+    private readonly record struct QuadIds(long Graph, long Subject, long Predicate, long Object);
+
+    /// <summary>One quad a batch has touched: what held before the batch, and the last operation asked.</summary>
+    private struct BatchQuad
+    {
+        public QuadIds Quad;
+        public TemporalQuadIndex.QuadAtReading Before;
+        public Asked Last;
+    }
+
     /// <summary>
     /// The store's clock (ADR-061 D4, <see cref="StorageOptions.Clock"/>). A query's <c>NOW()</c> is a reading of it,
     /// so every write the query did not see is stamped at or after that reading (ADR-061 M9).
@@ -616,10 +636,13 @@ public sealed class QuadStore : IDisposable
     }
 
     /// <summary>
-    /// Add a current fact (valid from now onwards) with WAL durability.
+    /// Memorize a fact — a SPARQL insert of one quad, with WAL durability. On a Cognitive store the write rule
+    /// decides what changes (ADR-061 M5): a fact that is remembered stays as it is, a fact forgotten in this clock
+    /// reading continues its period, and any other fact begins a period at this reading.
     /// Thread-safe: acquires write lock.
+    /// Returns true if the fact was not remembered before and is now (ADR-061 D2); on a Graph store, always true.
     /// </summary>
-    public void AddCurrent(
+    public bool AddCurrent(
         ReadOnlySpan<char> subject,
         ReadOnlySpan<char> predicate,
         ReadOnlySpan<char> @object,
@@ -631,17 +654,88 @@ public sealed class QuadStore : IDisposable
         _lock.EnterWriteLock();
         try
         {
-            // One reading of the clock, taken under the lock, is both the memorized time and the transaction
-            // time (ADR-061 I12). Reading it before the lock let a write carry a stamp earlier than the NOW()
-            // of a query that did not see it, and gave the two times different readings.
+            // One reading of the clock, taken under the lock, is the stamp (ADR-061 I12). Reading it before the
+            // lock let a write carry a stamp earlier than the NOW() of a query that did not see it.
             var now = _clock.GetUtcNow();
-            AddHoldingWriteLock(subject, predicate, @object, now, DateTimeOffset.MaxValue, graph,
-                transactionTime: now.ToUnixTimeMilliseconds());
+            if (_schema.Profile != StoreProfile.Cognitive)
+            {
+                AddHoldingWriteLock(subject, predicate, @object, now, DateTimeOffset.MaxValue, graph,
+                    transactionTime: now.ToUnixTimeMilliseconds());
+                return true;
+            }
+
+            var quad = new QuadIds(graph.IsEmpty ? 0 : _atoms.Intern(graph),
+                _atoms.Intern(subject), _atoms.Intern(predicate), _atoms.Intern(@object));
+            return ChangeHoldingWriteLock(quad, Asked.Memorize, now.ToUnixTimeMilliseconds());
         }
         finally
         {
             _lock.ExitWriteLock();
         }
+    }
+
+    /// <summary>
+    /// One single write on a Cognitive store, with the write lock held: decide the change (ADR-061 M5), and when
+    /// there is one, log it, apply it and save the counts. Returns whether the quad's being remembered changed.
+    /// </summary>
+    private bool ChangeHoldingWriteLock(QuadIds quad, Asked asked, long clockReadingMs)
+    {
+        var before = _gspoIndex!.FindQuadAtReading(quad.Graph, quad.Subject, quad.Predicate, quad.Object, clockReadingMs);
+        if (DecideChange(asked, before, quad, clockReadingMs) is not { } record)
+            return false;
+
+        // The WAL record holds only atom IDs, so the atoms must be durable first (ADR-058 D6)
+        MakeAtomsDurable();
+        _wal!.Append(record);
+        ApplyRecordToIndexesById(record);
+        CommitIndexCounts(_wal.CurrentTxId, durable: false);
+        CheckpointIfNeeded();
+        CheckDiskSpaceAfterWrite();
+        return true;
+    }
+
+    /// <summary>
+    /// The write rule (ADR-061 M5): the change one operation makes to one quad at one clock reading, or null when it
+    /// changes nothing. It looks at what the store holds for the quad at the reading and at nothing else: no
+    /// operation identity, no sequence number, no second timestamp.
+    /// </summary>
+    private static LogRecord? DecideChange(Asked asked, TemporalQuadIndex.QuadAtReading before, QuadIds quad, long clockReadingMs)
+    {
+        if (asked == Asked.Memorize)
+        {
+            // Remembered: nothing (I3).
+            if (before.HoldingMemorizedAt is not null)
+                return null;
+
+            // Forgotten in this clock reading: the period continues, its forgotten time is removed (M2).
+            if (before.ForgottenAtReadingMemorizedAt is { } continued)
+                return LogRecord.CreatePeriodChange(LogOperation.ContinuePeriod, quad.Graph, quad.Subject, quad.Predicate,
+                    quad.Object, continued, clockReadingMs, clockReadingMs);
+
+            // Never remembered, or forgotten before this reading: a period begins.
+            return LogRecord.CreatePeriodChange(LogOperation.BeginPeriod, quad.Graph, quad.Subject, quad.Predicate,
+                quad.Object, clockReadingMs, TemporalQuadIndex.OpenForgottenAt, clockReadingMs);
+        }
+
+        // Not remembered: nothing (I4).
+        if (before.HoldingMemorizedAt is not { } held)
+            return null;
+
+        // An entry that holds and has a stated end was written by Add with a stated time, which stays until ADR-061
+        // Step 6. It is ended as before that step: the End record shortens it.
+        if (!before.HoldingIsOpen)
+            return LogRecord.CreateEnd(quad.Subject, quad.Predicate, quad.Object,
+                DateTimeOffset.FromUnixTimeMilliseconds(held), DateTimeOffset.FromUnixTimeMilliseconds(clockReadingMs),
+                quad.Graph, transactionTimeTicks: clockReadingMs);
+
+        // Memorized in this clock reading: the quad was remembered at no representable time, so no period is left (M2).
+        if (held == clockReadingMs)
+            return LogRecord.CreatePeriodChange(LogOperation.RemovePeriod, quad.Graph, quad.Subject, quad.Predicate,
+                quad.Object, held, clockReadingMs, clockReadingMs);
+
+        // Remembered since an earlier reading: the period ends here.
+        return LogRecord.CreatePeriodChange(LogOperation.EndPeriod, quad.Graph, quad.Subject, quad.Predicate,
+            quad.Object, held, clockReadingMs, clockReadingMs);
     }
 
     /// <summary>
@@ -689,11 +783,11 @@ public sealed class QuadStore : IDisposable
     }
 
     /// <summary>
-    /// Delete a current fact — a SPARQL delete. On a Cognitive store the version that holds now stops holding now: its
-    /// ForgottenAt becomes the delete's transaction time, so AS OF before the delete still returns it and ALL VERSIONS
-    /// shows the closed interval (ADR-054 D1). On a Graph store (no valid time) the entry is soft-deleted.
+    /// Forget a fact — a SPARQL delete of one quad. On a Cognitive store the write rule decides what changes
+    /// (ADR-061 M5): the period that holds ends at this clock reading and stays in the store with both times; a fact
+    /// memorized in this same reading leaves no period. On a Graph store (no times) the entry is soft-deleted.
     /// Thread-safe: acquires write lock.
-    /// Returns true if a version held and was ended, false otherwise (nothing to delete).
+    /// Returns true if the fact was remembered and is not any more (ADR-061 D2), false if there was nothing to forget.
     /// </summary>
     public bool DeleteCurrent(
         ReadOnlySpan<char> subject,
@@ -711,21 +805,11 @@ public sealed class QuadStore : IDisposable
                 return false;
 
             var nowMs = _clock.GetUtcNow().ToUnixTimeMilliseconds();
-            LogRecord record;
-            if (_schema.Profile == StoreProfile.Graph)
-            {
-                record = LogRecord.CreateRetract(subjectId, predicateId, objectId,
-                    DateTimeOffset.MinValue, DateTimeOffset.MaxValue, graphId, transactionTimeTicks: nowMs);
-            }
-            else
-            {
-                var versionMemorizedAt = _gspoIndex!.FindVersionHoldingAt(graphId, subjectId, predicateId, objectId, nowMs);
-                if (versionMemorizedAt is null)
-                    return false;
-                record = LogRecord.CreateEnd(subjectId, predicateId, objectId,
-                    DateTimeOffset.FromUnixTimeMilliseconds(versionMemorizedAt.Value),
-                    DateTimeOffset.FromUnixTimeMilliseconds(nowMs), graphId, transactionTimeTicks: nowMs);
-            }
+            if (_schema.Profile != StoreProfile.Graph)
+                return ChangeHoldingWriteLock(new QuadIds(graphId, subjectId, predicateId, objectId), Asked.Forget, nowMs);
+
+            var record = LogRecord.CreateRetract(subjectId, predicateId, objectId,
+                DateTimeOffset.MinValue, DateTimeOffset.MaxValue, graphId, transactionTimeTicks: nowMs);
 
             _wal!.Append(record);
             var deleted = ApplyRecordToIndexesById(record);
@@ -969,6 +1053,8 @@ public sealed class QuadStore : IDisposable
             _activeBatchTxId = _wal.BeginBatch();
             _batchBuffer ??= new();
             _batchBuffer.Clear();
+            _batchQuadPositions?.Clear();
+            _batchQuads?.Clear();
             _batchCurrentFrom = _clock.GetUtcNow();
             _batchTransactionTimeTicks = _batchCurrentFrom.ToUnixTimeMilliseconds();
         }
@@ -1134,18 +1220,76 @@ public sealed class QuadStore : IDisposable
     }
 
     /// <summary>
-    /// Add a current fact to the batch (valid from now onwards).
+    /// Memorize a fact in the current batch — a SPARQL insert of one quad (see <see cref="AddCurrent"/>). Every
+    /// operation of a batch has the batch's one clock reading, so on a Cognitive store only the last operation on a
+    /// quad in the batch counts (ADR-061 M2); the change is decided and logged at CommitBatch.
+    /// Returns true if the fact was not remembered when this was called and is now (ADR-061 D2); on a store without
+    /// times, always true.
     /// </summary>
-    public void AddCurrentBatched(
+    public bool AddCurrentBatched(
         ReadOnlySpan<char> subject,
         ReadOnlySpan<char> predicate,
         ReadOnlySpan<char> @object,
         ReadOnlySpan<char> graph = default)
     {
-        // Use the cached batch timestamp instead of calling UtcNow per triple — save
-        // ~1.4% of bulk-load time. Bitemporally equivalent: all triples in one batch
-        // share the same "valid from" moment.
-        AddBatched(subject, predicate, @object, _batchCurrentFrom, DateTimeOffset.MaxValue, graph);
+        if (_schema.Profile != StoreProfile.Cognitive)
+        {
+            // Reference, Minimal and Graph keep no times: the batch's reading is not stored.
+            AddBatched(subject, predicate, @object, _batchCurrentFrom, DateTimeOffset.MaxValue, graph);
+            return true;
+        }
+
+        if (_activeBatchTxId < 0)
+            throw new InvalidOperationException("No active batch. Call BeginBatch() first.");
+
+        // Intern atoms (IAtomStore is append-only — orphans from rollback are harmless)
+        var quad = new QuadIds(graph.IsEmpty ? 0 : _atoms.Intern(graph),
+            _atoms.Intern(subject), _atoms.Intern(predicate), _atoms.Intern(@object));
+        return AskInBatch(quad, Asked.Memorize);
+    }
+
+    /// <summary>
+    /// Note one operation of the current batch on one quad, and say whether it changes if the quad is remembered.
+    /// The first operation on a quad looks the quad up; a later one replaces the one before it (ADR-061 I9).
+    /// </summary>
+    private bool AskInBatch(QuadIds quad, Asked asked)
+    {
+        _batchQuadPositions ??= new();
+        _batchQuads ??= new();
+
+        bool remembered;
+        if (_batchQuadPositions.TryGetValue(quad, out var position))
+        {
+            var touched = _batchQuads[position];
+            remembered = touched.Last == Asked.Memorize;
+            touched.Last = asked;
+            _batchQuads[position] = touched;
+        }
+        else
+        {
+            var before = _gspoIndex!.FindQuadAtReading(quad.Graph, quad.Subject, quad.Predicate, quad.Object, _batchTransactionTimeTicks);
+
+            // An Add with a stated time that this batch has buffered is not in the index yet. If it holds at the
+            // batch's reading, it is what the quad holds (until ADR-061 Step 6 removes Add with a stated time).
+            if (before.HoldingMemorizedAt is null)
+            {
+                foreach (var buffered in _batchBuffer!)
+                {
+                    if (buffered.Operation != LogOperation.Add || !IsSameQuad(buffered, quad.Graph, quad.Subject, quad.Predicate, quad.Object))
+                        continue;
+                    var from = UtcTicksToUnixMs(buffered.MemorizedAtTicks);
+                    var to = UtcTicksToUnixMs(buffered.ForgottenAtTicks);
+                    if (from <= _batchTransactionTimeTicks && to > _batchTransactionTimeTicks)
+                        before = new TemporalQuadIndex.QuadAtReading(from, to >= TemporalQuadIndex.OpenForgottenAt, before.ForgottenAtReadingMemorizedAt);
+                }
+            }
+
+            remembered = before.HoldingMemorizedAt is not null;
+            _batchQuadPositions[quad] = _batchQuads.Count;
+            _batchQuads.Add(new BatchQuad { Quad = quad, Before = before, Last = asked });
+        }
+
+        return asked == Asked.Memorize ? !remembered : remembered;
     }
 
     /// <summary>
@@ -1197,9 +1341,10 @@ public sealed class QuadStore : IDisposable
     }
 
     /// <summary>
-    /// Delete a current fact in the batch — a SPARQL delete (see <see cref="DeleteCurrent"/>). The version that holds
-    /// at the batch's transaction time is found now, against the indexes and the records already buffered in this
-    /// batch, and ended at CommitBatch. Returns true if such a version exists, false if there is nothing to delete.
+    /// Forget a fact in the current batch — a SPARQL delete of one quad (see <see cref="DeleteCurrent"/>). Every
+    /// operation of a batch has the batch's one clock reading, so on a Cognitive store only the last operation on a
+    /// quad in the batch counts (ADR-061 M2); the change is decided and logged at CommitBatch.
+    /// Returns true if the fact was remembered when this was called and is not any more (ADR-061 D2).
     /// </summary>
     public bool DeleteCurrentBatched(
         ReadOnlySpan<char> subject,
@@ -1217,41 +1362,7 @@ public sealed class QuadStore : IDisposable
         if (!TryResolveQuadIds(subject, predicate, @object, graph, out var graphId, out var subjectId, out var predicateId, out var objectId))
             return false;
 
-        var atMs = _batchTransactionTimeTicks;
-
-        // Records already buffered for this quad in this batch come first. If the newest is an End, the quad was
-        // already deleted in this batch. An earlier End means the indexed version is already ended, so only a later
-        // buffered Add can hold at T. Otherwise the indexed version that holds at T is the one to end; a buffered Add
-        // of it is a duplicate, a no-op at commit.
-        LogRecord? newest = null;
-        bool endedInBatch = false;
-        for (int i = _batchBuffer!.Count - 1; i >= 0; i--)
-        {
-            var buffered = _batchBuffer[i];
-            if (!IsSameQuad(buffered, graphId, subjectId, predicateId, objectId))
-                continue;
-            newest ??= buffered;
-            if (buffered.Operation == LogOperation.End)
-                endedInBatch = true;
-        }
-        if (newest is { Operation: LogOperation.End })
-            return false;
-
-        long? versionMemorizedAt = endedInBatch
-            ? null
-            : _gspoIndex!.FindVersionHoldingAt(graphId, subjectId, predicateId, objectId, atMs);
-        if (versionMemorizedAt is null && newest is { Operation: LogOperation.Add } add
-            && UtcTicksToUnixMs(add.MemorizedAtTicks) <= atMs && UtcTicksToUnixMs(add.ForgottenAtTicks) > atMs)
-            versionMemorizedAt = UtcTicksToUnixMs(add.MemorizedAtTicks);
-        if (versionMemorizedAt is null)
-            return false;
-
-        var record = LogRecord.CreateEnd(subjectId, predicateId, objectId,
-            DateTimeOffset.FromUnixTimeMilliseconds(versionMemorizedAt.Value),
-            DateTimeOffset.FromUnixTimeMilliseconds(atMs), graphId, transactionTimeTicks: atMs);
-        _wal!.AppendBatch(record, _activeBatchTxId);
-        _batchBuffer.Add(record);
-        return true;
+        return AskInBatch(new QuadIds(graphId, subjectId, predicateId, objectId), Asked.Forget);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -1315,6 +1426,21 @@ public sealed class QuadStore : IDisposable
             RequireWriteCapableProfile(nameof(CommitBatch));
             if (_activeBatchTxId < 0)
                 throw new InvalidOperationException("No active batch.");
+
+            // 0. Decide one change per quad the batch touched (ADR-061 M5, I9) and log it. The batch has one clock
+            // reading, so the last operation asked of a quad decides, against what the store held before the batch.
+            if (_batchQuads is { Count: > 0 })
+            {
+                foreach (var touched in _batchQuads)
+                {
+                    if (DecideChange(touched.Last, touched.Before, touched.Quad, _batchTransactionTimeTicks) is not { } change)
+                        continue;
+                    _wal.AppendBatch(change, _activeBatchTxId);
+                    _batchBuffer!.Add(change);
+                }
+                _batchQuads.Clear();
+                _batchQuadPositions!.Clear();
+            }
 
             // 1. Write CommitTx marker — fsync in cognitive mode, deferred in bulk mode.
             // The WAL records hold only atom IDs, so the atoms they reference are made
@@ -1400,6 +1526,8 @@ public sealed class QuadStore : IDisposable
         }
 
         _batchBuffer?.Clear();
+        _batchQuadPositions?.Clear();
+        _batchQuads?.Clear();
         _activeBatchTxId = -1;
         _lock.ExitWriteLock();
     }
@@ -2468,11 +2596,91 @@ public sealed class QuadStore : IDisposable
                 return ApplyRetractToIndexesById(record);
             case LogOperation.End:
                 return ApplyEndToIndexesById(record);
+            case LogOperation.BeginPeriod:
+            case LogOperation.EndPeriod:
+            case LogOperation.RemovePeriod:
+            case LogOperation.ContinuePeriod:
+                return ApplyPeriodChangeToIndexesById(record);
             default:
                 throw new InvalidDataException(
                     $"WAL record (TxId {record.TxId}) has operation {(byte)record.Operation}, which this Mercury does not know. " +
                     "It was written by a newer Mercury; open the store with that version.");
         }
+    }
+
+    /// <summary>
+    /// Apply one of the four decided changes to a period (ADR-061 M7), in every index. Each index finds the period by
+    /// the quad and its memorized time, which both sort orders can do, and applies the change only in the state the
+    /// change names. So an index that already holds it, or that holds a later state, is left as it is.
+    /// </summary>
+    private bool ApplyPeriodChangeToIndexesById(in LogRecord record)
+    {
+        // ADR-031 Piece 2: a change to a period is a mutation — track it.
+        _sessionMutated = true;
+
+        var memorizedAtMs = UtcTicksToUnixMs(record.MemorizedAtTicks);
+        var forgottenAtMs = UtcTicksToUnixMs(record.ForgottenAtTicks);
+
+        var changed = ApplyPeriodChange(_gspoIndex!, record, record.SubjectId, record.PredicateId, record.ObjectId, memorizedAtMs, forgottenAtMs);
+
+        if (!_bulkLoadMode)
+        {
+            changed |= ApplyPeriodChange(_gposIndex!, record, record.PredicateId, record.ObjectId, record.SubjectId, memorizedAtMs, forgottenAtMs);
+            changed |= ApplyPeriodChange(_gospIndex!, record, record.ObjectId, record.SubjectId, record.PredicateId, memorizedAtMs, forgottenAtMs);
+            changed |= ApplyPeriodChange(_tgspIndex!, record, record.SubjectId, record.PredicateId, record.ObjectId, memorizedAtMs, forgottenAtMs);
+
+            // A period that begins makes its literal object searchable, as an Add does.
+            if (record.Operation == LogOperation.BeginPeriod)
+            {
+                var utf8Span = _atoms.GetAtomSpan(record.ObjectId);
+                if (utf8Span.Length > 0 && utf8Span[0] == (byte)'"')
+                    _trigramIndex.IndexAtom(record.ObjectId, utf8Span);
+            }
+        }
+
+        return changed;
+    }
+
+    /// <summary>
+    /// Apply one decided change to one Cognitive index, and keep the index's entry count right during recovery.
+    /// A decided change always took effect when it was first applied. So in recovery a change of a transaction
+    /// after the index's saved count (<see cref="TemporalQuadIndex.CountTxId"/>) counts by what it means, one more
+    /// entry for a period that begins and one fewer for a period that is removed, whatever the page already held;
+    /// a change at or before the saved count is in that count already, whatever it does to the page now (ADR-058).
+    /// </summary>
+    private bool ApplyPeriodChange(TemporalQuadIndex index, in LogRecord record,
+        long primary, long secondary, long tertiary, long memorizedAtMs, long forgottenAtMs)
+    {
+        bool changed;
+        int entriesAdded;
+        switch (record.Operation)
+        {
+            case LogOperation.BeginPeriod:
+                changed = index.BeginPeriod(record.GraphId, primary, secondary, tertiary, memorizedAtMs);
+                entriesAdded = 1;
+                break;
+            case LogOperation.RemovePeriod:
+                changed = index.RemovePeriod(record.GraphId, primary, secondary, tertiary, memorizedAtMs);
+                entriesAdded = -1;
+                break;
+            case LogOperation.EndPeriod:
+                changed = index.EndPeriod(record.GraphId, primary, secondary, tertiary, memorizedAtMs, forgottenAtMs);
+                entriesAdded = 0;
+                break;
+            default:
+                changed = index.ContinuePeriod(record.GraphId, primary, secondary, tertiary, memorizedAtMs, forgottenAtMs);
+                entriesAdded = 0;
+                break;
+        }
+
+        if (_recovering && entriesAdded != 0)
+        {
+            var counted = changed ? entriesAdded : 0;
+            var owed = record.TxId > index.CountTxId ? entriesAdded : 0;
+            index.AdjustRecoveredEntryCount(owed - counted);
+        }
+
+        return changed;
     }
 
     /// <summary>

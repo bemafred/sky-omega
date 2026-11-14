@@ -423,6 +423,29 @@ internal enum LogOperation : byte
     /// </summary>
     End = 5,
 
+    // ADR-061 M7: the four changes a write on a Cognitive store can be decided to make. The log holds the change
+    // that was decided at the write, not the operation that was asked for. Each names its period by the quad and the
+    // period's memorized time, applies only in the state the table of M7 names, and reads no clock, so applying it
+    // again, to an index at any earlier point of the log, changes nothing more.
+
+    /// <summary>A period begins at MemorizedAt. Applies when the quad has no period that began then.</summary>
+    BeginPeriod = 6,
+
+    /// <summary>The period that began at MemorizedAt ends at ForgottenAt. Applies when that period is open.</summary>
+    EndPeriod = 7,
+
+    /// <summary>
+    /// The period that began at MemorizedAt is removed: the quad was memorized and forgotten inside one clock
+    /// reading, so it was remembered at no representable time (ADR-061 M2). Applies when that period is open.
+    /// </summary>
+    RemovePeriod = 8,
+
+    /// <summary>
+    /// The period that began at MemorizedAt and ended at ForgottenAt continues: the quad was forgotten and memorized
+    /// again inside one clock reading (ADR-061 M2). Applies when that period's forgotten time is ForgottenAt.
+    /// </summary>
+    ContinuePeriod = 9,
+
     Checkpoint = 255
 }
 
@@ -495,6 +518,28 @@ internal struct LogRecord
             MemorizedAtTicks = versionMemorizedAt.UtcTicks,
             ForgottenAtTicks = end.UtcTicks,
             TransactionTimeTicks = transactionTimeTicks
+        };
+    }
+
+    /// <summary>
+    /// Create a log record for one of the four decided changes to a period (ADR-061 M7). Times are in Unix
+    /// milliseconds, as the index keeps them. <paramref name="forgottenAtMs"/> is the reading the change names for
+    /// <see cref="LogOperation.EndPeriod"/> and <see cref="LogOperation.ContinuePeriod"/>, and the stored form of
+    /// "no forgotten time" for <see cref="LogOperation.BeginPeriod"/>.
+    /// </summary>
+    public static LogRecord CreatePeriodChange(LogOperation change, long graphId, long subjectId, long predicateId,
+        long objectId, long memorizedAtMs, long forgottenAtMs, long clockReadingMs)
+    {
+        return new LogRecord
+        {
+            Operation = change,
+            GraphId = graphId,
+            SubjectId = subjectId,
+            PredicateId = predicateId,
+            ObjectId = objectId,
+            MemorizedAtTicks = DateTimeOffset.FromUnixTimeMilliseconds(memorizedAtMs).UtcTicks,
+            ForgottenAtTicks = DateTimeOffset.FromUnixTimeMilliseconds(forgottenAtMs).UtcTicks,
+            TransactionTimeTicks = clockReadingMs
         };
     }
 

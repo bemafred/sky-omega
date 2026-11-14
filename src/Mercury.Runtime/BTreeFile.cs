@@ -322,6 +322,13 @@ public sealed unsafe class BTreeFile : IDisposable
     public long IncrementEntryCount() => System.Threading.Interlocked.Increment(ref _entryCount);
 
     /// <summary>
+    /// Decrement <see cref="EntryCount"/> atomically. Consumers call this once per entry
+    /// taken out of the tree. Returns the new count.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public long DecrementEntryCount() => System.Threading.Interlocked.Decrement(ref _entryCount);
+
+    /// <summary>
     /// Reset the tree to empty state. Used by <c>Clear()</c> on the consumer side.
     /// File size is preserved; the page cache is cleared (stale pointers).
     /// Consumer is responsible for re-initializing page 1 (the new empty root).

@@ -188,7 +188,10 @@ public class DeleteEndsValidTimeTests : IDisposable
     }
 
     [Fact]
-    public void DeleteCurrentBatched_AfterAnAddInTheSameBatch_EndsTheAddedVersion()
+    // Since ADR-061 (M2) an add and a delete of one quad in one batch leave no period: the quad was remembered at no
+    // representable time. MemoryTimeWriteRuleTests holds that. What this test holds still stands: the delete reports
+    // a change, and nothing is remembered.
+    public void DeleteCurrentBatched_AfterAnAddInTheSameBatch_ReportsAChangeAndLeavesNothingRemembered()
     {
         var dir = Path.Combine(_testDir, "end-batch-add");
         using var store = new QuadStore(dir);
@@ -198,7 +201,7 @@ public class DeleteEndsValidTimeTests : IDisposable
         var deleted = store.DeleteCurrentBatched(S, P, "\"a\"");
         store.CommitBatch();
 
-        Assert.True(deleted, "The version the batch's Add creates holds at the batch's time");
+        Assert.True(deleted, "The quad the batch memorized was remembered when the delete was asked");
         store.AcquireReadLock();
         try
         {
@@ -565,12 +568,13 @@ public class DeleteEndsValidTimeTests : IDisposable
         {
             var record = LogRecord.CreateAdd(1, 2, 3, DateTimeOffset.UtcNow, DateTimeOffset.MaxValue,
                 transactionTimeTicks: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
-            record.Operation = (LogOperation)7;
+            // 200 is no operation of this Mercury. (7 was used here until ADR-061 gave 6 to 9 to the decided changes.)
+            record.Operation = (LogOperation)200;
             wal.Append(record);
         }
 
         var error = Assert.Throws<InvalidDataException>(() => new QuadStore(dir));
-        Assert.Contains("operation 7", error.Message);
+        Assert.Contains("operation 200", error.Message);
     }
 
     // ---- D7: repair ----------------------------------------------------------------------------------------------
