@@ -48,13 +48,11 @@ internal sealed unsafe class ReferenceQuadIndex : IQuadIndex
     internal ReferenceQuadIndex(string filePath, IAtomStore? sharedAtoms,
         long initialSizeBytes = 1L << 30, bool bulkMode = false)
     {
-        // Bulk-mode floor set to 1 TB so 21.3B Wikidata Reference bulk-load doesn't
-        // overrun the mmap view. A 256 GB allocation (the earlier floor) fits ~8.2B
-        // triples at 16 KB pages × 511 entries/leaf; past that the file must grow,
-        // but BTreeFile acquires a single fixed-size mmap view at open and has no
-        // remap logic (docs/limits/btree-mmap-remap.md). 1 TB covers the full
-        // Wikidata 21.3B case (~670 GB actual on APFS sparse storage); anything
-        // larger would currently need the proper remap implementation.
+        // Bulk-mode floor set to 1 TB so that the 21.3B Wikidata Reference bulk-load
+        // stays in one mapped extent (~670 GB actual on APFS sparse storage). A 256 GB
+        // allocation (the earlier floor) fits ~8.2B triples at 16 KB pages × 511
+        // entries/leaf. A file that outgrows its size is lengthened and the added part
+        // mapped as one more extent (ADR-063).
         _file = new BTreeFile(
             filePath,
             initialSizeBytes,

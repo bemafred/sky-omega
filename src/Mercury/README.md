@@ -127,7 +127,7 @@ Want a cognitive architecture with semantic memory? That’s [Sky Omega](../../R
 - **QuadStorePool** — Managed pool for concurrent access
 - **AtomStore** — String interning for 64-bit ID efficiency
 - **WriteAheadLog** — Durability guarantee
-- **PageCache** — Buffer management for mmap’d access
+- **BTreeFile** — The memory-mapped file a B+Tree index lives in
 
 ### Format Support
 

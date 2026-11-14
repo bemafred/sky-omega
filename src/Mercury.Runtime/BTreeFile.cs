@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.IO.MemoryMappedFiles;
 using System.Runtime.CompilerServices;
+using System.Threading;
 
 namespace SkyOmega.Mercury.Runtime;
 
@@ -12,9 +13,20 @@ namespace SkyOmega.Mercury.Runtime;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>What this is:</b> the managed file (FileStream + MemoryMappedFile + accessor
-/// + pinned base pointer), plus the lifecycle that anchors a B+Tree (root, next-free
-/// page, entry count, magic).
+/// <b>What this is:</b> the managed file (FileStream + its memory mappings), plus the
+/// lifecycle that anchors a B+Tree (root, next-free page, entry count, magic).
+/// </para>
+/// <para>
+/// <b>Growth:</b> the file is mapped in extents. The first extent is the whole file as it
+/// is when it is opened. When the tree needs a page past the end, the file is lengthened
+/// and the added part is mapped as one more extent. An extent is never unmapped or moved
+/// before <see cref="Dispose"/>, so a page pointer stays valid until then: a tree that
+/// splits a page may go on using the pointers it held when it asked for the new page.
+/// </para>
+/// <para>
+/// <b>Threads:</b> <see cref="GetPagePointer{T}"/> may be called from any number of threads
+/// at once, also while another thread allocates a page. It reads no state that a reader
+/// changes. One thread at a time changes the tree; the consumer's lock sees to that.
 /// </para>
 /// <para>
 /// <b>What this is not:</b> the B+Tree algorithm. Consumers (concrete <c>*QuadIndex</c>
@@ -60,13 +72,23 @@ public sealed unsafe class BTreeFile : IDisposable
 
     private const int CountTxIdOffset = 32;
 
+    /// <summary>
+    /// One mapped part of the file: the pages from <see cref="FirstPageId"/> on, at <see cref="FirstPage"/>.
+    /// </summary>
+    private sealed class MappedExtent
+    {
+        public required MemoryMappedFile Mapping { get; init; }
+        public required MemoryMappedViewAccessor Accessor { get; init; }
+        public required long FirstPageId { get; init; }
+        public byte* FirstPage;
+    }
+
     private readonly long _magicNumber;
     private readonly FileStream _fileStream;
-    private readonly MemoryMappedFile _mmapFile;
-    private readonly MemoryMappedViewAccessor _accessor;
-    private readonly PageCache _pageCache;
-    private byte* _basePtr;
-    private long _fileCapacity;
+    private readonly MemoryMappedViewAccessor _accessor = null!;   // of the first extent, which holds the header
+    private readonly Lock _growth = new();
+    private volatile MappedExtent[] _extents = [];
+    private long _mappedPageCount;
     private long _rootPageId;
     private long _nextPageId;
     private long _entryCount;
@@ -74,9 +96,6 @@ public sealed unsafe class BTreeFile : IDisposable
     private long _countTxId;
     private bool _deferMsync;
     private bool _disposed;
-
-    /// <summary>Raw base pointer to the mmap'd region. Consumers use this for page-pointer math.</summary>
-    public byte* BasePtr => _basePtr;
 
     /// <summary>Current root page id of the B+Tree. Consumer updates after root-split.</summary>
     public long RootPageId { get => _rootPageId; set => _rootPageId = value; }
@@ -115,17 +134,15 @@ public sealed unsafe class BTreeFile : IDisposable
     /// <param name="bulkMode">When true, opens with <see cref="FileOptions.None"/> (OS write cache batched) and <see cref="DeferMsync"/>=true; lifts initial size to <paramref name="bulkModeFloor"/>. When false, opens with <see cref="FileOptions.WriteThrough"/> for per-op durability.</param>
     /// <param name="bulkModeFloor">Bulk-mode initial-size floor (e.g., 256 GB for Graph, 1 TB for Reference, 1 GB for Minimal). Ignored when <paramref name="bulkMode"/> is false.</param>
     /// <param name="magicNumber">Consumer's file-format identifier. Stored at byte offset 24 of the file; verified on subsequent opens.</param>
-    /// <param name="pageCacheCapacity">LRU page cache size (default 10,000 pages).</param>
     /// <param name="initRoot">Called once when the file is freshly created (no prior magic).
     /// The consumer writes its empty root-page header at <c>GetPagePointer&lt;T&gt;(1)</c>;
     /// the metadata header (RootPageId=1, NextPageId=2, EntryCount=0) is written
     /// before the callback fires. Not called when opening an existing file.</param>
-    public BTreeFile(string filePath, long initialSizeBytes, bool bulkMode, long bulkModeFloor, long magicNumber, Action<BTreeFile>? initRoot = null, int pageCacheCapacity = 10_000)
+    public BTreeFile(string filePath, long initialSizeBytes, bool bulkMode, long bulkModeFloor, long magicNumber, Action<BTreeFile>? initRoot = null)
     {
         if (filePath is null) throw new ArgumentNullException(nameof(filePath));
         if (initialSizeBytes <= 0) throw new ArgumentOutOfRangeException(nameof(initialSizeBytes));
         if (bulkModeFloor <= 0) throw new ArgumentOutOfRangeException(nameof(bulkModeFloor));
-        if (pageCacheCapacity <= 0) throw new ArgumentOutOfRangeException(nameof(pageCacheCapacity));
 
         _magicNumber = magicNumber;
         _deferMsync = bulkMode;
@@ -144,22 +161,63 @@ public sealed unsafe class BTreeFile : IDisposable
             : initialSizeBytes;
         if (_fileStream.Length == 0)
             SparseFile.SetLength(_fileStream, actualInitialSize);
-        _fileCapacity = _fileStream.Length;
 
-        _mmapFile = MemoryMappedFile.CreateFromFile(
+        // The first extent: the whole file as it is now. A file whose length is not a whole number of
+        // pages ends in a part of a page; that part belongs to no page, and the next extent starts at the
+        // page it would have been.
+        try
+        {
+            var first = MapExtent(firstPageId: 0, fileLength: _fileStream.Length);
+            _accessor = first.Accessor;
+            _extents = [first];
+            _mappedPageCount = _fileStream.Length / PageSize;
+
+            LoadMetadata(initRoot);
+        }
+        catch
+        {
+            // A file that is refused (another consumer's magic number) or cannot be mapped is closed again.
+            Unmap();
+            _fileStream.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Map the file from page <paramref name="firstPageId"/> to <paramref name="fileLength"/>, which is the
+    /// file's length now.
+    /// </summary>
+    private MappedExtent MapExtent(long firstPageId, long fileLength)
+    {
+        var mapping = MemoryMappedFile.CreateFromFile(
             _fileStream,
             mapName: null,
-            capacity: 0,
+            capacity: fileLength,
             MemoryMappedFileAccess.ReadWrite,
             HandleInheritability.None,
-            leaveOpen: false);
-
-        _accessor = _mmapFile.CreateViewAccessor(0, 0, MemoryMappedFileAccess.ReadWrite);
-        _accessor.SafeMemoryMappedViewHandle.AcquirePointer(ref _basePtr);
-
-        _pageCache = new PageCache(pageCacheCapacity);
-
-        LoadMetadata(initRoot);
+            leaveOpen: true);
+        MemoryMappedViewAccessor? accessor = null;
+        try
+        {
+            var offset = firstPageId * PageSize;
+            accessor = mapping.CreateViewAccessor(offset, fileLength - offset, MemoryMappedFileAccess.ReadWrite);
+            byte* viewStart = null;
+            accessor.SafeMemoryMappedViewHandle.AcquirePointer(ref viewStart);
+            // The view starts at a boundary the operating system chooses, at or before the offset asked for.
+            return new MappedExtent
+            {
+                Mapping = mapping,
+                Accessor = accessor,
+                FirstPageId = firstPageId,
+                FirstPage = viewStart + accessor.PointerOffset
+            };
+        }
+        catch
+        {
+            accessor?.Dispose();
+            mapping.Dispose();
+            throw;
+        }
     }
 
     /// <summary>
@@ -261,54 +319,76 @@ public sealed unsafe class BTreeFile : IDisposable
         _accessor.Write(24, _magicNumber);
         _accessor.Write(CountTxIdOffset, _countTxId);
         if (_deferMsync || !msync) return;
-        _accessor.Flush();
+        Flush();
     }
 
     /// <summary>
     /// Allocate a new B+Tree page. Returns the page id; the consumer's tree algorithm
-    /// initializes the page's content via <see cref="GetPagePointer{T}"/>. Grows the
-    /// file (doubles capacity, minimum required) when the new page exceeds the
-    /// currently-allocated extent. Persists the structure via <see cref="SaveStructure"/>.
+    /// initializes the page's content via <see cref="GetPagePointer{T}"/>. When the page
+    /// lies past the end of the file, the file is lengthened (doubled, at least) and the
+    /// added part is mapped as one more extent. Persists the structure via
+    /// <see cref="SaveStructure"/>.
     /// </summary>
+    /// <remarks>
+    /// Pointers to pages allocated before stay valid. When the file cannot be lengthened or
+    /// mapped, the exception leaves the file as it was: no page id is used up.
+    /// </remarks>
     public long AllocatePage()
     {
-        var pageId = System.Threading.Interlocked.Increment(ref _nextPageId) - 1;
-        var requiredSize = (pageId + 1) * PageSize;
-        if (requiredSize > _fileCapacity)
+        lock (_growth)
         {
-            lock (_fileStream)
-            {
-                if (requiredSize > _fileCapacity)
-                {
-                    var newSize = Math.Max(_fileCapacity * 2, requiredSize);
-                    SparseFile.SetLength(_fileStream, newSize);
-                    _fileCapacity = newSize;
-                }
-            }
+            var pageId = _nextPageId;
+            if (pageId >= _mappedPageCount)
+                MapOneMoreExtent(upToPageId: pageId);
+            _nextPageId = pageId + 1;
+            SaveStructure();
+            return pageId;
         }
-        SaveStructure();
-        return pageId;
+    }
+
+    private void MapOneMoreExtent(long upToPageId)
+    {
+        var extents = _extents;
+        var lengthNow = _fileStream.Length;
+        var lengthNeeded = (upToPageId + 1) * PageSize;
+        var newLength = Math.Max(lengthNow * 2, lengthNeeded);
+        newLength = (newLength + PageSize - 1) / PageSize * PageSize;
+
+        // The file is lengthened before the added part is mapped, so a mapping never reaches past the
+        // end of its file (ADR-020 section 4).
+        SparseFile.SetLength(_fileStream, newLength);
+        var added = MapExtent(firstPageId: _mappedPageCount, fileLength: newLength);
+
+        var longer = new MappedExtent[extents.Length + 1];
+        extents.CopyTo(longer, 0);
+        longer[extents.Length] = added;
+        _extents = longer;
+        _mappedPageCount = newLength / PageSize;
     }
 
     /// <summary>
-    /// Get a typed pointer to a page. The page-cache layer makes repeated accesses
-    /// to hot pages O(1) at the cost of an unmanaged byte* per cached entry; the
-    /// pointer math (<c>_basePtr + pageId * PageSize</c>) is constant either way.
+    /// Get a typed pointer to a page. The pointer is valid until <see cref="Dispose"/>: a page
+    /// is mapped once and never moves. May be called from any number of threads at once.
     /// </summary>
     /// <typeparam name="T">The consumer's page-header struct type (e.g., <c>TemporalBTreePage</c>).</typeparam>
     /// <param name="pageId">Page id (≥ 1 for tree pages; page 0 is the metadata header).</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public T* GetPagePointer<T>(long pageId) where T : unmanaged
     {
-        if (_pageCache.TryGet(pageId, out var cached))
-            return (T*)cached;
-        var ptr = _basePtr + pageId * PageSize;
-        _pageCache.Add(pageId, ptr);
-        return (T*)ptr;
+        // The extents are few: the file at least doubles each time it grows. Later extents are the
+        // larger ones, so the search starts with the last.
+        var extents = _extents;
+        for (int i = extents.Length - 1; i > 0; i--)
+        {
+            var extent = extents[i];
+            if (pageId >= extent.FirstPageId)
+                return (T*)(extent.FirstPage + (pageId - extent.FirstPageId) * PageSize);
+        }
+        return (T*)(extents[0].FirstPage + pageId * PageSize);
     }
 
     /// <summary>
-    /// Issue an <c>msync</c> on the whole mapped region — unless <see cref="DeferMsync"/>
+    /// Issue an <c>msync</c> on the whole file — unless <see cref="DeferMsync"/>
     /// is true (bulk mode), in which case the call is a no-op. Consumers call this
     /// after every page write in cognitive mode and once at end-of-bulk-load.
     /// </summary>
@@ -316,11 +396,18 @@ public sealed unsafe class BTreeFile : IDisposable
     public void FlushPage()
     {
         if (_deferMsync) return;
-        _accessor.Flush();
+        Flush();
     }
 
-    /// <summary>Unconditional <c>msync</c> — flushes pending writes regardless of <see cref="DeferMsync"/>. Called at end-of-bulk-load.</summary>
-    public void Flush() => _accessor.Flush();
+    /// <summary>
+    /// Unconditional <c>msync</c> of every extent — flushes pending writes regardless of
+    /// <see cref="DeferMsync"/>. Called at end-of-bulk-load.
+    /// </summary>
+    public void Flush()
+    {
+        foreach (var extent in _extents)
+            extent.Accessor.Flush();
+    }
 
     /// <summary>
     /// Increment <see cref="EntryCount"/> atomically. Consumers call this once per
@@ -338,12 +425,11 @@ public sealed unsafe class BTreeFile : IDisposable
 
     /// <summary>
     /// Reset the tree to empty state. Used by <c>Clear()</c> on the consumer side.
-    /// File size is preserved; the page cache is cleared (stale pointers).
+    /// File size and mapping are preserved.
     /// Consumer is responsible for re-initializing page 1 (the new empty root).
     /// </summary>
     public void Reset()
     {
-        _pageCache.Clear();
         _rootPageId = 1;
         _nextPageId = 2;
         _entryCount = 0;
@@ -351,21 +437,25 @@ public sealed unsafe class BTreeFile : IDisposable
         _countTxId = 0; // the store's WAL is cleared with it, so its TxIds start over
     }
 
-    /// <summary>Persist metadata one last time, release the pinned pointer, dispose mmap + file.</summary>
+    /// <summary>Persist metadata one last time, unmap every extent, close the file.</summary>
     public void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
 
         SaveMetadata();
-        if (_basePtr != null)
+        Unmap();
+        _fileStream.Dispose();
+    }
+
+    private void Unmap()
+    {
+        foreach (var extent in _extents)
         {
-            _accessor?.SafeMemoryMappedViewHandle.ReleasePointer();
-            _basePtr = null;
+            extent.FirstPage = null;
+            extent.Accessor.SafeMemoryMappedViewHandle.ReleasePointer();
+            extent.Accessor.Dispose();
+            extent.Mapping.Dispose();
         }
-        _accessor?.Dispose();
-        _mmapFile?.Dispose();
-        _fileStream?.Dispose();
-        _pageCache?.Dispose();
     }
 }

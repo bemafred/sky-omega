@@ -277,7 +277,7 @@ Candidate rounds, in their currently-estimated impact order (subject to re-ranki
 3. **Hardware-accelerated XxHash3** — `docs/limits/hash-function-quality.md`. 5-15% on hash hot path.
 4. **Prefetch + pipelined batch intern** — Cognitive-side; 20-30% on probe cost.
 5. **MPHF on sorted vocab (BBHash)** — Phase 2 of #1; query-side O(1) lookup.
-6. **B+Tree mmap remap** — `docs/limits/btree-mmap-remap.md`. Unblocks > 1 TB cases.
+6. **B+Tree mmap remap** — `docs/limits/btree-mmap-remap.md`. Unblocks > 1 TB cases. Done 2026-11-14 by ADR-063: an index file is mapped in extents and grows by adding one.
 7. **Reference read-only mmap** — `docs/limits/reference-readonly-mmap.md`. Query-time relaxed page handling for sealed stores.
 
 Each round's exit is a captured JSONL artifact comparing pre/post on the metric it targets. No round merges as "we believe it improves X" — only as "the metric moved from Y to Z, gradient-validated at 1 M / 10 M / 100 M."

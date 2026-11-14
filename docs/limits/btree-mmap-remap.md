@@ -1,8 +1,10 @@
 # Limit: B+Tree index has no mmap remap
 
-**Status:**        Latent
+**Status:**        Resolved
 **Surfaced:**      2026-04-22, during Phase 6 pre-flight for 21.3B Wikidata Reference bulk-load
-**Last reviewed:** 2026-04-22
+**Promoted to:**   [ADR-063](../adrs/mercury/ADR-063-an-index-file-grows-by-extents.md) (2026-11-14)
+**Resolved:**      2026-11-14. The file is mapped in extents: a file that outgrows its size is lengthened and the added part is mapped as one more extent. A page never moves, so the stale-pointer and reader-coordination work listed below under "Why this is a limit, not a bug" is not needed. Measured before the fix on omega: a Cognitive store whose index files start at 1 MB died with `AccessViolationException` after 5,000 quads. `StorageOptions` promised that index files grow, so this was a defect and not only a limit. What follows is the entry as it stood.
+**Last reviewed:** 2026-11-14
 **Promotes to:**   ADR when (a) a single store genuinely needs to exceed the current 1 TB sparse floor for Reference / the TemporalQuadIndex initial size for Cognitive, OR (b) a workload materializes that cannot predict its final size at store-open time
 
 ## Description

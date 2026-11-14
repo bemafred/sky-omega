@@ -28,7 +28,7 @@ left out; test counts are from one `dotnet test` run on omega (macOS arm64), rea
 | ├─ NTriples | 178 | N-Triples parser and writer, over the N-Quads ones |
 | └─ (top-level files) | 1,018 | `RdfEngine` and `SparqlEngine` facades, `RdfDocumentWriter` |
 | **Mercury.Abstractions** | **1,486** | Store profiles and schema, `IAtomStore`, metric event types, exceptions |
-| **Mercury.Runtime** | **4,229** | `BTreeFile`, `PageCache`, buffers, cross-process gate, disk-space guard, memory probe, temp paths, sparse files |
+| **Mercury.Runtime** | **4,229** | `BTreeFile`, buffers, cross-process gate, disk-space guard, memory probe, temp paths, sparse files |
 | **Mercury.Solid** | **4,401** | W3C Solid Protocol: WAC/ACP, N3 Patch, HTTP handlers |
 | **Mercury.Pruning** | **1,238** | Copy-and-switch pruning |
 | **Mercury.Mcp** | **481** | MCP server, 6 tools (query, update, stats, graphs, store, version) |

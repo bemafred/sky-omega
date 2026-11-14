@@ -9,7 +9,7 @@ Detailed technical reference for Mercury's storage, durability, concurrency, and
 | `QuadStore`    | Multi-index quad store with named graph support                        |
 | `QuadIndex`    | B+Tree index with bitemporal + graph support (GSPO, GPOS, GOSP, TGSPO) |
 | `AtomStore`    | String interning with memory-mapped storage                            |
-| `PageCache`    | LRU cache for B+Tree pages (clock algorithm)                           |
+| `BTreeFile`    | The file a B+Tree index lives in: mapped in extents, grows by adding one ([ADR-063](../../adrs/mercury/ADR-063-an-index-file-grows-by-extents.md)) |
 | `TrigramIndex` | Full-text search via trigram inverted index (opt-in)                   |
 
 ## Durability Design
