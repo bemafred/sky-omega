@@ -194,6 +194,21 @@ Resolved, pointing here.
 
 ### D5. Existing stores are migrated, not matched both ways
 
+**Changed 2026-11-14 by [ADR-061](ADR-061-a-facts-own-times.md) (its Q8, decided by Martin).** The migration below
+rewrites a version with `Retract` and an `Add` that states the same valid time. ADR-061 removes both: there is no
+retraction (its D2), and no writer states a time (its I11). So the migration is a **conversion** in ADR-061's sense
+(its I14):
+
+- It rewrites the stored form of a term and carries every period of the quad unchanged, with both times. The memory
+  learned nothing new, so nothing is memorized and nothing is forgotten.
+- Where two stored forms are one term, they are one quad, and that quad is remembered whenever either form was. Their
+  periods are merged by that rule.
+- It is built on Mercury's internal copy that carries a period's times (ADR-061 D12), after ADR-061's Step 6.
+- It reports what it changes and keeps the source (ADR-061 I19).
+
+What follows is the text as it was proposed on 2026-10-27. Where it says `Retract`, `Delete` and `Add` with an
+interval, read the conversion above. The command, what it rewrites, what it lists and leaves, and its reports stand.
+
 Stores written before this ADR hold the old forms. The readers do **not** learn to match both forms. That would be a
 second canonicalization rule kept forever, which is the divergence this ADR removes. Instead:
 

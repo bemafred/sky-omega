@@ -187,9 +187,13 @@ On Minimal the graph is empty because the profile has no graphs. That is a true 
 A second type carries the quad and its two times, `MemorizedAt` and `ForgottenAt`. Only reads that exist on the
 Cognitive profile return it. Whoever holds a value of this type knows the times are kept, not made up.
 
+A memory that is remembered has no forgotten time, and the type says so: `ForgottenAt` is absent, not a far-future
+value ([ADR-061](ADR-061-a-facts-own-times.md) I8, decided 2026-11-13). The stored maximum never leaves the index.
+
 - Which Cognitive reads exist is ADR-061's matter (Step 6: the public store methods follow the words). This ADR says
   only what they return.
-- Pruning reads every version with both times through such a read (ADR-061 D12).
+- A conversion reads every period with both times through such a read (ADR-061 I14). A prune reads what is
+  remembered, with its memorized time (ADR-061 D12, decided 2026-11-14).
 - `LegacyTransactionTime` and `LegacyIsDeleted` are not members of the new type. Until they leave the entry (ADR-061
   Step 6 and L1), what still needs them reads them inside the store: the ADR-054 repair, and the tests that check the
   transaction time, which then move to the index's own tests or go with the field.

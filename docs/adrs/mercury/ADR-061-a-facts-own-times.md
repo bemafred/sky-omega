@@ -17,7 +17,7 @@ Martin's first review, the same day, decided six more things:
 
 - a time without a timezone is UTC (D10);
 - the code names the two times `MemorizedAt` and `ForgottenAt`, from the start (D11);
-- pruning keeps both times (D12);
+- pruning keeps the times (D12; on 2026-11-14 he decided what a prune transfers);
 - the stored layout changes later, as the later part of this ADR (D13, [Later: the stored layout](#later-the-stored-layout));
 - the dialect is called Cognitive SPARQL (D14);
 - the rename is the first step. It is done (Step 2), on his direction, while the rest is under review.
@@ -36,6 +36,27 @@ form derived from that decision. It is [The model](#the-model), written into thi
   the stored shape Martin chose asks of M7 and I13 (the later part), and the path where a committed write is not
   applied (M7).
 
+**The decisions were closed on 2026-11-14.** Martin reviewed a report of what was still open and accepted its six
+packages: the language (D8 to D10), what a caller can observe (D2, M9, Q10, Q15), what the store does when a committed
+write cannot be applied (M7), pruning (D12, as he clarified it), the two other ADRs this one touches (Q8), and the
+scope of acceptance. No part of the decision text is marked Proposed any more. What is still Proposed is in the later
+part, which acceptance does not cover.
+
+**What acceptance of this ADR covers:**
+
+- the model (M1 to M9) and its invariants (I1 to I19);
+- Cognitive SPARQL's words and their rules (D6 to D10), and what a caller can observe;
+- recovery and failure as requirements (M7), and pruning (D12).
+
+**What it does not cover:** the stored layout, the conversion of existing stores, and the rule for the entries of the
+live store that disagree between its indexes. They are [the later part](#later-the-stored-layout), a design phase
+reviewed on its own. Two requirements bind that phase already: a conversion carries every period unchanged (I14), and
+nothing resolves a disagreement between stored copies silently (I19).
+
+**What is left to the implementation plan:** the planner (Q6), a clock that tests control (Q14), the form of the
+diagnostic (Q13), the word the documents use in place of "bitemporal" (Q7), how a failure is made on purpose in a
+test, and whether recovery can run without reopening the store.
+
 The file keeps its name: the changelog, the 1.8.41 release notes, the solution file and the ADR index link to it.
 
 ## Why
@@ -47,6 +68,9 @@ The time a memory store keeps is for recall. Martin, 2026-11-11:
 > We need functionality that can answer what have we been upto last week? Last month? What did we do in January? The
 > temporality is for recall purposes. Relative to your subjective experience. It is not for validating/invalidating
 > individual quads.
+
+The times say when the memory took something in. When a thing happened in the world is content (D3): the store dates
+the memory of it, not the event.
 
 And the goal:
 
@@ -111,7 +135,7 @@ Only two paths write a stated valid time: `Mercury.Pruning` copies, and `example
 The memory stores have never been pruned (Martin, 2026-11-11). So nothing has written a stated time into them, and
 every `ValidFrom` in them should be the time of its write.
 
-**Counted 2026-11-14 (Step 3), on a copy of the live memory store:** of 8,187 entries, 84 have a memorized time
+**Counted 2026-11-14 (Step 3), on a copy of the live memory store:** of 8,238 entries, 84 have a memorized time
 different from `LegacyTransactionTime`, and none has `LegacyIsDeleted` set. In all 84 the memorized time is earlier
 by less than 10 ms, and all were memorized between 2026-03-29 and 2026-04-19. So no entry holds a stated time that is
 far from its write.
@@ -128,7 +152,7 @@ them.
 ## The model
 
 **Decided — 2026-11-13.** On 2026-11-14 Martin confirmed the form derived here: "now I think you have the model
-right." The parts marked **Proposed** are Sky's and are not confirmed.
+right." M7 and M9 were Sky's proposals; Martin accepted them on 2026-11-14 with the decision closure.
 
 Martin, 2026-11-13:
 
@@ -202,17 +226,25 @@ Periods:
 Writes:
 
 - **I9.** Inside one clock reading, any sequence of operations on a quad gives what its last operation alone gives.
-- **I10.** Once the clock has moved past `t`, `M(t)` never changes.
-- **I11.** Both times of a period are readings of the store's clock, taken at a write. No writer states one.
+- **I10.** Once the clock has moved past `t`, and the write in progress, if there is one, has completed, `M(t)` never
+  changes. A batch is stamped when it begins and can complete later.
+- **I11.** Both times of a period are readings of a store's clock, taken at a write. No writer states one. A copy
+  carries the times of the store it was copied from (I14).
 - **I12.** An operation is stamped while the writer holds the write lock.
 
 The stored form:
 
-- **I13.** Every index holds the same periods.
-- **I14.** A copy (a prune, a rebuild, a conversion) carries periods unchanged (D12).
+- **I13.** Every read answers from the same periods, whichever stored structure serves it.
+- **I14.** A rebuild and a conversion carry every period unchanged. A prune carries the open period of each remembered
+  quad it selects, unchanged, and nothing else (D12).
 - **I15.** Recovery changes nothing. Replaying the log onto indexes that have each applied some first part of it gives
   the periods an uninterrupted run gives. Two conditions: recovery starts at or before the earliest point any index has
   reached, and it runs to the end of the log.
+- **I19.** No repair, rebuild, prune or conversion resolves a disagreement between stored copies silently. It reports
+  what differs, and the source is kept.
+
+I10, I11, I13 and I14 were worded more exactly on 2026-11-14, and I19 was added then. Martin accepted the changes with
+the decision closure.
 
 Kept apart from the set:
 
@@ -265,14 +297,22 @@ Across two readings nothing is merged:
 So one request can give either result. `INSERT x ; DELETE x` leaves a short period when the clock moved between the two
 operations, and none when it did not. Both are correct: memory time shows what it can resolve.
 
-### M7. Recovery — Proposed
+### M7. Recovery, and a write that cannot be applied — Decided 2026-11-14
+
+Three requirements are decided. The form of the records is not: it belongs to the implementation and to the stored
+layout.
+
+1. The log holds the change that was decided at the write, not the operation that was asked for.
+2. Applying a record is idempotent, and it reads no clock.
+3. Recovery starts at or before the earliest point any index has reached, and runs to the end of the log (I15).
 
 I15 has a consequence for the log. The store keeps the periods in several indexes, and after a crash each index can
 have applied a different part of the log. If recovery decided each operation again (M5) on one index and gave the
 outcome to the others, the indexes would end up different: an enumeration found 2,911 such cases among 6,688 small
 ones.
 
-So the log holds the change that was decided at the write, and not the operation that was asked for:
+So the log holds the change that was decided at the write, and not the operation that was asked for. For today's
+form, where every index holds every period, the records are:
 
 | Record | Applies when | Otherwise |
 |--------|--------------|-----------|
@@ -287,8 +327,8 @@ So the log holds the change that was decided at the write, and not the operation
 - **The start of recovery (read, not run).** The checkpoint moves it. `CheckpointInternal` runs only under the write
   lock, or at open after recovery; it saves every index to disk before it truncates the log. So the start moves only to
   a point every index has reached.
-- **One path is not closed (read 2026-11-14, not run):** a committed record that is not applied, in a process that
-  lives on.
+- **One path is not closed in today's code (read 2026-11-14, not run):** a committed record that is not applied, in a
+  process that lives on.
   - `CommitBatch` makes the commit durable in the log first. It then applies each record of the batch to GSPO, GPOS,
     GOSP, TGSP and the trigram index, one after the other.
   - If that throws part-way, the records after it reach no index, and the one being applied may have reached some.
@@ -298,9 +338,23 @@ So the log holds the change that was decided at the write, and not the operation
     first, and I13 and I15 can both be broken without a crash.
   - The one throw that the code names on that path is the trigram table's overflow (`TrigramIndex`, after 1,024
     probes). It comes after the four indexes of one record and before the rest of the batch.
-  - **Proposed:** a write that cannot be applied stops the store from writing and from checkpointing, until recovery
-    has run. Whether recovery then runs in the same process or at the next open is open. A test that makes this path
-    fail on purpose needs a way into production code, which is not proposed yet (Q14).
+
+**A committed write that cannot be applied — Decided 2026-11-14.**
+
+- **The durable commit in the log is the commit point.** From then on the write is part of the store, at its stamp.
+- **A store that could not apply a committed write is not consistent, and says so.** Until recovery has run it:
+  - answers no read: indexes that may disagree do not serve a result;
+  - takes no write: a later write would be decided (M5) against indexes that lack the earlier one;
+  - makes no checkpoint, so the start of recovery never moves past a record an index has not received;
+  - closes without a checkpoint.
+- **If recovery fails, the store does not open.** The log is kept as it is.
+- **What the caller can conclude from an error:**
+  - before the commit: nothing changed, and `M` is as it was;
+  - after the commit: the write holds once recovery has run. It is not known to have failed.
+  - A retry is safe in both cases. Memorizing a remembered quad and forgetting one that is not remembered change
+    nothing (I3, I4), so a repeated write leaves the period and its times as the first one made them.
+- **Left to the implementation plan:** whether recovery can run in the same process, and how a test makes this path
+  fail on purpose. That needs a way into production code (Q14).
 
 ### M8. Knowledge, diagnostics and judgement are three layers
 
@@ -319,7 +373,7 @@ membership."
   this reading, and a forget of a quad memorized at this reading. It observes the second operation, and it knows the
   first from a stored time equal to the current reading. It never concludes anything from stored times alone.
 - Such a sequence is not a defect by itself. A retry, a batch or a correction can produce it.
-- **Open:** the form of the diagnostic, and whether and where it is kept (Q13).
+- **Left to the implementation plan:** the form of the diagnostic, and whether and where it is kept (Q13).
 
 ### M9. What a reader sees is a separate contract
 
@@ -329,10 +383,26 @@ membership."
   quad `M` will not hold for this reading (memorized, then forgotten before the reading ends), or a forgotten time that
   a later memorize in the same reading removes.
 - A clock reading is not a transaction, and a request is not a moment (I17).
+
+**The contract — Decided 2026-11-14:**
+
+- **One state.** A query is answered from one state of the store: the store as some completed write left it. No write
+  becomes visible while the query runs.
+- **A write operation is seen whole or not at all.** A `DELETE … INSERT … WHERE` is one write: no query sees its
+  deletions without its insertions.
+- **A request with several operations is several writes**, and a query can run between them.
+- **Every write that completed before the query began is seen.**
+- **Recency.** Every write a query did not see is stamped at or after that query's `NOW()`. So a reader that asks
+  "what is new since my last look" with the `NOW()` of its last look as the bound misses nothing (Q11). A write
+  stamped in the same millisecond as the bound can come back twice.
+
+How the store keeps this (a lock, or another way) is an implementation choice. So is which index answers a query.
+
 - **Today's code (read, not run):** a query holds the read lock and the writer holds the write lock for a whole batch,
-  so a query sees whole batches. One SPARQL request with several operations is several batches, and a query can run
-  between them.
-- **Open:** the contract itself is not written yet (Q12).
+  so a query sees whole batches. One SPARQL request with several operations is several batches.
+- **Today's code breaks the recency rule in one place (read, not run):** `AddCurrent` reads the clock before it takes
+  the write lock (I12), so a single write can carry a stamp earlier than the `NOW()` of a query that did not see it.
+  The batch path stamps under the lock.
 
 ### M10. How the model was checked
 
@@ -397,8 +467,8 @@ stand:
   - `GRAPH ?g` lists the graphs by a scan of what is remembered now (`NamedGraphEnumerator`), under `ALL VERSIONS` too.
     A graph that is wholly forgotten is found by no query with a graph variable. `INCLUDING FORGOTTEN` would inherit
     that.
-  - Pruning lists the graphs the same way (`PruningTransfer`; read, not run). A prune that keeps history would leave
-    such a graph out, against I14.
+  - Pruning lists the graphs the same way (`PruningTransfer`; read, not run). For a prune that is right: it transfers
+    only what is remembered (D12).
   - All 8 are test and scratch graphs, with 25, 9, 6, 5, 3, 1, 1 and 1 entries.
 - **I13 is broken in two ways, and in no other.** TGSP against GSPO, entry by entry:
 
@@ -481,7 +551,16 @@ This replaces ADR-054 D2 (Retract) and D6 (`RetractedAt`). ADR-054 D1, D4 and D8
   - D3: a fact forgotten and memorized again in one reading continues its period. No new period begins.
   - D5: an add followed by a delete of the same quad in one batch leaves no period. Today it leaves an entry with
     equal times (M11).
-  - What such a delete counts as affected is open (Q9).
+
+**What an update counts as affected — Decided 2026-11-14** (Q9). An operation counts a quad when it changes whether
+the quad is remembered.
+
+- Memorizing a quad that is remembered counts nothing, and so does forgetting one that is not (I3, I4).
+- A delete of a quad memorized in the same clock reading counts it: the quad was remembered and is not any more, though
+  no period is left.
+- The count is a result of the request. Nothing of it is stored.
+- **Today's code:** a delete already counts what ended (ADR-054 D5). `INSERT DATA` counts every quad it is given,
+  remembered or not (`UpdateExecutor`), and changes with this rule.
 
 ### D3. World time is content — Decided
 
@@ -547,7 +626,7 @@ SELECT ?g ?s ?label ?when WHERE {
   GRAPH ?g { ?s rdfs:label ?label MEMORIZED ?when SINCE "2026-11-02"^^xsd:date BEFORE "2026-11-09"^^xsd:date . }
 } ORDER BY ?when
 
-# What did we do in January?
+# What did we memorize in January?
 SELECT ?g ?s ?label WHERE {
   GRAPH ?g { ?s rdfs:label ?label MEMORIZED SINCE "2026-01-01"^^xsd:date BEFORE "2026-02-01"^^xsd:date . }
 }
@@ -579,12 +658,12 @@ that has no forgotten time. It needs no clock reading. Today's default reads the
 | `BETWEEN a AND b` | `SINCE a BEFORE b` says the same and states its bounds. |
 | `ALL VERSIONS` | `INCLUDING FORGOTTEN` takes its place. |
 | `RECORDED`, `VALID` | The 2026-11-10 draft's working names. `MEMORIZED` and `FORGOTTEN` replace them. |
-| `DURING [a, b]` | **Proposed.** Martin has not named it. It selects by overlap with valid time, which no recall question asks. |
+| `DURING [a, b]` | **Decided 2026-11-14.** It selects by overlap with a range, which no recall question asks. What it could answer, the words answer (Q10). |
 
 The old clauses are removed in the same step that adds the words. Two temporal languages side by side would be two
 paths to keep in agreement.
 
-### D9. What the words keep from the 2026-11-10 draft — Proposed
+### D9. What the words keep from the 2026-11-10 draft — Decided 2026-11-14
 
 1. **Mercury-only, and non-intrusive.** No standard query can reach the words, so the W3C results cannot move. No pragma
    or switch.
@@ -595,10 +674,10 @@ paths to keep in agreement.
 5. **Clear of SPARQL 1.2.** The words take none of its new syntax: triple terms `<<( )>>`, reifiers `~`, annotations
    `{| |}`, the `VERSION` directive.
 
-### D10. The exact rules of the words — Proposed, except where marked
+### D10. The exact rules of the words — Decided 2026-11-14, except where another date is given
 
-- **A time without a timezone is UTC — Decided.** Martin: "UTC, yes. Of course." It is the rule everywhere else in
-  Mercury. A bound that means a local day carries its offset: `"2026-01-01+01:00"^^xsd:date`.
+- **A time without a timezone is UTC — Decided 2026-11-11.** Martin: "UTC, yes. Of course." It is the rule everywhere
+  else in Mercury. A bound that means a local day carries its offset: `"2026-01-01+01:00"^^xsd:date`.
 
 - **An empty range is empty.** `SINCE a BEFORE b` with `a` at or after `b` matches nothing. It is not an error, and it
   never means "outside the range": that takes two patterns and `UNION`.
@@ -609,6 +688,25 @@ paths to keep in agreement.
   keeps "open" as a maximum value, which would pass `FORGOTTEN SINCE a`; that value never appears above storage (I8).
 - **A pattern that carries `FORGOTTEN` matches forgotten memories too.** `INCLUDING FORGOTTEN` does the same for every
   pattern. Without this rule a `FORGOTTEN` bound in a query without `INCLUDING FORGOTTEN` would match nothing, silently.
+  - It follows from D6: `FORGOTTEN ?t` leaves `?t` unbound for a remembered memory, so the pattern matches remembered
+    and forgotten memories alike.
+  - A bound selects: `FORGOTTEN SINCE a` and `FORGOTTEN BEFORE b` match only memories that have a forgotten time in
+    the range.
+- **`INCLUDING FORGOTTEN` stands on the outermost query only.** It applies to every pattern of the query, a subquery's
+  and a property path's included. A subquery cannot carry it. It does not reach into `SERVICE`, which another store
+  answers. Today's clause is parsed in the same place.
+- **In the abbreviated forms the words follow an object** and apply to the one triple pattern that object completes.
+  In a `,` list and in a `;` list each object may carry its own words, and the same holds inside `[ ]`.
+- **The words are an error on a pattern that matches no single stored period:** a pattern with any property-path
+  operator, and any pattern inside `SERVICE`. The rule is strict on purpose; it can be widened later without breaking
+  a query that is valid now. A triple inferred by `OwlReasoner` is materialized and has times of its own: they say
+  when the reasoner wrote it.
+- **A graph variable ranges over every graph that holds a period**, in a query with `INCLUDING FORGOTTEN` and in a
+  pattern that carries `FORGOTTEN`. In the default view it ranges over the graphs that hold something remembered.
+  Today it does the second under `ALL VERSIONS` too (M11), so forgetting the last fact of a graph hides the graph's
+  history from every query that does not name it.
+- **Every range is half-open, `[a, b)`:** the range of `SINCE a BEFORE b`, and a period `[m, f)` itself. A memory
+  forgotten at `b` is not forgotten before `b`.
 - **A bound is an expression without variables**: a literal, or `NOW() - "P7D"^^xsd:dayTimeDuration`. It is evaluated
   once per query. A bound that depends on a variable is a `FILTER` on the bound time:
   `?s ?p ?o MEMORIZED ?t . FILTER(?t >= ?started)`.
@@ -637,26 +735,39 @@ Martin: "If we rename ValidFrom and ValidTo to more suitable names, at start, I 
   time), and they then hold a stated valid time, not the time of the write.
 - This text still says `ValidFrom` and `ValidTo` where it describes the store before the rename.
 
-### D12. Every copy carries both times unchanged — Decided
+### D12. A prune keeps what is remembered, with its times — Decided
 
-Martin: "Prune must preserve temporality."
+Martin, 2026-11-11: "Prune must preserve temporality."
 
-- Today `HistoryMode.FlattenToCurrent`, the pruning default, rewrites every time to the time of the prune. After such a
-  prune, "what did we do in January" answers "nothing".
-- The preserving modes keep `ValidFrom` and `ValidTo` and rewrite the rest.
-- Pruning, a rebuild and a conversion copy a period's memorized and forgotten times as they are (I14). Pruning chooses
-  which periods to copy, never what their times become.
-- **Proposed:** with two times and no retraction, pruning has two modes: copy the remembered memories, or copy all.
-- **Proposed 2026-11-14: the two modes keep different things, and each says which.**
-  - *Copy all* keeps `M(t)` for every `t`. The pruned store answers every question of D6 as its source did. Step 7's
-    test is a test of this mode.
-  - *Copy the remembered* keeps what is remembered now, each fact with the memorized time of its present period. It
-    loses every forgotten period on purpose. For an earlier `t` it answers with only the facts that are still
-    remembered, and no `FORGOTTEN` question finds anything.
-  - A selection by graph or predicate narrows either mode. Within what is selected the mode's guarantee holds.
-- **Today's code against this (read 2026-11-14, not run):** the modes that keep history list the graphs by what is
-  remembered now, so a graph that is wholly forgotten is not copied (M11).
-- A copy between stores needs a way to carry the two times that no ordinary writer has. It is internal to Mercury.
+Martin, 2026-11-14:
+
+> the purpose of pruning, just like in gardening, is to remove unwanted world information and not needed knowledge -
+> hence, forgotten memories need not be transferred. Asking for forgotten in a freshly pruned copy should returning
+> nothing and given a source store with memorized knowledge over time where everything has been deleted (forgotten)
+> must effectively become an empty store, no matter what period we examine. Apart from this, pruning will also allow
+> filtering the graph, using a selection query.
+
+- **A prune transfers what is remembered now, and nothing that is forgotten.** Each remembered quad keeps the memorized
+  time of its present period (I14). A period that has ended is not transferred, and neither is an earlier period of a
+  quad that is remembered again.
+- **What the pruned store answers:**
+  - the default view, and every `MEMORIZED` question about what is remembered, as its source did when it was pruned;
+  - nothing to a `FORGOTTEN` question, and nothing more under `INCLUDING FORGOTTEN` than without it;
+  - a source in which everything is forgotten gives an empty store, at every time one asks about.
+- **A prune can take a selection query**, which says which of the remembered memories are transferred. Today's
+  filters by graph and predicate are such selections. The form of the query is for the implementation plan.
+- **A graph in which nothing is remembered is not transferred.** So a prune lists the graphs by what is remembered
+  now, as today's code does (M11).
+- **A prune never changes a time.** Today `HistoryMode.FlattenToCurrent`, the pruning default, rewrites every time to
+  the time of the prune. After such a prune, "what did we memorize in January" answers "nothing". That goes.
+- **There is one way to prune.** Today's three history modes go: one rewrites the times, and the other two transfer
+  what is forgotten or retracted. Whoever wants everything kept copies the store.
+- **A rebuild and a conversion are not prunes.** They carry every period, with both times, unchanged (I14).
+- **A prune reports a disagreement between the source's stored copies and does not resolve it silently** (I19).
+- A copy between stores needs a way to carry a time that no ordinary writer has. It is internal to Mercury.
+
+**Replaced 2026-11-14:** Sky's proposal of two modes with "copy all" as the default. Martin's clarification above
+decided the question the other way: forgotten memories are what a prune removes.
 
 ### D13. The stored layout changes later — Decided
 
@@ -715,50 +826,60 @@ this situation", then "Legacy" and "All five, clear intent."
 - `[Obsolete]` was not used: the build treats warnings as errors, and the fields are still read.
 - It is a rename: no behaviour changes and no stored byte moves. 109 lines in 9 files of `src` and `tests` changed.
 
-## Open questions
+## Questions
+
+Each question is kept as it was asked, with how it was closed. Four are left to the implementation plan (Q6, Q7, Q13,
+Q14). None is open for the decisions.
 
 ### The language
 
 - **Q1. `FORGOTTEN` without `INCLUDING FORGOTTEN`** (D10): does the word widen its own pattern, or is it an error to use
   it without the clause?
-- **Q2. `INCLUDING FORGOTTEN` on a subquery.** Whether today's clause is accepted on a sub-SELECT is not checked. With
-  `FORGOTTEN` on a pattern, the clause may be needed only on the outermost query.
-- **Q3. The abbreviated triple forms.** Sky's proposal: the words follow an object and apply to the one triple pattern
-  that object completes.
-  - In a `,` list each object may carry its own words.
-  - In a `;` list the words follow each object in the same way.
-  - A blank-node property list is an object list too, so the same rule holds inside `[ ]`.
-- **Q4. Patterns that match no single stored period.**
-  - A property path longer than one predicate: a syntax error?
-  - A pattern inside `SERVICE`: a syntax error?
-  - A triple inferred by `OwlReasoner`: it is materialized, so it has times of its own. They say when the reasoner
-    wrote it.
+  - **Closed 2026-11-14:** it widens its own pattern (D10).
+- **Q2. `INCLUDING FORGOTTEN` on a subquery.** With `FORGOTTEN` on a pattern, the clause may be needed only on the
+  outermost query.
+  - **Closed 2026-11-14:** on the outermost query only (D10). Read from the code: today's clause is parsed for a query
+    and not for a sub-SELECT.
+- **Q3. The abbreviated triple forms.** The words follow an object and apply to the one triple pattern that object
+  completes.
+  - **Closed 2026-11-14:** as asked (D10).
+- **Q4. Patterns that match no single stored period:** a property path, a pattern inside `SERVICE`, a triple inferred
+  by `OwlReasoner`.
+  - **Closed 2026-11-14:** the words are an error on a property-path operator and inside `SERVICE`. An inferred
+    triple is materialized and has its own times (D10).
 - **Q5. `DURING`** (D8): dropped with the others?
-- **Q6. The planner.** The pattern tree must carry each pattern's bounds to its scan, and choose TGSP when the
-  memorized range is the most selective part.
+  - **Closed 2026-11-14:** dropped (D8).
+- **Q6. The planner.** The pattern tree must carry each pattern's bounds to its scan, and choose the index that suits
+  them.
+  - **Left to the implementation plan.** Which index answers a query changes no answer (I13).
 
 ### Names
 
 - **Q7. The word "bitemporal".** The documents call the Cognitive profile bitemporal: valid time and transaction time.
   This ADR gives it one axis with two points per period. What do we call it?
-  - **Decided 2026-11-13:** the axis is called memory time. What the documents say in place of "bitemporal" is not
-    written yet.
+  - **Decided 2026-11-13:** the axis is called memory time.
+  - **Left to the implementation plan:** what the documents say in place of "bitemporal" (Step 8).
 
 ### Other ADRs
 
 - **Q8. ADR-053's migration uses Retract.** [ADR-053](ADR-053-one-rdf-term-one-atom.md) (Proposed) D5 rewrites an
   atom's form by retracting the version and adding it again with the same valid time. Without Retract and without
-  stated times it needs another way: a conversion that rewrites the atom and keeps both times, since the memory learned
-  nothing new.
+  stated times it needs another way.
+  - **Closed 2026-11-14:** the migration is a conversion (I14). It rewrites the stored form of a term and carries
+    every period unchanged: the memory learned nothing new, so nothing is memorized and nothing is forgotten.
+  - Where two stored forms are one term, they are one quad (I1), and the quad is remembered whenever either form was.
+    Their periods are merged by that rule.
+  - It is built on the internal copy that carries a period's times (D12), after Step 6, and without Retract. ADR-053
+    D5 says so now.
+- **ADR-062.** Its two-time type gives an absent forgotten time as absent (I8). Its cursor comes before the words
+  (Step 5), by its D8. Nothing in this ADR's decisions depends on how the cursor is built.
 
 ### From the model (2026-11-13 and 2026-11-14)
 
-- **Q9. What a delete counts as affected, inside one clock reading.** ADR-054 D5 counts what changed. A delete of a
-  quad memorized in the same reading changes what a reader sees now, and leaves no period.
-- **Q10. `M(t)` has no word.** "Was `q` remembered at `t`" is the model's first question, and `AS OF` is gone (D8). With
-  the words of D6 it takes two patterns and a `UNION`: memorized at or before `t` and still remembered, or memorized at
-  or before `t` and forgotten after it. Is that enough?
-  - **Shown on the model, 2026-11-14** (M10). With `b` one millisecond after `t`:
+- **Q9. What a delete counts as affected, inside one clock reading.**
+  - **Closed 2026-11-14:** an operation counts a quad when it changes whether the quad is remembered (D2).
+- **Q10. `M(t)` has no word.** "Was `q` remembered at `t`" is the model's first question, and `AS OF` is gone (D8).
+  - **Closed 2026-11-14:** no new word. With `b` one millisecond after `t`:
 
     ```sparql
     { ?s ?p ?o MEMORIZED ?m BEFORE b }
@@ -768,27 +889,34 @@ this situation", then "Legacy" and "All five, clear intent."
 
     It gives each quad of `M(t)` once, with the bounds of the period that holds `t`. With `b` a date it gives what was
     remembered just before that day began.
-  - It rests on two rules of D10 that are still Proposed: both words may follow one pattern, and a pattern that
-    carries `FORGOTTEN` matches forgotten memories.
-  - It is not shown on a store: the words are not built (Step 5).
-- **Q11. "What is new since my last look" — Proposed.** A reader that asks this again and again misses nothing when
-  its bound is the store's clock, read no later than the end of its previous look. `NOW()` inside the reading query is
-  such a bound. A write stamped in the same millisecond as the bound can come back twice, and is never skipped. A bound
-  read after the query returned, or from another clock, can skip a write. The `lucy` skill's recency recall is the
-  first such reader (Step 8). Is this a rule of the words?
-- **Q12. What a reader sees during writes** (M9): the contract is not written.
+  - Shown on the model (M10). It is not shown on a store: the words are not built (Step 5).
+  - On a pruned store it answers from what the prune kept (D12).
+- **Q11. "What is new since my last look".**
+  - **Closed 2026-11-14:** the store guarantees that every write a query did not see is stamped at or after that
+    query's `NOW()` (M9). A reader that uses the `NOW()` of its last look as its next bound misses nothing. A bound
+    read after the query returned, or from another clock, can skip a write. The `lucy` skill's recency recall is the
+    first such reader (Step 8).
+- **Q12. What a reader sees during writes.**
+  - **Closed 2026-11-14:** the contract is in M9.
 - **Q13. The diagnostic** (M8): its form, and whether and where it is kept.
+  - **Left to the implementation plan.** What binds it is decided: it is never a quad, and it reports only what the
+    writer observed (I18, M8).
 - **Q14. Tests that need one clock reading** (Step 4). A batch has one by construction. A sequence of requests does
   not: on omega they were at least 4 ms apart. Testing the request path inside one reading needs a clock the test
-  controls, which is a change to production code and is not proposed yet.
-- **Q15. A graph that is wholly forgotten — Proposed 2026-11-14.** Today a graph variable ranges over the graphs that
-  hold something remembered now, also under `ALL VERSIONS` (M11). In a query with `INCLUDING FORGOTTEN`, and in a
-  pattern that carries `FORGOTTEN`, it ranges over every graph that holds a period. Otherwise forgetting the last
-  fact of a graph hides the graph's whole history from every query that does not name it.
+  controls, which is a change to production code.
+  - **Left to the implementation plan.** What binds it: the test supplies the clock's readings, and no writer states a
+    time (I11).
+- **Q15. A graph that is wholly forgotten.**
+  - **Closed 2026-11-14:** under `INCLUDING FORGOTTEN`, and in a pattern that carries `FORGOTTEN`, a graph variable
+    ranges over every graph that holds a period (D10).
 
 ## Steps
 
-1. **Martin's review** of this text: D8 to D12 where marked Proposed, Q1 to Q8, and the later part.
+**The order, decided 2026-11-14.** Steps 4, 7, 10 and 11 touch neither the cursor nor the words and can start at once.
+Step 5 follows the cursor of ADR-062. Step 6 follows Step 5.
+
+1. **Martin's review** of this text — **done 2026-11-14**, with the decision closure. The later part is reviewed on
+   its own.
 2. **The rename** (D11) — **done 2026-11-11.** `MemorizedAt` and `ForgottenAt` in the code and in the four current
    technical documents that name the fields, with no change of behaviour. Every test passes with only the names
    changed. ADRs, release notes and the changelog keep the old names: they describe the store as it was.
@@ -807,6 +935,7 @@ this situation", then "Legacy" and "All five, clear intent."
    - **Open:** why the old delete left TGSP's entries unflagged, and the rule for each difference (LQ5).
 4. **Tests for the model on today's code.** Every row of M6, and the four rows of M11, each with the result the model
    gives. A batch gives one clock reading by construction (Q14). Fix what fails: the rows of M11 fail today.
+   The affected counts follow the rule of D2.
 5. **The words:** the grammar in `SparqlParser`, the bounds and time variables carried to the scan, the times bound from
    the matched period. The old clauses are removed in the same step.
    - Tests: each word alone and combined; both orders of the bounds; the empty range; joins where each pattern keeps its
@@ -819,7 +948,12 @@ this situation", then "Legacy" and "All five, clear intent."
    `QueryEvolution` go or change.
    - **One change with ADR-062's part two** (ADR-062 D8): the two result types and the public names change here, so the
      public surface changes once.
-7. **Pruning carries both times** (D12), with a test that a pruned store answers a period question as its source did.
+7. **Pruning** (D12): one way to prune, the remembered memories with their memorized times, a selection query, and the
+   internal copy that carries a time. Tests:
+   - a pruned store answers the default view and every `MEMORIZED` question about what is remembered as its source
+     did;
+   - a `FORGOTTEN` question on it finds nothing;
+   - a source in which everything is forgotten gives an empty store.
 8. **Consumers:**
    - the `lucy` skill's recency recall uses `MEMORIZED`, and its temporal modes are rewritten;
    - the agent stops stamping `dcterms:created`;
@@ -830,10 +964,20 @@ this situation", then "Legacy" and "All five, clear intent."
    - ask "what did we memorize last week" and "in October" with one query each;
    - read the eight write times of 2026-11-10 with one query, and compare them with the bisected values in
      `urn:sky-omega:obs:2026-11-10-write-times-from-the-store`.
+10. **A committed write that cannot be applied** (M7): the store refuses reads, writes and checkpoints until recovery
+    has run, and the two kinds of error can be told apart. The single-write path stamps under the write lock (I12).
+11. **Every graph that holds a period** is found by a graph variable under `INCLUDING FORGOTTEN` (D10). Until Step 5 the
+    same holds for `ALL VERSIONS`.
 
 ## Later: the stored layout
 
-Sky's proposal, except where it is marked **Decided**. It starts when Steps 1 to 9 are done.
+**Not covered by the acceptance of this ADR — Decided 2026-11-14.** This part is a design phase that is reviewed on
+its own: the layout, the conversion of existing stores, their cost, and the rule for the entries of the live store
+that disagree between its indexes. Everything in it is Sky's proposal, except where it is marked **Decided**. It starts
+when Steps 1 to 11 are done.
+
+Two things bind it already: a conversion carries every period unchanged (I14), and nothing resolves a disagreement
+between stored copies silently (I19).
 
 **Since this part was written** Martin has chosen another shape for the stored form than L1's four indexes: a set
 keyed by the quad alone, holding its latest period, and a timeline in time order that a search by time can cut by
@@ -866,7 +1010,7 @@ script that touches no store (65,537 sequences, 2,652,185 cases of a stop and a 
 
 Until then the store keeps five more attributes per entry that nothing will read:
 
-| Attribute | After Steps 1 to 9 |
+| Attribute | After Steps 1 to 11 |
 |-----------|--------------------|
 | `LegacyTransactionTime` | A copy of the memorized time. |
 | `LegacyCreatedAt` | A copy of the memorized time. |
@@ -899,7 +1043,7 @@ only version 1 already refuses a higher version.
 Martin: "We can translate old data, convert/migrate it to a preferred state. Rebuild a store … It could possibly be
 automatic, on open. We do not need to mind other stores, there are only ours in use."
 
-- **Both times are carried unchanged — Decided** (D12).
+- **Both times are carried unchanged — Decided** (I14).
 - An entry with `LegacyIsDeleted` set: forgotten = the earlier of `ForgottenAt` and `LegacyModifiedAt`, the time of
   its retraction.
 
