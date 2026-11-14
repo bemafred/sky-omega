@@ -2,7 +2,11 @@
 
 ## Status
 
-**Status:** Proposed — 2026-11-11
+**Status:** Accepted — 2026-11-14
+
+Proposed on 2026-11-11. Martin accepted it on 2026-11-14: "Change to Accepted. Make a plan for the implementation and
+start implementation." Acceptance covers what is listed below under "What acceptance of this ADR covers". The plan is
+in [Steps](#steps).
 
 Rewritten on 2026-11-11 from the draft of 2026-11-10 ("A Fact's Own Times"). That draft let a query read the times
 the store already keeps. In the design discussion of 2026-11-11 Martin set the purpose of those times, reduced them to
@@ -496,7 +500,8 @@ stand:
     memory was told again.
 - **The 84 entries** whose memorized time differs from `LegacyTransactionTime` differ by less than 10 ms, the memorized
   time being the earlier, and are from 2026-03-29 to 2026-04-19. Two clock readings at one write would give that. The
-  code of that time was not read.
+  code of that time was not read. Until P0 the single-write path did read the clock twice, the memorized time first
+  and before the write lock; whether the 84 were written through it is not established.
 - **The copy is kept**, with its hashes, the probes and their outputs, on omega in
   `~/diag/mcp-omega-snapshot-20261114T0451Z`. The live store keeps changing; the numbers above are the copy's.
 - **Until the differences are resolved (LQ5)**, two commands would resolve them without saying so, each by reading
@@ -914,6 +919,40 @@ Q14). None is open for the decisions.
 
 **The order, decided 2026-11-14.** Steps 4, 7, 10 and 11 touch neither the cursor nor the words and can start at once.
 Step 5 follows the cursor of ADR-062. Step 6 follows Step 5.
+
+### The plan (2026-11-14)
+
+The work is done in increments. Each one leaves every test passing and can be released on its own. Each names what
+must be observed before its code changes, and the tests that decide whether it is done. A question the cookbook and
+this ADR do not answer goes to Martin.
+
+| | Increment | Steps | Before the code changes | Done when |
+|---|-----------|-------|-------------------------|-----------|
+| P0 | **The store's clock.** A store has one clock. Every stamp is read from it under the write lock (I12), and `NOW()` and "now" in a read come from it too. A test can supply its readings; no writer states a time (I11, Q14). | 4, 10 | every place that reads the system clock is listed | every test passes unchanged; a test supplies the readings and sees them in the stamps and in `NOW()` |
+| P1 | **The write rule** (M5). A write is decided once, from the quad's latest period and the batch's earlier operations. The log holds the decided change, and each index applies it by quad and memorized time (M7). An entry is removed when its period is (M2). Affected counts follow D2. | 4 | the write benchmarks are measured on today's code | the rows of M6 pass on the batch path, the single-write path and through a SPARQL request, each inside one reading and across readings; the rows of M11 pass; recovery tests pass for each kind of record; the benchmarks are measured again |
+| P2 | **A committed write that cannot be applied** (M7). | 10 | what can throw while applying is listed from the code | a test makes applying fail and sees reads, writes and checkpoints refused, a close without a checkpoint, and a consistent store after reopening |
+| P3 | **Every graph that holds a period** is listed under `ALL VERSIONS` (D10, Q15). | 11 | | a wholly forgotten graph is found by a graph variable |
+| P4 | **Pruning** (D12): one way to prune, a selection query, and the internal copy that carries a time. | 7 | Martin decides the form of the selection query | the three tests of Step 7 |
+| P5 | **The cursor** of [ADR-062](ADR-062-what-a-read-yields.md), its part one. | | ADR-062 is accepted | ADR-062's own tests |
+| P6 | **The words** (D6 to D10). The old clauses go in the same step. | 5 | | the tests of Step 5; every W3C result unchanged; the query of Q10 gives `M(t)` on a store |
+| P7 | **One removal** (D2), with ADR-062's part two. `Add` with a stated time goes here. | 6 | | no caller states a time |
+| P8 | **Consumers and documents.** | 8 | | |
+| P9 | **Dogfood** on the live memory store. | 9 | the store's index differences are resolved (LQ5) | |
+
+- **Until P7, `Add` with a stated time keeps today's path.** The tests of the old clauses use it. The writes that
+  state no time move to the rule in P1.
+- **A release reaches the live memory store only after it ran on a copy of it**, and on Martin's word.
+- **Progress** is recorded here, one line per increment.
+
+**Progress:**
+
+- **P0: done 2026-11-14.** `StorageOptions.Clock`, a `TimeProvider`, the system clock unless one is given.
+  - The single-write path read the clock twice: the memorized time before it took the write lock, the transaction
+    time under it. It now reads once, under the lock (I12).
+  - `NOW()` in a query and in an update, "now" in a current read, and the listing of graphs read the store's clock.
+  - Left on the system clock: the timestamps of diagnostics events, and `TemporalQuadIndex`'s own convenience methods
+    (`AddCurrent`, `QueryCurrent`), which no store path calls.
+  - Six tests supply the readings (`StoreClockTests`). `Mercury.Tests` on omega: 6,365 passed, 156 skipped, 0 failed.
 
 1. **Martin's review** of this text — **done 2026-11-14**, with the decision closure. The later part is reviewed on
    its own.
