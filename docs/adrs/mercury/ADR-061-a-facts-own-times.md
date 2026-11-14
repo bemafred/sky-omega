@@ -357,8 +357,22 @@ form, where every index holds every period, the records are:
   - after the commit: the write holds once recovery has run. It is not known to have failed.
   - A retry is safe in both cases. Memorizing a remembered quad and forgetting one that is not remembered change
     nothing (I3, I4), so a repeated write leaves the period and its times as the first one made them.
-- **Left to the implementation plan:** whether recovery can run in the same process, and how a test makes this path
-  fail on purpose. That needs a way into production code (Q14).
+- **The smallest form — Decided 2026-11-14.** Martin: "We build in the smallest form — what is important here is to
+  convey some kind of internal server error."
+  - **Recovery does not run in the living process.** No failure was found that it would heal. A cause that is in the
+    code or in a limit fails again at the same record, and after a shortage of memory or a device error the process
+    is not to be trusted.
+  - **No kind of cause is told from another, and nothing is tried again.** Any exception between the commit in the
+    log and the last index change stops the store.
+  - **A stopped store is like a closed one, and its close makes no checkpoint.** It is one field, tested where the
+    lock is taken.
+  - **The error conveys an internal error.** Its text says that it is one, names the store and the cause, and says
+    that the write is not lost and what to do. Every later call on the store gives the same error with the first
+    cause.
+  - **What error handling cannot do** was listed from the code and by one probe (Steps, Progress, P2): most failures
+    in that stretch kill the process, and recovery at the next open already covers a killed process.
+  - **The test** makes the path fail with a part the store is given at its construction, the buffer manager. No way
+    into production code was added for it.
 
 ### M8. Knowledge, diagnostics and judgement are three layers
 
@@ -983,6 +997,37 @@ this ADR do not answer goes to Martin.
   - The listing for `mercury_graphs`, for `CLEAR`, and for pruning stays what is remembered now.
   - Three tests (`ForgottenGraphTests`); two of them fail with the old listing. `Mercury.Tests`: 6,416 passed, 156
     skipped, 0 failed.
+- **P2: done 2026-11-14**, on omega, in the smallest form (M7).
+  - **What can fail between the commit in the log and the last index change** (the gate):
+    - A shortage of disk space: the index files are sparse and mapped, so it shows when the system writes a page.
+      The process is killed, or a flush throws. Read and known of the platforms, not run.
+    - An index file that grows past its initial size: the process dies with `AccessViolationException`. Measured:
+      a store with 1 MB index files died in its sixth batch of 1,000 quads. `BTreeFile.AllocatePage` lengthens the
+      file and never renews the mapping. The default is 1 GB, about 5 to 6 million quads when scaled from that run.
+      **A defect, not fixed here.**
+    - The trigram table, which is fixed at 2^20 buckets and throws when a probe path of 1,024 fills. Read, not run.
+      **A defect, not fixed here.**
+    - A coding error, or a shortage of memory: an exception.
+  - **`CommittedWriteNotAppliedException`** (`Mercury.Abstractions`), thrown by the write that met the failure and
+    by every later read, write, checkpoint, `Clear` and index rebuild on that store. The first cause is its inner
+    exception, and the store logs it at the level Critical.
+  - **A store that cannot apply its log when it is opened** throws the same exception from its constructor and
+    releases its files, with no checkpoint. A log with an operation this Mercury does not know (ADR-054 D8) is one
+    such case: the `InvalidDataException` is now the inner exception.
+  - **Two defects found by the tests, and fixed:**
+    - Every SPARQL update commits and rolls back in one `try`. `CommitBatch` releases the lock when it throws, and
+      `RollbackBatch` then released it again, so the caller got "the write lock is being released without being
+      held" in place of the commit's own error. `RollbackBatch` now does nothing when no batch holds the lock.
+    - An index saves its entry count when it closes. After a write that was applied in part, that count had no
+      transaction saved with it, and recovery counted the write twice. A stopped store's indexes now go back to the
+      count saved with its transaction before they close.
+  - **Five tests** (`CommittedWriteNotAppliedTests`): a batch, a single write, a SPARQL update, a store that does
+    not open while the cause lasts, and a failure before the commit. With the checkpoint at close put back, the
+    committed write is lost and three fail; with the old `RollbackBatch`, the SPARQL test fails.
+  - **Not tested:** a failure inside one of the four indexes (the test fails after all four, in the trigram index);
+    the Graph profile; a caller that waits for the lock while the write fails; any platform but omega.
+  - **Not built:** a log that Mercury owns. Every shipped tool opens its stores with no logger, so the Critical
+    line reaches nobody. The error text is what a caller has.
 
 1. **Martin's review** of this text — **done 2026-11-14**, with the decision closure. The later part is reviewed on
    its own.

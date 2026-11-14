@@ -695,6 +695,12 @@ internal sealed unsafe class VersionedQuadIndex : IQuadIndex
     /// <summary>Save the entry count as exact up to WAL transaction <paramref name="txId"/> (ADR-058).</summary>
     internal void CommitEntryCount(long txId, bool durable) => _file.CommitEntryCount(txId, durable);
 
+    /// <summary>
+    /// Take the entry count back to the one last saved with its transaction, before a close that follows a
+    /// transaction this index did not finish applying (ADR-058, ADR-061 M7).
+    /// </summary>
+    internal void ReturnToSavedEntryCount() => _file.ReturnToSavedEntryCount();
+
     /// <summary>Toggle deferred-msync mode (used by rebuild paths, mirrors TemporalQuadIndex).</summary>
     internal void SetDeferMsync(bool value) => _file.DeferMsync = value;
 

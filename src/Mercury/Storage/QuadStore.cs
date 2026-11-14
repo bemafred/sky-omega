@@ -83,6 +83,11 @@ public sealed class QuadStore : IDisposable
     // Volatile because Dispose reads it without re-acquiring the writer lock under
     // which mutations set it.
     private volatile bool _sessionMutated;
+    // ADR-061 M7: the exception that applying a record met after the log had committed it, or null. Once set, the
+    // indexes may lack a write the log holds, and may disagree with each other. The store then answers no read, takes
+    // no write and makes no checkpoint, and it closes without one: the log is the only complete copy, and opening the
+    // store again applies it. Volatile because Dispose reads it without a lock.
+    private volatile Exception? _unappliedWriteCause;
     // Batched records hold atom IDs only. Resolving IDs back to strings just so
     // ApplyToIndexes could re-intern them was a 1% hot path in bulk-load profiles,
     // plus one string allocation per atom per triple. The IDs are already in the
@@ -317,7 +322,19 @@ public sealed class QuadStore : IDisposable
 
         // Recover any uncommitted transactions — WAL only exists for versioned profiles.
         if (_wal is not null)
-            Recover();
+        {
+            try
+            {
+                Recover();
+            }
+            catch (CommittedWriteNotAppliedException)
+            {
+                // The store does not open (ADR-061 M7). Its files are released, with no checkpoint, so the same
+                // process can open it again once the cause is gone.
+                Dispose();
+                throw;
+            }
+        }
     }
 
     /// <summary>
@@ -588,6 +605,7 @@ public sealed class QuadStore : IDisposable
         _lock.EnterWriteLock();
         try
         {
+            ThrowIfStoppedOverUnappliedWrite();
             AddHoldingWriteLock(subject, predicate, @object, memorizedAt, forgottenAt, graph,
                 transactionTime: _clock.GetUtcNow().ToUnixTimeMilliseconds());
         }
@@ -624,9 +642,17 @@ public sealed class QuadStore : IDisposable
             transactionTimeTicks: transactionTime);
         _wal!.Append(record);
 
-        // 4. Apply to indexes using pre-resolved IDs (no re-intern), then save their counts
-        ApplyToIndexesById(record);
-        CommitIndexCounts(_wal.CurrentTxId, durable: false);
+        // 4. Apply to indexes using pre-resolved IDs (no re-intern), then save their counts.
+        // The log has committed the record: a failure from here on stops the store (ADR-061 M7).
+        try
+        {
+            ApplyToIndexesById(record);
+            CommitIndexCounts(_wal.CurrentTxId, durable: false);
+        }
+        catch (Exception cause)
+        {
+            throw StopOverUnappliedWrite(cause);
+        }
 
         // 5. Check if checkpoint needed
         CheckpointIfNeeded();
@@ -654,6 +680,7 @@ public sealed class QuadStore : IDisposable
         _lock.EnterWriteLock();
         try
         {
+            ThrowIfStoppedOverUnappliedWrite();
             // One reading of the clock, taken under the lock, is the stamp (ADR-061 I12). Reading it before the
             // lock let a write carry a stamp earlier than the NOW() of a query that did not see it.
             var now = _clock.GetUtcNow();
@@ -687,8 +714,17 @@ public sealed class QuadStore : IDisposable
         // The WAL record holds only atom IDs, so the atoms must be durable first (ADR-058 D6)
         MakeAtomsDurable();
         _wal!.Append(record);
-        ApplyRecordToIndexesById(record);
-        CommitIndexCounts(_wal.CurrentTxId, durable: false);
+
+        // The log has committed the record: a failure from here on stops the store (ADR-061 M7).
+        try
+        {
+            ApplyRecordToIndexesById(record);
+            CommitIndexCounts(_wal.CurrentTxId, durable: false);
+        }
+        catch (Exception cause)
+        {
+            throw StopOverUnappliedWrite(cause);
+        }
         CheckpointIfNeeded();
         CheckDiskSpaceAfterWrite();
         return true;
@@ -758,6 +794,7 @@ public sealed class QuadStore : IDisposable
         _lock.EnterWriteLock();
         try
         {
+            ThrowIfStoppedOverUnappliedWrite();
             if (!TryResolveQuadIds(subject, predicate, @object, graph, out var graphId, out var subjectId, out var predicateId, out var objectId))
                 return false;
 
@@ -771,7 +808,17 @@ public sealed class QuadStore : IDisposable
             var record = LogRecord.CreateRetract(subjectId, predicateId, objectId, memorizedAt, forgottenAt, graphId,
                 transactionTimeTicks: _clock.GetUtcNow().ToUnixTimeMilliseconds());
             _wal!.Append(record);
-            var retracted = ApplyRecordToIndexesById(record);
+
+            // The log has committed the record: a failure from here on stops the store (ADR-061 M7).
+            bool retracted;
+            try
+            {
+                retracted = ApplyRecordToIndexesById(record);
+            }
+            catch (Exception cause)
+            {
+                throw StopOverUnappliedWrite(cause);
+            }
             CheckpointIfNeeded();
             CheckDiskSpaceAfterWrite();
             return retracted;
@@ -801,6 +848,7 @@ public sealed class QuadStore : IDisposable
         _lock.EnterWriteLock();
         try
         {
+            ThrowIfStoppedOverUnappliedWrite();
             if (!TryResolveQuadIds(subject, predicate, @object, graph, out var graphId, out var subjectId, out var predicateId, out var objectId))
                 return false;
 
@@ -812,7 +860,17 @@ public sealed class QuadStore : IDisposable
                 DateTimeOffset.MinValue, DateTimeOffset.MaxValue, graphId, transactionTimeTicks: nowMs);
 
             _wal!.Append(record);
-            var deleted = ApplyRecordToIndexesById(record);
+
+            // The log has committed the record: a failure from here on stops the store (ADR-061 M7).
+            bool deleted;
+            try
+            {
+                deleted = ApplyRecordToIndexesById(record);
+            }
+            catch (Exception cause)
+            {
+                throw StopOverUnappliedWrite(cause);
+            }
             CheckpointIfNeeded();
             CheckDiskSpaceAfterWrite();
             return deleted;
@@ -857,6 +915,7 @@ public sealed class QuadStore : IDisposable
         _lock.EnterWriteLock();
         try
         {
+            ThrowIfStoppedOverUnappliedWrite();
             if (_activeBatchTxId >= 0)
                 throw new InvalidOperationException("RepairDeletes cannot run inside a batch.");
 
@@ -965,6 +1024,7 @@ public sealed class QuadStore : IDisposable
         _lock.EnterWriteLock();
         try
         {
+            ThrowIfStoppedOverUnappliedWrite();
             if (_activeBatchTxId >= 0 || _referenceBulkActive || _minimalBulkActive)
                 throw new InvalidOperationException("A batch is already active.");
 
@@ -1459,16 +1519,28 @@ public sealed class QuadStore : IDisposable
 
             // 2. Materialize buffered records into indexes. IDs are already in the
             // record — use the by-ID path so TemporalQuadIndex doesn't re-intern strings.
-            if (_batchBuffer != null)
+            // The log has committed the batch: a failure from here on stops the store (ADR-061 M7). The records
+            // after the one that failed have reached no index, and the log holds them all.
+            try
             {
-                foreach (var record in _batchBuffer)
-                    ApplyRecordToIndexesById(record);
-                _batchBuffer.Clear();
-            }
+                if (_batchBuffer != null)
+                {
+                    foreach (var record in _batchBuffer)
+                        ApplyRecordToIndexesById(record);
+                }
 
-            // 3. The indexes now hold this transaction: save their counts as of it (ADR-058).
-            if (!_bulkLoadMode)
-                CommitIndexCounts(committedTxId, durable: false);
+                // 3. The indexes now hold this transaction: save their counts as of it (ADR-058).
+                if (!_bulkLoadMode)
+                    CommitIndexCounts(committedTxId, durable: false);
+            }
+            catch (Exception cause)
+            {
+                throw StopOverUnappliedWrite(cause);
+            }
+            finally
+            {
+                _batchBuffer?.Clear();
+            }
 
             CheckpointIfNeeded();
 
@@ -1488,6 +1560,12 @@ public sealed class QuadStore : IDisposable
     /// </summary>
     public void RollbackBatch()
     {
+        // A CommitBatch that threw has already ended the batch and released the lock. The callers roll back in the
+        // catch block that also catches a failed commit: there is nothing to roll back then, and releasing a lock
+        // that is not held would throw over the commit's own exception.
+        if (!_lock.IsWriteLockHeld)
+            return;
+
         // Minimal profile rollback: no WAL, no sorter — once AddCurrentBatched writes
         // a triple, it's already in _gspoMinimal. Per ADR-026's pattern, a mid-bulk
         // failure means "delete the store and retry"; RollbackBatch just releases the lock.
@@ -1793,6 +1871,7 @@ public sealed class QuadStore : IDisposable
     public void RebuildSecondaryIndexes(Action<string, long>? onProgress = null)
     {
         ThrowIfDisposed();
+        ThrowIfStoppedOverUnappliedWrite();
 
         // ADR-030 Decision 5: Reference's bulk-load writes only _gspoReference. The
         // rebuild phase populates _gposReference and the trigram index from a single
@@ -2428,6 +2507,29 @@ public sealed class QuadStore : IDisposable
     }
 
     /// <summary>
+    /// ADR-061 M7: a store that could not apply a write its log has committed stops. Reads and writes call this with
+    /// the lock held, so a caller that waited for the lock while the write failed is refused too.
+    /// </summary>
+    private void ThrowIfStoppedOverUnappliedWrite()
+    {
+        if (_unappliedWriteCause is { } cause)
+            throw new CommittedWriteNotAppliedException(_baseDirectory, cause);
+    }
+
+    /// <summary>
+    /// ADR-061 M7: applying a record threw after the log had committed it. Stops the store and returns the exception
+    /// for the caller to throw. No kind of cause is told from another, and nothing is tried again: what would fail
+    /// again fails when the store is opened, with the log kept.
+    /// </summary>
+    private CommittedWriteNotAppliedException StopOverUnappliedWrite(Exception cause)
+    {
+        _unappliedWriteCause = cause;
+        var stopped = new CommittedWriteNotAppliedException(_baseDirectory, cause);
+        _logger.Critical($"{stopped.Message}{Environment.NewLine}{cause}".AsSpan());
+        return stopped;
+    }
+
+    /// <summary>
     /// ADR-034 Phase 1B-5b: open <see cref="SortedAtomStore"/> for the given atom path,
     /// or create empty placeholder files if this is a fresh store. The placeholder
     /// (<c>{base}.atoms</c> at 0 bytes, <c>{base}.offsets</c> with a single int64 sentinel
@@ -2764,6 +2866,11 @@ public sealed class QuadStore : IDisposable
                 recoveredCount++;
             }
         }
+        catch (Exception cause)
+        {
+            // ADR-061 M7: if recovery fails, the store does not open, and the log is kept as it is.
+            throw StopOverUnappliedWrite(cause);
+        }
         finally
         {
             _recovering = false;
@@ -2794,6 +2901,7 @@ public sealed class QuadStore : IDisposable
         _lock.EnterWriteLock();
         try
         {
+            ThrowIfStoppedOverUnappliedWrite();
             CheckpointInternal();
         }
         finally
@@ -3465,6 +3573,11 @@ public sealed class QuadStore : IDisposable
     {
         ThrowIfDisposed();
         _lock.EnterReadLock();
+        if (_unappliedWriteCause is { } cause)
+        {
+            _lock.ExitReadLock();
+            throw new CommittedWriteNotAppliedException(_baseDirectory, cause);
+        }
     }
 
     /// <summary>
@@ -3492,8 +3605,26 @@ public sealed class QuadStore : IDisposable
         // marker to write — skip unconditionally. For Reference/Minimal profiles the
         // inner `_wal is null` short-circuit makes this redundant but cheap.
         // Locking note: skip — we're disposing, no concurrent access expected.
-        if (_sessionMutated)
+        // ADR-061 M7: a store that could not apply a committed write closes without a checkpoint. A checkpoint would
+        // truncate the log, which is the only complete copy of that write.
+        // The indexes save their entry counts when they close. The counts in memory include what was applied of the
+        // write that failed, and no index has saved a count for that transaction, so each count goes back to the one
+        // saved with its transaction: recovery then counts the write once (ADR-058).
+        if (_unappliedWriteCause is not null)
+        {
+            _gspoIndex?.ReturnToSavedEntryCount();
+            _gposIndex?.ReturnToSavedEntryCount();
+            _gospIndex?.ReturnToSavedEntryCount();
+            _tgspIndex?.ReturnToSavedEntryCount();
+            _gspoGraph?.ReturnToSavedEntryCount();
+            _gposGraph?.ReturnToSavedEntryCount();
+            _gospGraph?.ReturnToSavedEntryCount();
+            _tgspGraph?.ReturnToSavedEntryCount();
+        }
+        else if (_sessionMutated)
+        {
             CheckpointInternal();
+        }
 
         _wal?.Dispose();
         _gspoIndex?.Dispose();
@@ -3528,6 +3659,7 @@ public sealed class QuadStore : IDisposable
         _lock.EnterWriteLock();
         try
         {
+            ThrowIfStoppedOverUnappliedWrite();
             // ADR-031 Piece 2: Clear is an all-encompassing mutation.
             _sessionMutated = true;
 

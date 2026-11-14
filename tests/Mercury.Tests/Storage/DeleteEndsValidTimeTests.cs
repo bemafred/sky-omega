@@ -573,7 +573,10 @@ public class DeleteEndsValidTimeTests : IDisposable
             wal.Append(record);
         }
 
-        var error = Assert.Throws<InvalidDataException>(() => new QuadStore(dir));
+        // The store does not open, and its error names the cause (ADR-061 M7): the log is kept for the Mercury that
+        // knows the operation.
+        var error = Assert.Throws<SkyOmega.Mercury.Abstractions.CommittedWriteNotAppliedException>(() => new QuadStore(dir));
+        Assert.IsType<InvalidDataException>(error.InnerException);
         Assert.Contains("operation 200", error.Message);
     }
 

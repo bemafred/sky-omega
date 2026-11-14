@@ -181,6 +181,12 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
     internal void CommitEntryCount(long txId, bool durable) => _file.CommitEntryCount(txId, durable);
 
     /// <summary>
+    /// Take the entry count back to the one last saved with its transaction, before a close that follows a
+    /// transaction this index did not finish applying (ADR-058, ADR-061 M7).
+    /// </summary>
+    internal void ReturnToSavedEntryCount() => _file.ReturnToSavedEntryCount();
+
+    /// <summary>
     /// Count an entry that WAL recovery found already present: a crashed process inserted
     /// it after the saved count was last committed (ADR-058).
     /// </summary>

@@ -238,6 +238,14 @@ public sealed unsafe class BTreeFile : IDisposable
     }
 
     /// <summary>
+    /// Take the entry count back to the one last saved with its transaction (ADR-058). A WAL-backed consumer
+    /// that closes with a transaction it did not finish applying calls this before <see cref="Dispose"/>,
+    /// which saves the count: the saved count then stays exact for <see cref="CountTxId"/>, and recovery
+    /// counts the unfinished transaction once.
+    /// </summary>
+    public void ReturnToSavedEntryCount() => _entryCount = _savedEntryCount;
+
+    /// <summary>
     /// Persist the tree structure (RootPageId, NextPageId) and leave the saved entry count
     /// as it was. Called when the structure changes in the middle of an operation (page
     /// allocation, root split), where the in-memory count may include entries of a
