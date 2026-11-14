@@ -138,7 +138,8 @@ Acceptance of this ADR should be based on recorded evidence, not on the attracti
 - [ ] Run the POC and its tests on Windows, Ubuntu, and macOS; record the commands, environment, outcomes, and known gaps.
   - **Ubuntu, 2026-11-14, from `poc/AvaTerm/`:** zbook, Ubuntu 26.04.1 LTS x86_64, .NET SDK 10.0.403, bash, tmux 3.6. `dotnet build AvaTerm.slnx` gave 0 warnings and 0 errors. `dotnet run --project tests/AvaTerm.Tests` gave 30 passed, 0 failed, 1 skipped (the comparison with tmux's rendering of vim; vim is not installed). The application itself was not started in this run.
 - [ ] Verify basic shell operation and terminal interaction on each platform, including keyboard layout, resizing, copy/paste, process exit, and common full-screen terminal applications.
-- [ ] Verify Claude Code or Codex can run as an ordinary terminal process where installed, without special Omega integration.
+- [x] Verify Claude Code or Codex can run as an ordinary terminal process where installed, without special Omega integration.
+  - **Reported by Martin, 2026-11-14:** Claude Code runs in AvaTerm on Windows, Ubuntu and macOS. The hosts, versions and any defects seen were not recorded. Codex was not reported.
 - [ ] Verify tmux behavior on supported hosts, including a reconnect workflow if one is exercised; distinguish local, WSL, and SSH cases.
 - [ ] Characterize security boundaries (including OSC 52 clipboard writes and untrusted escape sequences), process cleanup, and PTY lifecycle before claiming production suitability.
 - [ ] Determine the minimal install/run approach for a first Omega application. Assess .NET tool packaging for a graphical desktop application on all three OSes rather than treating packaging as already solved.

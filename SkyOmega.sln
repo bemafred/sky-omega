@@ -330,6 +330,7 @@ EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "ADRs", "ADRs", "{21CED3E0-43E6-4555-9ABE-7A117ED0F5A5}"
 	ProjectSection(SolutionItems) = preProject
 		docs\adrs\Mira\ADR-001-interaction-surface-architecture.md = docs\adrs\Mira\ADR-001-interaction-surface-architecture.md
+		docs\adrs\Mira\ADR-004-omega-terminal-first.md = docs\adrs\Mira\ADR-004-omega-terminal-first.md
 	EndProjectSection
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "ADRs", "ADRs", "{29FBAB18-16FE-4190-8B95-41C830218A0C}"
