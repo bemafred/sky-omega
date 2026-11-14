@@ -103,25 +103,28 @@ While a session is active, the engine binds a fixed, well-known Unix-domain sock
 - **macOS:** `~/Library/SkyOmega/drhook/session.sock`
 - **Other POSIX:** `~/.local/share/sky-omega/drhook/session.sock` (Windows AF_UNIX is a later refinement)
 
-One active session at a time, so a fixed path is the whole rendezvous — no broker, no registry. The socket is created on `drhook_launch` / `drhook_attach` and unlinked on session end (a stale socket is unlinked on bind). A connecting view receives a **snapshot on connect**, then a live **delta stream**, as **NDJSON** — one JSON message per line (`{"type":"snapshot"|"delta", …}`).
+One active session at a time, so a fixed path is the whole rendezvous — no broker, no registry. The socket is created on `drhook_launch` / `drhook_attach` and unlinked on session end (a stale socket is unlinked on bind). A connecting view receives the session's **delta history** (what the session emitted before the view connected: hypotheses, console output, log and anomaly records, events; the most recent 1,000), then a **snapshot** of the current state, then the live **delta stream**, as **NDJSON** — one JSON message per line (`{"type":"snapshot"|"delta", …}`). The sequence numbers on one connection only rise. Before the first stop there is no snapshot yet, and the history is sent alone.
 
 ### The console view: `drhook-viz-console`
 
 ```bash
 # while a DrHook session is active (the agent has launched/attached a target):
-dotnet run --project src/DrHook.Viz.Console          # optional: pass a socket path as the one argument
+drhook-viz-console                # installed by tools/install-tools.sh; optional: a socket path as the one argument
+drhook-viz-console --follow       # wait for a session, and for the next one after it ends, until Ctrl+C
+dotnet run --project src/DrHook.Viz.Console          # the same, from source
 ```
 
-It prints the snapshot-on-connect — session (pid, owned/borrowed, runtime, exec state), execution position (stop reason, top frame, call stack), locals + arguments, breakpoints, and the console/log/anomaly stream counts — then one line per delta as the agent steps, and a clean `disconnected` when the session ends. It is also **the first proper DrHook debuggee** — a clean .NET app to `drhook_launch` and step.
+It prints what the session emitted before it connected, one line per delta, then the snapshot-on-connect — session (pid, owned/borrowed, runtime, exec state), execution position (stop reason, top frame, call stack), locals + arguments, breakpoints, and the console/log/anomaly stream counts — then one line per delta as the agent steps, and a clean `disconnected` when the session ends. Without `--follow` it then exits, and it exits at once when no session is up; with `--follow` (`-f`) it waits and tails the next session too. It is also **the first proper DrHook debuggee** — a clean .NET app to `drhook_launch` and step.
 
 ### The dashboard: `drhook-viz-tui`
 
 ```bash
-# in a real terminal (it refuses to run with redirected I/O), while a DrHook session is active:
-dotnet run --project src/DrHook.Viz.Tui              # optional: pass a socket path as the one argument
+# in a real terminal (it refuses to run with redirected I/O), before or during a DrHook session:
+drhook-viz-tui                    # installed by tools/install-tools.sh; optional: a socket path as the one argument
+dotnet run --project src/DrHook.Viz.Tui              # the same, from source
 ```
 
-A full-screen view that **redraws in place** (the console view *appends*): a title bar (pid, owned/borrowed, runtime, execution state, stop reason, snapshot #, connection status) over fixed panes — **stack** | **source-on-step** (caret on the stopped line), **locals/args** | **breakpoints** (with hit counts), **braid / events** (the agent's hypotheses interleaved with lifecycle events and logpoint output), **console** (the launched target's stdout/stderr) | **anomalies**. BCL `System.Console` + ANSI only (ADR-012 Q2): alternate screen, changed-rows-only redraw, at most one frame per 50 ms however busy the stream. Debuggee text is sanitized — a target printing ANSI escapes cannot take over the screen. On session end it keeps the last picture with `disconnected (q to quit)`; **q** or Ctrl+C quits and restores the terminal. Read-only, like every view: closing it never affects the session. It does **not** host the target's terminal (ADR-012 Q5 — no PTY; interactive stdin is a separate, deferred increment). Needs at least 60×16; 110×34 or larger shows every pane comfortably.
+A full-screen view that **redraws in place** (the console view *appends*): a title bar (pid, owned/borrowed, runtime, execution state, stop reason, snapshot #, connection status) over fixed panes — **stack** | **source-on-step** (caret on the stopped line), **locals/args** | **breakpoints** (with hit counts), **braid / events** (the agent's hypotheses interleaved with lifecycle events and logpoint output), **console** (the launched target's stdout/stderr) | **anomalies**. BCL `System.Console` + ANSI only (ADR-012 Q2): alternate screen, changed-rows-only redraw, at most one frame per 50 ms however busy the stream. Debuggee text is sanitized — a target printing ANSI escapes cannot take over the screen. It can be started before any session and left running: it shows `waiting for a session (q to quit)` until one starts, connects to it, and on session end keeps the last picture with `session ended, waiting for the next (q to quit)` until the next session replaces it (it looks for the socket twice a second). A dashboard that connects after the session started is sent what the session emitted until then, so the braid opens with the hypothesis the session was launched with and the console pane has the target's output from its first line (since 1.8.42; the server keeps the session's most recent 1,000 deltas for this). **q** or Ctrl+C quits and restores the terminal. Read-only, like every view: closing it never affects the session. It does **not** host the target's terminal (ADR-012 Q5 — no PTY; interactive stdin is a separate, deferred increment). Needs at least 60×16; 110×34 or larger shows every pane comfortably.
 
 ### Architecture — one client, many views
 
@@ -133,7 +136,7 @@ Layered like Mercury's `Mercury.Abstractions ← Mercury.Sparql.Tool ← Mercury
 | Client library | `DrHook.Viz` | `DebugStateClient` (connect, read, parse, update model, push to a view), `DebugStateClientModel` (snapshot + bounded delta tail), `IDebugStateView` (the seam views implement). BCL-only; references **only** `DrHook.Wire`. |
 | View | `DrHook.Viz.Console` | The console renderer (`ConsoleDebugStateView` over a `TextWriter`). The planned TUI (Phase 4) and Avalonia GUI (Phase 6) are richer renderings of the **same** client + model. |
 
-**Server side:** `DrHook.Engine/Transport/DebugStateServer` publishes a snapshot after each stop and the delta stream throughout; `EngineSteppingSession` wires it as a 4th `CompositeEventSink` member. The server **never calls into `DebugSession`** — the request-thread *driver* captures the immutable snapshot after each stop and pushes it, so there is no transport↔stepping concurrency hazard. Best-effort throughout: a transport fault never breaks a debug response.
+**Server side:** `DrHook.Engine/Transport/DebugStateServer` publishes a snapshot after each stop and the delta stream throughout, and keeps the session's most recent deltas to replay to a view that connects (emptied at session end); `EngineSteppingSession` wires it as a 4th `CompositeEventSink` member. The server **never calls into `DebugSession`** — the request-thread *driver* captures the immutable snapshot after each stop and pushes it, so there is no transport↔stepping concurrency hazard. Best-effort throughout: a transport fault never breaks a debug response.
 
 **Shipped since Phase 2:** the full-screen TUI dashboard `drhook-viz-tui` (Phase 4, 2026-10-03), source-on-step + typed value rendering, the `(hypothesis, observation)` braid as a delta kind rendered inline (Phase 3), and `DrHook.Capture` persisting the braid to a Mercury store. **Not yet:** command-in / control (Phase 5), the Avalonia GUI sibling (Phase 6), hosting the target's PTY (interactive stdin — deferred, ADR-012 Q5).
 
@@ -287,8 +290,8 @@ dotnet test --project tests/Mercury.Tests --filter "FullyQualifiedName~BasicSele
 | Project | Command | Count |
 |---------|---------|-------|
 | Mercury (W3C conformance + unit) | `dotnet test --project tests/Mercury.Tests` | ~4,700 |
-| DrHook.Engine (unit) | `dotnet test --project tests/DrHook.Engine.Tests` | 194 |
-| DrHook.Viz | `dotnet test --project tests/DrHook.Viz.Tests` | 42 |
+| DrHook.Engine (unit) | `dotnet test --project tests/DrHook.Engine.Tests` | 226 |
+| DrHook.Viz | `dotnet test --project tests/DrHook.Viz.Tests` | 47 |
 | DrHook.Wire | `dotnet test --project tests/DrHook.Wire.Tests` | 5 |
 | DrHook.Capture | `dotnet test --project tests/DrHook.Capture.Tests` | 1 |
 | Mercury.Solid | `dotnet test --project tests/Mercury.Solid.Tests` | 25 |

@@ -7,6 +7,10 @@
     <Nullable>enable</Nullable>
     <RootNamespace>SkyOmega.DrHook.Viz.Tui</RootNamespace>
     <AssemblyName>SkyOmega.DrHook.Viz.Tui</AssemblyName>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>drhook-viz-tui</ToolCommandName>
+    <PackageId>SkyOmega.DrHook.Viz.Tui</PackageId>
+    <Authors>Sky Omega Contributors</Authors>
     <Description>DrHook TUI dashboard — a full-screen, redraw-in-place IDebugStateView over DrHook.Viz (ADR-012 Phase 4). BCL System.Console + ANSI escapes only (ADR-012 Q2): no TUI framework.</Description>
   </PropertyGroup>
 

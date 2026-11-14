@@ -4,10 +4,18 @@ using System.Text;
 namespace SkyOmega.DrHook.Engine.Transport;
 
 /// <summary>The ADR-012 Phase 2 transport: a Unix-domain-socket server that publishes the surface-agnostic
-/// debug-state to human-launched views. On connect a client receives a <b>snapshot</b> (the current
-/// <see cref="DebugStateSnapshot"/>, so it renders full state with no prior context — the 2026-06-25
+/// debug-state to human-launched views. On connect a client receives the session's <b>delta history</b>
+/// (what the session emitted before the view connected, oldest first, bounded), then a <b>snapshot</b> (the
+/// current <see cref="DebugStateSnapshot"/>, so it renders full state with no prior context — the 2026-06-25
 /// ownership directive), then stays live on the <b>delta stream</b> (<see cref="DebugStateDelta"/>). One
 /// message per newline-terminated JSON line (NDJSON, Q4).
+///
+/// <para><b>Why the history is replayed.</b> The snapshot carries the stream counts, not the records, and a
+/// hypothesis or an event is in no snapshot at all. Without the history a view that connects after the
+/// session started — every view that was waiting for a session connects a moment after it starts — never
+/// shows the target's first output or the hypothesis the session was launched with. The history holds the
+/// last <c>replayCapacity</c> deltas of the running session; the oldest fall off past that
+/// (<see cref="ReplayDropped"/>), and it is emptied when the session ends.</para>
 ///
 /// <para><b>Why this is concurrency-safe.</b> The server handles ONLY immutable snapshots + deltas — it
 /// never calls into <see cref="DebugSession"/>. The session <i>driver</i> (the MCP request thread that owns
@@ -18,7 +26,8 @@ namespace SkyOmega.DrHook.Engine.Transport;
 ///
 /// <para><b>Resource account</b> (<c>feedback_resource_limit_class_audit</c>): the listener FD + at most
 /// <see cref="_maxClients"/> client FDs (excess connections refused); a bounded outbound queue
-/// (drop-oldest + <see cref="DroppedMessages"/> count, like the bounded sinks); two background threads
+/// (drop-oldest + <see cref="DroppedMessages"/> count, like the bounded sinks); a bounded replay history
+/// (drop-oldest + <see cref="ReplayDropped"/> count); two background threads
 /// joined on <see cref="Stop"/>; the socket file unlinked on <see cref="Start"/> (stale) and on stop.</para>
 ///
 /// <para>BCL-only: <see cref="System.Net.Sockets"/> + <see cref="System.Text.Json"/> ship in the shared
@@ -29,9 +38,10 @@ public sealed class DebugStateServer : IDebugEventSink, IDisposable
     private readonly record struct Outbound(long Seq, DebugStateSnapshot? Snapshot, DebugStateDelta? Delta);
 
     // A connected view + the sequence number it joined at. The publisher skips any message with
-    // seq <= JoinedSeq for this client: everything published before it connected is already reflected in
-    // its connect-time snapshot, so re-delivering it would arrive out of order (a stale snapshot after the
-    // newer connect snapshot) — the Phase-2 connect-race bug.
+    // seq <= JoinedSeq for this client: everything published before it connected was sent to it at the
+    // join (the deltas as the replayed history, the snapshots as its connect-time snapshot), so
+    // re-delivering it would arrive twice or out of order (a stale snapshot after the newer connect
+    // snapshot) — the Phase-2 connect-race bug.
     private sealed class ClientConn(Socket socket, long joinedSeq)
     {
         public Socket Socket { get; } = socket;
@@ -42,19 +52,25 @@ public sealed class DebugStateServer : IDebugEventSink, IDisposable
     private readonly int _maxClients;
     private readonly int _queueCapacity;
     private readonly int _sendTimeoutMs;
+    private readonly int _replayCapacity;
 
+    // _queueLock guards the queue, the replay history, the latest snapshot and the sequence counter
+    // together: a sequence number is handed out in the same critical section that stores its message, so
+    // "everything up to seq N" is exactly what these hold at that moment. The join in AcceptLoop depends on it.
     private readonly LinkedList<Outbound> _queue = new();
+    private readonly LinkedList<Outbound> _history = new(); // this session's deltas, oldest first
     private readonly object _queueLock = new();
     private readonly ManualResetEventSlim _wake = new(false);
     private CancellationTokenSource _shutdownCts = new(); // recreated per Start (see Start) so the server restarts
     private long _droppedMessages;
     private long _workerErrors;
+    private long _replayDropped;
     private long _seq;
 
     private readonly List<ClientConn> _clients = new();
     private readonly object _clientsLock = new();
 
-    private volatile DebugStateSnapshot? _latestSnapshot;
+    private DebugStateSnapshot? _latestSnapshot;
 
     private Socket? _listener;
     private Thread? _acceptThread;
@@ -63,16 +79,22 @@ public sealed class DebugStateServer : IDebugEventSink, IDisposable
 
     /// <summary>Construct a server bound to <paramref name="socketPath"/> (see <see cref="SkyOmega.DrHook.Wire.WireRendezvous.DefaultSocketPath"/>).
     /// Does not bind until <see cref="Start"/>. <paramref name="maxClients"/> caps concurrent views;
-    /// <paramref name="queueCapacity"/> bounds the outbound buffer (drop-oldest on overflow).</summary>
-    public DebugStateServer(string socketPath, int maxClients = 8, int queueCapacity = 4096, int sendTimeoutMs = 2000)
+    /// <paramref name="queueCapacity"/> bounds the outbound buffer (drop-oldest on overflow).
+    /// <paramref name="replayCapacity"/> is how many of the session's most recent deltas a connecting view is
+    /// sent before its snapshot (drop-oldest on overflow); 0 turns the replay off. The default matches the
+    /// tail a view keeps (<c>DebugStateClientOptions.DeltaHistory</c>).</summary>
+    public DebugStateServer(string socketPath, int maxClients = 8, int queueCapacity = 4096, int sendTimeoutMs = 2000,
+        int replayCapacity = 1000)
     {
         ArgumentException.ThrowIfNullOrEmpty(socketPath);
         if (maxClients <= 0) throw new ArgumentOutOfRangeException(nameof(maxClients));
         if (queueCapacity <= 0) throw new ArgumentOutOfRangeException(nameof(queueCapacity));
+        if (replayCapacity < 0) throw new ArgumentOutOfRangeException(nameof(replayCapacity));
         _socketPath = socketPath;
         _maxClients = maxClients;
         _queueCapacity = queueCapacity;
         _sendTimeoutMs = sendTimeoutMs;
+        _replayCapacity = replayCapacity;
     }
 
     /// <summary>True once <see cref="Start"/> has bound the listener and not yet stopped.</summary>
@@ -88,6 +110,10 @@ public sealed class DebugStateServer : IDebugEventSink, IDisposable
     /// a silent thread death can never again masquerade as a client hang (the Phase-2 reflection-Serialize
     /// bug).</summary>
     public long WorkerErrors => Interlocked.Read(ref _workerErrors);
+
+    /// <summary>Number of deltas that fell off the replay history to honor its cap. Non-zero means a view
+    /// connecting now is not shown the start of the session.</summary>
+    public long ReplayDropped => Interlocked.Read(ref _replayDropped);
 
     /// <summary>Current number of connected views.</summary>
     public int ClientCount { get { lock (_clientsLock) return _clients.Count; } }
@@ -125,9 +151,7 @@ public sealed class DebugStateServer : IDebugEventSink, IDisposable
     public void PublishSnapshot(DebugStateSnapshot snapshot)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
-        if (!_running) return;
-        _latestSnapshot = snapshot;
-        Enqueue(new Outbound(Interlocked.Increment(ref _seq), snapshot, null));
+        Enqueue(snapshot, null);
     }
 
     // IDebugEventSink — deltas pushed from the pump worker / console-drain / event threads. Must be O(1)
@@ -136,37 +160,56 @@ public sealed class DebugStateServer : IDebugEventSink, IDisposable
     public void OnEvent(string name)
     {
         if (name is null || !_running) return;
-        Enqueue(new Outbound(Interlocked.Increment(ref _seq), null, DebugStateDelta.ForEvent(DateTimeOffset.UtcNow, name)));
+        Enqueue(null, DebugStateDelta.ForEvent(DateTimeOffset.UtcNow, name));
     }
 
     public void OnLog(LogRecord record)
     {
         if (record is null || !_running) return;
-        Enqueue(new Outbound(Interlocked.Increment(ref _seq), null, DebugStateDelta.ForLog(record)));
+        Enqueue(null, DebugStateDelta.ForLog(record));
     }
 
     public void OnAnomaly(EngineAnomaly anomaly)
     {
         if (anomaly is null || !_running) return;
-        Enqueue(new Outbound(Interlocked.Increment(ref _seq), null, DebugStateDelta.ForAnomaly(anomaly)));
+        Enqueue(null, DebugStateDelta.ForAnomaly(anomaly));
     }
 
     public void OnConsoleOutput(ConsoleOutputRecord record)
     {
         if (record is null || !_running) return;
-        Enqueue(new Outbound(Interlocked.Increment(ref _seq), null, DebugStateDelta.ForConsole(record)));
+        Enqueue(null, DebugStateDelta.ForConsole(record));
     }
 
     public void OnHypothesis(HypothesisRecord record)
     {
         if (record is null || !_running) return;
-        Enqueue(new Outbound(Interlocked.Increment(ref _seq), null, DebugStateDelta.ForHypothesis(record)));
+        Enqueue(null, DebugStateDelta.ForHypothesis(record));
     }
 
-    private void Enqueue(Outbound message)
+    private void Enqueue(DebugStateSnapshot? snapshot, DebugStateDelta? delta)
     {
         lock (_queueLock)
         {
+            // Checked under the lock: Stop clears the history and the queue under it after clearing _running,
+            // so nothing from a session that has ended can be left behind for the next one to replay.
+            if (!_running) return;
+
+            var message = new Outbound(++_seq, snapshot, delta);
+            if (snapshot is not null)
+            {
+                _latestSnapshot = snapshot;
+            }
+            else if (_replayCapacity > 0)
+            {
+                if (_history.Count >= _replayCapacity)
+                {
+                    _history.RemoveFirst();
+                    Interlocked.Increment(ref _replayDropped);
+                }
+                _history.AddLast(message);
+            }
+
             if (_queue.Count >= _queueCapacity)
             {
                 _queue.RemoveFirst();
@@ -196,19 +239,43 @@ public sealed class DebugStateServer : IDebugEventSink, IDisposable
             {
                 client.SendTimeout = _sendTimeoutMs;
 
-                // Everything published up to joinedSeq is reflected in the connect-time snapshot, so this
-                // client skips any in-flight broadcast with seq <= joinedSeq (else a stale snapshot could
-                // arrive after the newer connect snapshot — out of order). Serialize the snapshot OUTSIDE the
-                // lock (immutable); send it BEFORE registering so a concurrent broadcast can't reach this
-                // client ahead of its snapshot.
-                long joinedSeq = Interlocked.Read(ref _seq);
-                DebugStateSnapshot? snap = _latestSnapshot;
-                string? snapshotLine = snap is null ? null : DebugStateWireMapper.SnapshotLine(snap, Interlocked.Increment(ref _seq));
-
+                // The join. The client is sent the session's delta history, then the current snapshot, and
+                // is then registered for the live stream — all under _clientsLock, so no broadcast can reach
+                // it ahead of that or slip past between the capture and the registration. What it is sent is
+                // captured in one step under _queueLock: every message up to joinedSeq is either a delta in
+                // the history or a snapshot no newer than the one captured, so the publisher skips those for
+                // this client (seq <= joinedSeq) and delivers everything after. The sequence numbers on its
+                // wire only ever rise: the history keeps its own, the snapshot gets a fresh one.
+                // Lock order is _clientsLock, then _queueLock; nothing takes them the other way round.
                 lock (_clientsLock)
                 {
                     if (_clients.Count >= _maxClients) { SafeClose(client); continue; }
-                    if (snapshotLine is not null && !TrySend(client, snapshotLine)) { SafeClose(client); continue; }
+
+                    Outbound[] replay;
+                    DebugStateSnapshot? snap;
+                    long snapshotSeq = 0, joinedSeq;
+                    lock (_queueLock)
+                    {
+                        replay = new Outbound[_history.Count];
+                        _history.CopyTo(replay, 0);
+                        snap = _latestSnapshot;
+                        if (snap is not null) snapshotSeq = ++_seq;
+                        joinedSeq = _seq;
+                    }
+
+                    bool sent = true;
+                    foreach (Outbound m in replay)
+                    {
+                        string line;
+                        // One delta that cannot be serialized must not keep every view out for the rest of
+                        // the session: count it, leave it out, send the rest.
+                        try { line = DebugStateWireMapper.DeltaLine(m.Delta!, m.Seq); }
+                        catch { Interlocked.Increment(ref _workerErrors); continue; }
+                        if (!TrySend(client, line)) { sent = false; break; }
+                    }
+                    if (sent && snap is not null) sent = TrySend(client, DebugStateWireMapper.SnapshotLine(snap, snapshotSeq));
+                    if (!sent) { SafeClose(client); continue; }
+
                     _clients.Add(new ClientConn(client, joinedSeq));
                 }
             }
@@ -313,8 +380,12 @@ public sealed class DebugStateServer : IDebugEventSink, IDisposable
             _clients.Clear();
         }
 
-        _latestSnapshot = null;
-        lock (_queueLock) _queue.Clear();
+        lock (_queueLock) // the session is over: its snapshot and its history are not the next session's
+        {
+            _latestSnapshot = null;
+            _queue.Clear();
+            _history.Clear();
+        }
         TryUnlinkSocketFile();
     }
 

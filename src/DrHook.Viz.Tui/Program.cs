@@ -1,3 +1,4 @@
+using System.Reflection;
 using SkyOmega.DrHook.Viz;
 using SkyOmega.DrHook.Viz.Tui;
 
@@ -14,13 +15,22 @@ foreach (string arg in args)
 
             Usage: drhook-viz-tui [socket-path]
 
-              socket-path   the rendezvous socket (default: the well-known per-host path)
-              -h, --help    show this help
+              socket-path     the rendezvous socket (default: the well-known per-host path)
+              -v, --version   show version information
+              -h, --help      show this help
 
             Panes: stack, source-on-step, locals/args, breakpoints, the (hypothesis, observation) braid and
             lifecycle events, the target's console output, anomalies. Read-only — the session is driven by the
             agent through the DrHook MCP; closing the dashboard never affects it. q or Ctrl+C to quit.
+
+            It can be started before any session and left running: it waits for a session, shows it, keeps the
+            last state on screen when the session ends, and connects to the next one.
             """);
+        return 0;
+    }
+    if (arg is "-v" or "--version")
+    {
+        Console.WriteLine($"drhook-viz-tui {Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown"}");
         return 0;
     }
     if (arg.StartsWith('-')) { Console.Error.WriteLine($"unknown option: {arg}"); return 2; }
@@ -33,14 +43,14 @@ if (Console.IsOutputRedirected || Console.IsInputRedirected)
     return 2;
 }
 
-var options = new DebugStateClientOptions();
+var options = new DebugStateClientOptions { Reconnect = true }; // a dashboard stays up across sessions
 if (socketPath is not null) options.SocketPath = socketPath;
 
 using var cts = new CancellationTokenSource();
 Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
 
 var terminal = new AnsiTerminal(Console.Out);
-var view = new DashboardDebugStateView(terminal, () => (Console.WindowWidth, Console.WindowHeight));
+var view = new DashboardDebugStateView(terminal, () => (Console.WindowWidth, Console.WindowHeight), reconnects: true);
 terminal.Enter();
 try
 {

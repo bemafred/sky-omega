@@ -12,8 +12,9 @@ namespace SkyOmega.DrHook.Viz;
 /// NOT necessarily a UI thread. A console view can write directly; a TUI/GUI view must marshal to its UI thread.</para></summary>
 public interface IDebugStateView
 {
-    /// <summary>The client connected to <paramref name="endpoint"/> (the rendezvous socket path). A snapshot
-    /// normally follows immediately (the server's snapshot-on-connect).</summary>
+    /// <summary>The client connected to <paramref name="endpoint"/> (the rendezvous socket path). What the
+    /// session emitted before this connection follows as deltas, oldest first, and then a snapshot (the
+    /// server's snapshot-on-connect); before the session's first stop there is no snapshot yet.</summary>
     void OnConnected(string endpoint);
 
     /// <summary>A point-in-time snapshot arrived — the full current state. <paramref name="model"/> now has it
@@ -25,6 +26,9 @@ public interface IDebugStateView
     void OnDelta(WireDelta delta, DebugStateClientModel model);
 
     /// <summary>The session ended for this view: the server closed the connection, the read was cancelled, or
-    /// the connect failed. <paramref name="reason"/> is a short human-readable cause (never null in practice).</summary>
+    /// the connect failed. <paramref name="reason"/> is a short human-readable cause (never null in practice).
+    /// A client that reconnects (<see cref="DebugStateClientOptions.Reconnect"/>) calls this once each time it
+    /// starts waiting, and <see cref="OnConnected"/> again when the next session is up; the model's
+    /// state from the ended session stays readable in between.</summary>
     void OnDisconnected(string? reason);
 }

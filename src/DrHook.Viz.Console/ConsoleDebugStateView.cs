@@ -13,11 +13,15 @@ public sealed class ConsoleDebugStateView : IDebugStateView
 {
     private readonly TextWriter _out;
     private readonly SourceWindowReader _source;
+    private readonly bool _waitsForNextSession;
 
-    public ConsoleDebugStateView(TextWriter output, SourceWindowReader? source = null)
+    /// <param name="waitsForNextSession">True when the client reconnects
+    /// (<see cref="DebugStateClientOptions.Reconnect"/>): a disconnect line then says the view is waiting.</param>
+    public ConsoleDebugStateView(TextWriter output, SourceWindowReader? source = null, bool waitsForNextSession = false)
     {
         _out = output;
         _source = source ?? new SourceWindowReader();
+        _waitsForNextSession = waitsForNextSession;
     }
 
     public void OnConnected(string endpoint)
@@ -30,5 +34,7 @@ public sealed class ConsoleDebugStateView : IDebugStateView
         => DebugStateTextRenderer.RenderDelta(_out, d);
 
     public void OnDisconnected(string? reason)
-        => _out.WriteLine($"● disconnected: {reason}");
+        => _out.WriteLine(_waitsForNextSession
+            ? $"● disconnected: {reason} — waiting for a session…"
+            : $"● disconnected: {reason}");
 }

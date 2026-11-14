@@ -43,6 +43,15 @@ public sealed class DebugStateClientModel
         }
     }
 
+    /// <summary>Forget the previous connection's state. Called when a new connection is established: its
+    /// snapshot and deltas belong to another session, and the new connection's sequence numbers are its own.</summary>
+    internal void Reset()
+    {
+        lock (_lock) _deltas.Clear();
+        Snapshot = null;
+        LastSeq = 0;
+    }
+
     internal void ApplySnapshot(WireSnapshot snapshot, long seq)
     {
         Snapshot = snapshot;

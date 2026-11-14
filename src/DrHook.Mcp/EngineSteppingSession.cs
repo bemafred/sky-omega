@@ -328,6 +328,7 @@ public sealed class EngineSteppingSession : IDisposable
 
             _session = DebugSession.Attach(pid, _sink);
             StartTransport(); // a view can now connect; it gets its first snapshot at the first stop below
+            EmitHypothesis(hypothesis, HypothesisLens.Navigation); // the session's own hypothesis opens the braid
             // Setup stop: most targets break on attach (the Debugger.IsAttached transition) and we drain it. But an
             // IDLE target — e.g. a GUI app blocked in its native message pump between events — may never reach a
             // managed safe-point on its own, so if the organic stop does not arrive, force synchronization with an
@@ -413,6 +414,7 @@ public sealed class EngineSteppingSession : IDisposable
             // the inherited environment by the POSIX spawn (BuildChildEnv) — Owned/launch only.
             _session = DebugSession.Launch(program, args, cwd, _sink, entryModule: DeriveEntryModule(program, args), env: env);
             StartTransport(); // a view can now connect; it gets its first snapshot at the first stop below
+            EmitHypothesis(hypothesis, HypothesisLens.Navigation); // the session's own hypothesis opens the braid
 
             // Capture the launched PID for status reporting. DebugSession.Launch (finding 64)
             // now owns the Process handle internally and kill-firsts on Dispose — no separate

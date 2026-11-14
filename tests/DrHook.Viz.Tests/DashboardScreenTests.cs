@@ -183,4 +183,17 @@ public sealed class AnsiTerminalTests
         Assert.EndsWith("\u001b[?25h\u001b[?1049l", written);
         Assert.Equal(1, written.Split("\u001b[?1049l").Length - 1);
     }
+
+    [Fact]
+    public void DisconnectedStatus_ADashboardThatReconnects_IsWaiting_AndKeepsTheQuitHintFirst()
+    {
+        const string reason = "server closed the connection";
+
+        Assert.Equal($"disconnected (q to quit): {reason}",
+            DashboardDebugStateView.DisconnectedStatus(reason, reconnects: false, connectedOnce: true));
+        Assert.Equal($"waiting for a session (q to quit): {reason}",
+            DashboardDebugStateView.DisconnectedStatus(reason, reconnects: true, connectedOnce: false));
+        Assert.Equal($"session ended, waiting for the next (q to quit): {reason}",
+            DashboardDebugStateView.DisconnectedStatus(reason, reconnects: true, connectedOnce: true));
+    }
 }

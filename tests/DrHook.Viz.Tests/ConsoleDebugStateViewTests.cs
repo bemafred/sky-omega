@@ -202,4 +202,18 @@ public sealed class ConsoleDebugStateViewTests : IDisposable
         Assert.Contains("map={Dictionary<String, Foo>}", output);
         Assert.Contains("arr={Bar[]}", output);
     }
+
+    [Fact]
+    public void OnDisconnected_SaysItIsWaiting_OnlyWhenTheClientReconnects()
+    {
+        var once = new StringWriter();
+        new ConsoleDebugStateView(once).OnDisconnected("server closed the connection");
+        Assert.Contains("disconnected: server closed the connection", once.ToString());
+        Assert.DoesNotContain("waiting", once.ToString());
+
+        var following = new StringWriter();
+        new ConsoleDebugStateView(following, waitsForNextSession: true).OnDisconnected("server closed the connection");
+        Assert.Contains("disconnected: server closed the connection", following.ToString());
+        Assert.Contains("waiting for a session", following.ToString());
+    }
 }

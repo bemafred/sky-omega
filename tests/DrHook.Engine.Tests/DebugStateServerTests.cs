@@ -175,4 +175,177 @@ public sealed class DebugStateServerTests
 
         server.Stop();
     }
+
+    // ─── Replay on connect: a view is shown what the session emitted before it connected ───────────────
+
+    private static string Type(JsonDocument m) => m.RootElement.GetProperty("type").GetString()!;
+    private static long Seq(JsonDocument m) => m.RootElement.GetProperty("seq").GetInt64();
+    private static string? Field(JsonDocument m, string name) => m.RootElement.GetProperty("delta").GetProperty(name).GetString();
+
+    [Fact]
+    public void OnConnect_ReplaysWhatTheSessionEmittedBefore_ThenTheSnapshot_ThenStaysLive()
+    {
+        string sock = TempSocketPath();
+        using var server = new DebugStateServer(sock);
+        server.Start();
+        server.OnHypothesis(new HypothesisRecord(DateTimeOffset.UnixEpoch, "the loop runs three times", HypothesisLens.Navigation));
+        server.OnConsoleOutput(new ConsoleOutputRecord(DateTimeOffset.UnixEpoch, ConsoleStream.Stdout, "first line"));
+        server.PublishSnapshot(Snapshot(ExecutionState.Running)); // superseded: only the latest snapshot is sent
+        server.OnEvent("Breakpoint");
+        server.PublishSnapshot(Snapshot(ExecutionState.Stopped));
+
+        using Socket client = Connect(sock); // the session is well under way
+
+        long last = 0;
+        using (JsonDocument m = ReadMessage(client))
+        {
+            Assert.Equal("the loop runs three times", Field(m, "hypothesisText"));
+            last = Seq(m);
+        }
+        using (JsonDocument m = ReadMessage(client))
+        {
+            Assert.Equal("first line", Field(m, "consoleText"));
+            Assert.True(Seq(m) > last); last = Seq(m);
+        }
+        using (JsonDocument m = ReadMessage(client))
+        {
+            Assert.Equal("Breakpoint", Field(m, "event"));
+            Assert.True(Seq(m) > last); last = Seq(m);
+        }
+        using (JsonDocument m = ReadMessage(client)) // then the current state, once
+        {
+            Assert.Equal("snapshot", Type(m));
+            Assert.Equal("Stopped", m.RootElement.GetProperty("snapshot").GetProperty("session").GetProperty("execution").GetString());
+            Assert.True(Seq(m) > last); last = Seq(m);
+        }
+
+        server.OnEvent("StepComplete"); // and nothing from before the connect arrives a second time
+        using (JsonDocument m = ReadMessage(client))
+        {
+            Assert.Equal("StepComplete", Field(m, "event"));
+            Assert.True(Seq(m) > last);
+        }
+    }
+
+    [Fact]
+    public void OnConnect_BeforeTheFirstSnapshot_ReplaysTheDeltasAlone()
+    {
+        string sock = TempSocketPath();
+        using var server = new DebugStateServer(sock);
+        server.Start();
+        server.OnConsoleOutput(new ConsoleOutputRecord(DateTimeOffset.UnixEpoch, ConsoleStream.Stdout, "starting"));
+
+        using Socket client = Connect(sock);
+        using (JsonDocument m = ReadMessage(client)) Assert.Equal("starting", Field(m, "consoleText"));
+
+        server.PublishSnapshot(Snapshot(ExecutionState.Stopped)); // the first stop arrives live
+        using (JsonDocument m = ReadMessage(client)) Assert.Equal("snapshot", Type(m));
+    }
+
+    [Fact]
+    public void ReplayCapacity_KeepsTheNewest_AndCountsWhatFellOff()
+    {
+        string sock = TempSocketPath();
+        using var server = new DebugStateServer(sock, replayCapacity: 2);
+        server.Start();
+        for (int i = 0; i < 5; i++) server.OnEvent($"e{i}");
+        Assert.Equal(3, server.ReplayDropped);
+
+        using Socket client = Connect(sock);
+        using (JsonDocument m = ReadMessage(client)) Assert.Equal("e3", Field(m, "event"));
+        using (JsonDocument m = ReadMessage(client)) Assert.Equal("e4", Field(m, "event"));
+
+        server.OnEvent("live");
+        using (JsonDocument m = ReadMessage(client)) Assert.Equal("live", Field(m, "event"));
+    }
+
+    [Fact]
+    public void ReplayCapacity_Zero_SendsTheSnapshotOnly()
+    {
+        string sock = TempSocketPath();
+        using var server = new DebugStateServer(sock, replayCapacity: 0);
+        server.Start();
+        server.OnEvent("before");
+        server.PublishSnapshot(Snapshot(ExecutionState.Stopped));
+
+        using Socket client = Connect(sock);
+        using (JsonDocument m = ReadMessage(client)) Assert.Equal("snapshot", Type(m));
+
+        server.OnEvent("live");
+        using (JsonDocument m = ReadMessage(client)) Assert.Equal("live", Field(m, "event"));
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => new DebugStateServer(sock, replayCapacity: -1));
+    }
+
+    [Fact]
+    public void Restart_DoesNotReplayThePreviousSession()
+    {
+        string sock = TempSocketPath();
+        using var server = new DebugStateServer(sock);
+        server.Start();
+        server.OnEvent("from the first session");
+        server.PublishSnapshot(Snapshot(ExecutionState.Stopped));
+        server.Stop();
+        server.OnEvent("after it ended"); // a late event from the session that has ended is not kept either
+
+        server.Start();
+        using Socket client = Connect(sock);
+        server.OnEvent("from the second session");
+        // Whether the event was emitted before or after the join, it is the first and only thing the view is sent.
+        using (JsonDocument m = ReadMessage(client)) Assert.Equal("from the second session", Field(m, "event"));
+    }
+
+    [Fact]
+    public async Task ConnectingWhileTheSessionEmits_EveryDeltaArrivesOnce_InOrder()
+    {
+        // The join has to hand over from the replayed history to the live stream without a gap and without a
+        // repeat, while the publisher is busy. A writer emits numbered events throughout; views connect at
+        // arbitrary moments; each must be sent 0, 1, 2, … with nothing missing and nothing twice.
+        const int total = 4000;
+        string sock = TempSocketPath();
+        using var server = new DebugStateServer(sock, queueCapacity: total * 2, replayCapacity: total * 2);
+        server.Start();
+
+        var writer = new Thread(() =>
+        {
+            for (int i = 0; i < total; i++)
+            {
+                server.OnEvent(i.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                if (i % 200 == 0) server.PublishSnapshot(Snapshot(ExecutionState.Running));
+                if (i % 50 == 0) Thread.Sleep(1);
+            }
+        }) { IsBackground = true };
+        writer.Start();
+
+        var readers = new List<Task>();
+        for (int c = 0; c < 4; c++)
+        {
+            Thread.Sleep(15); // each view joins at a different point of the stream
+            Socket client = Connect(sock);
+            readers.Add(Task.Run(() =>
+            {
+                using (client)
+                {
+                    int expected = 0;
+                    long lastSeq = 0;
+                    while (expected < total)
+                    {
+                        using JsonDocument m = ReadMessage(client);
+                        Assert.True(Seq(m) > lastSeq, $"seq went from {lastSeq} to {Seq(m)}");
+                        lastSeq = Seq(m);
+                        if (Type(m) != "delta") continue;
+                        Assert.Equal(expected.ToString(System.Globalization.CultureInfo.InvariantCulture), Field(m, "event"));
+                        expected++;
+                    }
+                }
+            }, TestContext.Current.CancellationToken));
+        }
+
+        // A view that is not sent the whole stream fails here: its read times out, or this wait does.
+        await Task.WhenAll(readers).WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+        writer.Join();
+        Assert.Equal(0, server.DroppedMessages);
+        Assert.Equal(0, server.ReplayDropped);
+        Assert.Equal(0, server.WorkerErrors);
+    }
 }

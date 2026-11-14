@@ -10,6 +10,10 @@
          ambiguous). The project / assembly name stays DrHook.Viz.Console. -->
     <RootNamespace>SkyOmega.DrHook.Viz.ConsoleView</RootNamespace>
     <AssemblyName>SkyOmega.DrHook.Viz.Console</AssemblyName>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>drhook-viz-console</ToolCommandName>
+    <PackageId>SkyOmega.DrHook.Viz.Console</PackageId>
+    <Authors>Sky Omega Contributors</Authors>
     <Description>DrHook console visualizer — a thin view over DrHook.Viz that tails the live debug-state stream to the console. The simplest IDebugStateView, and the first proper DrHook debuggee (drhook_launch-able).</Description>
   </PropertyGroup>
 

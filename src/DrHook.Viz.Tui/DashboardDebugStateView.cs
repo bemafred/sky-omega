@@ -17,23 +17,35 @@ public sealed class DashboardDebugStateView : IDebugStateView
     private readonly SourceWindowReader _source = new(new SourceWindowOptions { ContextLines = DashboardScreen.SourceContextLines });
     private readonly AutoResetEvent _dirty = new(false);
     private readonly object _lock = new();
+    private readonly bool _reconnects;
     private DebugStateClientModel? _model;
     private string _status = "connecting…";
+    private bool _connectedOnce;
 
-    public DashboardDebugStateView(AnsiTerminal terminal, Func<(int Width, int Height)> size)
+    /// <param name="reconnects">True when the client waits for the next session after one ends
+    /// (<see cref="DebugStateClientOptions.Reconnect"/>): a disconnect is then shown as waiting, not as the end.</param>
+    public DashboardDebugStateView(AnsiTerminal terminal, Func<(int Width, int Height)> size, bool reconnects = false)
     {
         _terminal = terminal;
         _size = size;
+        _reconnects = reconnects;
     }
 
-    public void OnConnected(string endpoint) => SetStatus("connected");
+    public void OnConnected(string endpoint) { _connectedOnce = true; SetStatus("connected"); }
 
     public void OnSnapshot(WireSnapshot snapshot, DebugStateClientModel model) { lock (_lock) _model = model; _dirty.Set(); }
 
     public void OnDelta(WireDelta delta, DebugStateClientModel model) { lock (_lock) _model = model; _dirty.Set(); }
 
     // The quit hint leads: the title clips from the right, so it may cut the reason but never the instruction.
-    public void OnDisconnected(string? reason) => SetStatus($"disconnected (q to quit): {reason}");
+    public void OnDisconnected(string? reason) => SetStatus(DisconnectedStatus(reason, _reconnects, _connectedOnce));
+
+    /// <summary>The title-bar status for a disconnect. A view whose client reconnects is waiting, and says whether
+    /// a session has ended or none has been seen yet; the panes keep the ended session's last state.</summary>
+    internal static string DisconnectedStatus(string? reason, bool reconnects, bool connectedOnce) =>
+        !reconnects ? $"disconnected (q to quit): {reason}"
+        : connectedOnce ? $"session ended, waiting for the next (q to quit): {reason}"
+        : $"waiting for a session (q to quit): {reason}";
 
     private void SetStatus(string status) { lock (_lock) _status = status; _dirty.Set(); }
 

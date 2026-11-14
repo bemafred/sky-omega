@@ -13,4 +13,12 @@ public sealed class DebugStateClientOptions
     /// <summary>Maximum number of recent deltas the client-side model retains (the bounded tail a view can
     /// render). Oldest are dropped past this. Must be positive.</summary>
     public int DeltaHistory { get; set; } = 1000;
+
+    /// <summary>When true, the client outlives a session: after a stream ends, or when no session is up at the
+    /// start, it waits and connects to the next one, until cancelled. Default false: one connection, then return.</summary>
+    public bool Reconnect { get; set; }
+
+    /// <summary>How long the client waits between connect attempts while <see cref="Reconnect"/> is on. A connect
+    /// to a socket that is not there fails at once, so this is the whole cost of waiting. Must be positive.</summary>
+    public TimeSpan ReconnectDelay { get; set; } = TimeSpan.FromMilliseconds(500);
 }
