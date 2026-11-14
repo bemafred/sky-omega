@@ -79,6 +79,10 @@ With one extent, which is every file that has not grown since it was opened, the
 pointer is one multiplication and one addition. The file at least doubles each time it grows, so the extents stay
 few.
 
+Measured on omega (Release, one thread, 50 million requests for random pages, best of five): with 4,000 pages a
+request took 43 ns through the cache and 10 ns computed; with 20,000 pages, more than the cache's 10,000 so that
+it put pages out, 146 ns and 10 ns. The cache cost more than the arithmetic it saved.
+
 `PageCache` is removed, with its tests. `BTreeFile.BasePtr` is removed: it had no caller, and with extents there is
 no single base.
 
@@ -140,7 +144,8 @@ After the fix all pass. The two probes were run again: eight readers finished an
 - A growth that fails (a full disk, no address space).
 - The Reference and Minimal profiles through a store: their stores are loaded in bulk mode, which starts the file
   at 1 TB and 1 GB. They use the same `BTreeFile`, which is tested alone.
-- A file larger than 16 MB, and the cost of a flush over many extents.
+- A file larger than 16 MB, the cost of a flush over many extents, and the cost of a page request in a file of
+  several extents.
 
 ## Consequences
 
