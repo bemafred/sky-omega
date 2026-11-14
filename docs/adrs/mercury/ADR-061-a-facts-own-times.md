@@ -10,7 +10,7 @@ two, and chose the words. This text follows those decisions.
 
 Each decision below is marked:
 
-- **Decided**: Martin's decision, 2026-11-11.
+- **Decided**: Martin's decision, 2026-11-11 unless another date is given.
 - **Proposed**: Sky's addition that follows from a decision. Martin has not confirmed it.
 
 Martin's first review, the same day, decided six more things:
@@ -24,6 +24,13 @@ Martin's first review, the same day, decided six more things:
 
 On 2026-11-12, after reading this text, Martin decided one more thing: the five attributes that leave carry the
 prefix `Legacy` in the code until they are removed (D15). That rename is done too (Step 2).
+
+On 2026-11-13 Martin decided what the store is: a temporal RDF set, not an event log. On 2026-11-14 he confirmed the
+form derived from that decision. It is [The model](#the-model), written into this text on 2026-11-14:
+
+- D1, D2, D5 and D10 said things the model contradicts. Their wording is corrected, and each correction is dated.
+- The logical thing is now called a **period**, where this text said "version". The stored thing is an **entry**.
+- The store was run against the model on 2026-11-14 (M11), and the live memory store was counted (Step 3).
 
 The file keeps its name: the changelog, the 1.8.41 release notes, the solution file and the ADR index link to it.
 
@@ -42,8 +49,8 @@ And the goal:
 > … give memory/cognitive-storage excellent temporal awareness, functionally akin to a human brain but not lossy,
 > instead, better and more reliable. Excellent recall support.
 
-Human memory misdates events and loses the old version when a memory is revised. A store that stamps every
-memorization and every forgetting itself, and never erases, does neither.
+Human memory misdates events and loses the old version when a memory is revised. A store that sets each fact's
+memorized and forgotten time itself, and keeps every period in which the fact was remembered, does neither.
 
 ### What the store cannot answer today
 
@@ -100,8 +107,9 @@ Only two paths write a stated valid time: `Mercury.Pruning` copies, and `example
 The memory stores have never been pruned (Martin, 2026-11-11). So nothing has written a stated time into them, and
 every `ValidFrom` in them should be the time of its write.
 
-**Not verified:** that no entry of the live memory store has `ValidFrom` different from `TransactionTime`, or
-`IsDeleted` set. Step 3 counts them.
+**Counted 2026-11-14 (Step 3), on a copy of the live memory store:** of 8,187 entries, 84 have a memorized time
+different from `LegacyTransactionTime`, and none has `LegacyIsDeleted` set. The 84 are not explained yet, so "every
+`ValidFrom` should be the time of its write" is not established for them.
 
 This section names the attributes as they were on 2026-11-10. In the code they are now `MemorizedAt`, `ForgottenAt`
 (D11) and `LegacyTransactionTime`, `LegacyCreatedAt`, `LegacyModifiedAt`, `LegacyVersion`, `LegacyIsDeleted` (D15).
@@ -112,34 +120,309 @@ Only the Cognitive profile keeps these times ([ADR-029](ADR-029-store-profiles.m
 soft deletes; Reference and Minimal have no time. `QuadStore.RequireTemporalProfile` already rejects temporal queries on
 them.
 
+## The model
+
+**Decided — 2026-11-13.** On 2026-11-14 Martin confirmed the form derived here: "now I think you have the model
+right." The parts marked **Proposed** are Sky's and are not confirmed.
+
+Martin, 2026-11-13:
+
+> Mercury's Cognitive profile is a temporal RDF set, not an event log. The identity of an RDF quad is determined by its
+> RDF terms. Repeated operations do not create additional facts or identities. A fact's temporal membership is what we
+> model. We do not promise to preserve every intermediate operation or state transition.
+
+The model comes before the decisions because they rest on it. It was written after them.
+
+### M1. Memory time, the set, and a period
+
+- **Memory time** is the one time axis: the readings of the store's clock, in UTC, one per millisecond (D4).
+- **`M : T → P(Q)`.** `M(t)` is the set of RDF quads the store remembers at the representable time `t`:
+  - `M(t)` is the set as the last operation stamped `t` left it;
+  - when no operation is stamped `t`, `M(t) = M(t − 1)`.
+- A **period** of a quad `q` is a longest unbroken run of readings at which `q` is in the set. It is written `[m, f)`:
+  `q` is in `M(t)` exactly when `m ≤ t < f`.
+  - `m`, its **memorized** time, is the first reading at which `q` is remembered.
+  - `f`, its **forgotten** time, is the first reading after that at which `q` is not remembered. It is absent while
+    `q` is remembered.
+- A period says when a quad belongs to the set. It is not a thing with an identity of its own. The operations that
+  began and ended it are not kept.
+- `M` describes the set at each representable time. It says nothing about what happened between two readings, and the
+  store does not promise to keep that.
+
+### M2. Inside one clock reading
+
+One rule follows from M1: **inside one clock reading, only the last operation on a quad counts, as if it were the only
+operation in that reading.** Martin decided its two cases on 2026-11-13:
+
+- **No period of zero length.** "A fact memorized and forgotten within the same clock reading has no nonempty
+  membership interval. … Do not introduce artificial records, identities, sequence numbers, or special timestamp
+  handling to preserve such operations."
+- **A period continues across a forget and a memorize in one reading.** "If an existing fact is forgotten and memorized
+  again within one clock reading, its membership period continues uninterrupted. If an absent fact is memorized,
+  forgotten, and memorized again within that reading, the resulting state contains one membership period beginning at
+  that time."
+
+The rule says what memory time can show. It does not claim that the earlier operations never happened.
+
+### M3. What the model assumes
+
+- **One store has one owner and one writer.** Martin, 2026-11-14: "A cognitive profile store is owned by one, and only
+  one, instance. A single writer." A copy of a store is another store. Memory time is that one writer's clock, and no
+  other clock takes part.
+- **The writer applies operations one at a time, in the order it receives them.** "Last" in M2 means last in that
+  order.
+- **The clock does not go backwards** (D4). This is assumed and not guarded.
+- **An operation is stamped while the writer holds the write lock** (I12). So stamps never decrease in the order of
+  application.
+
+### M4. Invariants
+
+The set:
+
+- **I1.** A quad's identity is its four RDF terms: graph, subject, predicate, object. Until
+  [ADR-053](ADR-053-one-rdf-term-one-atom.md) is done the store compares atoms, and one term can have more than one.
+- **I2.** A quad has at most one open period.
+- **I3.** Memorizing a quad that is remembered changes nothing.
+- **I4.** Forgetting a quad that is not remembered changes nothing.
+
+Periods:
+
+- **I5.** Every period has `m < f`, or no `f`. No period is empty.
+- **I6.** Two periods of one quad never overlap and never touch. Between them is at least one reading at which the quad
+  is not remembered.
+- **I7.** Two periods of one quad never begin at the same reading, and only the latest can be open. So "the period of
+  `q` that began at `m`" is one period, found from values the store already holds. No identifier is added for it.
+- **I8.** An absent forgotten time is absent. No maximum value stands for it above storage.
+
+Writes:
+
+- **I9.** Inside one clock reading, any sequence of operations on a quad gives what its last operation alone gives.
+- **I10.** Once the clock has moved past `t`, `M(t)` never changes.
+- **I11.** Both times of a period are readings of the store's clock, taken at a write. No writer states one.
+- **I12.** An operation is stamped while the writer holds the write lock.
+
+The stored form:
+
+- **I13.** Every index holds the same periods.
+- **I14.** A copy (a prune, a rebuild, a conversion) carries periods unchanged (D12).
+- **I15.** Recovery changes nothing. Replaying the log onto indexes that have each applied some first part of it gives
+  the periods an uninterrupted run gives. Two conditions: recovery starts at or before the earliest point any index has
+  reached, and it runs to the end of the log.
+
+Kept apart from the set:
+
+- **I16.** A reader sees the store as the last completed write left it (M9). That is not always what `M` holds for the
+  current reading.
+- **I17.** A clock reading is not a transaction, and a request is not a moment.
+- **I18.** A diagnostic is never a quad and never changes `M`. Turning diagnostics off changes no answer (M8).
+
+### M5. What an operation does
+
+An operation at reading `t` looks at the quad's latest period, and at nothing else:
+
+| Operation | The quad's latest period | Result |
+|-----------|--------------------------|--------|
+| memorize | none | a period begins: `[t, –)` |
+| memorize | open | nothing |
+| memorize | forgotten at `t` | the period continues: its forgotten time is removed |
+| memorize | forgotten before `t` | a new period begins: `[t, –)` |
+| forget | none | nothing |
+| forget | forgotten | nothing |
+| forget | open, memorized before `t` | the period ends: `[m, t)` |
+| forget | open, memorized at `t` | the period is removed: the quad was remembered at no representable time |
+
+`–` is an absent forgotten time. The rule needs no operation identity, no sequence number and no second timestamp. It
+has no case for an operation stamped earlier than the period it meets: with one writer and a clock that does not go
+backwards, there is none.
+
+### M6. Expected results
+
+| Before reading `t` | Operations at `t`, in order | After |
+|--------------------|-----------------------------|-------|
+| not remembered | memorize | `[t, –)` |
+| remembered since `m` | memorize | unchanged |
+| remembered since `m` | forget | `[m, t)` |
+| not remembered | forget | unchanged |
+| not remembered | memorize, forget | no period |
+| remembered since `m` | forget, memorize | `[m, –)`, unbroken |
+| not remembered | memorize, forget, memorize | `[t, –)` |
+| remembered since `m` | forget, memorize, forget | `[m, t)` |
+| forgotten at `f`, before `t` | memorize | `[m, f)` and `[t, –)` |
+| forgotten at `f`, before `t` | memorize, forget | `[m, f)` only |
+
+Across two readings nothing is merged:
+
+| Before | Operations | After |
+|--------|------------|-------|
+| memorized at `t` | forget at `t + 1` | `[t, t + 1)`: a real period of one millisecond |
+| forgotten at `t` | memorize at `t + 1` | `[m, t)` and `[t + 1, –)` |
+
+So one request can give either result. `INSERT x ; DELETE x` leaves a short period when the clock moved between the two
+operations, and none when it did not. Both are correct: memory time shows what it can resolve.
+
+### M7. Recovery — Proposed
+
+I15 has a consequence for the log. The store keeps the periods in several indexes, and after a crash each index can
+have applied a different part of the log. If recovery decided each operation again (M5) on one index and gave the
+outcome to the others, the indexes would end up different: an enumeration found 2,911 such cases among 6,688 small
+ones.
+
+So the log holds the change that was decided at the write, and not the operation that was asked for:
+
+| Record | Applies when | Otherwise |
+|--------|--------------|-----------|
+| begin a period at `t` | the quad has no period that began at `t` | nothing |
+| end the period that began at `m`, at `t` | that period is open | nothing |
+| remove the period that began at `t` | that period is open | nothing |
+| continue the period that began at `m` and ended at `t` | that period's forgotten time is `t` | nothing |
+
+- Each index finds "the period of `q` that began at `m`" by I7. Today's `End` record already names the memorized time
+  this way.
+- Applying a record reads no clock and compares no times for order.
+- **The start of recovery (read, not run).** The checkpoint moves it. `CheckpointInternal` runs only under the write
+  lock, or at open after recovery; it saves every index to disk before it truncates the log. So the start moves only to
+  a point every index has reached. One path is not closed: if applying a committed record throws part-way in
+  `CommitBatch` and the process lives on, nothing refuses later writes, and a later checkpoint would move the start
+  past a record some indexes never received. What can throw there is not established.
+
+### M8. Knowledge, diagnostics and judgement are three layers
+
+Martin, 2026-11-13: a memorize and a forget inside one clock reading "may indicate unnecessary or misguided client
+behavior. That is potentially useful information — but it is information about the agent's behavior, not temporal RDF
+membership."
+
+| Layer | Holds | Whose |
+|-------|-------|-------|
+| RDF memory | which quads are remembered at each representable time (`M`) | Mercury |
+| Diagnostics | operations Mercury observed that `M` does not show | Mercury reports them, as structured diagnostics |
+| Judgement | whether the behaviour was a mistake | James (Operational Epistemology) |
+
+- A diagnostic is never a quad and never changes `M` (I18).
+- Mercury reports only what it observed. The writer meets the case in two rows of M5: a memorize of a quad forgotten at
+  this reading, and a forget of a quad memorized at this reading. It observes the second operation, and it knows the
+  first from a stored time equal to the current reading. It never concludes anything from stored times alone.
+- Such a sequence is not a defect by itself. A retry, a batch or a correction can produce it.
+- **Open:** the form of the diagnostic, and whether and where it is kept (Q13).
+
+### M9. What a reader sees is a separate contract
+
+`M` says what the history holds. It does not say what a query sees while writes are going on.
+
+- A reader sees the store as the last completed write left it (I16). Inside the current clock reading that can be a
+  quad `M` will not hold for this reading (memorized, then forgotten before the reading ends), or a forgotten time that
+  a later memorize in the same reading removes.
+- A clock reading is not a transaction, and a request is not a moment (I17).
+- **Today's code (read, not run):** a query holds the read lock and the writer holds the write lock for a whole batch,
+  so a query sees whole batches. One SPARQL request with several operations is several batches, and a query can run
+  between them.
+- **Open:** the contract itself is not written yet (Q12).
+
+### M10. How the model was checked
+
+This checks the reasoning. It does not check Mercury.
+
+- **By enumeration**, in a script that touches no store: every sequence of up to 8 operations on one quad over 4 clock
+  readings, 65,537 sequences. For each, the rule of M5 gives the periods M1 defines, and I2, I5, I6, I7 and I9 hold.
+  The records of M7, replayed from any earlier point onto an index stopped at any point, give the uninterrupted result
+  in all 2,652,185 cases.
+- **By a second implementation**, written by sky-zbook from the description alone: the same agreement, and also for a
+  recovery that is itself interrupted and started again. It ran on zbook and was not repeated on omega.
+- **The bounds are small.** Quads are independent in the model, so one quad is enough. Nothing shows that 8 operations
+  and 4 readings are.
+- The script is not in the repository.
+
+### M11. Today's code against the model
+
+**Run on 2026-11-14** on omega (macOS arm64, Mercury 1.8.41, commit `1a59d75`), on new temporary stores, through the
+public API:
+
+| Operations | Today's result | Runs | Breaks |
+|------------|----------------|------|--------|
+| one batch: add `x`, delete `x`, add `x` (`x` new) | `x` is forgotten; one entry with equal times | 50 of 50 | I9, I5 |
+| one batch: add `x`, delete `x` (`x` new) | one entry with equal times | 50 of 50 | I5 |
+| one batch: delete `x`, add `x` (`x` remembered) | two periods that touch | 50 of 50 | I6 |
+| insert `x` again while it is remembered, with another entry between the two in TGSP's key order | TGSP alone gains an entry; after `x` is deleted, a time-range read still returns it | 2 of 2 cases; 3 of 3 controls clean | I13 |
+
+- A batch has one clock reading by construction. sky-zbook saw the first and the fourth row on zbook on 2026-11-13.
+- "Between in TGSP's key order" is not "between in time": a quad written in the same request as the first `x`, after
+  it, has the same time and a larger atom, and lies between.
+- **Through one SPARQL request the operations did not share a clock reading on omega**, in 200 runs each of
+  `INSERT ; DELETE ; INSERT`, `INSERT ; DELETE` and `DELETE ; INSERT`. Each operation is a batch of its own, and they
+  were at least 4 ms apart. Those runs gave what the model gives for different readings. sky-zbook reported the first
+  row through one request on zbook (2026-11-12).
+
+The causes, read from the code:
+
+- **First row:** `InsertIntoLeaf` takes the second add for a replay of the first, because the quad, `MemorizedAt` and
+  `LegacyTransactionTime` are equal. It does not compare `ForgottenAt`.
+- **Second row:** the delete looks for the entry holding at `t`, finds the one memorized at `t`, and ends it at `t`.
+- **Third row:** an add after an entry that ended at `t` inserts a new entry from `t`.
+- **Fourth row:** each index decides "already remembered" from the neighbouring entry in its own sort order. In TGSP,
+  where the memorized time leads, another entry can lie between. The delete then names the memorized time found in
+  GSPO, and the extra TGSP entry is never ended.
+- **I12 (read, not run):** `AddCurrent` reads the clock before `Add` takes the write lock. The batch path reads it
+  under the lock.
+
+**The live memory store**, counted on 2026-11-14 on a copy (Step 3):
+
+- 8,187 entries of 8,185 distinct quads, in 81 named graphs, read through GSPO.
+- Read through GSPO, none breaks I2, I5 or I6: no entry with equal times, none forgotten before it was memorized, no
+  two periods that touch or overlap, no quad with two open periods.
+- **I13 is broken for 187 quads.** Their periods read through TGSP differ from those read through GSPO, and in each
+  TGSP has more open periods. TGSP holds 47 more entries than GSPO. The 187 are not broken down yet.
+- **Not explained:** the 84 entries whose memorized time differs from `LegacyTransactionTime`; and the entry counts in
+  the index files (8,238 for GSPO, GPOS and GOSP, 8,285 for TGSP), which are 51 higher than the entries read.
+
 ## Decision
 
-### D1. Each memory version has two times, set by the store — Decided
+### D1. Each period of a fact has two times, set by the store — Decided
 
-- **memorized**: when the store took the fact in.
-- **forgotten**: when the store let it go. Open while the fact is remembered.
+- **memorized**: the first clock reading at which the fact is remembered.
+- **forgotten**: the first clock reading after that at which it is not. Absent while the fact is remembered.
 
-Both are points on one axis: the memory's own time, read from the store's clock at the write. No writer states them,
-and nothing edits them afterwards. A fact that is memorized, forgotten and memorized again has two versions, each with
-its own times (ADR-054 D3 stays).
+Both are points on one axis, memory time: the store's own clock, read at the write. No writer states them (I11). Once
+the clock has moved past a reading, what the store holds for that reading never changes (I10).
 
-At most one version of a quad is remembered at a time. Memorizing a fact that is already remembered changes nothing and
-records nothing: re-affirmation and recall are not stored on the quad.
+A fact that is memorized, forgotten at a later reading and memorized again at a reading after that has two periods,
+each with its own times. Inside one clock reading the last operation decides (M2).
+
+At most one period of a quad is open (I2). Memorizing a fact that is already remembered changes nothing and records
+nothing (I3): re-affirmation and recall are not stored on the quad.
+
+**Corrected 2026-11-13, by the model:**
+
+- "nothing edits them afterwards" was true only from the next clock reading on. Inside the reading of a write, a later
+  operation can still remove a period or continue it.
+- "memorized, forgotten and memorized again has two versions" was true only when the three fall in three clock
+  readings.
+- "when the store took the fact in" and "let it go" described operations. The two times describe membership.
 
 **Assumption, stated so it can be challenged:** one store is one subject's memory. "Forgotten" is a fact about the
 whole store. Two subjects sharing one store could not forget separately.
 
-### D2. Forgetting is the SPARQL delete, and nothing is erased — Decided
+### D2. Forgetting is the SPARQL delete, and it ends a period — Decided
 
 Martin: "From a SPARQL point of view, forget is a retract. And a soft delete. We know the when. Which is a good thing.
 We have immutability."
 
-- `INSERT` memorizes. `DELETE` forgets: it sets the forgotten time of the remembered version to the delete's time.
-- The version stays in the store, with both times.
+- `INSERT` memorizes. `DELETE` forgets: it sets the forgotten time of the fact's open period to the delete's clock
+  reading.
+- The period stays in the store, with both times.
 - There is no second kind of removal. `Retract`, `RetractBatched`, `IsDeleted` and `RetractedAt` go. A fact recorded
-  in error is forgotten like any other, and the store still knows it once held it and when.
+  in error is forgotten like any other, and the store still holds the period in which it was remembered.
 
-This replaces ADR-054 D2 (Retract) and D6 (`RetractedAt`). ADR-054 D1, D3, D4, D5 and D8 stay.
+This replaces ADR-054 D2 (Retract) and D6 (`RetractedAt`). ADR-054 D1, D4 and D8 stay.
+
+**Corrected 2026-11-13, by the model:**
+
+- The heading said "and nothing is erased". One thing leaves no trace: a fact memorized and forgotten inside one clock
+  reading was remembered at no representable time, so it has no period (M2).
+- The immutability Martin names holds for every reading the clock has passed (I10).
+- ADR-054 D3 and D5 stay for operations at different clock readings. Inside one reading the model decides:
+  - D3: a fact forgotten and memorized again in one reading continues its period. No new period begins.
+  - D5: an add followed by a delete of the same quad in one batch leaves no period. Today it leaves an entry with
+    equal times (M11).
+  - What such a delete counts as affected is open (Q9).
 
 ### D3. World time is content — Decided
 
@@ -159,17 +442,25 @@ brain injury. We do not guard for stochastic time. Time is relied on and the tim
 - Events inside one clock reading are simultaneous, and that is correct. Martin: "It is not a problem if order is
   confused due time resolution … Time axis resolution is for recall purposes, not for high speed event logging."
 - The resolution stays one millisecond. No finer unit, and no rule that each batch gets a time of its own.
+- **The clock is the store's one writer's clock — Decided 2026-11-14.** A store has one owner and one writer, and a
+  copy is another store (M3). A clock that is behind the times already in the store is the clock stepping back, which
+  the first point leaves unguarded. It is not a case of its own.
 
 ### D5. The last operation decides the end state — Decided
 
-Operations in one request run in order, and the last one decides the state, also when their times are equal. A fact
-inserted, deleted and inserted again inside one millisecond is remembered.
+The writer applies operations in the order it receives them. Inside one clock reading the last operation on a fact
+decides, as if it were the only one in that reading (M2). A fact inserted, deleted and inserted again inside one
+millisecond is remembered, with one period.
 
 This is a rule for the write logic, and does not touch the clock.
 
-**Not verified:** read from the code, not run. `INSERT DATA {x} ; DELETE DATA {x} ; INSERT DATA {x}` inside one
-millisecond may drop the last insert, because `InsertIntoLeaf` takes an entry with the same quad and times for a WAL
-replay (Case A). Step 4 tests it.
+**Corrected 2026-11-13, by the model:** this said "operations in one request". The rule is for one clock reading,
+whether the operations came in one request or in several. A request is not a moment (I17): its operations can fall in
+different readings, and then each reading has its own result (M6).
+
+**Observed 2026-11-14 (M11):** today's code breaks the rule. One batch that adds, deletes and adds a new quad leaves it
+forgotten, in 50 of 50 runs, because `InsertIntoLeaf` takes the second add for a WAL replay of the first. Step 4 holds
+the tests.
 
 ### D6. The words — Decided
 
@@ -181,8 +472,9 @@ INCLUDING FORGOTTEN                      after the query
 
 - `MEMORIZED ?t` binds when the matched memory was memorized.
 - `FORGOTTEN ?t` binds when it was forgotten. It is unbound while the memory is remembered.
-- `SINCE a` keeps the memories whose event time is at or after `a`.
-- `BEFORE b` keeps the memories whose event time is before `b`.
+- `SINCE a` keeps the memories whose time is at or after `a`: the memorized time after `MEMORIZED`, the forgotten time
+  after `FORGOTTEN`.
+- `BEFORE b` keeps the memories whose time is before `b`.
 - `SINCE` and `BEFORE` work alone, together, and in either order. Together they are the intersection: the half-open
   range `[a, b)`.
 - `INCLUDING FORGOTTEN` makes every pattern of the query match forgotten memories too.
@@ -216,8 +508,8 @@ that begin the next pattern (`FILTER`, `OPTIONAL`, `GRAPH` and so on). A new key
 
 ### D7. The default view is what is remembered now — Decided
 
-A pattern without `FORGOTTEN`, in a query without `INCLUDING FORGOTTEN`, matches the remembered memories: every version
-whose forgotten time is open. It needs no clock reading. Today's default reads the clock at each scan and compares.
+A pattern without `FORGOTTEN`, in a query without `INCLUDING FORGOTTEN`, matches the remembered memories: every period
+that has no forgotten time. It needs no clock reading. Today's default reads the clock at each scan and compares.
 
 ### D8. The old clauses go — Decided
 
@@ -239,12 +531,12 @@ paths to keep in agreement.
    or switch.
 2. **Temporal stores only.** On Graph, Reference or Minimal the words are an error through `RequireTemporalProfile`.
    Never silently unbound.
-3. **A time belongs to the version a pattern matched.** Each matched version is its own solution with its own times.
+3. **A time belongs to the period a pattern matched.** Each matched period is its own solution with its own times.
 4. **No cost when unused**, and nothing allocated on the query hot path.
 5. **Clear of SPARQL 1.2.** The words take none of its new syntax: triple terms `<<( )>>`, reifiers `~`, annotations
    `{| |}`, the `VERSION` directive.
 
-### D10. The exact rules of the words — Proposed, except the first
+### D10. The exact rules of the words — Proposed, except where marked
 
 - **A time without a timezone is UTC — Decided.** Martin: "UTC, yes. Of course." It is the rule everywhere else in
   Mercury. A bound that means a local day carries its offset: `"2026-01-01+01:00"^^xsd:date`.
@@ -253,8 +545,9 @@ paths to keep in agreement.
   never means "outside the range": that takes two patterns and `UNION`.
 - **Each bound at most once per word.** `MEMORIZED SINCE a SINCE b` is a syntax error.
 - **Both words may follow one pattern**, each with its own bounds: `MEMORIZED SINCE a FORGOTTEN BEFORE b`.
-- **A remembered memory has no forgotten time.** No `FORGOTTEN` bound selects it. The store keeps "open" as a maximum
-  value, which would otherwise pass `FORGOTTEN SINCE a`.
+- **A remembered memory has no forgotten time — Decided 2026-11-13.** Martin: "An absent ForgottenAt remains absent in
+  the logical representation." No `FORGOTTEN` bound selects it, and `FORGOTTEN ?t` leaves `?t` unbound. Today the store
+  keeps "open" as a maximum value, which would pass `FORGOTTEN SINCE a`; that value never appears above storage (I8).
 - **A pattern that carries `FORGOTTEN` matches forgotten memories too.** `INCLUDING FORGOTTEN` does the same for every
   pattern. Without this rule a `FORGOTTEN` bound in a query without `INCLUDING FORGOTTEN` would match nothing, silently.
 - **A bound is an expression without variables**: a literal, or `NOW() - "P7D"^^xsd:dayTimeDuration`. It is evaluated
@@ -262,8 +555,9 @@ paths to keep in agreement.
   `?s ?p ?o MEMORIZED ?t . FILTER(?t >= ?started)`.
 - **A time is an `xsd:dateTime` in UTC with a millisecond fraction.** A bound may also be an `xsd:date`: its first
   instant.
-- **A version memorized and forgotten in the same clock reading is kept.** Its two times are equal. It shows under
-  `INCLUDING FORGOTTEN`.
+- **No period has equal times — Decided 2026-11-13.** A fact memorized and forgotten in the same clock reading has no
+  period, and no word finds one (M2, I5). This replaces the rule proposed here on 2026-11-11, that such a version is
+  kept with two equal times and shows under `INCLUDING FORGOTTEN`. Martin withdrew it.
 - **The words work in an Update's `WHERE`**, since it is the same pattern path as a query's
   ([ADR-052](ADR-052-update-where-one-pattern-path.md)):
   - `DELETE { ?s ?p ?o } WHERE { ?s ?p ?o MEMORIZED BEFORE … }` forgets what was memorized before a time.
@@ -291,8 +585,8 @@ Martin: "Prune must preserve temporality."
 - Today `HistoryMode.FlattenToCurrent`, the pruning default, rewrites every time to the time of the prune. After such a
   prune, "what did we do in January" answers "nothing".
 - The preserving modes keep `ValidFrom` and `ValidTo` and rewrite the rest.
-- Pruning, a rebuild and a conversion copy a version's memorized and forgotten times as they are. Pruning chooses which
-  versions to copy, never what their times become.
+- Pruning, a rebuild and a conversion copy a period's memorized and forgotten times as they are (I14). Pruning chooses
+  which periods to copy, never what their times become.
 - **Proposed:** with two times and no retraction, pruning has two modes: copy the remembered memories, or copy all.
 - A copy between stores needs a way to carry the two times that no ordinary writer has. It is internal to Mercury.
 
@@ -366,7 +660,7 @@ this situation", then "Legacy" and "All five, clear intent."
   - In a `,` list each object may carry its own words.
   - In a `;` list the words follow each object in the same way.
   - A blank-node property list is an object list too, so the same rule holds inside `[ ]`.
-- **Q4. Patterns that match no single stored version.**
+- **Q4. Patterns that match no single stored period.**
   - A property path longer than one predicate: a syntax error?
   - A pattern inside `SERVICE`: a syntax error?
   - A triple inferred by `OwlReasoner`: it is materialized, so it has times of its own. They say when the reasoner
@@ -378,7 +672,9 @@ this situation", then "Legacy" and "All five, clear intent."
 ### Names
 
 - **Q7. The word "bitemporal".** The documents call the Cognitive profile bitemporal: valid time and transaction time.
-  This ADR gives it one axis with two points per version. What do we call it?
+  This ADR gives it one axis with two points per period. What do we call it?
+  - **Decided 2026-11-13:** the axis is called memory time. What the documents say in place of "bitemporal" is not
+    written yet.
 
 ### Other ADRs
 
@@ -386,6 +682,24 @@ this situation", then "Legacy" and "All five, clear intent."
   atom's form by retracting the version and adding it again with the same valid time. Without Retract and without
   stated times it needs another way: a conversion that rewrites the atom and keeps both times, since the memory learned
   nothing new.
+
+### From the model (2026-11-13 and 2026-11-14)
+
+- **Q9. What a delete counts as affected, inside one clock reading.** ADR-054 D5 counts what changed. A delete of a
+  quad memorized in the same reading changes what a reader sees now, and leaves no period.
+- **Q10. `M(t)` has no word.** "Was `q` remembered at `t`" is the model's first question, and `AS OF` is gone (D8). With
+  the words of D6 it takes two patterns and a `UNION`: memorized at or before `t` and still remembered, or memorized at
+  or before `t` and forgotten after it. Is that enough?
+- **Q11. "What is new since my last look" — Proposed.** A reader that asks this again and again misses nothing when
+  its bound is the store's clock, read no later than the end of its previous look. `NOW()` inside the reading query is such
+  a bound. A write stamped in the same millisecond as the bound can come back twice, and is never skipped. A bound read
+  after the query returned, or from another clock, can skip a write. The `lucy` skill's recency recall is the first
+  such reader (Step 8). Is this a rule of the words?
+- **Q12. What a reader sees during writes** (M9): the contract is not written.
+- **Q13. The diagnostic** (M8): its form, and whether and where it is kept.
+- **Q14. Tests that need one clock reading** (Step 4). A batch has one by construction. A sequence of requests does
+  not: on omega they were at least 4 ms apart. Testing the request path inside one reading needs a clock the test
+  controls, which is a change to production code and is not proposed yet.
 
 ## Steps
 
@@ -395,14 +709,18 @@ this situation", then "Legacy" and "All five, clear intent."
    changed. ADRs, release notes and the changelog keep the old names: they describe the store as it was.
    - **The `Legacy` prefix** (D15) — **done 2026-11-12**, the same way: the code, and the two current technical
      documents that name `TransactionTime`. Every test passes with only the names changed.
-3. **Count the live store**, read-only, as a probe reviewed before it runs:
-   - versions in total;
-   - versions whose memorized time differs from `LegacyTransactionTime`;
-   - versions with `LegacyIsDeleted` set.
-4. **Tests for D5 on today's code:** insert, delete, insert of one quad in one request and one millisecond; a delete
-   that follows an insert in the same millisecond. Fix what fails.
+3. **Count the live store**, read-only, as a probe reviewed before it runs — **done 2026-11-14**, on a copy. The
+   numbers are in M11:
+   - entries in total: 8,187;
+   - entries whose memorized time differs from `LegacyTransactionTime`: 84, not explained;
+   - entries with `LegacyIsDeleted` set: 0;
+   - and, against the model: 187 quads whose periods differ between TGSP and GSPO.
+   - **Open:** a second read-only count that breaks down the 187 and the 84, and explains the 51 entries the index
+     files count and the read does not find.
+4. **Tests for the model on today's code.** Every row of M6, and the four rows of M11, each with the result the model
+   gives. A batch gives one clock reading by construction (Q14). Fix what fails: the rows of M11 fail today.
 5. **The words:** the grammar in `SparqlParser`, the bounds and time variables carried to the scan, the times bound from
-   the matched version. The old clauses are removed in the same step.
+   the matched period. The old clauses are removed in the same step.
    - Tests: each word alone and combined; both orders of the bounds; the empty range; joins where each pattern keeps its
      own times; the error on Graph, Reference and Minimal.
    - Every W3C result unchanged.
@@ -429,7 +747,12 @@ this situation", then "Legacy" and "All five, clear intent."
 
 Sky's proposal, except where it is marked **Decided**. It starts when Steps 1 to 9 are done.
 
-Until then the store keeps five more attributes per version that nothing will read:
+**Since this part was written** Martin has chosen another shape for the stored form than L1's four indexes: a set
+keyed by the quad alone, holding its latest period, and a timeline in time order that a search by time can cut by
+binary search. It is not written here yet, and its analysis against the model (M4, M7) is outstanding. L1 stands as it
+was proposed until then.
+
+Until then the store keeps five more attributes per entry that nothing will read:
 
 | Attribute | After Steps 1 to 9 |
 |-----------|--------------------|
@@ -478,12 +801,16 @@ automatic, on open. We do not need to mind other stores, there are only ours in 
 ### Open questions of the later part
 
 - **LQ1. Entries whose `MemorizedAt` differs from `LegacyTransactionTime`** are the ones where the stored time could be a
-  stated one. The memory stores have never been pruned, so none is expected. Step 3 counts them.
+  stated one. The memory stores have never been pruned, so none was expected. Step 3 counted 84 in the live memory
+  store (2026-11-14). They are not explained yet.
 - **LQ2. Automatic or by command.** Martin: "possibly … automatic, on open". An open that converts takes longer than
   any other open, and the MCP server opens the store at start. Does the server convert, or does a command do it first?
 - **LQ3. Disk space.** The conversion needs room for both layouts at once. It checks before it starts
   (`DiskSpaceGuard`).
 - **LQ4. The Graph profile** uses `VersionedQuadIndex` and has no times. The later part does not change it.
+- **LQ5. Entries the model has no place for.** A version 1 store can hold an entry with equal times, two periods of
+  one quad that touch, and an extra open entry in TGSP (M11). The conversion needs a rule for each. The live memory
+  store holds none of the first two and 187 quads of the third. Other stores are not counted.
 
 ### Steps of the later part
 
@@ -512,6 +839,8 @@ automatic, on open. We do not need to mind other stores, there are only ours in 
 - C-SPARQL: Barbieri, Braga, Ceri, Della Valle, Grossniklaus, "C-SPARQL: SPARQL for Continuous Querying", WWW 2009.
 - T-SPARQL: Grandi, "T-SPARQL: A TSQL2-like Temporal Query Language for RDF", ADBIS 2010 (CEUR Vol-639); Tappolet and
   Bernstein, "Applied Temporal RDF", ESWC 2009.
+- [Time is not identity, a cookbook](../../architecture/technical/time-is-not-identity-cookbook.md), version 0.2:
+  modelling guidance for the model. It does not replace this ADR.
 - `src/Mercury/Storage/TemporalQuadIndex.cs`: the entry layout and `InsertIntoLeaf`.
 - `src/Mercury.Abstractions/StoreSchema.cs`: `KeyLayoutVersion`.
 - Mercury, graph `urn:sky-omega:session:2026-11-07-adr016-step5`:
@@ -525,3 +854,11 @@ automatic, on open. We do not need to mind other stores, there are only ours in 
   - `urn:sky-omega:obs:2026-11-11-martin-settles-the-memory-time-words`
   - `urn:sky-omega:obs:2026-11-11-martin-reviews-adr061-first-pass`
   - `urn:sky-omega:obs:2026-11-11-dialect-name-research`
+  - `urn:sky-omega:obs:2026-11-13-martin-decided-temporal-rdf-set-not-event-log`
+  - `urn:sky-omega:obs:2026-11-13-memory-time-model-derived-and-checked`
+  - `urn:sky-omega:obs:2026-11-13-zbook-attack-on-the-memory-time-model-and-my-assessment`
+  - `urn:sky-omega:obs:2026-11-13-zbook-independent-check-of-resolved-record-replay`
+  - `urn:sky-omega:obs:2026-11-13-new-since-my-last-look-is-exact-under-one-rule`
+  - `urn:sky-omega:obs:2026-11-14-martin-a-cognitive-store-has-one-owner-clock-behind-is-not-a-case`
+  - `urn:sky-omega:obs:2026-11-14-cookbook-v02-compared-with-the-model-and-checkpoint-read`
+  - `urn:sky-omega:obs:2026-11-14-probes-run-today-against-the-model-and-live-store-count`
