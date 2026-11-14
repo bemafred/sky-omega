@@ -242,6 +242,11 @@ if (showHelp)
         HTTP Endpoint:
           When running, SPARQL is available at http://localhost:{port}/sparql
           Use SERVICE <http://localhost:3030/sparql> to query MCP instance
+
+        Log:
+          mercury.log in the store's directory: each run's start and stop, each store
+          opened, and every warning and error a store reported. Read it after a failure.
+          A temporary store (-m) has none.
         """);
     return 0;
 }
@@ -324,6 +329,9 @@ if (convertInput != null && convertOutput != null)
 // Create or open pool
 QuadStorePool pool;
 string resolvedStorePath;
+// The log Mercury owns (ADR-061 M7), for a persistent store: beside the stores, not in one. What a store
+// reports is there after a failure. A temporary session has none.
+FileLogger? storeLog = null;
 bool isBulkLoad = bulkLoadFile != null;
 
 // Determine minimum free disk space: explicit flag > bulk default (100 GB) > normal default (1 GB)
@@ -365,7 +373,17 @@ else
             // others→Hash — and is not separately overridable.
             Profile = requestedProfile ?? StoreProfile.Cognitive,
         };
-        pool = new QuadStorePool(resolvedStorePath, new QuadStorePoolOptions { StorageOptions = storeOpts });
+        // Nothing is written to the log before the pool holds the store, so this process leaves the log of the
+        // process that holds it alone.
+        var logPath = Path.Combine(Path.GetFullPath(resolvedStorePath), "mercury.log");
+        var toolVersion = Assembly.GetExecutingAssembly()
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown";
+        storeLog = new FileLogger(logPath, firstLine: $"mercury {toolVersion} starts, process {Environment.ProcessId}");
+        pool = new QuadStorePool(resolvedStorePath, new QuadStorePoolOptions { StorageOptions = storeOpts, Logger = storeLog });
+        var logOfThisRun = storeLog;
+        AppDomain.CurrentDomain.UnhandledException += (_, unhandled) =>
+            logOfThisRun.Log(SkyOmega.Mercury.Diagnostics.LogLevel.Critical,
+                $"mercury ends with an exception that nothing handled: {unhandled.ExceptionObject}");
     }
     catch (StoreInUseException ex)
     {
@@ -379,6 +397,9 @@ else
 // (new pools and temp pools start with no stores; persistent pools
 // may have been created by an older version without pool metadata)
 pool.EnsureActive("primary");
+// The store is open, and it logged that. If the log could not take the line, say so now.
+if (storeLog is { LinesNotWritten: > 0 })
+    Console.Error.WriteLine($"Warning: the log at {storeLog.Path} cannot be written. This run leaves no log.");
 
 // Attach the already-constructed listener to pool.Active so store events (query +
 // rebuild) use the same writer as the CLI's load-progress records. Shared lock,
@@ -432,6 +453,8 @@ if (repairDeletes)
         Console.WriteLine("Dry run: the --restore events are shown with action 'restore'; nothing is changed.");
     var (ended, restored, left) = pool.Active.RepairDeletes(restoreEvents, dryRun, Console.Out);
     pool.Dispose();
+    storeLog?.Log(SkyOmega.Mercury.Diagnostics.LogLevel.Info, $"mercury stops, process {Environment.ProcessId}");
+    storeLog?.Dispose();
     Console.WriteLine(dryRun
         ? $"Dry run complete: {ended} would end, {restored} would be restored, {left} left."
         : $"Repair complete: {ended} ended, {restored} restored, {left} left.");
@@ -640,6 +663,9 @@ using (var session = new ReplSession(
     }
 }
 
+// The pool is closed here, and with it the stores.
+storeLog?.Log(SkyOmega.Mercury.Diagnostics.LogLevel.Info, $"mercury stops, process {Environment.ProcessId}");
+storeLog?.Dispose();
 return 0;
 
 // --- Helper functions ---

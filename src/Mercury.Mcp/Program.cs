@@ -108,6 +108,10 @@ if (showHelp)
           - MCP protocol on stdin/stdout (for Claude)
           - SPARQL HTTP endpoint at http://localhost:{port}/sparql
           - Named pipe 'mercury-mcp' for CLI attachment
+
+        Log:
+          mercury.log in the store's directory: each run's start and stop, each store
+          opened, and every warning and error a store reported. Read it after a failure.
         """);
     return 0;
 }
@@ -118,11 +122,21 @@ storePath ??= MercuryPaths.Store("mcp");
 Console.Error.WriteLine("Mercury MCP Server starting...");
 Console.Error.WriteLine($"  Store: {Path.GetFullPath(storePath)}");
 
+// The log Mercury owns (ADR-061 M7): beside the stores, not in one. What a store reports is there after a
+// failure, when this process and its standard error are gone. Nothing is written to it before the pool holds
+// the store, so a second mercury-mcp leaves the log of the first alone.
+var logPath = Path.Combine(Path.GetFullPath(storePath), "mercury.log");
+var toolVersion = Assembly.GetExecutingAssembly()
+    .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown";
+using var storeLog = new SkyOmega.Mercury.Diagnostics.FileLogger(logPath,
+    firstLine: $"mercury-mcp {toolVersion} starts, process {Environment.ProcessId}");
+Console.Error.WriteLine($"  Log:   {logPath}");
+
 // Create pool (auto-migrates flat stores on first run)
 QuadStorePool pool;
 try
 {
-    pool = new QuadStorePool(storePath);
+    pool = new QuadStorePool(storePath, new QuadStorePoolOptions { Logger = storeLog });
 }
 catch (StoreInUseException ex)
 {
@@ -131,7 +145,13 @@ catch (StoreInUseException ex)
     Console.Error.WriteLine("Close the other process first, or use -d to specify a different store path.");
     return 1;
 }
+AppDomain.CurrentDomain.UnhandledException += (_, unhandled) =>
+    storeLog.Log(SkyOmega.Mercury.Diagnostics.LogLevel.Critical,
+        $"mercury-mcp ends with an exception that nothing handled: {unhandled.ExceptionObject}");
 pool.EnsureActive("primary");
+// The store is open, and it logged that. If the log could not take the line, say so now.
+if (storeLog.LinesNotWritten > 0)
+    Console.Error.WriteLine($"Warning: the log at {logPath} cannot be written. This run leaves no log.");
 
 Console.Error.WriteLine($"  Updates: {(enableHttpUpdates ? "enabled" : "disabled")}");
 
@@ -153,9 +173,7 @@ builder.Services
         options.ServerInfo = new()
         {
             Name = "mercury-mcp",
-            Version = Assembly.GetExecutingAssembly()
-                .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
-                ?.InformationalVersion ?? "unknown"
+            Version = toolVersion
         };
         // Sent to the client during the initialization handshake and surfaced as an LLM system message:
         // orient the agent to Mercury as persistent semantic memory and point to the canonical discipline
@@ -202,6 +220,7 @@ await builder.Build().RunAsync(stopping.Token);
 
 Console.Error.WriteLine("MCP Server shutting down...");
 pool.Dispose();
+storeLog.Log(SkyOmega.Mercury.Diagnostics.LogLevel.Info, $"mercury-mcp stops, process {Environment.ProcessId}");
 Console.Error.WriteLine("MCP Server stopped.");
 
 return 0;

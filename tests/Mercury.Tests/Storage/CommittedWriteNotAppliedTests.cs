@@ -115,6 +115,40 @@ public class CommittedWriteNotAppliedTests : IDisposable
     }
 
     [Fact]
+    public void AStoreThatStops_LeavesTheErrorInItsLogFile_ToBeReadWhenTheStoreIsClosed()
+    {
+        var path = Path.Combine(_testDir, "logged");
+        var logPath = Path.Combine(_testDir, "mercury.log");
+        var buffers = new FailingBufferManager();
+
+        using (var log = new FileLogger(logPath))
+        {
+            var store = new QuadStore(path, log, buffers, new StorageOptions());
+            buffers.Fails = true;
+            Assert.Throws<CommittedWriteNotAppliedException>(() => store.AddCurrent(S, P, LongLiteral));
+            buffers.Fails = false;
+            store.Dispose();
+        }
+
+        // What a person or an agent reads afterwards: one line at the level Critical that says what happened, where,
+        // why, and that the write is not lost, and under it the exception that was the cause, with its stack.
+        var lines = File.ReadAllLines(logPath);
+        var critical = Assert.Single(lines, line => line.Contains(" CRT "));
+        Assert.Contains("Internal error in the Mercury store", critical);
+        Assert.Contains(path, critical);
+        Assert.Contains("The test's buffer manager has no buffer to give.", critical);
+        Assert.Contains("The write is not lost", critical);
+        Assert.Contains(lines, line => line.StartsWith("System.InvalidOperationException: The test's buffer manager has no buffer to give."));
+        Assert.Contains(lines, line => line.Contains("at SkyOmega.Mercury.Storage.TrigramIndex."));
+
+        // The store opened again logs that it applied its log again.
+        using (var log = new FileLogger(logPath))
+        using (var reopened = new QuadStore(path, log, buffers, new StorageOptions()))
+            Assert.Equal(1, reopened.GetStatistics().QuadCount);
+        Assert.Contains(File.ReadAllLines(logPath), line => line.Contains(" INF Recovered 1 records from WAL"));
+    }
+
+    [Fact]
     public void ABatchThatCannotBeApplied_StopsTheStore_AndOpeningItAgainAppliesTheLog()
     {
         var path = Path.Combine(_testDir, "batch");

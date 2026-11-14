@@ -51,6 +51,15 @@ public sealed class QuadStorePoolOptions
     public SkyOmega.Mercury.Abstractions.IObservabilityListener? ObservabilityListener { get; init; }
 
     /// <summary>
+    /// Given to every store the pool opens, which logs to it: that it was opened, that it applied its log
+    /// again, a warning, an error, and the internal error of a committed write that was not applied.
+    /// A tool gives a <see cref="SkyOmega.Mercury.Diagnostics.FileLogger"/> here, so that what a store reported
+    /// can be read after a failure. The pool does not dispose it.
+    /// Default: null (the stores log nothing).
+    /// </summary>
+    public SkyOmega.Mercury.Diagnostics.ILogger? Logger { get; init; }
+
+    /// <summary>
     /// Default options suitable for production use.
     /// </summary>
     public static QuadStorePoolOptions Default { get; } = new();

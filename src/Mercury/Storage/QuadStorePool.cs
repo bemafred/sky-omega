@@ -95,6 +95,7 @@ public sealed class QuadStorePool : IDisposable
     private readonly bool _useCrossProcessGate;
     private readonly long _maxDiskBytes;
     private readonly IObservabilityListener? _observabilityListener;
+    private readonly SkyOmega.Mercury.Diagnostics.ILogger? _logger;
     private int _globalSlotsHeld;
     private FileStream? _storeLock;
     private bool _disposed;
@@ -204,6 +205,7 @@ public sealed class QuadStorePool : IDisposable
         _storageOptions = opts.StorageOptions;
         _useCrossProcessGate = opts.UseCrossProcessGate;
         _observabilityListener = opts.ObservabilityListener;
+        _logger = opts.Logger;
 
         // Auto-migrate flat QuadStore format to pool structure
         MigrateFlatStore(_basePath);
@@ -357,7 +359,7 @@ public sealed class QuadStorePool : IDisposable
             EnsureDiskBudget(storePath, "CreateNamedStore");
 
             Directory.CreateDirectory(storePath);
-            var store = new QuadStore(storePath, null, null, _storageOptions);
+            var store = new QuadStore(storePath, _logger, null, _storageOptions);
 
             _namedStores[name] = store;
             _metadata.Stores[name] = guid;
@@ -569,7 +571,7 @@ public sealed class QuadStorePool : IDisposable
                 EnsureDiskBudget(storePath, "RentStore");
 
                 Directory.CreateDirectory(storePath);
-                var newStore = new QuadStore(storePath, null, null, _storageOptions);
+                var newStore = new QuadStore(storePath, _logger, null, _storageOptions);
                 _pooledStores.Add((storePath, newStore));
                 return newStore;
             }
@@ -782,7 +784,7 @@ public sealed class QuadStorePool : IDisposable
             var storePath = Path.Combine(StoresPath, guid);
             if (Directory.Exists(storePath))
             {
-                var store = new QuadStore(storePath, null, null, _storageOptions);
+                var store = new QuadStore(storePath, _logger, null, _storageOptions);
                 _namedStores[name] = store;
             }
         }

@@ -1035,8 +1035,31 @@ this ADR do not answer goes to Martin.
     committed write is lost and three fail; with the old `RollbackBatch`, the SPARQL test fails.
   - **Not tested:** a failure inside one of the four indexes (the test fails after all four, in the trigram index);
     the Graph profile; a caller that waits for the lock while the write fails; any platform but omega.
-  - **Not built:** a log that Mercury owns. Every shipped tool opens its stores with no logger, so the Critical
-    line reaches nobody. The error text is what a caller has.
+  - **A log that Mercury owns — built 2026-11-14**, on Martin's word the same day. Until then every shipped tool
+    opened its stores with no logger, so the Critical line reached nobody.
+    - `FileLogger` (`SkyOmega.Mercury.Diagnostics`) appends each message as a line with its time in UTC and its
+      level. The file is bounded: at 4 MB it is put aside as `mercury.log.1`, and two files are kept at most. A
+      message at Error or above is on disk when the call returns. A line that cannot be written is dropped and
+      counted, and nothing is thrown at the store.
+    - A pool hands its logger to every store it opens (`QuadStorePoolOptions.Logger`).
+    - `mercury-mcp` and `mercury` log to `mercury.log` in the pool's directory, beside `pool.json`: beside the
+      stores and in none of them, so a prune or a switch of stores leaves it. Each run starts with a line that names
+      the tool, its version and its process, and ends with one when it closes its stores; a run without the last
+      line did not close them. An exception that nothing handled is logged as Critical. Nothing is written before
+      the pool holds the store, so a second process leaves the log of the first alone.
+    - What a store logs is what it logged before, at Info and above: that it was opened, that it applied its log
+      again and how many records, a warning, an error, and the internal error with the cause and its stack.
+    - **Tests** (`FileLoggerTests`, eight, and one in `CommittedWriteNotAppliedTests`): the line, the bound, the
+      first line, a line that cannot be written, the pool's three places that open a store (each shown to fail the
+      test when it loses the logger), and a stopped store whose error and stack are read from the file after the
+      store is closed. The `mercury` CLI was run twice on a scratch store and its log read.
+    - **Not tested:** `mercury-mcp` itself (the live one holds the pipe name on omega); a process that dies with
+      an access violation, which no handler sees (the runtime writes that to standard error); any platform but
+      omega.
+    - **Not built:** a query or an update that fails inside the engine is returned to the caller as its message
+      and is not logged. The engine cannot yet tell a caller's error from its own (ADR-060).
+  - **Found while P2 was built, fixed in [ADR-063](ADR-063-an-index-file-grows-by-extents.md):** an index file
+    that outgrew its initial size killed the process, and readers at the same time were given wrong pages.
 
 1. **Martin's review** of this text — **done 2026-11-14**, with the decision closure. The later part is reviewed on
    its own.

@@ -12,6 +12,23 @@ Detailed technical reference for Mercury's storage, durability, concurrency, and
 | `BTreeFile`    | The file a B+Tree index lives in: mapped in extents, grows by adding one ([ADR-063](../../adrs/mercury/ADR-063-an-index-file-grows-by-extents.md)) |
 | `TrigramIndex` | Full-text search via trigram inverted index (opt-in)                   |
 
+## The Log
+
+`mercury` and `mercury-mcp` keep a log file, `mercury.log`, in the pool's directory beside `pool.json`
+(`FileLogger`, handed to every store through `QuadStorePoolOptions.Logger`). A line is the time in UTC, the level
+and the message:
+
+```
+2026-11-14T18:05:11.249Z INF mercury 1.8.43 starts, process 53689
+2026-11-14T18:05:11.249Z INF Opening store at /…/stores/01a1db3b…
+2026-11-14T18:05:11.298Z INF mercury stops, process 53689
+```
+
+A run that has no `stops` line did not close its stores. A store that could not apply a committed write logs the
+internal error at `CRT`, followed by the cause and its stack (ADR-061 M7); the store opened again logs how many
+records it applied from its log. The file is put aside as `mercury.log.1` at 4 MB, and two files are kept at
+most. A library user gets no log unless it gives a logger to its pool or its store.
+
 ## Durability Design
 
 Sky Omega uses Write-Ahead Logging (WAL) for crash safety:
