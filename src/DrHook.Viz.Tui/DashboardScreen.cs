@@ -23,6 +23,12 @@ namespace SkyOmega.DrHook.Viz.Tui;
 /// Item formatting (values, deltas, breakpoints) comes from the ONE shared <see cref="DebugStateTextRenderer"/>,
 /// never re-implemented here, so the dashboard, the tail view and the image tool read the same.
 ///
+/// Two panes show less than the stream holds, so that what a human looks for stays on screen. The braid pane puts
+/// the lifecycle events between two hypotheses on one line, each name once with its count: a target's start alone
+/// is some twenty module-load events, and one line each would push every hypothesis out of the pane. The console
+/// pane shows the target's output as lines, not as the chunks the pipe happened to deliver. The tail view
+/// (<c>drhook-viz-console</c>) prints every delta in order.
+///
 /// Text from the debuggee (console output, source lines, values) is SANITIZED: control characters — ESC above all —
 /// become '·' and tabs expand to spaces, so a target printing ANSI sequences cannot take over the dashboard's
 /// screen. Width is counted in UTF-16 code units (one cell each); East-Asian wide glyphs may misalign a row — a
@@ -36,8 +42,10 @@ public static class DashboardScreen
     /// fits its height, centred on the current line.</summary>
     public const int SourceContextLines = 40;
 
+    /// <param name="connected">False when the view has no connection to a session: the picture is then the last one
+    /// of a session that has ended, and the title says so instead of giving its state as the current one.</param>
     public static string[] Compose(WireSnapshot? snapshot, IReadOnlyList<WireDelta> deltas, long seq, string status,
-                                   int width, int height, SourceWindowReader source)
+                                   int width, int height, SourceWindowReader source, bool connected = true)
     {
         if (width < MinWidth || height < MinHeight)
             return TooSmall(width, height);
@@ -54,7 +62,7 @@ public static class DashboardScreen
         int splitAB = inner * 2 / 5;        // left column width of sections A and B
         int splitD = inner / 2;             // left column width of section D (console | anomalies — equal: both carry long lines)
 
-        var rows = new List<string>(height) { TitleRow(snapshot, seq, status, width) };
+        var rows = new List<string>(height) { TitleRow(snapshot, seq, status, width, connected) };
 
         List<string> stack = StackLines(snapshot), sourceLines = SourceLines(snapshot, source, hA - 1, out string sourceTitle);
         rows.AddRange(SplitSection("STACK", stack, sourceTitle, sourceLines, hA, splitAB, inner));
@@ -63,12 +71,10 @@ public static class DashboardScreen
         rows.AddRange(SplitSection("LOCALS / ARGS", VariableLines(snapshot, splitAB), "BREAKPOINTS", BreakpointLines(snapshot), hB, splitAB, inner));
         rows.Add(Separator('├', splitAB, '┴', '┤', inner));
 
-        rows.AddRange(FullSection("BRAID / EVENTS", Newest(deltas.Where(d => d.Kind is "event" or "hypothesis" or "log")
-            .Select(d => $"Δ {d.Kind,-10} {DebugStateTextRenderer.FormatDeltaDetail(d)}"), hC - 1), hC, inner));
+        rows.AddRange(FullSection("BRAID / EVENTS", Newest(BraidLines(deltas, inner), hC - 1), hC, inner));
         rows.Add(Separator('├', splitD, '┬', '┤', inner));
 
-        List<string> console = Newest(deltas.Where(d => d.Kind == "console")
-            .SelectMany(d => DebugStateTextRenderer.FormatDeltaDetail(d).Split('\n')), hD - 1);
+        List<string> console = Newest(ConsoleLines(deltas), hD - 1);
         WireDelta[] anomalies = deltas.Where(d => d.Kind == "anomaly").ToArray();
         rows.AddRange(SplitSection("CONSOLE  (target stdout/stderr)", console,
             $"ANOMALIES  {anomalies.Length}", Newest(anomalies.Select(DebugStateTextRenderer.FormatDeltaDetail), hD - 1),
@@ -80,21 +86,95 @@ public static class DashboardScreen
 
     // ── Pane contents ──────────────────────────────────────────────────────────────────────────────────────────
 
-    private static string TitleRow(WireSnapshot? s, long seq, string status, int width)
+    private static string TitleRow(WireSnapshot? s, long seq, string status, int width, bool connected)
     {
         string title = s is null
             ? $" DrHook ─ {status} "
             : $" DrHook ─ pid {s.Session.Pid} {(s.Session.Owned ? "owned" : "borrowed")} .NET{s.Session.RuntimeMajor?.ToString() ?? "?"} ─ " +
-              $"{s.Session.Execution}{(s.Position.Stop is { } stop ? $": {stop}" : "")}{(s.Position.ExceptionType is { } et ? $" [{et}]" : "")} ─ #{seq} ─ {status} ";
+              $"{StateText(s, connected)} ─ #{seq} ─ {status} ";
         string clipped = Fit(Sanitize(title), width - 2);
         return "┌" + clipped.TrimEnd().PadRight(width - 2, '─') + "┐";
+    }
+
+    // The target's state for the title. An end (exited, debugger lost) stays true after the session; "Running" and
+    // "Stopped: …" do not, so without a connection they are given as the last state the view was told.
+    private static string StateText(WireSnapshot s, bool connected)
+    {
+        if (DebugStateTextRenderer.FormatEnd(s.Session) is { } end) return end;
+        string state = $"{s.Session.Execution}{(s.Position.Stop is { } stop ? $": {stop}" : "")}{(s.Position.ExceptionType is { } et ? $" [{et}]" : "")}";
+        return connected ? state : $"last: {state}";
     }
 
     private static List<string> StackLines(WireSnapshot? s)
     {
         if (s is null) return ["waiting for debug-state…"];
-        if (s.Position.Stop is null) return ["running — no frame"];
+        if (s.Position.Stop is null) return [DebugStateTextRenderer.FormatEnd(s.Session) is { } end ? $"{end} — no frame" : "running — no frame"];
         return s.Position.CallStack.Select((f, i) => $"{(i == 0 ? "▸" : " ")}{f.Display}").ToList();
+    }
+
+    /// <summary>The braid pane's lines, oldest first. A hypothesis or a log record is one line. The lifecycle events
+    /// between two of them are one entry: each event name once, in the order it first occurred, with its count when
+    /// it occurred more than once ("LoadAssembly ×9  LoadModule ×9  CreateThread"), wrapped onto further lines when
+    /// the pane is narrower than the entry.</summary>
+    internal static List<string> BraidLines(IEnumerable<WireDelta> deltas, int paneWidth)
+    {
+        var lines = new List<string>();
+        var run = new List<(string Name, int Count)>();
+
+        void EndRun()
+        {
+            if (run.Count == 0) return;
+            // "Δ event" padded to where Pack's two-space separator puts the first name in the detail column.
+            lines.AddRange(Pack($"Δ {"event",-9}", run.Select(e => e.Count == 1 ? e.Name : $"{e.Name} ×{e.Count}"), paneWidth));
+            run.Clear();
+        }
+
+        foreach (WireDelta d in deltas)
+        {
+            if (d.Kind == "event")
+            {
+                string name = d.Event ?? "";
+                int i = run.FindIndex(e => e.Name == name);
+                if (i < 0) run.Add((name, 1)); else run[i] = (name, run[i].Count + 1);
+            }
+            else if (d.Kind is "hypothesis" or "log")
+            {
+                EndRun();
+                lines.Add($"Δ {d.Kind,-10} {DebugStateTextRenderer.FormatDeltaDetail(d)}");
+            }
+        }
+        EndRun();
+        return lines;
+    }
+
+    /// <summary>The console pane's lines, oldest first: the target's output line by line, each led by its stream.
+    /// A console delta is what one read of the target's pipe returned, so it can hold several lines, end with the
+    /// newline of its last line, or end in the middle of a line that the stream's next delta continues.</summary>
+    internal static List<string> ConsoleLines(IEnumerable<WireDelta> deltas)
+    {
+        var lines = new List<string>();
+        var open = new Dictionary<string, int>(); // per stream: the index of its line that no newline has ended yet
+        foreach (WireDelta d in deltas)
+        {
+            if (d.Kind != "console") continue;
+            string stream = d.ConsoleStream ?? "";
+            string[] parts = (d.ConsoleText ?? "").Replace("\r\n", "\n").Split('\n');
+            for (int i = 0; i < parts.Length; i++)
+            {
+                bool last = i == parts.Length - 1;
+                if (i == 0 && open.TryGetValue(stream, out int at))
+                {
+                    lines[at] += parts[i];
+                    if (!last) open.Remove(stream);
+                }
+                else if (!last || parts[i].Length > 0) // the empty piece after a final newline is not a line
+                {
+                    lines.Add($"[{stream}] {parts[i]}");
+                    if (last) open[stream] = lines.Count - 1;
+                }
+            }
+        }
+        return lines;
     }
 
     private static List<string> SourceLines(WireSnapshot? s, SourceWindowReader source, int rowsAvailable, out string title)

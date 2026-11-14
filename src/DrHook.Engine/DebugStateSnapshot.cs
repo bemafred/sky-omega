@@ -27,14 +27,17 @@ public enum ExecutionState
 /// connects mid-session to identify the target and its disposition with no prior context (the 2026-06-25
 /// ownership directive: a human-launched view joins an already-running, LLM-owned session and must render
 /// from the snapshot alone). <see cref="OwnsTarget"/> is the Owned-vs-Borrowed distinction (finding 64);
-/// <see cref="RuntimeMajor"/> is the .NET major this debugger process is locked to (finding 86).</summary>
+/// <see cref="RuntimeMajor"/> is the .NET major this debugger process is locked to (finding 86).
+/// <see cref="Exit"/> is how the target ended, as the operating system records it; it is set only when
+/// <see cref="Execution"/> is <see cref="ExecutionState.Exited"/> and the record was read by then.</summary>
 public sealed record SessionInfo(
     int ProcessId,
     bool OwnsTarget,
     int? RuntimeMajor,
     bool IsDetached,
     bool IsDisposed,
-    ExecutionState Execution);
+    ExecutionState Execution,
+    TargetExit? Exit = null);
 
 /// <summary>One frame of the managed call stack at a stop: its <see cref="Display"/> form
 /// ("Type.Method @ file:line" when a Portable PDB resolves the location, else "Type.Method";

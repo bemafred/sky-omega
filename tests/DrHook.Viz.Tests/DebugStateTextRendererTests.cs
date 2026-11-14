@@ -49,4 +49,21 @@ public sealed class DebugStateTextRendererTests
         Assert.Contains("contribution should be 7", output); // the braid's prediction line, verbatim
         Assert.Contains("inspection", output);               // tagged with its (lowercased) lens
     }
+
+    [Theory]
+    [InlineData("Exited", "was killed by signal 9 (SIGKILL)", "(target was killed by signal 9 (SIGKILL))")]
+    [InlineData("Exited", null, "(target exited)")]
+    [InlineData("DebuggerLost", null, "(debugger lost)")]
+    [InlineData("Running", null, "(running — no synchronized frame)")]
+    public void RenderSnapshot_WithoutAPosition_SaysWhy(string execution, string? exit, string expected)
+    {
+        var sw = new StringWriter();
+        var snap = new WireSnapshot("t", new WireSession(7, true, 10, false, false, execution, exit),
+            new WirePosition(null, null, [], [], []), [], [], new WireStreams(0, 0, 0, 0, 0, 0));
+
+        DebugStateTextRenderer.RenderSnapshot(sw, snap, seq: 3, new SourceWindowReader());
+
+        Assert.Contains(expected, sw.ToString());
+        if (execution != "Running") Assert.DoesNotContain("running", sw.ToString()); // an ended target is not "running"
+    }
 }

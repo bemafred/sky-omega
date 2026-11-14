@@ -20,6 +20,7 @@ public sealed class DashboardDebugStateView : IDebugStateView
     private readonly bool _reconnects;
     private DebugStateClientModel? _model;
     private string _status = "connecting…";
+    private bool _connected;
     private bool _connectedOnce;
 
     /// <param name="reconnects">True when the client waits for the next session after one ends
@@ -31,14 +32,14 @@ public sealed class DashboardDebugStateView : IDebugStateView
         _reconnects = reconnects;
     }
 
-    public void OnConnected(string endpoint) { _connectedOnce = true; SetStatus("connected"); }
+    public void OnConnected(string endpoint) { _connectedOnce = true; SetStatus("connected", connected: true); }
 
     public void OnSnapshot(WireSnapshot snapshot, DebugStateClientModel model) { lock (_lock) _model = model; _dirty.Set(); }
 
     public void OnDelta(WireDelta delta, DebugStateClientModel model) { lock (_lock) _model = model; _dirty.Set(); }
 
     // The quit hint leads: the title clips from the right, so it may cut the reason but never the instruction.
-    public void OnDisconnected(string? reason) => SetStatus(DisconnectedStatus(reason, _reconnects, _connectedOnce));
+    public void OnDisconnected(string? reason) => SetStatus(DisconnectedStatus(reason, _reconnects, _connectedOnce), connected: false);
 
     /// <summary>The title-bar status for a disconnect. A view whose client reconnects is waiting, and says whether
     /// a session has ended or none has been seen yet; the panes keep the ended session's last state.</summary>
@@ -47,7 +48,7 @@ public sealed class DashboardDebugStateView : IDebugStateView
         : connectedOnce ? $"session ended, waiting for the next (q to quit): {reason}"
         : $"waiting for a session (q to quit): {reason}";
 
-    private void SetStatus(string status) { lock (_lock) _status = status; _dirty.Set(); }
+    private void SetStatus(string status, bool connected) { lock (_lock) { _status = status; _connected = connected; } _dirty.Set(); }
 
     /// <summary>Compose + present frames until <paramref name="ct"/> is cancelled.</summary>
     public void RunRenderLoop(CancellationToken ct)
@@ -56,10 +57,11 @@ public sealed class DashboardDebugStateView : IDebugStateView
         {
             DebugStateClientModel? model;
             string status;
-            lock (_lock) { model = _model; status = _status; }
+            bool connected;
+            lock (_lock) { model = _model; status = _status; connected = _connected; }
             (int width, int height) = _size();
             _terminal.Present(DashboardScreen.Compose(model?.Snapshot, model?.DeltaTail() ?? [], model?.LastSeq ?? 0,
-                status, width, height, _source));
+                status, width, height, _source, connected));
 
             if (ct.WaitHandle.WaitOne(MinFrameInterval)) break;               // frame cap
             WaitHandle.WaitAny([_dirty, ct.WaitHandle], IdleRefresh);          // next change, or a resize check

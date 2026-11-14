@@ -1173,7 +1173,9 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
             ProcessRuntimeMajor,
             IsDetached: Volatile.Read(ref _detached) != 0,
             IsDisposed: Volatile.Read(ref _disposed) != 0,
-            execution);
+            execution,
+            // No wait: the driver that reports the exit has already waited for the record (TargetExitWithin).
+            Exit: exited ? TargetExitWithin(TimeSpan.Zero) : null);
 
         ExecutionPosition position = stopped
             ? new ExecutionPosition(

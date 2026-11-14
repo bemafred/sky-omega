@@ -23,7 +23,7 @@ public static class DebugStateWireMapper
     public static WireSnapshot ToWire(DebugStateSnapshot s) => new(
         s.CapturedAt.ToString("O", CultureInfo.InvariantCulture),
         new WireSession(s.Session.ProcessId, s.Session.OwnsTarget, s.Session.RuntimeMajor,
-            s.Session.IsDetached, s.Session.IsDisposed, s.Session.Execution.ToString()),
+            s.Session.IsDetached, s.Session.IsDisposed, s.Session.Execution.ToString(), s.Session.Exit?.Description),
         new WirePosition(
             s.Position.Stop?.Reason.ToString(),
             s.Position.ExceptionTypeName,

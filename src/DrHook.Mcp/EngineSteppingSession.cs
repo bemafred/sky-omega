@@ -233,6 +233,23 @@ public sealed class EngineSteppingSession : IDisposable
         catch { /* transport is best-effort; never break a debug response */ }
     }
 
+    // A resumed target that is back at a stop within this time is not shown as running. A step normally completes
+    // well inside it, and a view told "running" for every step would empty its stack, source and locals panes and
+    // fill them again each time.
+    private static readonly TimeSpan RunningNotice = TimeSpan.FromMilliseconds(250);
+
+    /// <summary>Wait for the resumed target's next stop, as <see cref="DebugSession.WaitForStop"/> does, and tell the
+    /// views that it runs when it has not stopped again within <see cref="RunningNotice"/>. Without this a view
+    /// keeps showing the stop the target left, for as long as the target runs. The running snapshot reads no target
+    /// state: no frame is walked, and the breakpoints and their counts are the debugger's own records.</summary>
+    private StopInfo? WaitForStopShowingRunning(TimeSpan budget)
+    {
+        StopInfo? stop = _session!.WaitForStop(RunningNotice);
+        if (stop is not null) return stop;
+        PublishTransportSnapshot(null);
+        return _session.WaitForStop(budget - RunningNotice);
+    }
+
     /// <summary>Render the CURRENT debug-state to a PNG (drhook_snapshot_image): capture the live state, map it to
     /// the wire shape, project it to text through the SHARED <see cref="DebugStateTextRenderer"/> (the same one the
     /// console view uses — so the image is exactly what a view shows, never a forked render), then rasterize. Pure
@@ -362,7 +379,7 @@ public sealed class EngineSteppingSession : IDisposable
 
             _lastStop = null; // released — no current stop until the next one arrives
             _session.Resume();
-            StopInfo? stop = _session.WaitForStop(TimeSpan.FromMinutes(2));
+            StopInfo? stop = WaitForStopShowingRunning(TimeSpan.FromMinutes(2));
             if (stop is null) return Task.FromResult(Error("Timed out waiting for the breakpoint to hit."));
             if (stop.EndsSession)
                 return Task.FromResult(RenderSessionEnd("attach", stop,
@@ -445,7 +462,7 @@ public sealed class EngineSteppingSession : IDisposable
 
             _lastStop = null; // released — no current stop until the next one arrives
             _session.Resume();
-            StopInfo? stop = _session.WaitForStop(TimeSpan.FromMinutes(2));
+            StopInfo? stop = WaitForStopShowingRunning(TimeSpan.FromMinutes(2));
             if (stop is null) { CleanupSession(); return Task.FromResult(Error("Timed out waiting for the breakpoint to hit.")); }
             if (stop.EndsSession)
                 return Task.FromResult(RenderSessionEnd("launch", stop,
@@ -506,6 +523,7 @@ public sealed class EngineSteppingSession : IDisposable
     public Task<string> StopAsync(string hypothesis, CancellationToken ct)
     {
         if (!IsActive) return Task.FromResult(Error("No active stepping session."));
+        EmitHypothesis(hypothesis, HypothesisLens.Navigation); // why the session is ended: the braid's last line
 
         bool owned = _session!.OwnsTarget;
         int pid = _targetPid;
@@ -549,6 +567,7 @@ public sealed class EngineSteppingSession : IDisposable
     public Task<string> DetachAsync(string hypothesis, CancellationToken ct)
     {
         if (!IsActive) return Task.FromResult(Error("No active stepping session."));
+        EmitHypothesis(hypothesis, HypothesisLens.Navigation); // why the session is ended: the braid's last line
 
         bool owned = _session!.OwnsTarget;
         int pid = _targetPid;
@@ -585,6 +604,7 @@ public sealed class EngineSteppingSession : IDisposable
     public Task<string> KillAsync(string hypothesis, CancellationToken ct)
     {
         if (!IsActive) return Task.FromResult(Error("No active stepping session."));
+        EmitHypothesis(hypothesis, HypothesisLens.Navigation); // why the session is ended: the braid's last line
 
         bool owned = _session!.OwnsTarget;
         int steps = _stepCount, pid = _targetPid;
@@ -630,6 +650,7 @@ public sealed class EngineSteppingSession : IDisposable
             _session.Resume();
             if (!waitForBreakpoint)
             {
+                PublishTransportSnapshot(null); // the views show it running; nothing here waits for the next stop
                 return Task.FromResult(Render(new JsonObject
                 {
                     ["operation"] = "continue",
@@ -638,7 +659,7 @@ public sealed class EngineSteppingSession : IDisposable
                     ["prompt"] = "Process resumed without waiting. Use drhook_pause to interrupt or drhook_continue with waitForBreakpoint=true to block on a stop."
                 }));
             }
-            StopInfo? stop = _session.WaitForStop(TimeSpan.FromMinutes(2));
+            StopInfo? stop = WaitForStopShowingRunning(TimeSpan.FromMinutes(2));
             if (stop is null) return Task.FromResult(Error("Timed out waiting for a stop."));
 
             // The debuggee can run to completion during continue (e.g. a suspend=none logpoint that
@@ -709,7 +730,7 @@ public sealed class EngineSteppingSession : IDisposable
             _stepCount++;
             _lastStop = null; // released — no current stop until the step completes
             step(_session);
-            StopInfo? stop = _session.WaitForStop(TimeSpan.FromMinutes(2));
+            StopInfo? stop = WaitForStopShowingRunning(TimeSpan.FromMinutes(2));
             if (stop is null) return Task.FromResult(Error("Step did not complete within budget."));
             if (stop.EndsSession)
                 return Task.FromResult(RenderSessionEnd(operationName, stop,
@@ -1221,6 +1242,9 @@ public sealed class EngineSteppingSession : IDisposable
         int pid = _session?.ProcessId ?? 0;
         bool owned = _session?.OwnsTarget ?? false;
         TargetExit? exit = stop.Reason == StopReason.ProcessExited ? _session?.TargetExitWithin(TargetExitWait) : null;
+        // The session's last picture: exited, with how (the record was waited for just above), or debugger lost.
+        // Published before the teardown, which stops the transport; the transport sends it before it closes the views.
+        PublishTransportSnapshot(stop);
         CleanupSession();
         JsonObject ended = new()
         {

@@ -106,4 +106,25 @@ public sealed class DebugStateWireMapperTests
         Assert.Equal("span.Length == 5", delta.GetProperty("hypothesisText").GetString());
         Assert.Equal("Inspection", delta.GetProperty("hypothesisLens").GetString());
     }
+
+    [Fact]
+    public void SnapshotLine_SaysHowAnExitedTargetEnded_AndOmitsItOtherwise()
+    {
+        DebugStateSnapshot Ended(TargetExit? exit) => StoppedSnapshot() with
+        {
+            Session = new SessionInfo(4242, OwnsTarget: true, RuntimeMajor: 10, IsDetached: false, IsDisposed: false, ExecutionState.Exited, exit),
+            Position = ExecutionPosition.None,
+        };
+
+        using (JsonDocument killed = JsonDocument.Parse(DebugStateWireMapper.SnapshotLine(Ended(TargetExit.Killed(11, coreDumped: true)), seq: 1)))
+        {
+            JsonElement session = killed.RootElement.GetProperty("snapshot").GetProperty("session");
+            Assert.Equal("Exited", session.GetProperty("execution").GetString());
+            Assert.Equal("was killed by signal 11 (SIGSEGV), core dumped", session.GetProperty("exit").GetString());
+        }
+        using (JsonDocument unread = JsonDocument.Parse(DebugStateWireMapper.SnapshotLine(Ended(null), seq: 2)))
+            Assert.False(unread.RootElement.GetProperty("snapshot").GetProperty("session").TryGetProperty("exit", out _));
+        using (JsonDocument stopped = JsonDocument.Parse(DebugStateWireMapper.SnapshotLine(StoppedSnapshot(), seq: 3)))
+            Assert.False(stopped.RootElement.GetProperty("snapshot").GetProperty("session").TryGetProperty("exit", out _));
+    }
 }

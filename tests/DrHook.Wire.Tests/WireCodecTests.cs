@@ -104,4 +104,27 @@ public sealed class WireCodecTests
         Assert.Null(WireCodec.Parse(""));
         Assert.Null(WireCodec.Parse("   \n"));
     }
+
+    [Fact]
+    public void Parse_ASessionWithoutExit_AsAnOlderServerSendsIt_ReadsExitAsNull()
+    {
+        const string line = """{"type":"snapshot","seq":4,"snapshot":{"capturedAt":"t","session":{"pid":7,"owned":true,"runtimeMajor":10,"detached":false,"disposed":false,"execution":"Stopped"},"position":{"stop":"Breakpoint","callStack":[],"locals":[],"arguments":[]},"breakpoints":[],"exceptionFilters":[],"streams":{"console":0,"consoleDropped":0,"logs":0,"logsDropped":0,"anomalies":0,"anomaliesDropped":0}}}""";
+
+        WireMessage? message = WireCodec.Parse(line);
+
+        Assert.Equal("Stopped", message!.Snapshot!.Session.Execution);
+        Assert.Null(message.Snapshot.Session.Exit);
+    }
+
+    [Fact]
+    public void Serialize_ThenParse_RoundTripsHowTheTargetEnded()
+    {
+        var snapshot = new WireSnapshot("t",
+            new WireSession(7, Owned: true, RuntimeMajor: 10, Detached: false, Disposed: false, Execution: "Exited", Exit: "exited with code 3"),
+            new WirePosition(null, null, [], [], []), [], [], new WireStreams(0, 0, 0, 0, 0, 0));
+
+        WireMessage? back = WireCodec.Parse(WireCodec.Serialize(new WireMessage("snapshot", 9, Snapshot: snapshot)));
+
+        Assert.Equal("exited with code 3", back!.Snapshot!.Session.Exit);
+    }
 }

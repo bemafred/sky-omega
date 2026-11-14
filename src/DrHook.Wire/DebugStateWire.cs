@@ -19,7 +19,12 @@ public sealed record WireMessage(string Type, long Seq, WireSnapshot? Snapshot =
 public sealed record WireSnapshot(string CapturedAt, WireSession Session, WirePosition Position,
     WireBreakpoint[] Breakpoints, WireExceptionFilter[] ExceptionFilters, WireStreams Streams);
 
-public sealed record WireSession(int Pid, bool Owned, int? RuntimeMajor, bool Detached, bool Disposed, string Execution);
+/// <summary>The session facet. <see cref="Execution"/> is <c>Running</c>, <c>Stopped</c>, <c>Exited</c> or
+/// <c>DebuggerLost</c>. <see cref="Exit"/> says how an exited target ended, as a predicate ("exited with code 3",
+/// "was killed by signal 11 (SIGSEGV)"); it is absent while the target lives, when the record was not read, and
+/// from a server that predates the field.</summary>
+public sealed record WireSession(int Pid, bool Owned, int? RuntimeMajor, bool Detached, bool Disposed, string Execution,
+    string? Exit = null);
 
 public sealed record WirePosition(string? Stop, string? ExceptionType,
     WireFrame[] CallStack, WireVar[] Locals, WireVar[] Arguments);

@@ -140,7 +140,8 @@ public sealed class DebugStateServer : IDebugEventSink, IDisposable
         _listener = listener;
         _running = true;
 
-        _publishThread = new Thread(PublishLoop) { IsBackground = true, Name = "drhook-transport-publish" };
+        CancellationToken run = _shutdownCts.Token; // this run's own: cancelled by Stop, and it stays cancelled
+        _publishThread = new Thread(() => PublishLoop(run)) { IsBackground = true, Name = "drhook-transport-publish" };
         _publishThread.Start();
         _acceptThread = new Thread(AcceptLoop) { IsBackground = true, Name = "drhook-transport-accept" };
         _acceptThread.Start();
@@ -293,14 +294,23 @@ public sealed class DebugStateServer : IDebugEventSink, IDisposable
         }
     }
 
-    private void PublishLoop()
+    // run is the token of the run this thread was started for. It is asked, not _running: the server is
+    // restartable, and a thread that outlived its Stop must end, not serve the next run beside that run's own.
+    private void PublishLoop(CancellationToken run)
     {
         var batch = new List<Outbound>();
-        while (_running)
+        long stopDeadline = 0;
+        while (true)
         {
             _wake.Wait();
             _wake.Reset(); // reset BEFORE draining so a message enqueued during the drain re-signals us
-            if (!_running) break;
+
+            // Read BEFORE the drain. When the server is stopping this is the last pass, and it still sends
+            // what was published before Stop: the session's final snapshot and the last of its output are
+            // enqueued a moment before the driver stops the transport, and a view must not lose them to the
+            // order two threads happen to run in. Nothing can be enqueued after _running is cleared.
+            bool stopping = run.IsCancellationRequested;
+            if (stopping && _running) break; // a later run has started: the queue is that run's
 
             batch.Clear();
             lock (_queueLock)
@@ -308,10 +318,17 @@ public sealed class DebugStateServer : IDebugEventSink, IDisposable
                 foreach (Outbound m in _queue) batch.Add(m);
                 _queue.Clear();
             }
-            if (batch.Count == 0) continue;
 
             foreach (Outbound m in batch)
             {
+                // A stopping server sends for the time one message has, then gives up: Stop waits for this
+                // thread, and a view that does not read must not hold the session's teardown.
+                if (run.IsCancellationRequested)
+                {
+                    if (stopDeadline == 0) stopDeadline = Environment.TickCount64 + StopFlushMs;
+                    else if (Environment.TickCount64 > stopDeadline) break;
+                }
+
                 // Never let one bad message kill the publisher thread (→ a silent hang for ALL views).
                 try
                 {
@@ -325,8 +342,12 @@ public sealed class DebugStateServer : IDebugEventSink, IDisposable
                     Interlocked.Increment(ref _workerErrors);
                 }
             }
+            if (stopping) break;
         }
     }
+
+    // How long a stopping server keeps sending what is still queued.
+    private int StopFlushMs => _sendTimeoutMs > 0 ? _sendTimeoutMs : 2000;
 
     private void Broadcast(long seq, string line)
     {
@@ -361,9 +382,10 @@ public sealed class DebugStateServer : IDebugEventSink, IDisposable
         catch { return false; }
     }
 
-    /// <summary>Close the listener, drop all client connections, join the threads, and unlink the socket
-    /// file. Closing client connections never calls back into the session (ADR-012: session-end drops view
-    /// connections, but a view drop never affects the session). Idempotent.</summary>
+    /// <summary>Send the connected views what was published before this call, then close the listener, drop
+    /// all client connections, join the threads, and unlink the socket file. The sending is bounded by the
+    /// send timeout. Closing client connections never calls back into the session (ADR-012: session-end
+    /// drops view connections, but a view drop never affects the session). Idempotent.</summary>
     public void Stop()
     {
         if (!_running) return;
@@ -373,7 +395,10 @@ public sealed class DebugStateServer : IDebugEventSink, IDisposable
         _wake.Set();           // unblock the publisher
 
         _acceptThread?.Join(TimeSpan.FromSeconds(2));
-        _publishThread?.Join(TimeSpan.FromSeconds(2));
+        // The publisher's last pass sends what is still queued, for at most StopFlushMs. Should it outlive
+        // this wait (a view that does not read), the clients are closed below, its sends fail at once, and
+        // whatever it still holds is older than any later session's views joined at (seq <= JoinedSeq).
+        _publishThread?.Join(TimeSpan.FromMilliseconds(StopFlushMs + 2000));
         _acceptThread = null;
         _publishThread = null;
 

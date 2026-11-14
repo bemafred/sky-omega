@@ -417,4 +417,64 @@ public sealed class DebugStateServerTests
         using (JsonDocument? m = view.Read()) Assert.Equal("live", Field(m!, "event"));
         Assert.Equal(1, server.ClientCount);
     }
+
+    [Fact]
+    public async Task Stop_SendsWhatWasPublishedBeforeIt_ThenClosesTheView()
+    {
+        // A session's end is: the last output and events, the final snapshot (exited, and how), then Stop, all
+        // within microseconds on the driver's side. The view must be sent all of it before its connection is
+        // closed; the publisher used to leave at Stop with whatever it had not yet taken from the queue.
+        const int count = 500;
+        string sock = TempSocketPath();
+        using var server = new DebugStateServer(sock, sendTimeoutMs: 30_000); // a loaded runner must not make this a test of speed
+        server.Start();
+        using var view = new BufferedView(sock, receiveTimeoutMs: 60_000);
+        Assert.True(SpinWait.SpinUntil(() => server.ClientCount == 1, TimeSpan.FromSeconds(10)), "the view was not registered");
+
+        // The view reads while the server stops, as a live view does: Stop waits for the sending, and a view
+        // that read nothing until Stop returned would be one that does not read (the next test).
+        Task<List<string>> reading = Task.Factory.StartNew(() =>
+        {
+            var lines = new List<string>();
+            while (view.Read() is { } m)
+                using (m) lines.Add(Type(m) == "snapshot" ? "snapshot:" + m.RootElement.GetProperty("snapshot").GetProperty("session").GetProperty("exit").GetString() : Field(m, "event")!);
+            return lines;
+        }, TestContext.Current.CancellationToken, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+
+        for (int i = 0; i < count; i++) server.OnEvent(Number(i));
+        server.PublishSnapshot(Snapshot(ExecutionState.Exited) with
+        {
+            Session = new SessionInfo(1234, OwnsTarget: true, RuntimeMajor: 10, IsDetached: false, IsDisposed: false,
+                ExecutionState.Exited, TargetExit.Exited(3)),
+        });
+        server.Stop();
+
+        // The reader returns when the server has closed the connection, so the list is everything it was sent.
+        List<string> got = await reading.WaitAsync(TimeSpan.FromSeconds(60), TestContext.Current.CancellationToken);
+        Assert.Equal(Enumerable.Range(0, count).Select(Number).Append("snapshot:exited with code 3"), got);
+    }
+
+    [Fact]
+    public void Stop_WithAViewThatDoesNotRead_StillReturns_AndTheServerRestarts()
+    {
+        // The flush at Stop is bounded: a view that reads nothing must not hold the session's teardown.
+        string sock = TempSocketPath();
+        using var server = new DebugStateServer(sock, sendTimeoutMs: 500);
+        server.Start();
+        using Socket idle = Connect(sock); // connects and never reads
+        Assert.True(SpinWait.SpinUntil(() => server.ClientCount == 1, TimeSpan.FromSeconds(10)), "the view was not registered");
+
+        string padding = new('x', 1000);
+        for (int i = 0; i < 2000; i++) server.OnEvent(Number(i) + "-" + padding); // ~2 MB, far past a socket buffer
+
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        server.Stop();
+        Assert.True(clock.Elapsed < TimeSpan.FromSeconds(10), $"Stop took {clock.Elapsed.TotalSeconds:0.0} s");
+
+        server.Start(); // and the next session is served
+        server.OnEvent("next");
+        using var view = new BufferedView(sock);
+        using JsonDocument? m = view.Read();
+        Assert.Equal("next", Field(m!, "event"));
+    }
 }

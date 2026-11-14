@@ -59,7 +59,7 @@ public static class DebugStateTextRenderer
         }
         else
         {
-            o.WriteLine("  (running — no synchronized frame)");
+            o.WriteLine($"  ({FormatEnd(s.Session) ?? "running — no synchronized frame"})");
         }
 
         foreach (WireBreakpoint b in s.Breakpoints)
@@ -75,6 +75,17 @@ public static class DebugStateTextRenderer
 
     // ── Per-item formatters — SHARED by every text projection (this block/line renderer, the image tool through it,
     //    and the TUI dashboard's panes), so a value, delta or breakpoint reads the same on every surface. ──
+
+    /// <summary>What a view says of a target that has no position because the session's target is gone, or null
+    /// while the target runs or is stopped: "target exited with code 3" or "target was killed by signal 11
+    /// (SIGSEGV)" when the snapshot says how it ended, "target exited" when it does not, "debugger lost" after
+    /// mscordbi's DebuggerError.</summary>
+    public static string? FormatEnd(WireSession s) => s.Execution switch
+    {
+        "Exited" => $"target {s.Exit ?? "exited"}",
+        "DebuggerLost" => "debugger lost",
+        _ => null,
+    };
 
     /// <summary>A delta's payload as text, without the kind prefix: the event name, the log message (FAULT-tagged),
     /// "Kind: observed" for an anomaly, "[stream] text" for console output, "▸ lens: text" for a hypothesis.</summary>
