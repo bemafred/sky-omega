@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/AvaloniaTerm.App/AvaloniaTerm.App.csproj" />
+    <Project Path="src/AvaloniaTerm.Core/AvaloniaTerm.Core.csproj" />
+    <Project Path="src/AvaloniaTerm.Pty/AvaloniaTerm.Pty.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/AvaloniaTerm.Tests/AvaloniaTerm.Tests.csproj" />
+  </Folder>
+</Solution>

@@ -1,6 +1,6 @@
 using System.Collections.Concurrent;
 
-namespace AvaTerm.Pty;
+namespace AvaloniaTerm.Pty;
 
 public sealed record PtyOptions
 {

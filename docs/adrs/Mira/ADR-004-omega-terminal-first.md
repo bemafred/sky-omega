@@ -6,7 +6,7 @@
 
 **Related:** [Mira ADR-001 — Interaction Surface Architecture](ADR-001-interaction-surface-architecture.md); [DrHook ADR-012 — Debug-State Surfaces](../drhook/ADR-012-debug-state-surfaces.md)
 
-**Evidence:** `poc/AvaTerm/` (cross-platform terminal proof of concept)
+**Evidence:** `poc/avalonia-term/` (cross-platform terminal proof of concept)
 
 ## Summary
 
@@ -28,18 +28,18 @@ Sky Omega already provides substantial capabilities through existing command-lin
 
 A new graphical development environment need not reimplement any of them to be valuable.
 
-### AvaTerm: the initial evidence
+### avalonia-term: the initial evidence
 
-The AvaTerm proof of concept contains:
+The avalonia-term proof of concept contains:
 
-- `AvaTerm.Core`: a self-contained VT/xterm terminal model and parser, with screen, scrollback, and input handling.
-- `AvaTerm.Pty`: Unix PTY and Windows ConPTY implementations, with terminal session management.
-- `AvaTerm.App`: an Avalonia desktop frontend with rendering, input handling, and tabs.
-- `AvaTerm.Tests`: a standalone console-based test runner, including terminal and PTY checks.
+- `AvaloniaTerm.Core`: a self-contained VT/xterm terminal model and parser, with screen, scrollback, and input handling.
+- `AvaloniaTerm.Pty`: Unix PTY and Windows ConPTY implementations, with terminal session management.
+- `AvaloniaTerm.App`: an Avalonia desktop frontend with rendering, input handling, and tabs.
+- `AvaloniaTerm.Tests`: a standalone console-based test runner, including terminal and PTY checks.
 
 The POC targets .NET 10 and uses Avalonia 11.3. Its authoring-time README records an earlier validation state, before the GUI was built against real Avalonia and before the Windows/macOS paths were run. Subsequently, the POC was reported as working on Windows, Ubuntu, and macOS. The repository import should retain the original README for provenance and document the later validation explicitly, including host, SDK, shell, test command, and any remaining defects when those measurements are collected. A successful manual run is evidence of feasibility, not a claim of production readiness.
 
-AvaTerm is an experimental starting point, not a mandate to preserve every implementation decision.
+avalonia-term is an experimental starting point, not a mandate to preserve every implementation decision.
 
 ## Decision (proposed)
 
@@ -67,24 +67,24 @@ Claude Code, Codex, and future command-line agent clients initially run exactly 
 
 Mercury and DrHook likewise remain independently executable tools or services. Omega does not become their owner or orchestrator merely by hosting a terminal in which they are used.
 
-### D4 — Preserve AvaTerm as an independent POC
+### D4 — Preserve avalonia-term as an independent POC
 
 Import the existing source without a premature rewrite:
 
 ```
-poc/AvaTerm/
-├── AvaTerm.slnx
+poc/avalonia-term/
+├── AvaloniaTerm.slnx
 ├── Directory.Build.props
 ├── README.md
 ├── src/
-│   ├── AvaTerm.Core/
-│   ├── AvaTerm.Pty/
-│   └── AvaTerm.App/
+│   ├── AvaloniaTerm.Core/
+│   ├── AvaloniaTerm.Pty/
+│   └── AvaloniaTerm.App/
 └── tests/
-    └── AvaTerm.Tests/
+    └── AvaloniaTerm.Tests/
 ```
 
-Treat `poc/AvaTerm/` as a standalone experiment. Do not automatically absorb it into the main `SkyOmega.sln`, or rename its projects to Mira/Omega, merely because it has entered the repository. Import does not imply promotion to production code.
+Treat `poc/avalonia-term/` as a standalone experiment. Do not automatically absorb it into the main `SkyOmega.sln`, or rename its projects to Mira/Omega, merely because it has entered the repository. Import does not imply promotion to production code.
 
 The POC may later seed production projects under `src/` if experiments justify that move. Preserve working behavior and test evidence during any extraction.
 
@@ -115,7 +115,7 @@ How a desktop terminal participates in Mira's broader surface contract is a sepa
 
 Omega is a plausible future home for an Avalonia `IDebugStateView` implementation. This may realize DrHook ADR-012's planned GUI surface inside the terminal-first application, without embedding the debugging engine or creating a competing state model. It is an architectural option, not an Omega v0.1 feature commitment and not a unilateral change to DrHook ADR-012.
 
-The current transport is read-only; bidirectional debugger control and human/agent command serialization remain separate, unresolved work. Cross-platform visualization must also verify the transport and session rendezvous on Windows rather than infer portability from AvaTerm's already demonstrated terminal support. The first justified integration experiment, if one emerges, should be an independently attachable read-only view consuming the existing DrHook stream. Do not tie the agent-owned debugger session's lifetime to an Omega tab or window.
+The current transport is read-only; bidirectional debugger control and human/agent command serialization remain separate, unresolved work. Cross-platform visualization must also verify the transport and session rendezvous on Windows rather than infer portability from avalonia-term's already demonstrated terminal support. The first justified integration experiment, if one emerges, should be an independently attachable read-only view consuming the existing DrHook stream. Do not tie the agent-owned debugger session's lifetime to an Omega tab or window.
 
 ## Explicitly out of scope for the first experiment
 
@@ -132,14 +132,15 @@ These are not rejected forever. They are uncommitted hypotheses, to be revisited
 
 Acceptance of this ADR should be based on recorded evidence, not on the attractiveness of the vision:
 
-- [x] Import the original AvaTerm POC into `poc/AvaTerm/` and record its provenance.
+- [x] Import the original AvaTerm POC into `poc/avalonia-term/` and record its provenance.
   - **Imported 2026-11-14** from `github.com/bemafred/AvaTerm`, commit `cac1ecf41e04a6f1ed3de472288000f6b12a4cf6` ("First commit", 2026-11-11): its 24 tracked files, unchanged, checked by SHA-256 against the source. The history was not carried over, and it is not a submodule.
-  - **Decided by Martin, 2026-11-14:** the copy in `poc/AvaTerm/` is the master for Sky Omega. The original repository goes its own way from here, and the two are not kept in step.
+  - **Decided by Martin, 2026-11-14:** the copy in `poc/avalonia-term/` is the master for Sky Omega. The original repository goes its own way from here, and the two are not kept in step.
+  - **Renamed 2026-11-14 (Martin):** the directory was `poc/AvaTerm/` at the import and is `poc/avalonia-term/` from then on, the name this ADR now uses for the POC. The same day the names inside it followed: the projects and namespaces are `AvaloniaTerm.*`, the solution is `AvaloniaTerm.slnx`, and the program, its window title, `TERM_PROGRAM` and its settings folder are `avalonia-term`. Only the names changed; after the rename the build gave 0 warnings and the tests 30 passed, 0 failed, 1 skipped. The Ubuntu run below was made before it, under the names of that moment.
 - [ ] Run the POC and its tests on Windows, Ubuntu, and macOS; record the commands, environment, outcomes, and known gaps.
-  - **Ubuntu, 2026-11-14, from `poc/AvaTerm/`:** zbook, Ubuntu 26.04.1 LTS x86_64, .NET SDK 10.0.403, bash, tmux 3.6. `dotnet build AvaTerm.slnx` gave 0 warnings and 0 errors. `dotnet run --project tests/AvaTerm.Tests` gave 30 passed, 0 failed, 1 skipped (the comparison with tmux's rendering of vim; vim is not installed). The application itself was not started in this run.
+  - **Ubuntu, 2026-11-14, from `poc/avalonia-term/`:** zbook, Ubuntu 26.04.1 LTS x86_64, .NET SDK 10.0.403, bash, tmux 3.6. `dotnet build AvaTerm.slnx` gave 0 warnings and 0 errors. `dotnet run --project tests/AvaTerm.Tests` gave 30 passed, 0 failed, 1 skipped (the comparison with tmux's rendering of vim; vim is not installed). The application itself was not started in this run.
 - [ ] Verify basic shell operation and terminal interaction on each platform, including keyboard layout, resizing, copy/paste, process exit, and common full-screen terminal applications.
 - [x] Verify Claude Code or Codex can run as an ordinary terminal process where installed, without special Omega integration.
-  - **Reported by Martin, 2026-11-14:** Claude Code runs in AvaTerm on Windows, Ubuntu and macOS. The hosts, versions and any defects seen were not recorded. Codex was not reported.
+  - **Reported by Martin, 2026-11-14:** Claude Code runs in avalonia-term on Windows, Ubuntu and macOS. The hosts, versions and any defects seen were not recorded. Codex was not reported.
 - [ ] Verify tmux behavior on supported hosts, including a reconnect workflow if one is exercised; distinguish local, WSL, and SSH cases.
 - [ ] Characterize security boundaries (including OSC 52 clipboard writes and untrusted escape sequences), process cleanup, and PTY lifecycle before claiming production suitability.
 - [ ] Determine the minimal install/run approach for a first Omega application. Assess .NET tool packaging for a graphical desktop application on all three OSes rather than treating packaging as already solved.
@@ -154,7 +155,7 @@ An initial delivery can be considerably smaller than this full validation list; 
 - A useful application can ship before broader Sky Omega cognitive components are available.
 - Existing shells and CLI applications keep doing their own work.
 - One interface supports Windows, Linux, and macOS without pretending their operating systems are identical.
-- AvaTerm offers an inspectable foundation for experimenting with Sky Omega's own development environment.
+- avalonia-term offers an inspectable foundation for experimenting with Sky Omega's own development environment.
 - New capabilities can grow from observed constraints, limiting unnecessary architectural commitments.
 - The work is recursively testable: agents can use Omega while changing Omega, with Mercury and DrHook available as independent tools.
 
@@ -177,7 +178,7 @@ An initial delivery can be considerably smaller than this full validation list; 
 
 These are deliberately unresolved and should not become implementation requirements until investigated:
 
-- Which first friction point, if any, warrants an Omega-specific feature beyond AvaTerm?
+- Which first friction point, if any, warrants an Omega-specific feature beyond avalonia-term?
 - Should the first installable Omega be a .NET tool, platform-native application packages, or both?
 - How should a local terminal eventually relate to Mira's formal interaction-surface contract, if at all?
 - Does actual use justify hosting DrHook ADR-012’s planned Avalonia view inside Omega, or is a standalone view preferable? If justified, can an Omega view attach read-only through `DrHook.Viz` without altering DrHook session ownership or relying on unverified Windows transport behavior?
@@ -186,7 +187,7 @@ These are deliberately unresolved and should not become implementation requireme
 
 ## Initial repository action
 
-1. Commit the unchanged AvaTerm POC under `poc/AvaTerm/` with its existing solution, README, sources, and tests.
+1. Commit the unchanged AvaTerm POC under `poc/avalonia-term/` with its existing solution, README, sources, and tests.
 2. Add this ADR at `docs/adrs/Mira/ADR-004-omega-terminal-first.md`, initially Proposed.
 3. Add an ADR-004 entry to `docs/adrs/README.md` under Cognitive Component ADRs, noting Mira and Proposed status.
 4. Preserve the planned Mira ADR-002 (Surface Contract Specification) and ADR-003 (MCP Surface Evolution); neither must be implemented to begin the terminal experiment.

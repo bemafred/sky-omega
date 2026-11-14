@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="..\AvaloniaTerm.Core\AvaloniaTerm.Core.csproj" />
+  </ItemGroup>
+</Project>

@@ -3,7 +3,7 @@ using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Styling;
 using Avalonia.Themes.Fluent;
 
-namespace AvaTerm.App;
+namespace AvaloniaTerm.App;
 
 internal static class Program
 {
@@ -18,7 +18,7 @@ public sealed class TerminalApp : Application
 {
     public override void Initialize()
     {
-        Name = "AvaTerm";
+        Name = "avalonia-term";
         Styles.Add(new FluentTheme());
         RequestedThemeVariant = ThemeVariant.Dark;
     }

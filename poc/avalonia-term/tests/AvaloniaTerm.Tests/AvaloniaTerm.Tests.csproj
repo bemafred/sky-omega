@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\AvaloniaTerm.Core\AvaloniaTerm.Core.csproj" />
+    <ProjectReference Include="..\..\src\AvaloniaTerm.Pty\AvaloniaTerm.Pty.csproj" />
+  </ItemGroup>
+</Project>

@@ -2,7 +2,7 @@ using Avalonia;
 using Avalonia.Media;
 using Avalonia.Media.Immutable;
 
-namespace AvaTerm.App;
+namespace AvaloniaTerm.App;
 
 /// <summary>
 /// Draws box-drawing and block characters as geometry so that borders (tmux panes, TUI frames)

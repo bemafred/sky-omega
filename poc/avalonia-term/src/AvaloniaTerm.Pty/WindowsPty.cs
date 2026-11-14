@@ -3,7 +3,7 @@ using System.Runtime.Versioning;
 using System.Text;
 using Microsoft.Win32.SafeHandles;
 
-namespace AvaTerm.Pty;
+namespace AvaloniaTerm.Pty;
 
 /// <summary>Pseudo terminal for Windows 10 1809+ built on ConPTY.</summary>
 [SupportedOSPlatform("windows")]

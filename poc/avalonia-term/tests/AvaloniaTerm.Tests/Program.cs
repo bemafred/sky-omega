@@ -1,8 +1,8 @@
-// Dependency-free test runner: `dotnet run --project tests/AvaTerm.Tests`.
+// Dependency-free test runner: `dotnet run --project tests/AvaloniaTerm.Tests`.
 // Core tests run everywhere; the PTY tests start real shells (and tmux when installed).
 using System.Text;
-using AvaTerm.Core;
-using AvaTerm.Pty;
+using AvaloniaTerm.Core;
+using AvaloniaTerm.Pty;
 
 int passed = 0, failed = 0, skipped = 0;
 

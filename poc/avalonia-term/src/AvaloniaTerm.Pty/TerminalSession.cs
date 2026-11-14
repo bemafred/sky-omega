@@ -1,6 +1,6 @@
-using AvaTerm.Core;
+using AvaloniaTerm.Core;
 
-namespace AvaTerm.Pty;
+namespace AvaloniaTerm.Pty;
 
 /// <summary>Couples a <see cref="Terminal"/> to a child process on a pseudo terminal.</summary>
 public sealed class TerminalSession : IDisposable

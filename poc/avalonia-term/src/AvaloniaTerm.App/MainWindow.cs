@@ -8,7 +8,7 @@ using Avalonia.Media;
 using Avalonia.Media.Immutable;
 using Avalonia.Threading;
 
-namespace AvaTerm.App;
+namespace AvaloniaTerm.App;
 
 /// <summary>A terminal surface with its scrollbar.</summary>
 public sealed class TerminalView : Grid
@@ -76,7 +76,7 @@ public sealed class MainWindow : Window
         _activeBrush = Solid(_theme.Background);
         _inactiveBrush = Solid(_theme.Chrome);
 
-        Title = "AvaTerm";
+        Title = "avalonia-term";
         Width = 980;
         Height = 640;
         MinWidth = 320;
@@ -172,7 +172,7 @@ public sealed class MainWindow : Window
         view.Terminal.TitleChanged += text =>
         {
             title.Text = string.IsNullOrWhiteSpace(text) ? "shell" : text;
-            if (_active == tab) Title = title.Text + " - AvaTerm";
+            if (_active == tab) Title = title.Text + " - avalonia-term";
         };
         view.Terminal.Exited += _ => CloseTab(tab);
 
@@ -190,7 +190,7 @@ public sealed class MainWindow : Window
             t.View.IsVisible = t == tab;
             t.Header.Background = t == tab ? _activeBrush : _inactiveBrush;
         }
-        Title = (tab.Title.Text ?? "shell") + " - AvaTerm";
+        Title = (tab.Title.Text ?? "shell") + " - avalonia-term";
         // Focus after layout, once the newly shown terminal can take it.
         Dispatcher.UIThread.Post(() => tab.View.Terminal.Focus());
     }

@@ -1,20 +1,20 @@
-# AvaTerm
+# avalonia-term
 
 A terminal emulator for macOS, Linux and Windows. .NET 10, Avalonia 11.3, no native code and
 no third-party terminal library: the VT/xterm emulator, the PTY layer and the renderer are all here.
 
-    dotnet run --project src/AvaTerm.App            # run
-    dotnet run --project tests/AvaTerm.Tests        # tests (optional name filter as argument)
-    dotnet publish src/AvaTerm.App -c Release -r osx-arm64 --self-contained   # or linux-x64, win-x64
+    dotnet run --project src/AvaloniaTerm.App            # run
+    dotnet run --project tests/AvaloniaTerm.Tests        # tests (optional name filter as argument)
+    dotnet publish src/AvaloniaTerm.App -c Release -r osx-arm64 --self-contained   # or linux-x64, win-x64
 
 ## Layout
 
 | Project | Contents |
 | --- | --- |
-| `AvaTerm.Core` | Emulator: parser, primary/alternate screen, scrollback, selection, key/mouse/paste encoding. No dependencies. |
-| `AvaTerm.Pty` | `posix_openpt` + `posix_spawn` on macOS/Linux, ConPTY on Windows; `TerminalSession` ties a PTY to an emulator. |
-| `AvaTerm.App` | Avalonia front end: cell renderer, input, tabs, scrollbar. Code only, no XAML. |
-| `AvaTerm.Tests` | Console test runner without a test framework. |
+| `AvaloniaTerm.Core` | Emulator: parser, primary/alternate screen, scrollback, selection, key/mouse/paste encoding. No dependencies. |
+| `AvaloniaTerm.Pty` | `posix_openpt` + `posix_spawn` on macOS/Linux, ConPTY on Windows; `TerminalSession` ties a PTY to an emulator. |
+| `AvaloniaTerm.App` | Avalonia front end: cell renderer, input, tabs, scrollbar. Code only, no XAML. |
+| `AvaloniaTerm.Tests` | Console test runner without a test framework. |
 
 ## Behaviour
 
@@ -44,8 +44,8 @@ in a tab, or set `"Shell": "wsl.exe"` in the settings.
 
 ## Settings
 
-Optional `settings.json` in `%APPDATA%\AvaTerm`, `~/.config/AvaTerm` or
-`~/Library/Application Support/AvaTerm`; see `Settings.cs` for all keys.
+Optional `settings.json` in `%APPDATA%\avalonia-term`, `~/.config/avalonia-term` or
+`~/Library/Application Support/avalonia-term`; see `Settings.cs` for all keys.
 
     { "FontFamily": "JetBrains Mono", "FontSize": 13, "ScrollbackLines": 50000, "Shell": "/bin/zsh" }
 
@@ -53,7 +53,7 @@ Optional `settings.json` in `%APPDATA%\AvaTerm`, `~/.config/AvaTerm` or
 
 Built and run on Ubuntu 24.04 x64 with .NET SDK 10.0.114:
 
-- `AvaTerm.Core` and `AvaTerm.Pty`: 31 tests pass. They include real shells on a PTY (controlling
+- `AvaloniaTerm.Core` and `AvaloniaTerm.Pty`: 31 tests pass. They include real shells on a PTY (controlling
   terminal, job control, Ctrl+C, resize, UTF-8), a live tmux session (status line, pane split,
   mouse click selecting a pane, resize), and screen-for-screen comparison against tmux's own
   emulator for less, vim and nano.

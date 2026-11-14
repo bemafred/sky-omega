@@ -1,11 +1,11 @@
 using System.Text.Json;
-using AvaTerm.Core;
+using AvaloniaTerm.Core;
 
-namespace AvaTerm.App;
+namespace AvaloniaTerm.App;
 
 /// <summary>
 /// User settings, read once at startup from settings.json in the per-user config directory
-/// (%APPDATA%\AvaTerm, ~/.config/AvaTerm, ~/Library/Application Support/AvaTerm).
+/// (%APPDATA%\avalonia-term, ~/.config/avalonia-term, ~/Library/Application Support/avalonia-term).
 /// Every property is optional in the file.
 /// </summary>
 public sealed class Settings
@@ -26,7 +26,7 @@ public sealed class Settings
     public int WheelLines { get; set; } = 3;
 
     public static string FilePath => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "AvaTerm", "settings.json");
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "avalonia-term", "settings.json");
 
     public static Settings Load()
     {

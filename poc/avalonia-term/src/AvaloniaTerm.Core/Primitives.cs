@@ -1,7 +1,7 @@
 using System.Globalization;
 using System.Text;
 
-namespace AvaTerm.Core;
+namespace AvaloniaTerm.Core;
 
 [Flags]
 public enum CellAttr : ushort

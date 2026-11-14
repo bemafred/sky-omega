@@ -1,6 +1,6 @@
 using System.Text;
 
-namespace AvaTerm.Core;
+namespace AvaloniaTerm.Core;
 
 public enum MouseTracking { None, Normal, Button, Any }
 public enum CursorShape { Block, Underline, Bar }

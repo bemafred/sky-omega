@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 
-namespace AvaTerm.Pty;
+namespace AvaloniaTerm.Pty;
 
 /// <summary>
 /// Pseudo terminal for Linux and macOS built on posix_openpt + posix_spawn.
@@ -36,7 +36,7 @@ internal sealed unsafe class UnixPty : PtyConnection
         var env = PtyFactory.BuildEnvironment(o with { Environment = new Dictionary<string, string?>() }, false);
         env["TERM"] = "xterm-256color";
         env["COLORTERM"] = "truecolor";
-        env["TERM_PROGRAM"] = "AvaTerm";
+        env["TERM_PROGRAM"] = "avalonia-term";
         env.Remove("TMUX");
         env.Remove("TMUX_PANE");
         if (!env.ContainsKey("LANG") && !env.ContainsKey("LC_ALL") && !env.ContainsKey("LC_CTYPE"))

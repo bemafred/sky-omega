@@ -1,8 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <AssemblyName>AvaTerm</AssemblyName>
-    <RootNamespace>AvaTerm.App</RootNamespace>
+    <AssemblyName>avalonia-term</AssemblyName>
+    <RootNamespace>AvaloniaTerm.App</RootNamespace>
     <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
   </PropertyGroup>
   <ItemGroup>
@@ -11,7 +11,7 @@
     <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.*" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\AvaTerm.Core\AvaTerm.Core.csproj" />
-    <ProjectReference Include="..\AvaTerm.Pty\AvaTerm.Pty.csproj" />
+    <ProjectReference Include="..\AvaloniaTerm.Core\AvaloniaTerm.Core.csproj" />
+    <ProjectReference Include="..\AvaloniaTerm.Pty\AvaloniaTerm.Pty.csproj" />
   </ItemGroup>
 </Project>

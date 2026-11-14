@@ -6,10 +6,10 @@ using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.Media.Immutable;
 using Avalonia.Threading;
-using AvaTerm.Core;
-using AvaTerm.Pty;
+using AvaloniaTerm.Core;
+using AvaloniaTerm.Pty;
 
-namespace AvaTerm.App;
+namespace AvaloniaTerm.App;
 
 /// <summary>
 /// The terminal surface: renders the cell grid and turns keyboard, mouse and clipboard

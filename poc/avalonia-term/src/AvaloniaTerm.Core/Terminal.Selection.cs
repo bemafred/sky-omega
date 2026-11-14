@@ -1,6 +1,6 @@
 using System.Text;
 
-namespace AvaTerm.Core;
+namespace AvaloniaTerm.Core;
 
 public enum SelectionUnit { Char, Word, Line }
 

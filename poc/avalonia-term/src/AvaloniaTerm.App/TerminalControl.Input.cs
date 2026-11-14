@@ -3,9 +3,9 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
-using AvaTerm.Core;
+using AvaloniaTerm.Core;
 
-namespace AvaTerm.App;
+namespace AvaloniaTerm.App;
 
 public sealed partial class TerminalControl
 {
