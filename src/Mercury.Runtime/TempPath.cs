@@ -194,8 +194,9 @@ public readonly record struct TempPath
     /// considered stale and will be cleaned up.
     /// </para>
     /// <para>
-    /// Directories without lock files (legacy or crashed during creation) fall back to
-    /// a 24-hour age check for safety.
+    /// A directory whose lock file is missing, empty or not in the written format has no owner
+    /// that can be read. Its owner may be between creating the file and writing it, so the
+    /// directory counts as in use for 24 hours after it was created, and as stale after that.
     /// </para>
     /// </remarks>
     public static void CleanupStale(string category)
@@ -220,7 +221,7 @@ public readonly record struct TempPath
         foreach (var file in Directory.GetFiles(tempDir, pattern))
         {
             var lockFile = file + LockFileName;
-            if (File.Exists(lockFile) && IsLockFileActive(lockFile))
+            if (File.Exists(lockFile) && ReadLockFileOwner(lockFile) == LockFileOwner.Alive)
                 continue;
 
             // No lock file for plain files - use age-based fallback
@@ -256,33 +257,48 @@ public readonly record struct TempPath
         }
     }
 
+    /// <summary>What a lock file says about the process that wrote it.</summary>
+    private enum LockFileOwner
+    {
+        /// <summary>The process named in the lock file is running.</summary>
+        Alive,
+        /// <summary>The process named in the lock file is not running.</summary>
+        Gone,
+        /// <summary>
+        /// The lock file does not name a process: it is missing, empty, or not in the format
+        /// <see cref="MarkOwnership"/> writes. Its owner may be between creating the file and
+        /// writing it, so this is never taken to mean that the owner is gone.
+        /// </summary>
+        Unknown
+    }
+
     private static bool IsDirectoryInUse(string dir)
     {
         var lockFile = Path.Combine(dir, LockFileName);
+        var owner = File.Exists(lockFile) ? ReadLockFileOwner(lockFile) : LockFileOwner.Unknown;
 
-        if (!File.Exists(lockFile))
+        return owner switch
         {
-            // No lock file - legacy format or crashed during creation.
-            // Conservative fallback: only consider stale if older than 24 hours.
-            return (DateTime.UtcNow - Directory.GetCreationTimeUtc(dir)) < TimeSpan.FromHours(24);
-        }
-
-        return IsLockFileActive(lockFile);
+            LockFileOwner.Alive => true,
+            LockFileOwner.Gone => false,
+            // No owner can be read: in use for 24 hours after the directory was created, stale after that.
+            _ => (DateTime.UtcNow - Directory.GetCreationTimeUtc(dir)) < TimeSpan.FromHours(24),
+        };
     }
 
-    private static bool IsLockFileActive(string lockFile)
+    private static LockFileOwner ReadLockFileOwner(string lockFile)
     {
         try
         {
             var lines = File.ReadAllLines(lockFile);
             if (lines.Length < 2)
-                return false; // Corrupt lock file → stale
+                return LockFileOwner.Unknown; // Created and not yet written, or cut short
 
             if (!int.TryParse(lines[0], out var pid))
-                return false; // Invalid PID → stale
+                return LockFileOwner.Unknown;
 
             if (!long.TryParse(lines[1], out var startTimeFileTime))
-                return false; // Invalid start time → stale
+                return LockFileOwner.Unknown;
 
             // Check if process with that PID is still running
             Process process;
@@ -292,26 +308,26 @@ public readonly record struct TempPath
             }
             catch (ArgumentException)
             {
-                return false; // Process not found → stale
+                return LockFileOwner.Gone; // Process not found
             }
 
             // Verify it's the same process (not PID reuse) by comparing start time
             try
             {
                 var actualStartTime = process.StartTime.ToFileTimeUtc();
-                return actualStartTime == startTimeFileTime;
+                return actualStartTime == startTimeFileTime ? LockFileOwner.Alive : LockFileOwner.Gone;
             }
             catch (Exception)
             {
                 // Can't get start time (permission issue, process exited, etc.)
                 // Be conservative - assume it might be active
-                return true;
+                return LockFileOwner.Alive;
             }
         }
         catch (IOException)
         {
             // Can't read lock file - might be in use, be conservative
-            return true;
+            return LockFileOwner.Alive;
         }
     }
 

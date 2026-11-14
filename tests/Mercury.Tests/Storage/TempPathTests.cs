@@ -76,6 +76,39 @@ public class TempPathTests
     }
 
     /// <summary>
+    /// A directory whose lock file exists but is still empty belongs to a process that is between creating
+    /// the file and writing it (MarkOwnership). A sweep by another process must leave it alone. Seen on CI
+    /// Linux x64 (run 43569905426): two test classes lost their directories in the same millisecond.
+    /// The category is this test's own, so its sweep reaches no other test's directory.
+    /// </summary>
+    [Theory]
+    [InlineData("")]
+    [InlineData("12345")]
+    [InlineData("not-a-pid\n133000000000000000")]
+    [InlineData("12345\nnot-a-time")]
+    public void CleanupStale_PreservesARecentDirectoryWhoseLockFileNamesNoProcess(string lockFileContent)
+    {
+        var path = TempPath.Create("test-unreadable-lock", "recent", unique: true);
+        var dir = path.FullPath;
+
+        try
+        {
+            Directory.CreateDirectory(dir);
+            File.WriteAllText(Path.Combine(dir, ".mercury.lock"), lockFileContent);
+
+            TempPath.CleanupStale("test-unreadable-lock");
+
+            Assert.True(Directory.Exists(dir),
+                "CleanupStale should preserve a recent directory whose lock file names no process");
+        }
+        finally
+        {
+            if (Directory.Exists(dir))
+                Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    /// <summary>
     /// Verifies that directories without lock files older than 24 hours are cleaned up.
     /// </summary>
     [Fact]
