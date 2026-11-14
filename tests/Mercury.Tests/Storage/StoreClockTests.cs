@@ -4,6 +4,7 @@ using System.Linq;
 using SkyOmega.Mercury;
 using SkyOmega.Mercury.Runtime;
 using SkyOmega.Mercury.Storage;
+using SkyOmega.Mercury.Tests.Fixtures;
 using Xunit;
 
 namespace SkyOmega.Mercury.Tests.Storage;
@@ -19,13 +20,6 @@ public class StoreClockTests : IDisposable
     private const string S = "<http://ex.org/s>";
     private const string P = "<http://ex.org/p>";
     private const string O = "\"o\"";
-
-    /// <summary>A clock whose reading the test sets. It stands still until the test moves it.</summary>
-    private sealed class SuppliedClock : TimeProvider
-    {
-        public DateTimeOffset Reading { get; set; }
-        public override DateTimeOffset GetUtcNow() => Reading;
-    }
 
     private readonly string _testDir;
 

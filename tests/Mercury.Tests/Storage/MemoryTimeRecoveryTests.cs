@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using SkyOmega.Mercury.Runtime;
 using SkyOmega.Mercury.Storage;
+using SkyOmega.Mercury.Tests.Fixtures;
 using Xunit;
 
 namespace SkyOmega.Mercury.Tests.Storage;
@@ -25,12 +26,6 @@ public class MemoryTimeRecoveryTests : IDisposable
     private const string P = "<urn:periods:p>";
 
     private static DateTimeOffset Reading(int n) => new DateTimeOffset(2031, 1, 1, 0, 0, 0, TimeSpan.Zero).AddMinutes(n);
-
-    private sealed class SuppliedClock : TimeProvider
-    {
-        public DateTimeOffset Reading { get; set; }
-        public override DateTimeOffset GetUtcNow() => Reading;
-    }
 
     private readonly string _root;
 

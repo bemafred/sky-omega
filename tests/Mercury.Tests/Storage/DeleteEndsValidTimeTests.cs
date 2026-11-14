@@ -4,6 +4,7 @@ using System.IO;
 using SkyOmega.Mercury;
 using SkyOmega.Mercury.Runtime;
 using SkyOmega.Mercury.Storage;
+using SkyOmega.Mercury.Tests.Fixtures;
 using Xunit;
 
 namespace SkyOmega.Mercury.Tests.Storage;
@@ -262,13 +263,16 @@ public class DeleteEndsValidTimeTests : IDisposable
     [Fact]
     public void InsertDeleteInsert_ThroughSparql_TheFactIsCurrentAgain()
     {
+        // Three requests in three clock readings: the test supplies them. In one reading the delete and the second
+        // insert would continue the first period, and one period would be left (ADR-061 M2).
         var dir = Path.Combine(_testDir, "reinsert-after-end");
-        using var store = new QuadStore(dir);
+        var clock = new SuppliedClock { Reading = new DateTimeOffset(2031, 3, 4, 5, 6, 7, TimeSpan.Zero) };
+        using var store = new QuadStore(dir, null, null, new StorageOptions { Clock = clock });
 
         SparqlEngine.Update(store, $"INSERT DATA {{ {S} {P} \"a\" }}", TestContext.Current.CancellationToken);
-        Thread.Sleep(5);
+        clock.Reading = clock.Reading.AddMinutes(1);
         SparqlEngine.Update(store, $"DELETE DATA {{ {S} {P} \"a\" }}", TestContext.Current.CancellationToken);
-        Thread.Sleep(5);
+        clock.Reading = clock.Reading.AddMinutes(1);
         var reinsert = SparqlEngine.Update(store, $"INSERT DATA {{ {S} {P} \"a\" }}", TestContext.Current.CancellationToken);
 
         Assert.True(reinsert.Success, reinsert.ErrorMessage);

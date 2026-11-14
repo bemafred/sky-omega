@@ -1,3 +1,4 @@
+using System;
 using SkyOmega.Mercury.Sparql.Execution.Expressions;
 using SkyOmega.Mercury.Sparql.Types;
 using SkyOmega.Mercury.Tests.Fixtures;
@@ -183,12 +184,27 @@ public class NowTests : PooledStoreTestBase
     [Fact]
     public void TwoExecutions_ReadTwoValues()
     {
-        var first = SparqlEngine.Query(Store, "SELECT (NOW() AS ?t) WHERE { }", TestContext.Current.CancellationToken);
-        var second = SparqlEngine.Query(Store, "SELECT (NOW() AS ?t) WHERE { }", TestContext.Current.CancellationToken);
+        // Each execution reads the store's clock once. The test supplies a reading for each execution.
+        var path = SkyOmega.Mercury.Runtime.TempPath.Test("now-two-executions");
+        path.MarkOwnership();
+        try
+        {
+            var clock = new SuppliedClock { Reading = new DateTimeOffset(2031, 3, 4, 5, 6, 7, TimeSpan.Zero) };
+            using var store = new SkyOmega.Mercury.Storage.QuadStore(path, null, null,
+                new SkyOmega.Mercury.Storage.StorageOptions { Clock = clock });
 
-        Assert.True(first.Success, first.ErrorMessage);
-        Assert.True(second.Success, second.ErrorMessage);
-        Assert.True(string.CompareOrdinal(second.Rows![0]["t"], first.Rows![0]["t"]) > 0,
-            $"{second.Rows[0]["t"]} is not after {first.Rows[0]["t"]}");
+            var first = SparqlEngine.Query(store, "SELECT (NOW() AS ?t) WHERE { }", TestContext.Current.CancellationToken);
+            clock.Reading = clock.Reading.AddSeconds(1);
+            var second = SparqlEngine.Query(store, "SELECT (NOW() AS ?t) WHERE { }", TestContext.Current.CancellationToken);
+
+            Assert.True(first.Success, first.ErrorMessage);
+            Assert.True(second.Success, second.ErrorMessage);
+            Assert.StartsWith("\"2031-03-04T05:06:07", first.Rows![0]["t"]);
+            Assert.StartsWith("\"2031-03-04T05:06:08", second.Rows![0]["t"]);
+        }
+        finally
+        {
+            SkyOmega.Mercury.Runtime.TempPath.SafeCleanup(path);
+        }
     }
 }

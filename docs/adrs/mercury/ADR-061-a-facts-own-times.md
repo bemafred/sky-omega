@@ -990,6 +990,15 @@ this ADR do not answer goes to Martin.
     8,926 ms; the same triples sent again 15,480 ms and 14,724 ms. Rounds vary by a factor of two on omega in both
     runs, so this shows no large change and settles nothing finer. Outside bulk mode a write is dominated by its
     syncs to disk (`BatchWriteBenchmarks`: 10,000 batched triples in 17.4 s).
+  - **Found on zbook after the push, fixed 2026-11-14.** Five older tests took two clock readings from the system
+    clock. Two of them wrote and forgot one quad with nothing between, and failed on zbook in 5 of 6 runs: there
+    both writes fall in one millisecond, and a quad memorized and forgotten in one reading leaves no period (M2).
+    The rule is right and the tests were wrong.
+    - Found by running the suite once with a store clock in whole seconds: those two, two that slept between their
+      writes, and one that compared `NOW()` of two executions.
+    - All five now supply their readings (I11), from one `SuppliedClock` for the test project. With the
+      whole-second clock the suite then passes.
+    - Not run with that clock: the other test projects.
 - **P3: done 2026-11-14**, on omega.
   - A graph variable ranges over the graphs that hold something remembered in the default view, and over every graph
     that holds a period in any other scope: `ALL VERSIONS`, and `AS OF` and `DURING` until they go. `DESCRIBE` lists

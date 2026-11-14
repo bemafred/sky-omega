@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using SkyOmega.Mercury.Storage;
 using SkyOmega.Mercury.Runtime;
+using SkyOmega.Mercury.Tests.Fixtures;
 using Xunit;
 
 namespace SkyOmega.Mercury.Tests.Storage;
@@ -1358,11 +1359,17 @@ public class QuadStoreTests : IDisposable
     public void QueryEvolution_DeletedTriple_IsVisibleWithClosedInterval()
     {
         // ADR-054 D1: a delete ends the version (ForgottenAt = the delete's time); it is not a retraction.
-        var store = CreateStore();
-        var before = DateTimeOffset.UtcNow;
+        // The fact is memorized in one clock reading and forgotten in a later one. In one reading it would leave no
+        // period (ADR-061 M2), so the test supplies the readings.
+        var memorized = new DateTimeOffset(2031, 3, 4, 5, 6, 7, TimeSpan.Zero);
+        var forgotten = memorized.AddMinutes(10);
+        var clock = new SuppliedClock { Reading = memorized };
+        _store?.Dispose();
+        _store = new QuadStore(_testPath, null, null, new StorageOptions { Clock = clock });
+        var store = _store;
         store.AddCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
+        clock.Reading = forgotten;
         store.DeleteCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
-        var after = DateTimeOffset.UtcNow;
 
         store.AcquireReadLock();
         try
@@ -1372,7 +1379,8 @@ public class QuadStoreTests : IDisposable
             {
                 Assert.True(results.MoveNext(), "Deleted triple should be visible in QueryEvolution");
                 Assert.False(results.Current.LegacyIsDeleted, "An ended version is not a retracted one");
-                Assert.InRange(results.Current.ForgottenAt, before.AddMilliseconds(-1), after.AddMilliseconds(1));
+                Assert.Equal(memorized, results.Current.MemorizedAt);
+                Assert.Equal(forgotten, results.Current.ForgottenAt);
                 Assert.Null(results.Current.RetractedAt);
                 Assert.False(results.MoveNext(), "The delete ends the version; it adds none");
             }
@@ -1390,12 +1398,17 @@ public class QuadStoreTests : IDisposable
     [Fact]
     public void QueryEvolution_MixedDeletedAndActive_ShowsAll()
     {
-        var store = CreateStore();
+        // Three facts are memorized in one clock reading, and one of them is forgotten in a later one. Forgotten in
+        // the reading it was memorized in, it would leave no period (ADR-061 M2), so the test supplies the readings.
+        var clock = new SuppliedClock { Reading = new DateTimeOffset(2031, 3, 4, 5, 6, 7, TimeSpan.Zero) };
+        _store?.Dispose();
+        _store = new QuadStore(_testPath, null, null, new StorageOptions { Clock = clock });
+        var store = _store;
 
-        // Add three triples, delete one
         store.AddCurrent("<http://ex.org/s1>", "<http://ex.org/p>", "<http://ex.org/o>");
         store.AddCurrent("<http://ex.org/s2>", "<http://ex.org/p>", "<http://ex.org/o>");
         store.AddCurrent("<http://ex.org/s3>", "<http://ex.org/p>", "<http://ex.org/o>");
+        clock.Reading = clock.Reading.AddMinutes(10);
         store.DeleteCurrent("<http://ex.org/s2>", "<http://ex.org/p>", "<http://ex.org/o>");
 
         store.AcquireReadLock();

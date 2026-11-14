@@ -4,6 +4,7 @@ using System.Linq;
 using SkyOmega.Mercury;
 using SkyOmega.Mercury.Runtime;
 using SkyOmega.Mercury.Storage;
+using SkyOmega.Mercury.Tests.Fixtures;
 using Xunit;
 
 namespace SkyOmega.Mercury.Tests.Storage;
@@ -17,12 +18,6 @@ namespace SkyOmega.Mercury.Tests.Storage;
 /// </summary>
 public class ForgottenGraphTests : IDisposable
 {
-    private sealed class SuppliedClock : TimeProvider
-    {
-        public DateTimeOffset Reading { get; set; }
-        public override DateTimeOffset GetUtcNow() => Reading;
-    }
-
     private static readonly DateTimeOffset Memorized = new(2031, 1, 1, 0, 0, 0, TimeSpan.Zero);
     private static readonly DateTimeOffset Forgotten = Memorized.AddHours(1);
     private static readonly DateTimeOffset Later = Memorized.AddHours(2);

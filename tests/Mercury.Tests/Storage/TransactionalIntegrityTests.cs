@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using SkyOmega.Mercury.Storage;
 using SkyOmega.Mercury.Runtime;
+using SkyOmega.Mercury.Tests.Fixtures;
 using Xunit;
 
 namespace SkyOmega.Mercury.Tests.Storage;
@@ -205,10 +206,16 @@ public class TransactionalIntegrityTests : IDisposable
     [Fact]
     public void TransactionTime_VariesPerWrite()
     {
-        var store = CreateStore();
+        // Each write is stamped with the clock reading it was made in. The test supplies the two readings.
+        var first = new DateTimeOffset(2031, 3, 4, 5, 6, 7, TimeSpan.Zero);
+        var second = first.AddMilliseconds(1);
+        var clock = new SuppliedClock { Reading = first };
+        _store?.Dispose();
+        _store = new QuadStore(_testPath, null, null, new StorageOptions { Clock = clock });
+        var store = _store;
 
         store.AddCurrent("<http://ex.org/s1>", "<http://ex.org/p>", "<http://ex.org/o>");
-        System.Threading.Thread.Sleep(15); // Ensure different millisecond
+        clock.Reading = second;
         store.AddCurrent("<http://ex.org/s2>", "<http://ex.org/p>", "<http://ex.org/o>");
 
         // Query ALL VERSIONS to see transaction times
@@ -233,9 +240,8 @@ public class TransactionalIntegrityTests : IDisposable
             }
             finally { results2.Dispose(); }
 
-            Assert.NotEqual(default, tt1);
-            Assert.NotEqual(default, tt2);
-            Assert.NotEqual(tt1, tt2);
+            Assert.Equal(first, tt1);
+            Assert.Equal(second, tt2);
         }
         finally
         {

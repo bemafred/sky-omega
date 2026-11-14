@@ -5,6 +5,7 @@ using System.Linq;
 using SkyOmega.Mercury;
 using SkyOmega.Mercury.Runtime;
 using SkyOmega.Mercury.Storage;
+using SkyOmega.Mercury.Tests.Fixtures;
 using Xunit;
 
 namespace SkyOmega.Mercury.Tests.Storage;
@@ -29,13 +30,6 @@ public class MemoryTimeWriteRuleTests : IDisposable
     private static readonly DateTimeOffset m = new(2031, 1, 1, 0, 0, 0, TimeSpan.Zero);
     private static readonly DateTimeOffset f = m.AddMinutes(5);
     private static readonly DateTimeOffset t = m.AddMinutes(10);
-
-    /// <summary>A clock whose reading the test sets. It stands still until the test moves it.</summary>
-    private sealed class SuppliedClock : TimeProvider
-    {
-        public DateTimeOffset Reading { get; set; } = m;
-        public override DateTimeOffset GetUtcNow() => Reading;
-    }
 
     private readonly string _testDir;
 
@@ -93,7 +87,7 @@ public class MemoryTimeWriteRuleTests : IDisposable
     [Fact]
     public void OneBatch_NotRemembered_Memorize_BeginsAPeriodAtTheReading()
     {
-        var clock = new SuppliedClock();
+        var clock = new SuppliedClock { Reading = m };
         using var store = new QuadStore(Path.Combine(_testDir, "OneBatch_NotRemembered_Memorize_BeginsAPeriodAtTheReading"), null, null, new StorageOptions { Clock = clock });
 
         clock.Reading = t;
@@ -107,7 +101,7 @@ public class MemoryTimeWriteRuleTests : IDisposable
     [Fact]
     public void OneBatch_RememberedSinceEarlier_Memorize_ChangesNothing()
     {
-        var clock = new SuppliedClock();
+        var clock = new SuppliedClock { Reading = m };
         using var store = new QuadStore(Path.Combine(_testDir, "OneBatch_RememberedSinceEarlier_Memorize_ChangesNothing"), null, null, new StorageOptions { Clock = clock });
         clock.Reading = m;
         store.AddCurrent(S, P, O);
@@ -123,7 +117,7 @@ public class MemoryTimeWriteRuleTests : IDisposable
     [Fact]
     public void OneBatch_RememberedSinceEarlier_Forget_EndsThePeriodAtTheReading()
     {
-        var clock = new SuppliedClock();
+        var clock = new SuppliedClock { Reading = m };
         using var store = new QuadStore(Path.Combine(_testDir, "OneBatch_RememberedSinceEarlier_Forget_EndsThePeriodAtTheReading"), null, null, new StorageOptions { Clock = clock });
         clock.Reading = m;
         store.AddCurrent(S, P, O);
@@ -139,7 +133,7 @@ public class MemoryTimeWriteRuleTests : IDisposable
     [Fact]
     public void OneBatch_NotRemembered_Forget_ChangesNothing()
     {
-        var clock = new SuppliedClock();
+        var clock = new SuppliedClock { Reading = m };
         using var store = new QuadStore(Path.Combine(_testDir, "OneBatch_NotRemembered_Forget_ChangesNothing"), null, null, new StorageOptions { Clock = clock });
 
         clock.Reading = t;
@@ -153,7 +147,7 @@ public class MemoryTimeWriteRuleTests : IDisposable
     [Fact]
     public void OneBatch_NotRemembered_MemorizeForget_LeavesNoPeriod()
     {
-        var clock = new SuppliedClock();
+        var clock = new SuppliedClock { Reading = m };
         using var store = new QuadStore(Path.Combine(_testDir, "OneBatch_NotRemembered_MemorizeForget_LeavesNoPeriod"), null, null, new StorageOptions { Clock = clock });
 
         clock.Reading = t;
@@ -168,7 +162,7 @@ public class MemoryTimeWriteRuleTests : IDisposable
     [Fact]
     public void OneBatch_RememberedSinceEarlier_ForgetMemorize_LeavesThePeriodUnbroken()
     {
-        var clock = new SuppliedClock();
+        var clock = new SuppliedClock { Reading = m };
         using var store = new QuadStore(Path.Combine(_testDir, "OneBatch_RememberedSinceEarlier_ForgetMemorize_LeavesThePeriodUnbroken"), null, null, new StorageOptions { Clock = clock });
         clock.Reading = m;
         store.AddCurrent(S, P, O);
@@ -185,7 +179,7 @@ public class MemoryTimeWriteRuleTests : IDisposable
     [Fact]
     public void OneBatch_NotRemembered_MemorizeForgetMemorize_BeginsOnePeriodAtTheReading()
     {
-        var clock = new SuppliedClock();
+        var clock = new SuppliedClock { Reading = m };
         using var store = new QuadStore(Path.Combine(_testDir, "OneBatch_NotRemembered_MemorizeForgetMemorize_BeginsOnePeriodAtTheReading"), null, null, new StorageOptions { Clock = clock });
 
         clock.Reading = t;
@@ -201,7 +195,7 @@ public class MemoryTimeWriteRuleTests : IDisposable
     [Fact]
     public void OneBatch_RememberedSinceEarlier_ForgetMemorizeForget_EndsThePeriodAtTheReading()
     {
-        var clock = new SuppliedClock();
+        var clock = new SuppliedClock { Reading = m };
         using var store = new QuadStore(Path.Combine(_testDir, "OneBatch_RememberedSinceEarlier_ForgetMemorizeForget_EndsThePeriodAtTheReading"), null, null, new StorageOptions { Clock = clock });
         clock.Reading = m;
         store.AddCurrent(S, P, O);
@@ -219,7 +213,7 @@ public class MemoryTimeWriteRuleTests : IDisposable
     [Fact]
     public void OneBatch_ForgottenEarlier_Memorize_BeginsASecondPeriod()
     {
-        var clock = new SuppliedClock();
+        var clock = new SuppliedClock { Reading = m };
         using var store = new QuadStore(Path.Combine(_testDir, "OneBatch_ForgottenEarlier_Memorize_BeginsASecondPeriod"), null, null, new StorageOptions { Clock = clock });
         clock.Reading = m;
         store.AddCurrent(S, P, O);
@@ -237,7 +231,7 @@ public class MemoryTimeWriteRuleTests : IDisposable
     [Fact]
     public void OneBatch_ForgottenEarlier_MemorizeForget_LeavesOnlyTheEarlierPeriod()
     {
-        var clock = new SuppliedClock();
+        var clock = new SuppliedClock { Reading = m };
         using var store = new QuadStore(Path.Combine(_testDir, "OneBatch_ForgottenEarlier_MemorizeForget_LeavesOnlyTheEarlierPeriod"), null, null, new StorageOptions { Clock = clock });
         clock.Reading = m;
         store.AddCurrent(S, P, O);
@@ -258,7 +252,7 @@ public class MemoryTimeWriteRuleTests : IDisposable
     [Fact]
     public void SingleWrites_NotRemembered_Memorize_BeginsAPeriodAtTheReading()
     {
-        var clock = new SuppliedClock();
+        var clock = new SuppliedClock { Reading = m };
         using var store = new QuadStore(Path.Combine(_testDir, "SingleWrites_NotRemembered_Memorize_BeginsAPeriodAtTheReading"), null, null, new StorageOptions { Clock = clock });
 
         clock.Reading = t;
@@ -270,7 +264,7 @@ public class MemoryTimeWriteRuleTests : IDisposable
     [Fact]
     public void SingleWrites_RememberedSinceEarlier_Memorize_ChangesNothing()
     {
-        var clock = new SuppliedClock();
+        var clock = new SuppliedClock { Reading = m };
         using var store = new QuadStore(Path.Combine(_testDir, "SingleWrites_RememberedSinceEarlier_Memorize_ChangesNothing"), null, null, new StorageOptions { Clock = clock });
         clock.Reading = m;
         store.AddCurrent(S, P, O);
@@ -284,7 +278,7 @@ public class MemoryTimeWriteRuleTests : IDisposable
     [Fact]
     public void SingleWrites_RememberedSinceEarlier_Forget_EndsThePeriodAtTheReading()
     {
-        var clock = new SuppliedClock();
+        var clock = new SuppliedClock { Reading = m };
         using var store = new QuadStore(Path.Combine(_testDir, "SingleWrites_RememberedSinceEarlier_Forget_EndsThePeriodAtTheReading"), null, null, new StorageOptions { Clock = clock });
         clock.Reading = m;
         store.AddCurrent(S, P, O);
@@ -298,7 +292,7 @@ public class MemoryTimeWriteRuleTests : IDisposable
     [Fact]
     public void SingleWrites_NotRemembered_Forget_ChangesNothing()
     {
-        var clock = new SuppliedClock();
+        var clock = new SuppliedClock { Reading = m };
         using var store = new QuadStore(Path.Combine(_testDir, "SingleWrites_NotRemembered_Forget_ChangesNothing"), null, null, new StorageOptions { Clock = clock });
 
         clock.Reading = t;
@@ -310,7 +304,7 @@ public class MemoryTimeWriteRuleTests : IDisposable
     [Fact]
     public void SingleWrites_NotRemembered_MemorizeForget_LeavesNoPeriod()
     {
-        var clock = new SuppliedClock();
+        var clock = new SuppliedClock { Reading = m };
         using var store = new QuadStore(Path.Combine(_testDir, "SingleWrites_NotRemembered_MemorizeForget_LeavesNoPeriod"), null, null, new StorageOptions { Clock = clock });
 
         clock.Reading = t;
@@ -323,7 +317,7 @@ public class MemoryTimeWriteRuleTests : IDisposable
     [Fact]
     public void SingleWrites_RememberedSinceEarlier_ForgetMemorize_LeavesThePeriodUnbroken()
     {
-        var clock = new SuppliedClock();
+        var clock = new SuppliedClock { Reading = m };
         using var store = new QuadStore(Path.Combine(_testDir, "SingleWrites_RememberedSinceEarlier_ForgetMemorize_LeavesThePeriodUnbroken"), null, null, new StorageOptions { Clock = clock });
         clock.Reading = m;
         store.AddCurrent(S, P, O);
@@ -338,7 +332,7 @@ public class MemoryTimeWriteRuleTests : IDisposable
     [Fact]
     public void SingleWrites_NotRemembered_MemorizeForgetMemorize_BeginsOnePeriodAtTheReading()
     {
-        var clock = new SuppliedClock();
+        var clock = new SuppliedClock { Reading = m };
         using var store = new QuadStore(Path.Combine(_testDir, "SingleWrites_NotRemembered_MemorizeForgetMemorize_BeginsOnePeriodAtTheReading"), null, null, new StorageOptions { Clock = clock });
 
         clock.Reading = t;
@@ -352,7 +346,7 @@ public class MemoryTimeWriteRuleTests : IDisposable
     [Fact]
     public void SingleWrites_RememberedSinceEarlier_ForgetMemorizeForget_EndsThePeriodAtTheReading()
     {
-        var clock = new SuppliedClock();
+        var clock = new SuppliedClock { Reading = m };
         using var store = new QuadStore(Path.Combine(_testDir, "SingleWrites_RememberedSinceEarlier_ForgetMemorizeForget_EndsThePeriodAtTheReading"), null, null, new StorageOptions { Clock = clock });
         clock.Reading = m;
         store.AddCurrent(S, P, O);
@@ -368,7 +362,7 @@ public class MemoryTimeWriteRuleTests : IDisposable
     [Fact]
     public void SingleWrites_ForgottenEarlier_Memorize_BeginsASecondPeriod()
     {
-        var clock = new SuppliedClock();
+        var clock = new SuppliedClock { Reading = m };
         using var store = new QuadStore(Path.Combine(_testDir, "SingleWrites_ForgottenEarlier_Memorize_BeginsASecondPeriod"), null, null, new StorageOptions { Clock = clock });
         clock.Reading = m;
         store.AddCurrent(S, P, O);
@@ -384,7 +378,7 @@ public class MemoryTimeWriteRuleTests : IDisposable
     [Fact]
     public void SingleWrites_ForgottenEarlier_MemorizeForget_LeavesOnlyTheEarlierPeriod()
     {
-        var clock = new SuppliedClock();
+        var clock = new SuppliedClock { Reading = m };
         using var store = new QuadStore(Path.Combine(_testDir, "SingleWrites_ForgottenEarlier_MemorizeForget_LeavesOnlyTheEarlierPeriod"), null, null, new StorageOptions { Clock = clock });
         clock.Reading = m;
         store.AddCurrent(S, P, O);
@@ -403,7 +397,7 @@ public class MemoryTimeWriteRuleTests : IDisposable
     [Fact]
     public void OneSparqlRequest_NotRemembered_Memorize_BeginsAPeriodAtTheReading()
     {
-        var clock = new SuppliedClock();
+        var clock = new SuppliedClock { Reading = m };
         using var store = new QuadStore(Path.Combine(_testDir, "OneSparqlRequest_NotRemembered_Memorize_BeginsAPeriodAtTheReading"), null, null, new StorageOptions { Clock = clock });
 
         clock.Reading = t;
@@ -416,7 +410,7 @@ public class MemoryTimeWriteRuleTests : IDisposable
     [Fact]
     public void OneSparqlRequest_RememberedSinceEarlier_Memorize_ChangesNothing()
     {
-        var clock = new SuppliedClock();
+        var clock = new SuppliedClock { Reading = m };
         using var store = new QuadStore(Path.Combine(_testDir, "OneSparqlRequest_RememberedSinceEarlier_Memorize_ChangesNothing"), null, null, new StorageOptions { Clock = clock });
         clock.Reading = m;
         store.AddCurrent(S, P, O);
@@ -431,7 +425,7 @@ public class MemoryTimeWriteRuleTests : IDisposable
     [Fact]
     public void OneSparqlRequest_RememberedSinceEarlier_Forget_EndsThePeriodAtTheReading()
     {
-        var clock = new SuppliedClock();
+        var clock = new SuppliedClock { Reading = m };
         using var store = new QuadStore(Path.Combine(_testDir, "OneSparqlRequest_RememberedSinceEarlier_Forget_EndsThePeriodAtTheReading"), null, null, new StorageOptions { Clock = clock });
         clock.Reading = m;
         store.AddCurrent(S, P, O);
@@ -446,7 +440,7 @@ public class MemoryTimeWriteRuleTests : IDisposable
     [Fact]
     public void OneSparqlRequest_NotRemembered_Forget_ChangesNothing()
     {
-        var clock = new SuppliedClock();
+        var clock = new SuppliedClock { Reading = m };
         using var store = new QuadStore(Path.Combine(_testDir, "OneSparqlRequest_NotRemembered_Forget_ChangesNothing"), null, null, new StorageOptions { Clock = clock });
 
         clock.Reading = t;
@@ -459,7 +453,7 @@ public class MemoryTimeWriteRuleTests : IDisposable
     [Fact]
     public void OneSparqlRequest_NotRemembered_MemorizeForget_LeavesNoPeriod()
     {
-        var clock = new SuppliedClock();
+        var clock = new SuppliedClock { Reading = m };
         using var store = new QuadStore(Path.Combine(_testDir, "OneSparqlRequest_NotRemembered_MemorizeForget_LeavesNoPeriod"), null, null, new StorageOptions { Clock = clock });
 
         clock.Reading = t;
@@ -475,7 +469,7 @@ public class MemoryTimeWriteRuleTests : IDisposable
     [Fact]
     public void OneSparqlRequest_RememberedSinceEarlier_ForgetMemorize_LeavesThePeriodUnbroken()
     {
-        var clock = new SuppliedClock();
+        var clock = new SuppliedClock { Reading = m };
         using var store = new QuadStore(Path.Combine(_testDir, "OneSparqlRequest_RememberedSinceEarlier_ForgetMemorize_LeavesThePeriodUnbroken"), null, null, new StorageOptions { Clock = clock });
         clock.Reading = m;
         store.AddCurrent(S, P, O);
@@ -493,7 +487,7 @@ public class MemoryTimeWriteRuleTests : IDisposable
     [Fact]
     public void OneSparqlRequest_NotRemembered_MemorizeForgetMemorize_BeginsOnePeriodAtTheReading()
     {
-        var clock = new SuppliedClock();
+        var clock = new SuppliedClock { Reading = m };
         using var store = new QuadStore(Path.Combine(_testDir, "OneSparqlRequest_NotRemembered_MemorizeForgetMemorize_BeginsOnePeriodAtTheReading"), null, null, new StorageOptions { Clock = clock });
 
         clock.Reading = t;
@@ -510,7 +504,7 @@ public class MemoryTimeWriteRuleTests : IDisposable
     [Fact]
     public void OneSparqlRequest_RememberedSinceEarlier_ForgetMemorizeForget_EndsThePeriodAtTheReading()
     {
-        var clock = new SuppliedClock();
+        var clock = new SuppliedClock { Reading = m };
         using var store = new QuadStore(Path.Combine(_testDir, "OneSparqlRequest_RememberedSinceEarlier_ForgetMemorizeForget_EndsThePeriodAtTheReading"), null, null, new StorageOptions { Clock = clock });
         clock.Reading = m;
         store.AddCurrent(S, P, O);
@@ -529,7 +523,7 @@ public class MemoryTimeWriteRuleTests : IDisposable
     [Fact]
     public void OneSparqlRequest_ForgottenEarlier_Memorize_BeginsASecondPeriod()
     {
-        var clock = new SuppliedClock();
+        var clock = new SuppliedClock { Reading = m };
         using var store = new QuadStore(Path.Combine(_testDir, "OneSparqlRequest_ForgottenEarlier_Memorize_BeginsASecondPeriod"), null, null, new StorageOptions { Clock = clock });
         clock.Reading = m;
         store.AddCurrent(S, P, O);
@@ -546,7 +540,7 @@ public class MemoryTimeWriteRuleTests : IDisposable
     [Fact]
     public void OneSparqlRequest_ForgottenEarlier_MemorizeForget_LeavesOnlyTheEarlierPeriod()
     {
-        var clock = new SuppliedClock();
+        var clock = new SuppliedClock { Reading = m };
         using var store = new QuadStore(Path.Combine(_testDir, "OneSparqlRequest_ForgottenEarlier_MemorizeForget_LeavesOnlyTheEarlierPeriod"), null, null, new StorageOptions { Clock = clock });
         clock.Reading = m;
         store.AddCurrent(S, P, O);
@@ -568,7 +562,7 @@ public class MemoryTimeWriteRuleTests : IDisposable
     [Fact]
     public void MemorizedAtOneReading_ForgottenAtTheNext_IsARealPeriodOfOneMillisecond()
     {
-        var clock = new SuppliedClock();
+        var clock = new SuppliedClock { Reading = m };
         using var store = new QuadStore(Path.Combine(_testDir, "one-millisecond"), null, null, new StorageOptions { Clock = clock });
 
         clock.Reading = t;
@@ -582,7 +576,7 @@ public class MemoryTimeWriteRuleTests : IDisposable
     [Fact]
     public void ForgottenAtOneReading_MemorizedAtTheNext_IsTwoPeriods()
     {
-        var clock = new SuppliedClock();
+        var clock = new SuppliedClock { Reading = m };
         using var store = new QuadStore(Path.Combine(_testDir, "two-periods"), null, null, new StorageOptions { Clock = clock });
         clock.Reading = m;
         store.AddCurrent(S, P, O);
@@ -601,7 +595,7 @@ public class MemoryTimeWriteRuleTests : IDisposable
         // A request is not a moment (I17). Here the clock moves between the request's two operations, so the insert
         // and the delete are in different readings and a period of that length is left. With the clock still, the
         // same request leaves none (OneSparqlRequest_NotRemembered_MemorizeForget_LeavesNoPeriod).
-        var clock = new SuppliedClock();
+        var clock = new SuppliedClock { Reading = m };
         using var store = new QuadStore(Path.Combine(_testDir, "request-two-readings"), null, null, new StorageOptions { Clock = clock });
 
         clock.Reading = t;
@@ -622,7 +616,7 @@ public class MemoryTimeWriteRuleTests : IDisposable
         // The other quad is written in the same request as the first telling, after it: it has the same memorized
         // time and a larger atom, so it lies between the two tellings in the time-first index. Before ADR-061 that
         // index alone gained an open entry, and after a delete a read by time still returned the fact.
-        var clock = new SuppliedClock();
+        var clock = new SuppliedClock { Reading = m };
         using var store = new QuadStore(Path.Combine(_testDir, "told-again"), null, null, new StorageOptions { Clock = clock });
 
         clock.Reading = m;
@@ -645,7 +639,7 @@ public class MemoryTimeWriteRuleTests : IDisposable
     [Fact]
     public void AnOperation_ReportsAChange_OnlyWhenItChangesWhetherTheQuadIsRemembered()
     {
-        var clock = new SuppliedClock();
+        var clock = new SuppliedClock { Reading = m };
         using var store = new QuadStore(Path.Combine(_testDir, "counts-single"), null, null, new StorageOptions { Clock = clock });
 
         clock.Reading = m;
@@ -661,7 +655,7 @@ public class MemoryTimeWriteRuleTests : IDisposable
     [Fact]
     public void InABatch_EachOperation_ReportsAgainstWhatTheBatchHasAskedSoFar()
     {
-        var clock = new SuppliedClock();
+        var clock = new SuppliedClock { Reading = m };
         using var store = new QuadStore(Path.Combine(_testDir, "counts-batch"), null, null, new StorageOptions { Clock = clock });
         clock.Reading = m;
         store.AddCurrent(S, P, O);
@@ -681,7 +675,7 @@ public class MemoryTimeWriteRuleTests : IDisposable
     [Fact]
     public void InsertData_OfRememberedFacts_AffectsNone_AndDeleteData_OfAFactMemorizedInTheSameReading_AffectsOne()
     {
-        var clock = new SuppliedClock();
+        var clock = new SuppliedClock { Reading = m };
         using var store = new QuadStore(Path.Combine(_testDir, "counts-sparql"), null, null, new StorageOptions { Clock = clock });
 
         clock.Reading = t;
@@ -705,7 +699,7 @@ public class MemoryTimeWriteRuleTests : IDisposable
     [Fact]
     public void AfterReopening_TheStoreHoldsThePeriodsAndTheEntryCountItHadBefore()
     {
-        var clock = new SuppliedClock();
+        var clock = new SuppliedClock { Reading = m };
         var dir = Path.Combine(_testDir, "reopen");
         using (var store = new QuadStore(dir, null, null, new StorageOptions { Clock = clock }))
         {
