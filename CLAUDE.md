@@ -8,6 +8,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 > **Linux: use Microsoft's .NET build, not the distro package.** Ubuntu's `dotnet-runtime-10.0` links the system `libunwind` and intermittently kills builds, test hosts and services with `Internal CLR error. (0x80131506)`. Install with `dotnet-install.sh`, and set both `PATH` and `DOTNET_ROOT`: the global tools, MCP servers and test executables pick their runtime from `DOTNET_ROOT`. Check with `ldd <runtime>/libcoreclr.so | grep unwind`, which must print nothing. See the [Linux .NET runbook](docs/operations/runbook-linux-dotnet-runtime.md).
 
+> **Test machines get commits, never patches.** Before running anything on zbook, elite, omega-ubuntu or omega-windows, look at its checkout (`git status -sb`). Run a check on a named commit: fetch origin, or carry unpushed commits as a `git bundle`, and check out the hash; prefer a separate clone in the machine's scratch directory. Never `git apply` a patch there. See the [test machines runbook](docs/operations/runbook-test-machines.md).
+
 ```bash
 # Initialize submodules (W3C test data — required for dotnet test)
 ./tools/update-submodules.sh   # or .\tools\update-submodules.ps1

@@ -135,6 +135,9 @@ went off the network during its run.
 | omega-ubuntu | Ubuntu 26.04 | arm64 | Virtual machine on omega, 4 cores, 7.2 GB |
 | omega-windows | Windows 11 | arm64 | Virtual machine on omega, 4 cores, 8 GB |
 
+A check on one of these machines runs on a commit, never on a patch copied to it; see the
+[test machines runbook](docs/operations/runbook-test-machines.md).
+
 Each platform skips the tests of other platforms' features. The skips and their reasons, the .NET versions and each
 run's time are in [STATISTICS.md](STATISTICS.md#test-runs-by-platform). Not tested yet: Linux distributions other
 than Ubuntu.
