@@ -654,6 +654,67 @@ internal sealed unsafe class ReferenceQuadIndex : IQuadIndex
         public readonly ReferenceKey Current => _currentKey;
 
         public ReferenceQuadEnumerator GetEnumerator() => this;
+
+        /// <summary>
+        /// A cursor at this enumerator's position, with its bounds (ADR-062 Step 4). The index's query methods
+        /// return the cursor itself once the enumerator over the cursor replaces this one.
+        /// </summary>
+        internal readonly QuadIndexCursor ToCursor()
+        {
+            var cursor = new QuadIndexCursor(_index);
+            ref var state = ref cursor.State<ScanState>();
+            state.PageId = _currentPageId;
+            state.Slot = _currentSlot;
+            state.MinKey = _minKey;
+            state.MaxKey = _maxKey;
+            return cursor;
+        }
+    }
+
+    /// <summary>What a scan of this index keeps between rows (ADR-062 D3). It holds no object reference.</summary>
+    internal struct ScanState
+    {
+        public long PageId;
+        public int Slot;
+        public ReferenceKey MinKey;
+        public ReferenceKey MaxKey;
+    }
+
+    /// <inheritdoc/>
+    public bool Advance(ref QuadIndexCursor cursor)
+    {
+        ref var state = ref cursor.State<ScanState>();
+
+        while (state.PageId != 0)
+        {
+            var view = GetView(state.PageId);
+            ref var header = ref view.Header;
+
+            while (state.Slot < header.EntryCount)
+            {
+                ref var key = ref view.LeafEntry(state.Slot);
+
+                if (ReferenceKey.Compare(in key, in state.MaxKey) > 0)
+                    return false;
+
+                if (ReferenceKey.Compare(in key, in state.MinKey) >= 0)
+                {
+                    cursor.Graph = key.Graph;
+                    cursor.Primary = key.Primary;
+                    cursor.Secondary = key.Secondary;
+                    cursor.Tertiary = key.Tertiary;
+                    state.Slot++;
+                    return true;
+                }
+
+                state.Slot++;
+            }
+
+            state.PageId = header.NextLeafOrLeftmostChild;
+            state.Slot = 0;
+        }
+
+        return false;
     }
 
     #endregion

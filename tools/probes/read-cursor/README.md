@@ -65,6 +65,23 @@ BenchmarkDotNet 0.14.0, Apple M5 Max, 10 iterations after 3 warmups. Mean, with 
 | | String CONTAINS FILTER | 2.986 ms (0.005) | 2.95 MB |
 | | REGEX FILTER | 7.003 ms (0.024) | 24.92 MB |
 
+### The call per row, at the index (Step 4, 2026-11-15, the cursor built beside the enumerators)
+
+`IndexCursorBenchmarks`: 50,000 entries per index, every row read and one atom summed, no decoding.
+
+```bash
+dotnet run --project benchmarks/Mercury.Benchmarks -c Release -- --filter "*IndexCursorBenchmarks*"
+```
+
+| Index | Enumerator | Cursor |
+|---|---:|---:|
+| Cognitive | 240.62 μs (1.17) | 266.81 μs (1.06) |
+| Graph | 79.70 μs (0.05) | 120.56 μs (0.07) |
+| Reference | 67.51 μs (0.06) | 107.10 μs (0.17) |
+| Minimal | 54.33 μs (0.17) | 94.30 μs (0.07) |
+
+The cursor's interface call costs 0.5 to 0.8 ns a row. None of the eight allocates.
+
 `FullScan` and `QueryByPredicate` are the two that walk many rows, so they are where a call per row would show.
 The store holds 50,000 quads: `FullScan` reads all of them, 36 ns a row, and `QueryByPredicate` reads 5,000, 41 ns a
 row. A row includes decoding three terms into the buffer.

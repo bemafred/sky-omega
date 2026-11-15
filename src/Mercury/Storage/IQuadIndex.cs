@@ -23,4 +23,11 @@ internal interface IQuadIndex : IDisposable
     /// File size is preserved (memory mapping stays valid).
     /// </summary>
     void Clear();
+
+    /// <summary>
+    /// Moves a cursor of this index to the next entry its scan accepts and writes that entry into the cursor's row
+    /// (ADR-062 D3). Returns false when there is none. The cursor must have been made by this index: its state is
+    /// this index's own.
+    /// </summary>
+    bool Advance(ref QuadIndexCursor cursor);
 }

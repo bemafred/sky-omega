@@ -6,7 +6,8 @@
 
 Accepted by Martin on 2026-11-15: "ADR-062 and ADR-063: Accepted, update the ADR's." D1 to D7 are accepted with it.
 D7 still holds: the mechanism of D3 is measured before it is fixed, and it changes if Steps 2 and 3 say so. Q3 (the
-names) and Q6 (the Graph profile's own version fields) stay open. No code has changed for this ADR yet.
+names) and Q6 (the Graph profile's own version fields) stay open. Steps 2 to 4 are done (2026-11-15): the cursor is
+built beside the enumerators, and nothing reads through it yet.
 
 Proposed — 2026-11-12.
 
@@ -305,9 +306,47 @@ the row then also holds; whether a body can write the row directly and drop its 
 is expected to be a few percent of a row. Expected, not measured: Step 5 runs the benchmarks again, and if the call
 shows, the index advances within a leaf and is called once per leaf (D7).
 
-**Names (Q3), proposed and not yet Martin's:** the cursor is `QuadIndexCursor`; the read operation is
-`bool Advance(ref QuadIndexCursor cursor)` on `IQuadIndex`. A cursor is made by the index's own query methods,
+**Names (Q3) — Decided 2026-11-15** (Martin: "Names: yes."): the cursor is `QuadIndexCursor`; the read operation
+is `bool Advance(ref QuadIndexCursor cursor)` on `IQuadIndex`. A cursor is made by the index's own query methods,
 which keep their names and their profile-specific arguments.
+
+#### The cursor as built (Step 4, 2026-11-15)
+
+Martin, 2026-11-15: "Yes, locate the cursor beside the existing enumerators." `QuadIndexCursor`
+(`src/Mercury/Storage/QuadIndexCursor.cs`), `IQuadIndex.Advance`, and in each of the four index classes a
+`ScanState` struct and an `Advance` body. The existing enumerators are as they were, and nothing reads through a
+cursor yet. Each enumerator has a `ToCursor()` that makes a cursor at its position with its bounds; it is the
+bridge for this step, and goes when the query methods return the cursor (Step 5).
+
+- **Sizes, measured:** the cursor is 232 bytes, against 632: 8 for the index, 160 for the state, 64 for the row.
+  The state block is 160 bytes and not the 224 written above, because a body writes the accepted entry straight
+  into the row and its state keeps no current key. The Cognitive state is the widest, exactly 160.
+- **The time selection and the check of the bound dimensions are written once** in `TemporalQuadIndex`; the
+  Cognitive enumerator and `Advance` both call them.
+- **Each index has two loops for now**, the enumerator's `MoveNext` and `Advance`. The enumerators are also used
+  inside the store (rebuilds, the graph listing, pruning). When part one ends there must be one loop per index:
+  Steps 5 and 6 move the remaining users to the cursor, and the enumerators go or are made from it.
+- **Tests** (`QuadIndexCursorTests`, seven): for each index, and for the Cognitive index in both of its orders,
+  the cursor gives the rows the enumerator gives, in the same order with the same values, over 3,000 entries and
+  every query shape in the test (84 on Cognitive); each state struct holds no reference and fits; a cursor copied
+  in the middle of a scan goes on from there. Each `Advance` was broken in one way at a time (no time selection,
+  no check of the bound dimensions, deleted entries accepted, the lower key left out, no step to the next leaf)
+  and its test failed each time.
+- **The call, measured at the index** (`IndexCursorBenchmarks`, omega, 50,000 rows, no decoding, so the call is as
+  large a part of a row as it can be):
+
+  | Index | Enumerator | Cursor | More per row |
+  |---|---:|---:|---:|
+  | Cognitive | 4.81 ns a row | 5.34 ns | 0.52 ns |
+  | Graph | 1.59 ns | 2.41 ns | 0.82 ns |
+  | Reference | 1.35 ns | 2.14 ns | 0.79 ns |
+  | Minimal | 1.09 ns | 1.89 ns | 0.80 ns |
+
+  So the interface call costs 0.5 to 0.8 ns a row. At the index that is between a tenth and three quarters of a
+  row; in a whole read, where a row costs 36 to 41 ns, it is about 2 %. Step 5 measures the whole read. If it
+  shows there, the index advances within a leaf and is called once per leaf.
+- **Not tested:** any platform but omega; a cursor held while the index is written to (the store's lock rules
+  that out, as for the enumerators); the cursor under the engine, which is Step 5.
 
 What was not known about D when it was proposed (the first is still open until Step 5; the other two are answered
 above):
@@ -372,7 +411,8 @@ values stay for that time, written in one place instead of three.
 - **Q2. The mechanism** (D3): D as proposed, or another. Accepted with the ADR on 2026-11-15: D, until the
   measurements of D7 say otherwise.
 - **Q3. Names.** For the quad every profile yields, the two-time type, the enumerator, the cursor, the read
-  operation, the index order. No names are proposed yet. The cursor and the read operation need their names before
+  operation, the index order. Decided 2026-11-15 for the cursor (`QuadIndexCursor`) and the read operation
+  (`Advance`); the others are open. The cursor and the read operation need their names before
   Step 4; the public names can wait until Step 7.
 - **Q4. The store class.** `QuadStore`'s eleven index fields and its profile branches are the same pattern. Does this
   ADR cover them, or only the read? *Accepted with the ADR on 2026-11-15: only the read.* The write path and the store's fields are a larger
@@ -404,10 +444,11 @@ The order follows D8.
      the code as it is.
 3. **Compare the four `MoveNext` bodies** line by line, and write down the cursor in one of its two forms (D3). If
    neither form is straightforward, D3 changes before any code does. The cursor and the read operation get their
-   names (Q3) — **compared 2026-11-15**, under D3: the block of bytes is the form. The names are proposed there and
-   wait for Martin.
+   names (Q3) — **compared 2026-11-15**, under D3: the block of bytes is the form. The names were decided the same
+   day.
 4. **The common read operation** on the four index classes, and the cursor, next to the existing enumerators. Each
-   index's own tests run against both and must agree.
+   index's own tests run against both and must agree — **done 2026-11-15**, on omega; see "The cursor as built"
+   under D3. `Mercury.Tests`: 6,425 passed, 156 skipped, 0 failed.
 5. **The enumerator over the cursor** replaces the four-enumerator struct. The three flags, four of the five
    constructors and the repeated branches go. It still returns `ResolvedTemporalQuad`, with the made-up values
    written once. Every test passes; every W3C result is unchanged. The benchmarks of Step 2 are run again and

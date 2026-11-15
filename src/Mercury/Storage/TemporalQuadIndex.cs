@@ -1020,7 +1020,7 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
                         // MemorizedAt leads, so the graph/S/P/O key range cannot gate those dimensions and a
                         // pure CompareKeys scan would leak entries from every graph/S/P/O in the time window
                         // (the DURING over-count bug). For the spatial-leading indexes (GSPO/GPOS/GOSP) the
-                        // key range already constrains them, so MatchesSpatialBounds is a redundant no-op.
+                        // key range already constrains them when the bound dimensions lead the key.
                         if (MatchesTemporalQuery(entry) && MatchesSpatialBounds(in _currentKey))
                         {
                             _currentSlot++;
@@ -1039,40 +1039,27 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private readonly bool MatchesTemporalQuery(in TemporalBTreeEntry entry)
+        private readonly bool MatchesTemporalQuery(in TemporalBTreeEntry entry) =>
+            IsSelectedByTime(in entry, in _query);
+
+        private readonly bool MatchesSpatialBounds(in TemporalKey key) =>
+            MatchesBoundDimensions(in key, in _minKey, in _maxKey);
+
+        /// <summary>
+        /// A cursor at this enumerator's position, with its bounds and its time selection (ADR-062 Step 4). The
+        /// index's query methods return the cursor itself once the enumerator over the cursor replaces this one.
+        /// </summary>
+        internal readonly QuadIndexCursor ToCursor()
         {
-            var key = entry.Key;
-
-            return _query.Type switch
-            {
-                // AsOf and Range queries exclude deleted entries
-                TemporalQueryType.AsOf =>
-                    !entry.LegacyIsDeleted &&
-                    key.MemorizedAt <= _query.AsOfTime &&
-                    key.ForgottenAt > _query.AsOfTime,
-
-                TemporalQueryType.Range =>
-                    !entry.LegacyIsDeleted &&
-                    key.MemorizedAt < _query.RangeEnd &&
-                    key.ForgottenAt > _query.RangeStart,
-
-                // AllTime (history/audit) includes deleted entries
-                TemporalQueryType.AllTime => true,
-
-                _ => false
-            };
+            var cursor = new QuadIndexCursor(_store);
+            ref var state = ref cursor.State<ScanState>();
+            state.PageId = _currentPageId;
+            state.Slot = _currentSlot;
+            state.MinKey = _minKey;
+            state.MaxKey = _maxKey;
+            state.Query = _query;
+            return cursor;
         }
-
-        // Post-filter the bound graph/S/P/O dimensions. A dimension is BOUND iff its min and max
-        // search-key values coincide (CreateSearchKey sets both to the term's value; an unbound
-        // dimension spans [0, long.MaxValue], so min != max and the check is skipped). On the TGSP
-        // time-leading index the key range cannot constrain these dimensions, so this is what actually
-        // applies the graph/S/P/O filter for DURING; on spatial-leading indexes it is a no-op.
-        private readonly bool MatchesSpatialBounds(in TemporalKey key)
-            => (_minKey.Graph     != _maxKey.Graph     || key.Graph     == _minKey.Graph)
-            && (_minKey.Primary   != _maxKey.Primary   || key.Primary   == _minKey.Primary)
-            && (_minKey.Secondary != _maxKey.Secondary || key.Secondary == _minKey.Secondary)
-            && (_minKey.Tertiary  != _maxKey.Tertiary  || key.Tertiary  == _minKey.Tertiary);
 
         public readonly TemporalQuad Current
         {
@@ -1106,6 +1093,102 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
     /// </summary>
     internal void ResetPageAccessCount() => _pageAccessCount = 0;
 #endif
+
+    /// <summary>What a scan of this index keeps between rows (ADR-062 D3). It holds no object reference.</summary>
+    internal struct ScanState
+    {
+        public long PageId;
+        public int Slot;
+        public TemporalKey MinKey;
+        public TemporalKey MaxKey;
+        public TemporalQuery Query;
+    }
+
+    /// <summary>The time selection: whether an entry is selected by a scan's temporal query.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool IsSelectedByTime(in TemporalBTreeEntry entry, in TemporalQuery query)
+    {
+        ref readonly var key = ref entry.Key;
+
+        return query.Type switch
+        {
+            // AsOf and Range queries exclude deleted entries
+            TemporalQueryType.AsOf =>
+                !entry.LegacyIsDeleted &&
+                key.MemorizedAt <= query.AsOfTime &&
+                key.ForgottenAt > query.AsOfTime,
+
+            TemporalQueryType.Range =>
+                !entry.LegacyIsDeleted &&
+                key.MemorizedAt < query.RangeEnd &&
+                key.ForgottenAt > query.RangeStart,
+
+            // AllTime (history/audit) includes deleted entries
+            TemporalQueryType.AllTime => true,
+
+            _ => false
+        };
+    }
+
+    // Post-filter the bound graph/S/P/O dimensions. A dimension is BOUND iff its min and max
+    // search-key values coincide (CreateSearchKey sets both to the term's value; an unbound
+    // dimension spans [0, long.MaxValue], so min != max and the check is skipped). On the TGSP
+    // time-leading index the key range cannot constrain these dimensions, so this is what actually
+    // applies the graph/S/P/O filter for DURING. On a spatial-leading index it changes nothing when the bound
+    // dimensions lead the key, which is how the store chooses its index; it filters when a dimension is bound
+    // behind an unbound one (QuadIndexCursorTests shows that case).
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool MatchesBoundDimensions(in TemporalKey key, in TemporalKey minKey, in TemporalKey maxKey)
+        => (minKey.Graph     != maxKey.Graph     || key.Graph     == minKey.Graph)
+        && (minKey.Primary   != maxKey.Primary   || key.Primary   == minKey.Primary)
+        && (minKey.Secondary != maxKey.Secondary || key.Secondary == minKey.Secondary)
+        && (minKey.Tertiary  != maxKey.Tertiary  || key.Tertiary  == minKey.Tertiary);
+
+    /// <inheritdoc/>
+    public bool Advance(ref QuadIndexCursor cursor)
+    {
+        ref var state = ref cursor.State<ScanState>();
+
+        while (state.PageId != 0)
+        {
+            var page = GetPage(state.PageId);
+
+            while (state.Slot < page->EntryCount)
+            {
+                ref var entry = ref page->GetEntry(state.Slot);
+                ref var key = ref entry.Key;
+
+                // Above the upper key in this index's order: the scan is over.
+                if (CompareKeys(in key, in state.MaxKey) > 0)
+                    return false;
+
+                // The spatial check is load-bearing for the TGSP (time-leading) index: there MemorizedAt leads, so
+                // the key range cannot gate the graph/S/P/O dimensions.
+                if (CompareKeys(in key, in state.MinKey) >= 0 &&
+                    IsSelectedByTime(in entry, in state.Query) &&
+                    MatchesBoundDimensions(in key, in state.MinKey, in state.MaxKey))
+                {
+                    cursor.Graph = key.Graph;
+                    cursor.Primary = key.Primary;
+                    cursor.Secondary = key.Secondary;
+                    cursor.Tertiary = key.Tertiary;
+                    cursor.MemorizedAt = key.MemorizedAt;
+                    cursor.ForgottenAt = key.ForgottenAt;
+                    cursor.LegacyTransactionTime = key.LegacyTransactionTime;
+                    cursor.LegacyIsDeleted = entry.LegacyIsDeleted;
+                    state.Slot++;
+                    return true;
+                }
+
+                state.Slot++;
+            }
+
+            state.PageId = page->NextLeaf;
+            state.Slot = 0;
+        }
+
+        return false;
+    }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private TemporalBTreePage* GetPage(long pageId)
