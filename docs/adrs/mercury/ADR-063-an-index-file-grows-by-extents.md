@@ -5,8 +5,8 @@
 **Status:** Accepted — 2026-11-15
 
 Accepted by Martin on 2026-11-15, after the push: "ADR-062 and ADR-063: Accepted, update the ADR's." The fix is
-built and on `main` (`f604888`, with its tests made smaller in `05a2d8e`). Before it is Completed: a run on Windows
-arm64 that finishes, which CI has not given yet.
+built and on `main` (`f604888`, with its tests made smaller in `05a2d8e`). A finished run on Windows arm64 was
+missing then; it came the same day, on omega-windows and in CI. Completed is Martin's to say.
 
 Proposed — 2026-11-14. Martin's word to fix the first defect below was given on 2026-11-14 ("Yes to both", to the
 question whether the index file growth is fixed next). The second defect was found while the fix was prepared and
@@ -137,20 +137,25 @@ smaller now that a file can grow is a separate question.
 | `APointerTakenBeforeTheFileGrew_ReachesItsPageAfterwards` | passed; it holds D1 against a later change that would move a page |
 
 The two store-level tests were made smaller on 2026-11-15, and the table shows them as they are now. As first
-written they memorized 100,000 quads, and on Windows, where a write flushes to disk, that took `Mercury.Tests` from
-38 minutes to 81 on CI (run 43683089204; the Windows arm64 job was cancelled at its 90-minute limit). They now
-memorize 7,000: index files of four pages for the growth test, and 25 rounds of a reopened store of 4,000 quads for
-the readers.
+written they memorized 100,000 quads; they now memorize 7,000: index files of four pages for the growth test, and 25
+rounds of a reopened store of 4,000 quads for the readers.
+
+They were made smaller because the CI run on `75dffff` (43683089204) was the slowest seen on Windows:
+`Mercury.Tests` took 81 minutes on Windows x64, and the Windows arm64 job was cancelled at its 90-minute limit after
+88. How much of that the tests caused is not known. Over the twelve runs before it, `Mercury.Tests` on the Windows
+runners took between 29 and 69 minutes on x64 and between 28 and 62 on arm64, with no change of mine in them, so one
+run cannot be compared with another. With the smaller tests (`05a2d8e`) it took 60 and 46 minutes, inside those
+ranges. On omega-windows the whole suite takes 3.5 minutes.
 
 After the fix all pass. The two probes were run again: eight readers finished and found their quad in 1,280,000 of
 1,280,000 lookups, and the store that died at 5,000 quads took 60,000 with its GSPO file grown from 1 MB to 16 MB.
 
 ## Not tested
 
-- Windows arm64: its CI job was cancelled at the time limit before it finished. CI passed on Linux x64 and
-  arm64, macOS x64 and Windows x64 (run 43683089204, at `75dffff`), and sky-zbook ran the tests on Linux x64. On
-  Windows the offset of an extent is in general not a multiple of the 64 KB the system maps at; the code adds the
-  accessor's `PointerOffset` for that, and the Windows x64 run passed with it.
+- Nothing on a platform is missing any more: CI passed on all six at `05a2d8e` (run 43737637016), sky-zbook ran
+  the tests on Linux x64, and the whole suite passed on omega-windows (Windows arm64). On Windows the offset of an
+  extent is in general not a multiple of the 64 KB the system maps at; the code adds the accessor's `PointerOffset`
+  for that, and the Windows runs passed with it.
 - That a flush makes the pages of a later extent durable across a power loss.
 - A growth that fails (a full disk, no address space).
 - The Reference and Minimal profiles through a store: their stores are loaded in bulk mode, which starts the file
