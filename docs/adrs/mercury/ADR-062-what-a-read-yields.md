@@ -2,7 +2,13 @@
 
 ## Status
 
-**Status:** Proposed — 2026-11-12
+**Status:** Accepted — 2026-11-15
+
+Accepted by Martin on 2026-11-15: "ADR-062 and ADR-063: Accepted, update the ADR's." D1 to D7 are accepted with it.
+D7 still holds: the mechanism of D3 is measured before it is fixed, and it changes if Steps 2 and 3 say so. Q3 (the
+names) and Q6 (the Graph profile's own version fields) stay open. No code has changed for this ADR yet.
+
+Proposed — 2026-11-12.
 
 Martin asked on 2026-11-12, after the `Legacy` rename of [ADR-061](ADR-061-a-facts-own-times.md) D15:
 
@@ -14,10 +20,10 @@ The code and the git history say yes (see [Context](#context)). Martin's decisio
 Each decision below is marked:
 
 - **Decided**: Martin's decision, 2026-11-12.
-- **Proposed**: Sky's proposal. Martin has not confirmed it.
+- **Accepted**: Sky's proposal, accepted by Martin with the ADR on 2026-11-15.
 
-Two things are decided: this is an ADR of its own and not a part of ADR-061, and the order of its work against
-ADR-061's (D8). D1 to D7 are proposed. Nothing in the code has changed for this ADR.
+Two things were decided on 2026-11-12: this is an ADR of its own and not a part of ADR-061, and the order of its work
+against ADR-061's (D8). D1 to D7 were proposed then and are accepted now.
 
 ## Why
 
@@ -169,9 +175,9 @@ Two more places have the pattern. They are named here so the scope can be decide
 
 ## Decision
 
-D1 to D7 are **Proposed**. D8 is **Decided**.
+D1 to D7 are **Accepted** (2026-11-15). D8 is **Decided** (2026-11-12).
 
-### D1. A read on any profile yields the quad and nothing else — Proposed
+### D1. A read on any profile yields the quad and nothing else — Accepted
 
 The type that every profile's read returns has four members: graph, subject, predicate, object. It has no time and no
 flag.
@@ -182,7 +188,7 @@ flag.
 
 On Minimal the graph is empty because the profile has no graphs. That is a true answer and stays.
 
-### D2. A memory's two times come only from a Cognitive read — Proposed
+### D2. A memory's two times come only from a Cognitive read — Accepted
 
 A second type carries the quad and its two times, `MemorizedAt` and `ForgottenAt`. Only reads that exist on the
 Cognitive profile return it. Whoever holds a value of this type knows the times are kept, not made up.
@@ -202,7 +208,7 @@ Inside the engine, ADR-061 Step 5 lets a triple pattern with `MEMORIZED` or `FOR
 version. The scan reads the two times from the position it holds (D3). A pattern with one of the words is rejected on
 a store without times before a scan is built, so a scan never asks a store that keeps none.
 
-### D3. One cursor for all profiles, and the per-profile part in the index class — Proposed
+### D3. One cursor for all profiles, and the per-profile part in the index class — Accepted
 
 Something must choose the index implementation, since there are four and the engine has one path. There are three
 ways to choose, and a fourth that only renames:
@@ -214,7 +220,7 @@ ways to choose, and a fourth that only renames:
 | **C. An enumerator object per scan** | a virtual call per row | none | one object per scan, or a pool | little | a reference |
 | **D. One cursor struct; the index class moves it** | a virtual call per row (or per leaf) | none | none | the enumerator's name | one cursor |
 
-**Proposed: D.** The four backing enumerators already have one shape (see Context). So:
+**Accepted: D**, until the measurements of D7 say otherwise. The four backing enumerators already have one shape (see Context). So:
 
 - **One cursor struct** holds what all four hold: the index object, the page, the slot, the lower and upper bounds, the
   current quad as four atoms, and the two times of the current version. The bounds are sized for the widest key.
@@ -265,26 +271,26 @@ The cursor has room for two times that only the Cognitive index fills. That is t
 the fields exist for every profile. They are internal, D2 keeps them out of every public type, and nothing reads them
 on a profile without times.
 
-### D4. What is the same for every profile is written once — Proposed
+### D4. What is the same for every profile is written once — Accepted
 
 The candidate filter and the mapping from index order to subject, predicate and object exist once, in the enumerator
 the engine holds (D3). Today the first exists four times and the second three times.
 
-### D5. The engine stays one path — Proposed
+### D5. The engine stays one path — Accepted
 
 No profile gets its own scan, its own operator or its own executor. The words of ADR-061 are the only thing a profile
 changes in a query, and they are rejected by one check before the scan.
 
-### D6. A type that every profile uses does not say Temporal — Proposed
+### D6. A type that every profile uses does not say Temporal — Accepted
 
 The names are an open question (Q3). The rule is proposed: a name with "Temporal" or "Memory" in it belongs to the
 Cognitive profile only. It covers the result type, the enumerator, `TemporalIndexType` (an index order: GSPO, GPOS,
 GOSP, TGSP), and what is left of `TemporalQueryType` and `TemporalQueryMode` after ADR-061 removes `AS OF`, `DURING`
 and `ALL VERSIONS`.
 
-### D7. Measure before the mechanism is fixed — Proposed
+### D7. Measure before the mechanism is fixed — Accepted
 
-D3 is proposed on the rules and on the shape of the code. Its unknowns are settled first (Steps 2 and 3), with
+D3 was proposed on the rules and on the shape of the code. Its unknowns are settled first (Steps 2 and 3), with
 measurements compared only to measurements.
 
 ### D8. The cursor comes before ADR-061's words, and the result types come with ADR-061's Step 6 — Decided
@@ -311,27 +317,29 @@ values stay for that time, written in one place instead of three.
 ## Open questions
 
 - **Q1. Order against ADR-061.** Answered on 2026-11-12: D8.
-- **Q2. The mechanism** (D3): D as proposed, or another.
+- **Q2. The mechanism** (D3): D as proposed, or another. Accepted with the ADR on 2026-11-15: D, until the
+  measurements of D7 say otherwise.
 - **Q3. Names.** For the quad every profile yields, the two-time type, the enumerator, the cursor, the read
   operation, the index order. No names are proposed yet. The cursor and the read operation need their names before
   Step 4; the public names can wait until Step 7.
 - **Q4. The store class.** `QuadStore`'s eleven index fields and its profile branches are the same pattern. Does this
-  ADR cover them, or only the read? *Proposed: only the read.* The write path and the store's fields are a larger
+  ADR cover them, or only the read? *Accepted with the ADR on 2026-11-15: only the read.* The write path and the store's fields are a larger
   change with its own risks, and a common read operation on the index classes (D3) is the first piece either way.
 - **Q5. `NamedGraphEnumerator`.** Two enumerators and a mode. With a common read operation it needs one cursor.
-  *Proposed: in this ADR, as the last step of part one.* Its public shape does not change.
+  *Accepted with the ADR on 2026-11-15: in this ADR, as the last step of part one.* Its public shape does not change.
 - **Q6. The Graph profile's own version fields.** No read exposes `CreatedAt`, `ModifiedAt` or `Version`, and
   `IsDeleted` reaches a result only as an always-`false` value. Is that intended, or is a Graph read missing
   something? This ADR does not change it; D1 removes the always-`false` member.
 - **Q7. The public surface.** The two public types change name and shape, and a third appears. That breaks callers of
-  the storage API outside this repository, if there are any. The count of 28 public types in `CLAUDE.md` and the list
+  the storage API outside this repository, if there are any. The count of public types in `CLAUDE.md` (28 when this was written, 29 since ADR-061's log) and the list
   in ADR-003 change.
 
 ## Steps
 
 The order follows D8.
 
-1. **Martin's review** of this text: D1 to D7 and Q2 to Q7.
+1. **Martin's review** of this text: D1 to D7 and Q2 to Q7 — **done 2026-11-15**: the ADR is accepted. Q3 and Q6
+   stay open; Q3 is brought to Martin with Step 3.
 
 **Part one: the cursor.** Before ADR-061 Step 5. No public type changes.
 

@@ -2,11 +2,15 @@
 
 ## Status
 
-**Status:** Proposed — 2026-11-14
+**Status:** Accepted — 2026-11-15
 
-Martin's word to fix the first defect below was given on 2026-11-14 ("Yes to both", to the question whether the
-index file growth is fixed next). The fix is built and its tests pass on omega. The second defect was found while
-the fix was prepared and is fixed by the same change. The status is Martin's to change.
+Accepted by Martin on 2026-11-15, after the push: "ADR-062 and ADR-063: Accepted, update the ADR's." The fix is
+built and on `main` (`f604888`, with its tests made smaller in `05a2d8e`). Before it is Completed: a run on Windows
+arm64 that finishes, which CI has not given yet.
+
+Proposed — 2026-11-14. Martin's word to fix the first defect below was given on 2026-11-14 ("Yes to both", to the
+question whether the index file growth is fixed next). The second defect was found while the fix was prepared and
+is fixed by the same change.
 
 Promoted from the limits register: [B+Tree index has no mmap remap](../../limits/btree-mmap-remap.md).
 

@@ -947,7 +947,7 @@ this ADR do not answer goes to Martin.
 | P2 | **A committed write that cannot be applied** (M7). | 10 | what can throw while applying is listed from the code | a test makes applying fail and sees reads, writes and checkpoints refused, a close without a checkpoint, and a consistent store after reopening |
 | P3 | **Every graph that holds a period** is listed under `ALL VERSIONS` (D10, Q15). | 11 | | a wholly forgotten graph is found by a graph variable |
 | P4 | **Pruning** (D12): one way to prune, a selection query, and the internal copy that carries a time. | 7 | Martin decides the form of the selection query | the three tests of Step 7 |
-| P5 | **The cursor** of [ADR-062](ADR-062-what-a-read-yields.md), its part one. | | ADR-062 is accepted | ADR-062's own tests |
+| P5 | **The cursor** of [ADR-062](ADR-062-what-a-read-yields.md), its part one. | | ADR-062 is accepted (it is: 2026-11-15) | ADR-062's own tests |
 | P6 | **The words** (D6 to D10). The old clauses go in the same step. | 5 | | the tests of Step 5; every W3C result unchanged; the query of Q10 gives `M(t)` on a store |
 | P7 | **One removal** (D2), with ADR-062's part two. `Add` with a stated time goes here. | 6 | | no caller states a time |
 | P8 | **Consumers and documents.** | 8 | | |
