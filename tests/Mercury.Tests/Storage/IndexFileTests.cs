@@ -171,20 +171,24 @@ public unsafe class IndexFileTests : IDisposable
     [InlineData(StoreProfile.Graph)]
     public void AStoreThatOutgrowsItsIndexFiles_HoldsEveryQuad_AlsoWhenOpenedAgain(StoreProfile profile)
     {
-        const int Quads = 20_000;
-        var options = new StorageOptions { Profile = profile, IndexInitialSizeBytes = 1L << 20 };
+        // Index files of four pages: the header, the root and two more. The tree asks for its fourth page after a
+        // few hundred quads, and 1,500 quads make the file grow several times. The numbers are small because a
+        // write flushes to disk, which is slow on Windows.
+        const int Quads = 1500;
+        var options = new StorageOptions { Profile = profile, IndexInitialSizeBytes = 4 * BTreeFile.PageSize };
 
         using (var store = new QuadStore(_testDir, null, null, options))
         {
-            for (int batch = 0; batch < Quads / 1000; batch++)
+            for (int batch = 0; batch < Quads / 500; batch++)
             {
                 store.BeginBatch();
-                for (int i = 0; i < 1000; i++)
-                    store.AddCurrentBatched($"<http://ex.org/s{batch * 1000 + i}>", "<http://ex.org/p>", $"\"{batch * 1000 + i}\"");
+                for (int i = 0; i < 500; i++)
+                    store.AddCurrentBatched($"<http://ex.org/s{batch * 500 + i}>", "<http://ex.org/p>", $"\"{batch * 500 + i}\"");
                 store.CommitBatch();
             }
 
-            Assert.True(new FileInfo(Path.Combine(_testDir, "gspo.tdb")).Length > 1L << 20);
+            // Grown at least twice, from four pages to eight and from eight to sixteen.
+            Assert.True(new FileInfo(Path.Combine(_testDir, "gspo.tdb")).Length > 8 * BTreeFile.PageSize);
             Assert.Equal(Quads, store.GetStatistics().QuadCount);
             store.AcquireReadLock();
             try
@@ -223,57 +227,64 @@ public unsafe class IndexFileTests : IDisposable
     [Fact]
     public void ReadersOfAStoreAtTheSameTime_FindEveryQuad()
     {
-        const int Quads = 60_000;
+        // The quads are few because a write flushes to disk, which is slow on Windows. Readers disturb each other
+        // only while pages are asked for the first time, so the store is opened again for every round.
+        const int Quads = 4000;
         const int Readers = 8;
-        var options = new StorageOptions { IndexInitialSizeBytes = 64L << 20 };
+        const int Rounds = 25;
+        var options = new StorageOptions { IndexInitialSizeBytes = 4L << 20, AtomDataInitialSizeBytes = 4L << 20, AtomOffsetInitialCapacity = 1L << 14 };
 
         using (var written = new QuadStore(_testDir, null, null, options))
         {
-            for (int batch = 0; batch < Quads / 1000; batch++)
+            for (int batch = 0; batch < Quads / 500; batch++)
             {
                 written.BeginBatch();
-                for (int i = 0; i < 1000; i++)
-                    written.AddCurrentBatched($"<http://ex.org/s{batch * 1000 + i}>", "<http://ex.org/p>", $"\"{batch * 1000 + i}\"");
+                for (int i = 0; i < 500; i++)
+                    written.AddCurrentBatched($"<http://ex.org/s{batch * 500 + i}>", "<http://ex.org/p>", $"\"{batch * 500 + i}\"");
                 written.CommitBatch();
             }
         }
 
-        // Opened again, so that no page of an index has been asked for yet.
-        using var store = new QuadStore(_testDir, null, null, options);
         long quadsNotFound = 0;
         long readersThatFinished = 0;
-        using var start = new Barrier(Readers);
-        var readers = new Thread[Readers];
-        for (int reader = 0; reader < Readers; reader++)
+        for (int round = 0; round < Rounds; round++)
         {
-            int seed = reader;
-            // A background thread: a reader that is given a wrong page can walk the leaves in a circle without end,
-            // and must then not keep the test process alive.
-            readers[reader] = new Thread(() =>
+            using var store = new QuadStore(_testDir, null, null, options);
+            using var start = new Barrier(Readers);
+            var readers = new Thread[Readers];
+            for (int reader = 0; reader < Readers; reader++)
             {
-                var random = new Random(seed);
-                start.SignalAndWait();
-                for (int asked = 0; asked < 4000; asked++)
+                int seed = round * Readers + reader;
+                // A background thread: a reader that is given a wrong page can walk the leaves in a circle without
+                // end, and must then not keep the test process alive.
+                readers[reader] = new Thread(() =>
                 {
-                    int n = random.Next(Quads);
-                    store.AcquireReadLock();
-                    try
+                    var random = new Random(seed);
+                    start.SignalAndWait();
+                    for (int asked = 0; asked < 300; asked++)
                     {
-                        var found = store.QueryCurrent($"<http://ex.org/s{n}>", "<http://ex.org/p>", default);
-                        if (!found.MoveNext()) Interlocked.Increment(ref quadsNotFound);
-                        found.Dispose();
+                        int n = random.Next(Quads);
+                        store.AcquireReadLock();
+                        try
+                        {
+                            var found = store.QueryCurrent($"<http://ex.org/s{n}>", "<http://ex.org/p>", default);
+                            if (!found.MoveNext()) Interlocked.Increment(ref quadsNotFound);
+                            found.Dispose();
+                        }
+                        finally { store.ReleaseReadLock(); }
                     }
-                    finally { store.ReleaseReadLock(); }
-                }
-                Interlocked.Increment(ref readersThatFinished);
-            }) { IsBackground = true };
-            readers[reader].Start();
+                    Interlocked.Increment(ref readersThatFinished);
+                }) { IsBackground = true };
+                readers[reader].Start();
+            }
+
+            var until = DateTime.UtcNow.AddSeconds(60);
+            foreach (var reader in readers) reader.Join(until > DateTime.UtcNow ? until - DateTime.UtcNow : TimeSpan.Zero);
+
+            // A reader that did not finish still holds the read lock: the store cannot be closed, so the test ends here.
+            Assert.Equal((round + 1L) * Readers, Interlocked.Read(ref readersThatFinished));
         }
 
-        var until = DateTime.UtcNow.AddSeconds(120);
-        foreach (var reader in readers) reader.Join(until > DateTime.UtcNow ? until - DateTime.UtcNow : TimeSpan.Zero);
-
-        Assert.Equal(Readers, Interlocked.Read(ref readersThatFinished));
         Assert.Equal(0, Interlocked.Read(ref quadsNotFound));
     }
 }

@@ -129,17 +129,24 @@ smaller now that a file can grow is a separate question.
 | `AFileThatOutgrowsItsInitialSize_HoldsEveryPage_AlsoWhenOpenedAgain` | the process died (`AccessViolationException`) |
 | `AnInitialSizeThatIsNotAWholeNumberOfPages_LosesNoPageWhereTheFileGrew` | the process died |
 | `AStoreThatOutgrowsItsIndexFiles_HoldsEveryQuad_AlsoWhenOpenedAgain` (Cognitive, Graph) | the process died |
-| `ReadersOfAStoreAtTheSameTime_FindEveryQuad` | the process died in `TemporalQuadEnumerator.MoveNext` |
+| `ReadersOfAStoreAtTheSameTime_FindEveryQuad` | the process died in `TemporalQuadEnumerator.MoveNext`, in 4 of 5 runs |
 | `APointerTakenBeforeTheFileGrew_ReachesItsPageAfterwards` | passed; it holds D1 against a later change that would move a page |
+
+The two store-level tests were made smaller on 2026-11-15, and the table shows them as they are now. As first
+written they memorized 100,000 quads, and on Windows, where a write flushes to disk, that took `Mercury.Tests` from
+38 minutes to 81 on CI (run 43683089204; the Windows arm64 job was cancelled at its 90-minute limit). They now
+memorize 7,000: index files of four pages for the growth test, and 25 rounds of a reopened store of 4,000 quads for
+the readers.
 
 After the fix all pass. The two probes were run again: eight readers finished and found their quad in 1,280,000 of
 1,280,000 lookups, and the store that died at 5,000 quads took 60,000 with its GSPO file grown from 1 MB to 16 MB.
 
 ## Not tested
 
-- Any platform but omega. The Linux and Windows runs are CI's. On Windows the offset of an extent is in general
-  not a multiple of the 64 KB the system maps at; the code adds the accessor's `PointerOffset` for that, and no
-  run has shown it yet.
+- Windows arm64: its CI job was cancelled at the time limit before it finished. CI passed on Linux x64 and
+  arm64, macOS x64 and Windows x64 (run 43683089204, at `75dffff`), and sky-zbook ran the tests on Linux x64. On
+  Windows the offset of an extent is in general not a multiple of the 64 KB the system maps at; the code adds the
+  accessor's `PointerOffset` for that, and the Windows x64 run passed with it.
 - That a flush makes the pages of a later extent durable across a power loss.
 - A growth that fails (a full disk, no address space).
 - The Reference and Minimal profiles through a store: their stores are loaded in bulk mode, which starts the file
