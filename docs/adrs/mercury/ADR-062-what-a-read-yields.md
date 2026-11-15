@@ -128,10 +128,11 @@ Each is a position in a B+Tree leaf with a lower and an upper key:
 The four index classes are `sealed` and implement `IQuadIndex`, which has `QuadCount`, `Flush`, `Clear` and
 `Dispose`. It has no read method.
 
-**The size of the shared enumerator is not measured.** Counting the declared fields gives roughly 230 bytes for the
-Cognitive enumerator, 140 for Graph, 120 for Reference and 95 for Minimal, so roughly 600 bytes for the struct that
-holds all four. This is a count, not a measurement: the runtime may lay the fields out differently. Step 2 measures
-it.
+**The size of the shared enumerator, measured** (Step 2, 2026-11-15, omega, `d4f11f2`): 632 bytes. The four
+backing enumerators are 232 (Cognitive), 144 (Graph), 120 (Reference) and 96 (Minimal), 592 together. So a read on
+the Minimal profile carries 632 bytes where its own enumerator is 96, and a Cognitive read 632 where its own is 232.
+`NamedGraphEnumerator` is 408 bytes and `MergedGraphEnumerator` 640. The count made before the measurement was
+roughly 230, 140, 120 and 95.
 
 ### Who reads what
 
@@ -258,7 +259,58 @@ and Step 3 chooses between them after the four `MoveNext` bodies have been compa
 If neither form is straightforward once the bodies are compared, D is the wrong extraction. Then the choice is
 between A with the result types of D1 and D2, and C with a pool, and it comes back to Martin.
 
-What is not known about D, and must be known before this ADR can be Accepted:
+#### The four bodies compared (Step 3, 2026-11-15)
+
+The four `MoveNext` bodies are one loop. Line for line:
+
+| Line of the loop | Cognitive | Graph | Reference | Minimal |
+|---|---|---|---|---|
+| while the page number is not 0 | same | same | same | same |
+| get the page | `GetPage`, a page pointer | `GetPage` | `GetView`, a view with a header | `GetView` |
+| while the slot is below the page's entry count | same | same | same | same |
+| read the entry at the slot | the key, `LegacyIsDeleted`, `LegacyModifiedAt` | the key, `IsDeleted`, `Version`, `CreatedAt`, `ModifiedAt` | the key | the key |
+| above the upper key: the scan is over | the index's own order (entity first or time first) | `VersionedKey`'s order | `ReferenceKey`'s order | `MinimalKey`'s order |
+| at or above the lower key, and the entry is accepted: step and return it | accepted when the time selection holds and the bound dimensions match | accepted when it is not deleted, or deleted entries are asked for | always accepted | always accepted |
+| otherwise step to the next slot | same | same | same | same |
+| end of the page: go to the next leaf, slot 0 | same | same | same | same |
+
+So the bodies differ in three places and nowhere else: what is read from an entry, the order two keys are compared
+in, and the test an entry must pass. All three are the index's own knowledge. What a body holds between calls
+differs with them: its key type (56, 32, 32 and 24 bytes, three times each for the lower, upper and current key),
+and for Cognitive the time selection, for Graph whether deleted entries are included. None of the four holds an
+object reference apart from the index it reads.
+
+**The form: a block of bytes, read by each index as its own state.** One set of fields does not fit: the bounds
+would be in the widest key's layout, and three of the four bodies would have to be rewritten to compare their own
+keys against a foreign one, or to convert on every row. The block lets each index keep its state struct and its
+body as they are, less the reference to the index, which the cursor holds once. That is the straightforward
+extraction: the loop is not shared and not parameterized, only the space and the call are.
+
+The cursor then has three parts:
+
+- **the index**, as the common type the four classes already implement (`IQuadIndex`);
+- **the state block**, 224 bytes, the size of the Cognitive state without its index reference, as 28 `long`s so that
+  it is aligned. An index reads it as its own state struct. A test asserts, for each of the four state types, that
+  it holds no object reference and fits the block;
+- **the current row**, which the index writes when it accepts an entry: the four atoms in index order, and the two
+  times, which only Cognitive fills. Until ADR-061 Step 6 removes them from the result type, also
+  `LegacyTransactionTime` and `LegacyIsDeleted`, which are stored values on Cognitive and which four test files
+  read. 64 bytes.
+
+That is about 300 bytes for every profile (8, 224 and 64), against 632 today. The state structs each repeat the current key that
+the row then also holds; whether a body can write the row directly and drop its own copy is looked at in Step 4.
+
+**The call.** The read operation is one method on `IQuadIndex`, called once per row. Today's rows cost 36 ns in
+`FullScan` and 41 ns in `QueryByPredicate` (Step 2, with the decoding of three terms), so an interface call per row
+is expected to be a few percent of a row. Expected, not measured: Step 5 runs the benchmarks again, and if the call
+shows, the index advances within a leaf and is called once per leaf (D7).
+
+**Names (Q3), proposed and not yet Martin's:** the cursor is `QuadIndexCursor`; the read operation is
+`bool Advance(ref QuadIndexCursor cursor)` on `IQuadIndex`. A cursor is made by the index's own query methods,
+which keep their names and their profile-specific arguments.
+
+What was not known about D when it was proposed (the first is still open until Step 5; the other two are answered
+above):
 
 1. **The cost of the call.** Today a row costs a predictable branch and a direct call. D costs a virtual or interface
    call per row. Whether that is visible next to decoding the atoms is not measured. If it is, the index can advance
@@ -343,13 +395,17 @@ The order follows D8.
 
 **Part one: the cursor.** Before ADR-061 Step 5. No public type changes.
 
-2. **Measure,** read-only, as a probe reviewed before it runs:
+2. **Measure,** read-only, as a probe reviewed before it runs — **done 2026-11-15**, on omega at `d4f11f2`. Martin
+   the same day: probes are run without asking first. The sizes are in Context; the sizes and the benchmark baseline
+   are in [`tools/probes/read-cursor/README.md`](../../../tools/probes/read-cursor/README.md). The baseline is the
+   six read-side classes of the three benchmark files (21 benchmarks); their parser and write classes are left out.
    - the size of `TemporalResultEnumerator`, of each of the four backing enumerators and of `MergedGraphEnumerator`;
    - a baseline of the existing query benchmarks (`SparqlBenchmarks`, `StorageBenchmarks`, `TemporalBenchmarks`) on
      the code as it is.
 3. **Compare the four `MoveNext` bodies** line by line, and write down the cursor in one of its two forms (D3). If
    neither form is straightforward, D3 changes before any code does. The cursor and the read operation get their
-   names (Q3).
+   names (Q3) — **compared 2026-11-15**, under D3: the block of bytes is the form. The names are proposed there and
+   wait for Martin.
 4. **The common read operation** on the four index classes, and the cursor, next to the existing enumerators. Each
    index's own tests run against both and must agree.
 5. **The enumerator over the cursor** replaces the four-enumerator struct. The three flags, four of the five
