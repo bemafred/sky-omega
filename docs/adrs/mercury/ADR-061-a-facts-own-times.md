@@ -520,6 +520,18 @@ stand:
   `~/diag/mcp-omega-snapshot-20261114T0451Z`. The live store keeps changing; the numbers above are the copy's.
 - **Until the differences are resolved (LQ5)**, two commands would resolve them without saying so, each by reading
   GSPO: `mercury --rebuild-indexes` and a prune. Nothing runs them automatically.
+  - **Corrected 2026-11-16: the rebuild does not resolve them.** The Cognitive rebuild (`QuadStore.RebuildIndex`)
+    does not clear GPOS, GOSP and TGSP first; the Graph rebuild does. It inserts every GSPO entry with `AddRaw`.
+    Measured with two probes on omega, 2026-11-16 ([`tools/probes/rebuild-indexes/`](../../../tools/probes/rebuild-indexes/README.md)):
+    - an entry that TGSP holds open while GSPO holds it closed, the kind of the 204, is still open in TGSP after
+      the rebuild and after a reopen, and the closed entry is added beside it: a read through TGSP then returns
+      the quad twice, once as remembered. The closed key sorts before the open one, so the check that recognizes
+      an entry already present does not see it;
+    - an entry that a secondary index holds and GSPO does not, the kind of the 47, is still there after the
+      rebuild and after a reopen. The probe put it into GPOS; the rebuild treats all three secondary indexes alike.
+    So on this store the rebuild would leave both kinds, add 204 entries to TGSP, and report nothing: against I14
+    and I19. A third probe showed that a version retracted before the rebuild stays retracted in GPOS, because the
+    rebuild writes nothing for an entry that is already there. The prune is not measured.
 
 ## Decision
 
