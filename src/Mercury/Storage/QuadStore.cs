@@ -1918,35 +1918,52 @@ public sealed class QuadStore : IDisposable
 
         RequireTemporalProfile(nameof(RebuildSecondaryIndexes));
         _lock.EnterWriteLock();
-        // ADR-031 Piece 2: rebuilding secondary indexes touches every B+Tree. Even
-        // though the data came from the primary, the secondaries are now different.
-        // Mark mutated so Dispose runs CheckpointInternal for the new statistics.
-        _sessionMutated = true;
         var totalStopwatch = System.Diagnostics.Stopwatch.StartNew();
         var phases = HasRebuildListener ? new List<RebuildPhaseMetrics>(4) : null;
+        var started = false;
         try
         {
-            RebuildIndex(_gposIndex, "GPOS", StoreIndexState.BuildingGPOS,
-                (q) => (q.Secondary, q.Tertiary, q.Primary), onProgress, phases);
+            // A rebuild replaces GPOS, GOSP and TGSP with GSPO's entries (ADR-061 I14). First it looks for what that
+            // would discard: an entry of one of them that GSPO does not hold as it is. Resolving such a difference
+            // needs a rule (ADR-061 LQ5), and the rebuild has none, so it then changes nothing and says how many it
+            // found (ADR-061 I19). An emptied or partly built index holds nothing GSPO lacks.
+            var gposOnly = CountEntriesGspoDoesNotHold(_gposIndex!, static (p, o, s) => (s, p, o));
+            var gospOnly = CountEntriesGspoDoesNotHold(_gospIndex!, static (o, s, p) => (s, p, o));
+            var tgspOnly = CountEntriesGspoDoesNotHold(_tgspIndex!, static (s, p, o) => (s, p, o));
+            if (gposOnly + gospOnly + tgspOnly > 0)
+            {
+                var refusal = $"The rebuild changed nothing: GPOS holds {gposOnly:N0}, GOSP {gospOnly:N0} and TGSP " +
+                    $"{tgspOnly:N0} entries that GSPO does not hold as they are. A rebuild derives these indexes from " +
+                    "GSPO and would discard them; a difference between the indexes needs a rule of its own (ADR-061 I19, LQ5).";
+                _logger.Warning(refusal.AsSpan());
+                throw new InvalidOperationException(refusal);
+            }
 
-            RebuildIndex(_gospIndex, "GOSP", StoreIndexState.BuildingGOSP,
-                (q) => (q.Tertiary, q.Primary, q.Secondary), onProgress, phases);
+            // ADR-031 Piece 2: rebuilding secondary indexes touches every B+Tree. Even
+            // though the data came from the primary, the secondaries are now different.
+            // Mark mutated so Dispose runs CheckpointInternal for the new statistics.
+            _sessionMutated = true;
+            started = true;
 
-            RebuildIndex(_tgspIndex, "TGSP", StoreIndexState.BuildingTGSP,
-                (q) => (q.Primary, q.Secondary, q.Tertiary), onProgress, phases);
+            RebuildIndex(_gposIndex!, "GPOS", StoreIndexState.BuildingGPOS,
+                static (s, p, o) => (p, o, s), onProgress, phases);
 
-            // Trigram rebuild
+            RebuildIndex(_gospIndex!, "GOSP", StoreIndexState.BuildingGOSP,
+                static (s, p, o) => (o, s, p), onProgress, phases);
+
+            RebuildIndex(_tgspIndex!, "TGSP", StoreIndexState.BuildingTGSP,
+                static (s, p, o) => (s, p, o), onProgress, phases);
+
+            // Trigram rebuild, from every graph's entries. The trigram index ignores an atom it already holds.
             _indexState = StoreIndexState.BuildingTrigram;
             StoreStateFile.Write(_baseDirectory, _indexState);
             var trigramStopwatch = System.Diagnostics.Stopwatch.StartNew();
             long trigramCount = 0;
-            var gspoEnum = _gspoIndex.QueryHistory(
-                ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty);
-            while (gspoEnum.MoveNext())
+            var gspo = _gspoIndex!.QueryEveryEntryAllGraphs().ToCursor();
+            while (gspo.MoveNext())
             {
-                var quad = gspoEnum.Current;
                 // In GSPO: Tertiary = object. Check if it's a literal (atom starts with ")
-                var objectId = quad.Tertiary;
+                var objectId = gspo.Tertiary;
                 if (objectId > 0)
                 {
                     var utf8Span = _atoms.GetAtomSpan(objectId);
@@ -1981,7 +1998,7 @@ public sealed class QuadStore : IDisposable
             totalStopwatch.Stop();
             _lock.ExitWriteLock();
 
-            if (HasRebuildListener)
+            if (HasRebuildListener && started)
             {
                 EmitRebuildComplete(new RebuildMetrics(
                     Timestamp: DateTimeOffset.UtcNow,
@@ -1994,15 +2011,40 @@ public sealed class QuadStore : IDisposable
     }
 
     /// <summary>
-    /// Rebuild a single secondary index from the primary GSPO index.
+    /// The number of entries of a Cognitive secondary index that GSPO does not hold as they are (ADR-061 I19).
+    /// <paramref name="toGspo"/> takes an entry's three dimensions in the index's order and gives subject, predicate
+    /// and object. Every entry is read, retracted ones too, in every graph.
+    /// </summary>
+    private long CountEntriesGspoDoesNotHold(TemporalQuadIndex target,
+        Func<long, long, long, (long Subject, long Predicate, long Object)> toGspo)
+    {
+        long count = 0;
+        var entry = target.QueryEveryEntryAllGraphs().ToCursor();
+        while (entry.MoveNext())
+        {
+            var (s, p, o) = toGspo(entry.Primary, entry.Secondary, entry.Tertiary);
+            if (!_gspoIndex!.HoldsEntry(entry.Graph, s, p, o, entry.MemorizedAt, entry.ForgottenAt,
+                    entry.LegacyTransactionTime, entry.LegacyModifiedAt, entry.LegacyIsDeleted))
+                count++;
+        }
+        return count;
+    }
+
+    /// <summary>
+    /// Rebuild a single secondary index from the primary GSPO index: empty it, then carry every GSPO entry of every
+    /// graph into it as it is, with its times and its retraction mark (ADR-061 I14).
+    /// <paramref name="fromGspo"/> takes subject, predicate and object and gives the index's three dimensions.
     /// </summary>
     private void RebuildIndex(TemporalQuadIndex target, string name, StoreIndexState duringState,
-        Func<TemporalQuad, (long Primary, long Secondary, long Tertiary)> remapDimensions,
+        Func<long, long, long, (long Primary, long Secondary, long Tertiary)> fromGspo,
         Action<string, long>? onProgress,
         List<RebuildPhaseMetrics>? phases)
     {
         _indexState = duringState;
         StoreStateFile.Write(_baseDirectory, _indexState);
+
+        var heldBefore = target.QuadCount;
+        target.Clear();
 
         // Secondary-index construction is a bulk-shape operation: each AllocatePage
         // would otherwise trigger a full-region msync via SaveMetadata (the same
@@ -2013,16 +2055,12 @@ public sealed class QuadStore : IDisposable
         var phaseStopwatch = System.Diagnostics.Stopwatch.StartNew();
         try
         {
-            var gspoEnum = _gspoIndex!.QueryHistory(
-                ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty);
-
-            while (gspoEnum.MoveNext())
+            var gspo = _gspoIndex!.QueryEveryEntryAllGraphs().ToCursor();
+            while (gspo.MoveNext())
             {
-                var quad = gspoEnum.Current;
-                var (primary, secondary, tertiary) = remapDimensions(quad);
-
-                target.AddRaw(quad.Graph, primary, secondary, tertiary,
-                    quad.MemorizedAt, quad.ForgottenAt, quad.LegacyTransactionTime);
+                var (primary, secondary, tertiary) = fromGspo(gspo.Primary, gspo.Secondary, gspo.Tertiary);
+                target.CarryEntry(gspo.Graph, primary, secondary, tertiary, gspo.MemorizedAt, gspo.ForgottenAt,
+                    gspo.LegacyTransactionTime, gspo.LegacyModifiedAt, gspo.LegacyIsDeleted);
                 count++;
             }
         }
@@ -2036,6 +2074,12 @@ public sealed class QuadStore : IDisposable
             phaseStopwatch.Stop();
         }
 
+        // Clear started the index's count over at transaction 0, as if the log were emptied with it, and the log is
+        // not. The index now holds what GSPO holds, so its count is exact up to the transaction GSPO's is: without
+        // this, recovery after a crash would count again what the log holds since the last checkpoint (ADR-058).
+        target.CommitEntryCount(_gspoIndex!.CountTxId, durable: true);
+
+        _logger.Info($"Rebuilt {name} from GSPO: it held {heldBefore:N0} entries, each of them in GSPO, and holds {count:N0}.".AsSpan());
         onProgress?.Invoke(name, count);
 
         if (phases is not null)

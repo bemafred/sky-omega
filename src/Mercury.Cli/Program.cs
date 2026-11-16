@@ -215,7 +215,7 @@ if (showHelp)
           --load <file>              Load RDF file at startup, then enter REPL
           --bulk-load <file>         Bulk load (GSPO only, no fsync), then enter REPL
           --convert <in> <out>       Streaming format conversion (no store, exits after)
-          --rebuild-indexes          Rebuild secondary indexes, then enter REPL
+          --rebuild-indexes          Rebuild the secondary indexes from GSPO, then enter REPL. Changes nothing, and says so, when one of them holds an entry GSPO does not
           --rebuild-mphf             Rebuild MPHF (atoms.mphf + atoms.idx) from sealed SortedAtomStore — recovery after MPHF-only failure
           --repair-deletes           Repair history erased by deletes before 1.8.23 (ADR-054): each deleted fact ends at its deletion time, then exit. Stop mercury-mcp first.
           --dry-run                  With --repair-deletes: print every deletion event and what would change, change nothing

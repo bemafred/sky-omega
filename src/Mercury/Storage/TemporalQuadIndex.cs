@@ -287,9 +287,12 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
         return new QuadAtReading(holding, holdingIsOpen, forgottenAtReading);
     }
 
-    // Set while BeginPeriod inserts. A decided period is inserted as it is: the neighbour logic of InsertIntoLeaf
-    // decides nothing for it. That logic stays for Add with a stated time until ADR-061 Step 6 removes it.
-    private bool _insertingDecidedPeriod;
+    // Set while an entry is inserted as it is: a decided period (BeginPeriod) or an entry a rebuild carries
+    // (CarryEntry). The neighbour logic of InsertIntoLeaf decides nothing for it, and the entry gets the two legacy
+    // values below. That logic stays for Add with a stated time until ADR-061 Step 6 removes it.
+    private bool _insertingAsItIs;
+    private long _asItIsLegacyModifiedAt;
+    private bool _asItIsLegacyIsDeleted;
 
     /// <summary>
     /// A period of the quad begins at <paramref name="memorizedAt"/> (ADR-061 M7). Returns false, changing nothing,
@@ -311,16 +314,87 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
             LegacyTransactionTime = memorizedAt
         };
 
-        _insertingDecidedPeriod = true;
+        _insertingAsItIs = true;
+        _asItIsLegacyModifiedAt = memorizedAt;
+        _asItIsLegacyIsDeleted = false;
         try
         {
             InsertIntoTree(key, _file.RootPageId);
         }
         finally
         {
-            _insertingDecidedPeriod = false;
+            _insertingAsItIs = false;
         }
         return true;
+    }
+
+    /// <summary>
+    /// Insert an entry as another index holds it: its key, its retraction mark, and the time of its last End or
+    /// Retract (ADR-061 I14). A rebuild carries each GSPO entry into an emptied index with it. Nothing is decided: the
+    /// neighbour logic of InsertIntoLeaf does not run.
+    /// </summary>
+    internal void CarryEntry(long graph, long primary, long secondary, long tertiary,
+        long memorizedAt, long forgottenAt, long legacyTransactionTime, long legacyModifiedAt, bool legacyIsDeleted)
+    {
+        var key = new TemporalKey
+        {
+            Graph = graph,
+            Primary = primary,
+            Secondary = secondary,
+            Tertiary = tertiary,
+            MemorizedAt = memorizedAt,
+            ForgottenAt = forgottenAt,
+            LegacyTransactionTime = legacyTransactionTime
+        };
+
+        _insertingAsItIs = true;
+        _asItIsLegacyModifiedAt = legacyModifiedAt;
+        _asItIsLegacyIsDeleted = legacyIsDeleted;
+        try
+        {
+            InsertIntoTree(key, _file.RootPageId);
+        }
+        finally
+        {
+            _insertingAsItIs = false;
+        }
+    }
+
+    /// <summary>
+    /// Whether this index holds an entry as given: the same key, the same retraction mark, and, for a retracted
+    /// entry, the same time of its retraction. A rebuild asks GSPO this for every entry of an index it would replace
+    /// (ADR-061 I19). The time of the last change of an entry that is not retracted is not compared: nothing reads it.
+    /// </summary>
+    internal bool HoldsEntry(long graph, long primary, long secondary, long tertiary,
+        long memorizedAt, long forgottenAt, long legacyTransactionTime, long legacyModifiedAt, bool legacyIsDeleted)
+    {
+        var key = new TemporalKey
+        {
+            Graph = graph,
+            Primary = primary,
+            Secondary = secondary,
+            Tertiary = tertiary,
+            MemorizedAt = memorizedAt,
+            ForgottenAt = forgottenAt,
+            LegacyTransactionTime = legacyTransactionTime
+        };
+
+        // Equal keys are adjacent and can straddle a page boundary, so the walk follows the leaf chain.
+        for (var pageId = FindLeafPage(_file.RootPageId, key); pageId != 0;)
+        {
+            var page = GetPage(pageId);
+            for (int i = 0; i < page->EntryCount; i++)
+            {
+                ref var entry = ref page->GetEntry(i);
+                var cmp = CompareKeys(in entry.Key, in key);
+                if (cmp < 0) continue;
+                if (cmp > 0) return false;
+                if (entry.LegacyIsDeleted == legacyIsDeleted && (!legacyIsDeleted || entry.LegacyModifiedAt == legacyModifiedAt))
+                    return true;
+            }
+            pageId = page->NextLeaf;
+        }
+        return false;
     }
 
     /// <summary>
@@ -1286,9 +1360,9 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
             insertPos++;
         }
 
-        // Check for updates (same GSPO dimensions). Not for a decided period (ADR-061 M7): BeginPeriod inserts it as
-        // it is.
-        if (insertPos > 0 && !_insertingDecidedPeriod)
+        // Check for updates (same GSPO dimensions). Not for an entry inserted as it is: a decided period (ADR-061 M7)
+        // or a carried one (ADR-061 I14).
+        if (insertPos > 0 && !_insertingAsItIs)
         {
             ref var prevEntry = ref page->GetEntry(insertPos - 1);
             if (IsSameDimensions(key, prevEntry.Key))
@@ -1335,9 +1409,9 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
         newEntry.Key = key;
         newEntry.ChildOrValue = 0;
         newEntry.LegacyCreatedAt = key.LegacyTransactionTime;
-        newEntry.LegacyModifiedAt = key.LegacyTransactionTime;
+        newEntry.LegacyModifiedAt = _insertingAsItIs ? _asItIsLegacyModifiedAt : key.LegacyTransactionTime;
         newEntry.LegacyVersion = 1;
-        newEntry.LegacyIsDeleted = false;
+        newEntry.LegacyIsDeleted = _insertingAsItIs && _asItIsLegacyIsDeleted;
 
         page->EntryCount++;
         _file.IncrementEntryCount();

@@ -539,6 +539,15 @@ stand:
     So on this store the rebuild would leave both kinds, add 204 entries to TGSP, and report nothing: against I14
     and I19. A third probe showed that a version retracted before the rebuild stays retracted in GPOS, because the
     rebuild writes nothing for an entry that is already there. The prune is not measured.
+  - **Fixed 2026-11-16** (Martin: "fix rebuild"). Two more defects were found on the way: the rebuild read only
+    GSPO's default graph, so after a bulk load the three indexes held no named graph's entries (a fourth probe); and
+    into an emptied index `AddRaw` would have written a retracted version as remembered, and passed every entry
+    through the insert's neighbour rules. The rebuild now first looks for an entry of GPOS, GOSP or TGSP that GSPO
+    does not hold as it is. If there is one, it changes nothing, logs a warning and throws, naming how many each index
+    holds: resolving the difference needs the rule of LQ5, and a rebuild has none. Otherwise it empties each index
+    and carries every GSPO entry of every graph into it as it is (I14), and logs what each held before and holds now.
+    On a copy of the 2026-11-14 copy of the live store it refuses: "GPOS holds 0, GOSP 0 and TGSP 251 entries that
+    GSPO does not hold as they are", the 204 and the 47. `CognitiveRebuildTests` fail on the code before the fix.
 
 ## Decision
 
