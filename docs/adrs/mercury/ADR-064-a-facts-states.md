@@ -2,11 +2,14 @@
 
 ## Status
 
-**Status:** Proposed — 2026-11-16
+**Status:** Accepted — 2026-11-16
 
-Martin, 2026-11-16: "New ADR is mandated, this session has proved it." The session is the ADR-061 and ADR-062 work of
-2026-11-16: fixing the Cognitive rebuild, and then asking what the Graph profile's version fields are for
-([ADR-062](ADR-062-what-a-read-yields.md) Q6).
+Accepted by Martin on 2026-11-16: "Commit. Proposals accepted." Every proposal below was accepted with it, so every
+decision is now his. The code of Steps 3 to 8 can start.
+
+Proposed — 2026-11-16. Martin, the same day: "New ADR is mandated, this session has proved it." The session is the
+ADR-061 and ADR-062 work of 2026-11-16: fixing the Cognitive rebuild, and then asking what the Graph profile's
+version fields are for ([ADR-062](ADR-062-what-a-read-yields.md) Q6).
 
 Martin answered Q1 to Q5 the same day. Q5, the order, he answered with a rule: "Is there a chain of depencies?
 Follow them. If not, it does not matter." The order is in [Steps](#steps).
@@ -14,7 +17,7 @@ Follow them. If not, it does not matter." The order is in [Steps](#steps).
 Each decision below is marked:
 
 - **Decided**: Martin's decision, 2026-11-16, in his words where they are quoted.
-- **Proposed**: Sky's proposal. It waits for Martin's review.
+- **Accepted**: Sky's proposal, accepted by Martin with the ADR on 2026-11-16.
 
 ## Why
 
@@ -228,7 +231,8 @@ indexes that have applied different parts of the log.
 ### D1. Graph keeps no time: the entry holds the quad, the child pointer and the version — Decided
 
 "Graph - only version is required, Graph keeps no time at all." `CreatedAt` and `ModifiedAt` go. `IsDeleted` goes
-too: the version's parity says it (M2). That last step is Sky's reading of "only version is required".
+too: the version's parity says it (M2). That last step was Sky's reading of "only version is required", accepted
+with the ADR.
 
 ### D2. Minimal is Graph without secondary indexes — Decided
 
@@ -255,12 +259,12 @@ binds a version.
 - The store's own operations, the rebuild and recovery, read the version through the index cursor
   ([ADR-062](ADR-062-what-a-read-yields.md) D3). That read is internal.
 
-### D5. The log holds the decided change — Proposed
+### D5. The log holds the decided change — Accepted
 
 For Graph and Minimal, as in M5. The record's form belongs to the implementation. `LogRecord` already has room: the
 three time fields Graph does not use are 24 bytes.
 
-### D6. A rebuild carries what the store holds — Proposed
+### D6. A rebuild carries what the store holds — Accepted
 
 As the Cognitive rebuild does since `c3b6025`:
 
@@ -279,11 +283,11 @@ selects is asserted there anew, at version 1. No retracted fact is carried. Toda
 "There are no old stores. Convert is not needed. No need for recreate."
 
 - The Graph and Minimal entries change (D1, D2). The sizes are measured when the layout is built.
-- *Proposed:* each index file's magic number changes with its layout, as each profile's has its own already. A file
+- *Accepted:* each index file's magic number changes with its layout, as each profile's has its own already. A file
   in the earlier layout is then refused by the check at open that exists, and is never read as the new one. Nothing
   else is added.
 
-### D9. ADR-029 is amended when this ADR is accepted — Proposed
+### D9. ADR-029 is amended when this ADR is accepted — Accepted
 
 - Its table: Graph without time and with three indexes; Minimal with versioning, a log and session writes; the entry
   sizes as built.
@@ -343,7 +347,7 @@ The links, read in the code on 2026-11-16:
 
 ### The steps
 
-1. **Martin's review** of this text. Still proposed: D5, D6, D8's magic number and D9, and the parity reading in D1.
+1. **Martin's review** of this text — **done 2026-11-16**: the ADR is accepted, with every proposal.
 2. **ADR-062 Step 6** finishes. The Graph cursor row carries the version, the store's own read of it (D4).
 3. **Tests that state the model,** written first and failing on today's code:
    - the table of M4, on Graph and on Minimal;
@@ -359,8 +363,8 @@ The links, read in the code on 2026-11-16:
 9. **Documents:** ADR-029 (D9), `mercury-internals.md`, `api-usage.md`, `MERCURY.md` where it describes the profiles,
    `STATISTICS.md`.
 
-ADR-061 P6 needs only Step 2 of this list. Its P7 needs Step 4 as well. Steps 3 to 8 change Mercury code and start
-when Martin accepts this ADR.
+ADR-061 P6 needs only Step 2 of this list. Its P7 needs Step 4 as well. Steps 3 to 8 change Mercury code; they can
+start since the acceptance. Step 2 is done (ADR-062 Step 6, `29db7b5`).
 
 ## Not in this ADR
 

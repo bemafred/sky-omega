@@ -4,6 +4,11 @@
 
 **Status:** Completed — 2026-04-26 (Cognitive + Reference); **Graph + Minimal profiles added 2026-05-16** as matrix-completion gestures. Graph shipped across 1.7.65 (`VersionedQuadIndex` types), 1.7.66 (`QuadStore` session-API + query path integration), 1.7.67 (bulk-load + `RebuildSecondaryIndexes` + CLI). **Minimal shipped in 1.7.68** as a single-file slice (`MinimalQuadIndex` + `QuadStore` integration + CLI + tests). All four ADR-029 profiles now ship as distinct concrete index implementations per the no-behavior-flags rule (`feedback_no_behavior_flags.md`, 2026-05-16). Reference validated end-to-end through 21.3 B Wikidata in Phase 6. Graph + Minimal validated through E2E suites totaling 28 tests covering open/add/query/persistence/profile-boundary rejections/named-graph rejection/AS_OF rejection. See [`adr-029-reference-gradient-2026-04-20.md`](../../validations/adr-029-reference-gradient-2026-04-20.md), [`21b-query-validation-2026-04-26.md`](../../validations/21b-query-validation-2026-04-26.md), [`adr-029-graph-profile-2026-05-16.md`](../../validations/adr-029-graph-profile-2026-05-16.md), and [`adr-029-minimal-profile-2026-05-16.md`](../../validations/adr-029-minimal-profile-2026-05-16.md).
 
+**2026-11-16:** [ADR-064](ADR-064-a-facts-states.md), Accepted, changes the Graph and Minimal profiles and Decision 7.
+Graph keeps no time and three indexes, and only the version of each fact; Minimal takes session writes with a log,
+soft deletes and the version; a Reference store takes one bulk load. The table and Decision 7 below are amended when
+ADR-064's code is built (its D9). Until then they describe the profiles as this ADR built them.
+
 ## Context
 
 Mercury has one storage schema. Every triple, in every store, in every named graph, pays for the full bitemporal apparatus: `ValidFrom`, `ValidTo`, `TransactionTime` per entry, plus `CreatedAt`, `ModifiedAt`, `Version`, `IsDeleted` per B+Tree record. This is correct for Mercury's primary use case — cognitive memory with temporal semantics, provenance, and audit trails. It is wrong for every other use case.
