@@ -6,7 +6,8 @@
 
 Accepted by Martin on 2026-11-15: "ADR-062 and ADR-063: Accepted, update the ADR's." D1 to D7 are accepted with it.
 D7 still holds: the mechanism of D3 is measured before it is fixed, and it changes if Steps 2 and 3 say so. Q3 (the
-names) and Q6 (the Graph profile's own version fields) stay open. Steps 2 to 4 are done (2026-11-15): the cursor is
+names) stays open. Q6 (the Graph profile's own version fields) was answered on 2026-11-16 by
+[ADR-064](ADR-064-a-facts-states.md). Steps 2 to 4 are done (2026-11-15): the cursor is
 built beside the enumerators, and nothing reads through it yet.
 
 Proposed — 2026-11-12.
@@ -472,7 +473,10 @@ values stay for that time, written in one place instead of three.
   *Accepted with the ADR on 2026-11-15: in this ADR, as the last step of part one.* Its public shape does not change.
 - **Q6. The Graph profile's own version fields.** No read exposes `CreatedAt`, `ModifiedAt` or `Version`, and
   `IsDeleted` reaches a result only as an always-`false` value. Is that intended, or is a Graph read missing
-  something? This ADR does not change it; D1 removes the always-`false` member.
+  something? This ADR does not change it; D1 removes the always-`false` member. *Answered 2026-11-16 by
+  [ADR-064](ADR-064-a-facts-states.md):* no client read is missing. Martin: "access to version is not for SPARQL";
+  "Graph keeps no time at all". The version is held state, and the store's own operations read it through the
+  cursor; `CreatedAt`, `ModifiedAt` and `IsDeleted` go.
 - **Q7. The public surface.** The two public types change name and shape, and a third appears. That breaks callers of
   the storage API outside this repository, if there are any. The count of public types in `CLAUDE.md` (28 when this was written, 29 since ADR-061's log) and the list
   in ADR-003 change.
@@ -524,7 +528,7 @@ Steps 4 to 7 change Mercury code and wait for Martin's word, each.
 - Which Cognitive read methods exist, and the words that select by time. That is ADR-061.
 - The stored layout of any profile. ADR-061's later part changes the Cognitive entry; this ADR reads whatever the
   entry holds.
-- What the Graph profile's version fields are for (Q6).
+- What the Graph profile's version fields are for (Q6). That is [ADR-064](ADR-064-a-facts-states.md).
 
 ## References
 
