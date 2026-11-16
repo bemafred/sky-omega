@@ -61,10 +61,25 @@ internal sealed class CallbackPump : IManagedCallbackSink, IDisposable
     /// call may be made on it (only <c>ICorDebugProcess::GetID</c> is documented as safe).</summary>
     public StopInfo? LostStop => Volatile.Read(ref _lostStop);
 
+    // Set when mscordbi dispatches the session's CreateProcess callback. Never disposed: a ManualResetEventSlim that
+    // was never waited on with a timeout long enough to allocate its kernel handle needs no disposal, and a wait after
+    // the pump's Dispose must still work.
+    private readonly ManualResetEventSlim _processCreated = new(false);
+
+    /// <summary>Waits until mscordbi has dispatched this session's <c>CreateProcess</c> callback, up to
+    /// <paramref name="timeout"/>; true once it has (finding 110). For an attach that callback is the first of the
+    /// "fake attach events", and mscordbi dispatches it only after it has finished queueing them all, on its event
+    /// thread with the process lock released; a <c>Detach</c> before then can neuter the process under that thread.
+    /// A launch gets a real CreateProcess at startup.</summary>
+    public bool WaitForProcessCreated(TimeSpan timeout) => _processCreated.Wait(timeout);
+
     /// <summary>Enqueue side — invoked by the callback thunks on mscordbi's event thread.
     /// Returns immediately so the event thread is never blocked.</summary>
     public void OnCallback(CallbackKind kind, string name, nint appDomain, nint thread, int detail, nint breakpoint = 0, uint errorCode = 0)
     {
+        // First, before any disposed check: the teardown waits on this whether or not the pump still runs.
+        if (name == "CreateProcess") _processCreated.Set();
+
         if (kind == CallbackKind.DebuggerError)
         {
             // ICorDebugManagedCallback.DebuggerError: "debugging services have been disabled due to an error". Only

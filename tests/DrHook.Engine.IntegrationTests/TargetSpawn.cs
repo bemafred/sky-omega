@@ -197,21 +197,36 @@ internal static class TargetSpawn
     {
         int pid = -1;
         ManualResetEventSlim ready = new(false);
+        // The readers are taken here, on the caller's thread, while the Process is alive. Each thread then reads only
+        // its reader, and ends when the stream ends or is closed under it: the test disposes the Process when it is
+        // done, and an exception on one of these threads ended the whole test host (SIGABRT, 2 of 20 loaded runs on
+        // macbook, 2026-11-16, ObjectDisposedException from Process.StandardError). Under load a thread can start
+        // after the test has already finished.
+        StreamReader stdout = bootstrap.StandardOutput;
+        StreamReader stderr = bootstrap.StandardError;
         Thread reader = new(() =>
         {
-            string? line;
-            while ((line = bootstrap.StandardOutput.ReadLine()) is not null)
+            try
             {
-                Match m = Regex.Match(line, @"Process Id:\s*(\d+)");
-                if (m.Success && int.TryParse(m.Groups[1].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsedPid))
+                string? line;
+                while ((line = stdout.ReadLine()) is not null)
                 {
-                    Volatile.Write(ref pid, parsedPid);
-                    ready.Set();
+                    Match m = Regex.Match(line, @"Process Id:\s*(\d+)");
+                    if (m.Success && int.TryParse(m.Groups[1].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsedPid))
+                    {
+                        Volatile.Write(ref pid, parsedPid);
+                        ready.Set();
+                    }
                 }
             }
+            catch (Exception ex) when (ex is ObjectDisposedException or IOException) { /* the test has disposed the Process */ }
         }) { IsBackground = true, Name = "target-stdout" };
         reader.Start();
-        Thread errDrain = new(() => { while (bootstrap.StandardError.ReadLine() is not null) { } })
+        Thread errDrain = new(() =>
+        {
+            try { while (stderr.ReadLine() is not null) { } }
+            catch (Exception ex) when (ex is ObjectDisposedException or IOException) { /* the test has disposed the Process */ }
+        })
         { IsBackground = true, Name = "target-stderr" };
         errDrain.Start();
 

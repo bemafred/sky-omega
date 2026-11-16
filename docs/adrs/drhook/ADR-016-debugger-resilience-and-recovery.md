@@ -49,7 +49,11 @@ well in both roles.
   the callback pump stops, the target is resumed (`TryResumeForDetach`), SIGTERM is sent at once (`RequestExit`),
   and if the target is still alive after `NaturalExitTimeout` (2 s), a `TargetStuckAtDispose` anomaly is reported
   and the target is killed. Nothing waits for the program's work to finish, and the debugger is still attached and
-  handling the target's events when the signal lands.
+  handling the target's events when the signal lands. **Changed 2026-11-16** (Martin's decision,
+  [finding 110](../../../poc/drhook-engine/findings/110-owned-teardown-signalled-an-attached-target.md)): the
+  debugger detaches first (Stop, deactivate the breakpoints, Detach) and the signal reaches a target that is no longer
+  debugged. The old order was the cause of finding 100's cascade in the integration suite: on macbook under CPU load
+  it hung 15 of 40 runs, the new one 0 of 40. `drhook_kill` (`Abandon`) is unchanged.
 - **On Windows** `RequestExit` cannot signal (`PosixSignals.Kill` throws `PlatformNotSupportedException`; the
   console-control path was never built), so every owned session end reports two anomalies and terminates the
   process.
@@ -572,6 +576,11 @@ the value `0x8013134F` (that is `OBJECT_NEUTERED`; the right value is `0x8013130
 anomaly; debug pipes left after
 exit-at-detach on the Linux x64 runner; mscordbi's transport threads do not accumulate across sessions (finding 101's
 open question). Step 2's scenarios (launched targets, MTP and VSTest runs, DrHook's own test host) are not yet run.
+*The owned session end, 2026-11-16* ([finding 110](../../../poc/drhook-engine/findings/110-owned-teardown-signalled-an-attached-target.md)):
+finding 100's cascade was reproduced on demand on macbook (macOS arm64, Developer Mode off) by loading every core. In
+the integration suite its trigger was DrHook's own order: `drhook_stop` resumed a launched target with its breakpoints
+active and signalled it while attached. Detaching first is decided (Martin) and built; it does not decide the session
+end for the other scenarios, or what a kill does (Step 6).
 
 **Step 3 — Cancellation.** Targets with a declared shutdown mechanism: a SIGTERM handler that cancels its work,
 asked mid-flood under the debugger; the same target without a handler, to record what an unhandled signal does under

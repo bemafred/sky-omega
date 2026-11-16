@@ -820,7 +820,13 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
     ///
     /// <para>No-op on already-Disposed sessions. For Borrowed sessions (F-010-1): Abandon force-
     /// SIGKILLs the attached target via the death-detection handle — a deliberate force-terminate
-    /// (no graceful SIGTERM, since we don't own it), then the dead-target Dispose teardown.</para></summary>
+    /// (no graceful SIGTERM, since we don't own it), then the dead-target Dispose teardown.</para>
+    ///
+    /// <para>Unlike <see cref="Dispose"/>, Abandon ends the target while the debugger is still attached (finding 110).
+    /// Detaching first would need the target's runtime to answer a synchronize request, and Abandon is for a target
+    /// that may not answer. So a target killed here can still die while mscordbi waits on a request to it, and leave
+    /// this process's debugger hung (findings 100, 105); the remedy for that is the debugger worker process
+    /// (ADR-016 Step 5), not the order of this method.</para></summary>
     public void Abandon(TimeSpan? briefGrace = null)
     {
         if (Volatile.Read(ref _disposed) != 0) return;
@@ -2285,72 +2291,6 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
         Thread.Sleep(KillSettleMs);
     }
 
-    /// <summary>Resume the debuggee before Detach (Attached path; Probe 44 / finding 59;
-    /// dispatch-settle added per finding 65).
-    /// After Quiesce the target is synchronized; mscordbi's Detach for a synchronized target
-    /// performs an implicit resume that has been observed to race the exit work item when the
-    /// resumed code immediately exits (limit drhook-detach-exit-race / probe 12 evidence).
-    /// Explicit Continue here moves the target back to a running state under our control, so
-    /// Detach's mscordbi unwind happens against a running (not stopped) target.
-    ///
-    /// mscordbi's Stop is a COUNTER, not a flag: each Stop call (pauseHandler + Quiesce) is
-    /// matched by a Continue. We loop Continue until controller.Continue returns S_FALSE
-    /// (target already running), bounded by maxAttempts to prevent infinite loop on a
-    /// substrate bug. Without the loop, an unbalanced counter leaves mscordbi internally
-    /// still considering the target synchronized after Detach, blocking the next Attach
-    /// on the same target with CORDBG_E_DEBUGGER_ALREADY_ATTACHED.
-    ///
-    /// FINDING 65 — dispatch-settle: between Continue iterations the resumed target may
-    /// generate fresh callbacks that mscordbi's RC event thread dispatches via the CCW
-    /// (still alive at this point in Dispose). Without settle, the next Continue (or
-    /// downstream Detach / Terminate) races concurrent dispatch and SIGSEGVs on
-    /// macOS-arm64 under informational-callback flood (probe 42 redesigned). The settle
-    /// gives mscordbi's RC thread a window to complete in-flight dispatch before the next
-    /// substrate operation. Empirical: 10 ms intra-iteration, 50 ms pre-return — well
-    /// inside Dispose budget, comfortably above mscordbi's microsecond-scale dispatch
-    /// latency. Settle fires on every exit path (S_FALSE / error / exhausted) since any
-    /// can be followed by Detach against in-flight dispatch.</summary>
-    private void TryResumeForDetach()
-    {
-        const int S_FALSE = 1;
-        const int CORDBG_E_SUPERFLOUS_CONTINUE = unchecked((int)0x8013132F); // mscordbi's "already running" (finding 89)
-        const int maxAttempts = 10;
-        const int IntraSettleMs = 10;
-        const int FinalSettleMs = 50;
-        for (int attempt = 0; attempt < maxAttempts; attempt++)
-        {
-            int hr = _controller.Continue(0);
-            if (hr == S_FALSE || hr == CORDBG_E_SUPERFLOUS_CONTINUE)
-            {
-                Thread.Sleep(FinalSettleMs); // post-resume dispatch settles before the next substrate operation
-                return;
-            }
-            if (hr < 0)
-            {
-                _sink.OnAnomaly(new EngineAnomaly(
-                    DateTimeOffset.UtcNow, AnomalyKind.UnexpectedHResult, "mcp-request",
-                    "TryResumeForDetach (Continue loop)",
-                    Observed: $"HRESULT 0x{hr:X8} on attempt {attempt + 1}",
-                    Expected: "S_OK while counter > 0, then S_FALSE when target released",
-                    Context: new Dictionary<string, string> { ["hresult"] = $"0x{hr:X8}", ["attempt"] = (attempt + 1).ToString(System.Globalization.CultureInfo.InvariantCulture) }));
-                Thread.Sleep(FinalSettleMs); // dying target may still race exit-work against Detach
-                return;
-            }
-            // hr == S_OK: target was synchronized, one step decremented. Let mscordbi
-            // dispatch any callbacks the resume produced before issuing the next Continue.
-            Thread.Sleep(IntraSettleMs);
-        }
-        // Reached maxAttempts without S_FALSE — substrate anomaly, likely a counter leak.
-        // Defensive settle before falling through to Detach so any final dispatch completes.
-        Thread.Sleep(FinalSettleMs);
-        _sink.OnAnomaly(new EngineAnomaly(
-            DateTimeOffset.UtcNow, AnomalyKind.UnexpectedHResult, "mcp-request",
-            "TryResumeForDetach (Continue loop exhausted)",
-            Observed: $"controller.Continue returned S_OK {maxAttempts} times without reaching S_FALSE",
-            Expected: "S_FALSE within bounded attempts (target running)",
-            Context: new Dictionary<string, string> { ["maxAttempts"] = maxAttempts.ToString(System.Globalization.CultureInfo.InvariantCulture) }));
-    }
-
     /// <summary>Detach a LIVE target from the synchronized state — the one detach sequence (finding 89 unified the
     /// Borrowed Dispose path onto the one probe 62 validated for Owned leave-running). ICorDebug refuses to detach
     /// while breakpoints are active (CORDBG_E_DETACH_FAILED_OUTSTANDING_BREAKPOINTS) or while the process is running
@@ -2360,9 +2300,35 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
     /// implicit-resumes the target on Detach, so it keeps running un-debugged.</summary>
     private void DetachSynchronized()
     {
+        AwaitAttachEventsQueued();
         Quiesce();
         ClearBreakpoints();
         Detach();
+    }
+
+    /// <summary>How long a detach waits for mscordbi to dispatch the session's CreateProcess callback (finding 110).
+    /// A session that has seen any stop has it already; only a session ended right after its attach waits.</summary>
+    private const int AttachEventsWaitMs = 5000;
+
+    /// <summary>FINDING 110: mscordbi queues an attach's "fake attach events" on its event thread
+    /// (<c>CordbRCEventThread::FlushQueuedEvents</c> → <c>ShimProcess::QueueFakeAttachEvents</c>) with the process lock
+    /// released ("the CorDbProcess may suddenly get neutered if the user detaches the debugger", release/10.0), and
+    /// <c>QueueFakeAssemblyAndModuleEvent</c> uses what <c>EnumerateModules</c> returns without a check. A Detach in that
+    /// window crashed the test host on macbook on 2026-11-16 (SIGSEGV at address 0, the Detach on another thread). The
+    /// CreateProcess callback is dispatched only after the queueing is done, so wait for it. The wait is bounded: a
+    /// target that never synchronized is detached after the bound, as before, and the anomaly says so.</summary>
+    private void AwaitAttachEventsQueued()
+    {
+        if (_pump.WaitForProcessCreated(TimeSpan.FromMilliseconds(AttachEventsWaitMs))) return;
+        _sink.OnAnomaly(new EngineAnomaly(
+            DateTimeOffset.UtcNow, AnomalyKind.DetachBeforeAttachEvents, "mcp-request", "DetachSynchronized",
+            Observed: $"no CreateProcess callback from mscordbi within {AttachEventsWaitMs} ms; detaching anyway",
+            Expected: "mscordbi has dispatched the session's CreateProcess callback before the debugger detaches",
+            Context: new Dictionary<string, string>
+            {
+                ["pid"] = ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["waitMs"] = AttachEventsWaitMs.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            }));
     }
 
     /// <summary>Synchronize the target before Detach so mscordbi's RC event thread is not
@@ -2386,13 +2352,13 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
     }
 
     /// <summary>F-010-2 — detach the debugger from an OWNED (launched) target and LEAVE IT RUNNING.
-    /// Runs the same quiescent-detach sequence the Borrowed live path uses inside <see cref="Dispose"/>
-    /// (pump teardown → Quiesce → TryResumeForDetach → Detach → Terminate), but for a target the
+    /// Runs the same sequence the Borrowed live path and the Owned path use inside <see cref="Dispose"/>
+    /// (pump teardown → Quiesce → ClearBreakpoints → Detach → Terminate), but for a target the
     /// substrate launched, deliberately SKIPPING the SIGTERM/SIGKILL the Owned <see cref="Dispose"/>
-    /// branch issues. The explicit resume is load-bearing: probe 33 documented that detaching a
-    /// currently-stopped launched target WITHOUT a Continue leaves it synchronized indefinitely (hung) —
-    /// TryResumeForDetach's Continue-until-S_FALSE is what moves the target back to a running state
-    /// before Detach unwinds. On success the target keeps running un-debugged; it remains a child of
+    /// branch issues after its detach. Probe 33 had a stopped target left synchronized (hung) by a Detach
+    /// without a Continue; probe 62 then showed that a pre-resume makes Detach fail NOT_SYNCHRONIZED, and
+    /// that Detach from the synchronized state resumes the target itself (see the body). On success the
+    /// target keeps running un-debugged; it remains a child of
     /// this process until it exits (a dedicated waitpid thread reaps it then, so it does not zombie),
     /// reparenting to launchd only if the debugger exits first. Idempotent (shares the _disposed gate,
     /// so a later Dispose is a no-op).
@@ -2575,24 +2541,38 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
                 // substrate own the kill operation. Finding 68's empirical SIGTERM evidence motivates
                 // the two-stage discipline — substrate trusts well-implemented targets to exit
                 // naturally, and only forces the kernel-mandated kill against violators.
+                bool detachedFirst = false;
                 if (_ownsTarget && !TargetHasExited)
                 {
-                    // ADR-008 Increment 1b: release any pending mscordbi stop before SIGTERM.
-                    // The substrate KNOWS from session activity whether the target is currently
-                    // halted by mscordbi (pump worker parked at _resume.Take until _pump.Dispose's
-                    // CompleteAdding fired and unparked it via WorkerSilentBreak). Even after the
-                    // pump worker exits, mscordbi continues to hold the target halted at the
-                    // hit/break point. SIGTERM against a halted target may be queued but blocked
-                    // by mscordbi's halt mechanism (probe 56 + Phase 8b AnomalyInjectionTest
-                    // evidence). Releasing the stop via controller.Continue moves target back to
-                    // running state — SIGTERM's signal-delivery thread then completes cleanly via
-                    // CoreCLR default disposition.
+                    // FINDING 110: the debugger detaches BEFORE the target is asked to exit. Until 2026-11-16 this
+                    // branch released the stop (Continue) and sent SIGTERM with every breakpoint active and the
+                    // debugger attached; the target could hit a breakpoint or end a thread while it died, and mscordbi's
+                    // event thread then waited for ever on a read of the dead target, holding the DAC lock, so every
+                    // later attach and launch in this process hung (finding 100's cascade). Measured on macbook under CPU
+                    // load: 15 of 40 runs of the integration suite hung with the old order, 0 of 40 with this one.
                     //
-                    // Reuses TryResumeForDetach (Borrowed-path helper from finding 59/65): if
-                    // target is already running, first Continue returns S_FALSE — no-op (~50ms
-                    // for final settle). If halted, Continue releases the stop, target runs, then
-                    // SIGTERM lands cleanly. Substrate acts on its knowledge of target state.
-                    TryResumeForDetach();
+                    // DetachSynchronized is the sequence the Borrowed path and DetachLeaveRunning use (finding 89, probes
+                    // 62/62b): synchronize, deactivate the breakpoints, Detach. mscordbi resumes the target on Detach, so
+                    // it runs free and un-debugged when SIGTERM reaches it, and the signal is handled as in any process
+                    // (the reason the old order released the stop first, ADR-008 Increment 1b, holds without it). The
+                    // target's end is still observed: ProcessLifetime watches the child, not the debugger.
+                    //
+                    // The cost: Detach needs the target's runtime to answer the synchronize request. A target whose
+                    // runtime cannot answer now holds this call where the old order went on to SIGTERM and SIGKILL;
+                    // drhook_kill (Abandon) stays the escape for that, because it kills without asking the target.
+                    try
+                    {
+                        DetachSynchronized();
+                        detachedFirst = true;
+                    }
+                    catch (DebuggerLostException)
+                    {
+                        // The debugger was lost during this teardown. Nothing more is called on mscordbi (the catch below
+                        // roots the session), so the owned target is ended with the OS, as in the debugger-lost branch
+                        // above; it would otherwise be left running with nobody to end it.
+                        try { _targetProcess.Kill(entireProcessTree: true); } catch { /* best effort: it may be gone */ }
+                        throw;
+                    }
 
                     bool exitedNaturally = false;
                     try { exitedNaturally = RequestExit(_naturalExitTimeout); }
@@ -2630,7 +2610,7 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
                 // exit-work-item (delivering ExitProcess, dispatching final callbacks, releasing RC
                 // state). The substrate's Quiesce/Continue calls from the main thread would race
                 // that exit-work and SIGSEGV mscordbi on macOS-arm64 (Probe 44 phase C / Probe 47
-                // evidence). Skip the active protocol pushes (Quiesce + TryResumeForDetach) and
+                // evidence). Skip the active protocol pushes (Quiesce, the old pre-detach resume) and
                 // add an explicit exit-work-completion settle before Detach. Detach itself is still
                 // necessary: it releases the CCW reference from mscordbi's side, which is the
                 // safety precondition for the later _callback.Dispose (which frees the CCW's
@@ -2638,7 +2618,12 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
                 // when _callback.Dispose runs would UAF the freed CCW memory.
                 bool targetDead = _targetProcess is not null && TargetHasExited;
 
-                if (targetDead)
+                if (detachedFirst)
+                {
+                    // Already detached before the exit request (finding 110): mscordbi has neutered its process object,
+                    // so the target's end raises no callback and there is no exit work to settle or detach again.
+                }
+                else if (targetDead)
                 {
                     // Dead-target path: let mscordbi's RC event thread complete exit-work-item
                     // processing before our Detach unwinds the same internal state. 200 ms is

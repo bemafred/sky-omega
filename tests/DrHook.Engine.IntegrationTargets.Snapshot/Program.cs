@@ -9,6 +9,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -41,6 +42,16 @@ if (args is ["kill-self"])
     System.Diagnostics.Process.GetCurrentProcess().Kill();   // KILL_HERE
 }
 
+// `report-attached-on-sigterm <report>`: the teardown-order test (finding 110). The target runs the loop below, through
+// the line a test stops at, and when SIGTERM reaches it, records in the report file whether a managed debugger was still
+// attached. The handler does not cancel the signal, so the process then ends as it would without it. A debugger that
+// asks its target to exit only after detaching yields "attached=False"; one that sends the signal while attached yields
+// "attached=True", or no report when the debugger holds the target stopped so that the handler never runs.
+PosixSignalRegistration? onTerm = null;
+if (args is ["report-attached-on-sigterm", string attachedReport])
+    onTerm = PosixSignalRegistration.Create(PosixSignal.SIGTERM,
+        _ => File.WriteAllText(attachedReport, $"attached={System.Diagnostics.Debugger.IsAttached}\n"));
+
 var worker = new Worker();
 const string alphabet = "abcdefghij";
 for (int beat = 1; beat <= 600; beat++)
@@ -49,6 +60,7 @@ for (int beat = 1; beat <= 600; beat++)
     worker.Scan(alphabet.AsSpan(0, (beat % 7) + 1));  // span length cycles 2..7 — gates `value.Length > 5`
     Thread.Sleep(50);
 }
+GC.KeepAlive(onTerm);   // the registration lives as long as the loop: a collected one unregisters its handler
 
 sealed class Worker
 {

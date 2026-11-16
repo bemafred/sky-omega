@@ -124,6 +124,14 @@ public enum AnomalyKind
     /// holds, for the rest of this process. Context: <c>errorHR</c>, <c>errorCode</c>. Actionable: the error codes
     /// name the CLR's reason; an owned target is killed at teardown, a borrowed one is left as it is.</summary>
     DebuggerError,
+
+    /// <summary>A session was detached before mscordbi had dispatched its <c>CreateProcess</c> callback (finding 110):
+    /// the teardown waited its bound for it and went on. For an attach, mscordbi queues the "fake attach events" on its
+    /// event thread with the process lock released, and a Detach that neuters the process meanwhile crashed the host
+    /// once (SIGSEGV in <c>ShimProcess::QueueFakeAssemblyAndModuleEvent</c>). Context: <c>pid</c>, <c>waitMs</c>.
+    /// Actionable: the session ended before its target ever synchronized with the debugger; if the host crashes after
+    /// this anomaly, the crash is that race.</summary>
+    DetachBeforeAttachEvents,
 }
 
 /// <summary>A structured record of a substrate-correctness anomaly. Surfaced through

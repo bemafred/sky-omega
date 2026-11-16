@@ -3,7 +3,11 @@
 **Date:** 2026-10-30
 **Status:** Mechanism **PROVEN**: located from stacks of the hung process on a GitHub macOS runner and the runtime
 source (`release/10.0`), then reproduced on omega by probe 100. **Not fixed.** A defect in mscordbi's design that
-DrHook's owned teardown runs into. **What made it frequent on CI is not established** (Symptom). On 2026-11-05 the
+DrHook's owned teardown runs into. **What made it frequent on CI is not established** (Symptom). **2026-11-16:**
+[finding 110](110-owned-teardown-signalled-an-attached-target.md) reproduced the cascade on demand on macbook under
+CPU load, found DrHook's own trigger in the integration suite (the owned teardown signalled a target that was still
+debugged, with its breakpoints active), and removed it by detaching first: 15 of 40 loaded runs hung before, 0 of 40
+after. The mechanism below is unchanged; a target that dies by itself during a request still hangs the debugger. On 2026-11-05 the
 same state was recorded with the event thread in a **write** to the target, not a read (Where it hung); the
 mechanism below covers both, but probe 100 has reproduced only the read.
 
@@ -172,7 +176,8 @@ test. Candidates, each a change to DrHook's owned teardown:
 
 - kill the target only while it is synchronized (stopped by the debugger), so no event is being dispatched;
 - detach before terminating, so no session is left to read (this conflicts with finding 64's kill-first protocol,
-  which must be re-examined);
+  which must be re-examined); **done 2026-11-16 for `drhook_stop`**, see finding 110, which also answers the
+  conflict with finding 64;
 - make reads direct, not over the transport: with `task_for_pid` allowed, `PAL_ReadProcessMemory` fails at once on a
   dead target. Needs entitlements; not explored.
 

@@ -5,6 +5,13 @@
 Where it holds is read from those stacks and the runtime source (`release/10.0`). **Which error started it is not
 identified. Not reproduced. Not fixed.** It is the first stack record of the "single timeout, then recovery" that
 [finding 100](100-orphaned-transport-read-holds-dac-lock.md) set aside as a different failure of unknown cause.
+**Recorded a second time 2026-11-14:** CI run 43614166222 (1.8.43), macOS arm64, test
+`AttachAndOwn_VstestTestHost_PauseThenDisposeWithoutResume_WorkerSilentBreakOnly`, timed out in `Dispose` →
+`ICorDebug.Terminate`. The watcher's native sample (artifact `drhook-hang-macos-latest`, `record1-host-sample-4821.txt`)
+has the same frames, `Win32EventLoop + 384` → `UnrecoverableError + 412` → `SetDCB` → `SendRequestMessageAndWait`,
+on runtime 10.0.15. **2026-11-16:** the Order section below places the failed event as the target ends, before the
+detach. That is the window [finding 110](110-owned-teardown-signalled-an-attached-target.md) closed for `drhook_stop` by
+detaching first. Whether that removes this hang too is not shown: it was never reproduced.
 
 ## Symptom
 

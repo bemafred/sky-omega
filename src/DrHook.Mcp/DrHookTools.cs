@@ -338,8 +338,8 @@ public sealed class DrHookTools
     [McpServerTool(Name = "drhook_stop"), Description(
         "End the active debugging session — the normal way to finish. " +
         "Borrowed sessions (started with drhook_attach) detach and leave the target running. " +
-        "Owned sessions (started with drhook_launch) ask the target to exit gracefully — SIGTERM, escalating " +
-        "to SIGKILL only if it does not exit within the ~2s natural-exit window (ADR-008). " +
+        "Owned sessions (started with drhook_launch) detach the debugger, then ask the target to exit gracefully — " +
+        "SIGTERM, escalating to SIGKILL only if it does not exit within the ~2s natural-exit window (ADR-008, finding 110). " +
         "Use drhook_detach to explicitly keep an attached target running, or drhook_kill to force-terminate. " +
         "Requires a hypothesis — your closing read of the session.")]
     public async Task<string> Stop(
