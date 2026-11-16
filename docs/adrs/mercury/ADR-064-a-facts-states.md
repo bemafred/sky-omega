@@ -8,6 +8,9 @@ Martin, 2026-11-16: "New ADR is mandated, this session has proved it." The sessi
 2026-11-16: fixing the Cognitive rebuild, and then asking what the Graph profile's version fields are for
 ([ADR-062](ADR-062-what-a-read-yields.md) Q6).
 
+Martin answered Q1 to Q5 the same day. Q5, the order, he answered with a rule: "Is there a chain of depencies?
+Follow them. If not, it does not matter." The order is in [Steps](#steps).
+
 Each decision below is marked:
 
 - **Decided**: Martin's decision, 2026-11-16, in his words where they are quoted.
@@ -135,7 +138,8 @@ only).
 
 Checked 2026-11-16: omega holds one Cognitive store (`mcp`) and three Reference stores. zbook holds two Cognitive
 stores (`cli`, `mcp`). Neither has a Graph or a Minimal store. elite, omega-ubuntu and omega-windows were not
-checked. DrHook.Capture creates a Graph store at `<stores>/drhook` the first time it runs.
+checked. DrHook.Capture creates a Graph store at `<stores>/drhook` the first time it runs. Martin, the same day:
+"There are no old stores."
 
 ## The model
 
@@ -189,12 +193,12 @@ For the Graph and Minimal profiles:
 - **G3.** Every other assert or retract raises the fact's version by one.
 - **G4.** A version once held never changes and never decreases, except by G3.
 - **G5.** Every read answers from the same versions, whichever index serves it (ADR-061 I13).
-- **G6.** A rebuild and a conversion carry every fact's version unchanged, retracted facts included (I14).
+- **G6.** A rebuild carries every fact's version unchanged, retracted facts included (I14).
 - **G7.** Recovery changes nothing. Replaying the log onto indexes that have each applied some first part of it gives
   the versions an uninterrupted run gives, provided recovery starts at or before the earliest point any index has
   reached and runs to the end of the log (I15).
-- **G8.** No repair, rebuild, prune or conversion resolves a disagreement between stored copies silently. It reports
-  what differs, and the source is kept (I19).
+- **G8.** No repair, rebuild or prune resolves a disagreement between stored copies silently. It reports what
+  differs, and the source is kept (I19).
 - **G9.** Nothing in a Graph or Minimal entry is read from a clock.
 
 ### M4. What an operation does
@@ -236,9 +240,10 @@ trigram index."
   so `RequireWriteCapableProfile` lets them through.
 - A bulk load writes GSPO directly; there is nothing to rebuild.
 
-### D3. Graph's TGSP goes — Proposed
+### D3. Graph's TGSP goes — Decided
 
-With no time, its key has the same order as GSPO's, and no query reads it. Graph keeps GSPO, GPOS and GOSP.
+"Graph's TGSP goes, no time -> no need." With no time, its key has the same order as GSPO's, and no query reads it.
+Graph keeps GSPO, GPOS and GOSP.
 
 ### D4. The version is not read by SPARQL — Decided
 
@@ -247,7 +252,7 @@ binds a version.
 
 - A read in the library API is possible, but nothing uses it: "Reasonable but I have no example at this moment." So
   none is added or promised until a user is named.
-- The store's own operations, rebuild, recovery, prune and conversion, read the version through the index cursor
+- The store's own operations, the rebuild and recovery, read the version through the index cursor
   ([ADR-062](ADR-062-what-a-read-yields.md) D3). That read is internal.
 
 ### D5. The log holds the decided change — Proposed
@@ -263,81 +268,111 @@ As the Cognitive rebuild does since `c3b6025`:
   changes nothing, says so and throws (G8).
 - Otherwise it clears each target and carries every GSPO entry, retracted facts included, with its version (G6).
 
-### D7. A prune keeps what is asserted, with its version — Proposed
+### D7. A prune starts every fact at version 1 — Decided
 
-As ADR-061 D12 does for Cognitive ("a prune keeps what is remembered, with its times"): a prune writes a new store,
-and carries each asserted fact it selects with its version unchanged. It carries no retracted fact. Q2 asks whether
-the version should travel or start again at 1.
+"Start at 1." A prune writes a new store, and a copy is another store (ADR-061 M3). Each asserted fact the prune
+selects is asserted there anew, at version 1. No retracted fact is carried. Today's prune does this already
+(`PruningTransfer` asserts each fact it keeps into the target; read, not run), so D7 changes no code.
 
-### D8. The layout changes, and the schema says which — Proposed
+### D8. The layout changes, and no store is converted — Decided
 
-- The Graph and Minimal entries change (D1, D2), and the schema's `keyLayoutVersion` names the layout (ADR-061 L2).
-  The sizes are measured when the layout is built.
-- A store in the old layout is converted by a copy that keeps the source (ADR-061 L3, L4):
-  - **Graph:** each entry's version is carried, and its `IsDeleted` must agree with the version's parity. If one does
-    not, nothing is converted and the conversion says which (G8).
-  - **Minimal:** each entry becomes version 1.
-- No such store exists on omega or zbook (Context). Q3 asks whether a conversion is wanted at all.
+"There are no old stores. Convert is not needed. No need for recreate."
+
+- The Graph and Minimal entries change (D1, D2). The sizes are measured when the layout is built.
+- *Proposed:* each index file's magic number changes with its layout, as each profile's has its own already. A file
+  in the earlier layout is then refused by the check at open that exists, and is never read as the new one. Nothing
+  else is added.
 
 ### D9. ADR-029 is amended when this ADR is accepted — Proposed
 
 - Its table: Graph without time and with three indexes; Minimal with versioning, a log and session writes; the entry
   sizes as built.
 - Its open questions on Graph and Minimal: answered here.
-- D7: narrowed by ADR-034 D7 and by ADR-007, with the answer to Q4.
+- D7: a Reference store takes one bulk load (D10).
 - The validation records of 2026-05-16 stay as they are: they record what was built and measured that day.
+
+### D10. A Reference store takes one bulk load — Decided
+
+"It should stop, yes, it is read only by design." The check that refuses a second bulk load applies to every
+Reference store, whatever its atom store. Today it applies to a sorted atom store only (`QuadStore`'s constructor,
+ADR-034 D7).
 
 ### Not changed
 
 - **Cognitive** (ADR-061). Its model is the one this ADR follows.
-- **Reference** stays sealed (ADR-007), apart from the answer to Q4.
+- **Reference** stays sealed (ADR-007), and D10 closes the one way it could still be changed.
 - **What a client sees.** Every query on Graph and Minimal answers as it does today, apart from the defects measured
   above.
 
 ## Questions
 
+All answered by Martin on 2026-11-16.
+
 - **Q1. Graph's TGSP** (D3): it goes?
+  *Answered:* "Graph's TGSP goes, no time -> no need."
 - **Q2. A prune's versions** (D7): does a pruned Graph store carry each fact's version, or start every fact again at
-  version 1? A copy is another store (ADR-061 M3), which argues for 1. Immutability, and D12 for Cognitive, argue for
-  carrying it.
-- **Q3. Old stores** (D8): converted, or refused when opened, with a message to re-create the store? omega and zbook
-  hold none; the other three machines were not checked. DrHook.Capture makes one the first time it runs.
-- **Q4. A Reference store with a hash atom store** takes a second bulk load today (ADR-029 D7). "Reference is
-  readonly by design" says it should not. Does it stop?
-- **Q5. Order.** Against ADR-061's remaining steps. ADR-062 Step 6, which is in progress, comes first either way: its
-  cursor is how the store's own operations read the version (D4).
+  version 1? *Answered:* "Start at 1."
+- **Q3. Old stores** (D8): converted, or refused when opened, with a message to re-create the store?
+  *Answered:* "There are no old stores. Convert is not needed. No need for recreate."
+- **Q4. A Reference store with a hash atom store** takes a second bulk load today (ADR-029 D7). Does it stop?
+  *Answered:* "It should stop, yes, it is read only by design." (D10)
+- **Q5. Order** against ADR-061's remaining steps. *Answered:* "Is there a chain of depencies? Follow them. If not,
+  it does not matter." The chain is in [Steps](#steps).
 
 ## Steps
 
-1. **Martin's review** of this text: D3 and D5 to D9, Q1 to Q5.
+### The order follows the dependencies
+
+What remains of ADR-061 (its plan, 2026-11-14): P4, pruning, which waits for the form of the selection query; P5,
+ADR-062's cursor, whose Steps 2 to 5 are done and Step 6 is under way; P6, the words; P7, one removal, with ADR-062's
+part two; P8, consumers and documents; P9, dogfood on the live memory store, which waits for its index differences to
+be resolved (ADR-061 LQ5); and ADR-061's later part, the Cognitive layout, after its Steps 1 to 11.
+
+The links, read in the code on 2026-11-16:
+
+- **ADR-062 Step 6 comes before every read built here or in ADR-061.** ADR-061 P6 builds the words on the cursor
+  (ADR-062 D8). This ADR's rebuild reads the held version through it (D4, D6). Built on the enumerators first, each
+  would be built twice.
+- **This ADR's log (D5) comes before ADR-061 P7.** P7 removes `Retract` and `RetractBatched`. A Graph delete writes a
+  `Retract` record today: `DeleteCurrent` through `LogRecord.CreateRetract`, and `DeleteCurrentBatched` through
+  `RetractBatched`. If P7 came first, it would have to keep `Retract` for Graph.
+- **D5 comes before Minimal's write path (D2),** which writes D5's records.
+- **ADR-061 P6, P7 and P8 keep their own order.**
+- **Nothing else is linked.** ADR-061 P4, D10 and the documents can go anywhere in the order.
+- **This ADR's code waits for its acceptance.**
+
+### The steps
+
+1. **Martin's review** of this text. Still proposed: D5, D6, D8's magic number and D9, and the parity reading in D1.
 2. **ADR-062 Step 6** finishes. The Graph cursor row carries the version, the store's own read of it (D4).
 3. **Tests that state the model,** written first and failing on today's code:
    - the table of M4, on Graph and on Minimal;
    - a rebuild that carries retracted facts and their versions, and refuses when the indexes differ (G6, G8);
    - recovery after a real kill, as `tests/Mercury.CrashTarget` does (G7);
-   - the four indexes agree after every operation (G5).
-4. **The log holds the decided change** (D5).
+   - every index agrees after every operation (G5).
+4. **The log holds the decided change** (D5). Before ADR-061 P7.
 5. **The rebuild** carries what the store holds (D6).
-6. **The layout** (D1, D3, D8): the entry without times and mark, TGSP gone, `keyLayoutVersion`, the conversion if Q3
-   wants one.
+6. **The layout** (D1, D3, D8): the entry holds the key, the child pointer and the version; Graph's TGSP goes; each
+   file's magic number changes with its layout.
 7. **Minimal's write path** (D2): the log, session writes, soft deletes, the version.
-8. **The prune** (D7).
+8. **A Reference store takes one bulk load** (D10).
 9. **Documents:** ADR-029 (D9), `mercury-internals.md`, `api-usage.md`, `MERCURY.md` where it describes the profiles,
    `STATISTICS.md`.
 
-Steps 4 to 8 change Mercury code and wait for Martin's word, each.
+ADR-061 P6 needs only Step 2 of this list. Its P7 needs Step 4 as well. Steps 3 to 8 change Mercury code and start
+when Martin accepts this ADR.
 
 ## Not in this ADR
 
 - The Cognitive model, its words and its layout (ADR-061).
 - A read of the version in SPARQL (D4), or in the library API until a user is named.
-- The Reference seal (ADR-007), apart from Q4.
+- The Reference seal (ADR-007), apart from D10.
 
 ## References
 
 - [ADR-029](ADR-029-store-profiles.md): the four store profiles.
-- [ADR-061](ADR-061-a-facts-own-times.md): the Cognitive model; M7 (the log holds the decided change), I13 to I15,
-  I19, D12 (a prune), L2 to L4 (the layout and its conversion).
+- [ADR-061](ADR-061-a-facts-own-times.md): the Cognitive model; M3 (a copy is another store), M7 (the log holds the
+  decided change), I13 to I15, I19, D12 (a prune), its plan P0 to P9.
 - [ADR-062](ADR-062-what-a-read-yields.md): what a read yields, the index cursor; Q6 is answered here.
 - [ADR-007](../ADR-007-sealed-substrate-immutability.md): sealed substrates are re-created, not modified.
 - [ADR-034](ADR-034-sorted-atom-store-for-reference.md): the sorted atom store; D7, a single bulk load.
