@@ -1051,7 +1051,7 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
         /// </summary>
         internal readonly QuadIndexCursor ToCursor()
         {
-            var cursor = new QuadIndexCursor(_store);
+            var cursor = new QuadIndexCursor(_store, hasMemoryTimes: true);
             ref var state = ref cursor.State<ScanState>();
             state.PageId = _currentPageId;
             state.Slot = _currentSlot;
@@ -1175,6 +1175,7 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
                     cursor.MemorizedAt = key.MemorizedAt;
                     cursor.ForgottenAt = key.ForgottenAt;
                     cursor.LegacyTransactionTime = key.LegacyTransactionTime;
+                    cursor.LegacyModifiedAt = entry.LegacyModifiedAt;
                     cursor.LegacyIsDeleted = entry.LegacyIsDeleted;
                     state.Slot++;
                     return true;

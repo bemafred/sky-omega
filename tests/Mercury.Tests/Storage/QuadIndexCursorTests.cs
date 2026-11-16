@@ -46,7 +46,7 @@ public class QuadIndexCursorTests : IDisposable
         Assert.True(Unsafe.SizeOf<MinimalQuadIndex.ScanState>() <= QuadIndexCursor.StateBytes);
 
         // The index, the state and the row. The enumerator that holds all four profiles' enumerators is 632 bytes.
-        Assert.Equal(8 + QuadIndexCursor.StateBytes + 64, Unsafe.SizeOf<QuadIndexCursor>());
+        Assert.Equal(8 + QuadIndexCursor.StateBytes + 72, Unsafe.SizeOf<QuadIndexCursor>());
     }
 
     [Theory]
@@ -112,7 +112,9 @@ public class QuadIndexCursorTests : IDisposable
                 Assert.Equal(expected.MemorizedAt, cursor.MemorizedAt);
                 Assert.Equal(expected.ForgottenAt, cursor.ForgottenAt);
                 Assert.Equal(expected.LegacyTransactionTime, cursor.LegacyTransactionTime);
+                Assert.Equal(expected.LegacyModifiedAt, cursor.LegacyModifiedAt);
                 Assert.Equal(expected.LegacyIsDeleted, cursor.LegacyIsDeleted);
+                Assert.True(cursor.HasMemoryTimes);
                 rows++;
             }
             Assert.False(cursor.MoveNext(), $"the cursor has a row more than the enumerator's {rows} of {selection.Type} {pattern}");

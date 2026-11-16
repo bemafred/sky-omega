@@ -85,3 +85,14 @@ The cursor's interface call costs 0.5 to 0.8 ns a row. None of the eight allocat
 `FullScan` and `QueryByPredicate` are the two that walk many rows, so they are where a call per row would show.
 The store holds 50,000 quads: `FullScan` reads all of them, 36 ns a row, and `QueryByPredicate` reads 5,000, 41 ns a
 row. A row includes decoding three terms into the buffer.
+
+### On the cursor (Step 5, 2026-11-16)
+
+Sizes after the step: `TemporalResultEnumerator` 272 bytes (was 632), `MergedGraphEnumerator` 280 (was 640),
+`NamedGraphEnumerator` 408 (unchanged until Step 6).
+
+The 21 benchmarks were run again on the cursor. Two runs a day apart can differ by more than a change does (on this
+run `REGEX FILTER` was 6.5 % faster, and the cursor does not touch it), so the comparison that counts is the one run
+alternately in one session: four classes on the code before the step (`e538f83`, a separate clone) and on the
+cursor, twice each, and `QueryBenchmarks` once each. The results are in ADR-062, under D3, "The enumerator over the
+cursor".

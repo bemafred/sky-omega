@@ -348,6 +348,57 @@ bridge for this step, and goes when the query methods return the cursor (Step 5)
 - **Not tested:** any platform but omega; a cursor held while the index is written to (the store's lock rules
   that out, as for the enumerators); the cursor under the engine, which is Step 5.
 
+#### The enumerator over the cursor (Step 5, 2026-11-16)
+
+Martin, 2026-11-15: "Yes" to Step 5. `TemporalResultEnumerator` holds one `QuadIndexCursor`. The four backing
+enumerators, the three flags, four of its five constructors and the per-profile branches in `MoveNext` and `Current`
+are gone. What is the same for every profile is written once: the candidate filter, the mapping from the index's
+order to subject, predicate and object, and the decoding. The made-up times of the three profiles that keep none
+are in one place, chosen by `QuadIndexCursor.HasMemoryTimes`, which the Cognitive index sets when it makes a cursor;
+they go with D1. The row gained `LegacyModifiedAt`, which the Cognitive result gives as `RetractedAt`.
+
+- **Sizes, measured** (`tools/probes/read-cursor/enumerator-sizes.cs`): `TemporalResultEnumerator` 272 bytes, was
+  632; `MergedGraphEnumerator`, which holds one, 280, was 640. `NamedGraphEnumerator` is 408 as before (Step 6).
+- **Tests:** `Mercury.Tests` 6,425 passed, 156 skipped, 0 failed, the counts of Step 4, the W3C suites included;
+  `Mercury.Solid.Tests` 39 and `Mercury.Mcp.Tests` 4 passed. On omega only.
+- **Benchmarks.** The 21 of Step 2 were run again on the cursor. Because two runs a day apart may differ by more
+  than a change does, four classes were also run alternately on the code before the step (`e538f83`, as a separate
+  clone) and on the cursor, twice each, and the scan benchmarks once each. Mean of the two rounds, in the same
+  session:
+
+  | Benchmark | Before | Cursor | |
+  |---|---:|---:|---:|
+  | 2-pattern JOIN | 697.1 μs | 597.3 μs | −14 % |
+  | 5-pattern JOIN | 1,768.1 μs | 1,517.1 μs | −14 % |
+  | 8-pattern JOIN | 1,723.4 μs | 1,492.3 μs | −13 % |
+  | Numeric comparison FILTER | 2.371 ms | 2.173 ms | −8 % |
+  | String CONTAINS FILTER | 3.069 ms | 2.888 ms | within the rounds' spread |
+  | REGEX FILTER | 6.717 ms | 6.829 ms | within the rounds' spread |
+  | SPO Index (Subject bound) | 772.3 ns | 766.9 ns | −1 % |
+  | POS Index (Predicate bound) | 841.8 ns | 827.5 ns | −2 % |
+  | OSP Index (Object bound) | 400.5 ns | 313.1 ns | −11 % against the second round before; the first had a deviation of 42 ns |
+  | Point-in-time query (as-of) | 814.5 ns | 750.2 ns | −8 % |
+  | Temporal range query | 770.3 ns | 723.4 ns | −6 % |
+  | Evolution query (all versions) | 819.5 ns | 845.1 ns | **+3 %** |
+  | Current state query | 887.1 ns | 836.2 ns | −6 % |
+
+  The scan benchmarks of `QueryBenchmarks` (a store of 50,000 quads; every row is decoded), once each:
+
+  | Benchmark | Before | Cursor | |
+  |---|---:|---:|---:|
+  | QueryBySubject | 477.0 ns | 422.8 ns | −11 % |
+  | QueryByObject | 17,310.9 ns | 14,601.1 ns | −16 % |
+  | QueryByPredicate (5,000 rows) | 203,268.3 ns | 160,496.0 ns | −21 % |
+  | FullScan (50,000 rows) | 1,697,508.6 ns | 1,645,800.7 ns | −3 %, 33.9 ns a row before and 32.9 after |
+
+  No benchmark allocates more or less than before.
+
+  **The call shows in one place.** The evolution benchmark reads 100 rows and decodes none of them: it is the one
+  where a row is nothing but the scan, and there the cursor is 3 % slower, in both rounds (+2.2 % and +4.0 %), which
+  is 0.2 to 0.3 ns a row. Every benchmark that decodes its rows is as fast or faster: the result enumerator no longer
+  tests three flags per row, and a scan copies 272 bytes instead of 632. D7's remedy, advancing within a leaf and
+  calling the index once per leaf, is not taken: next to decoding the call is not visible.
+
 What was not known about D when it was proposed (the first is still open until Step 5; the other two are answered
 above):
 
@@ -452,7 +503,7 @@ The order follows D8.
 5. **The enumerator over the cursor** replaces the four-enumerator struct. The three flags, four of the five
    constructors and the repeated branches go. It still returns `ResolvedTemporalQuad`, with the made-up values
    written once. Every test passes; every W3C result is unchanged. The benchmarks of Step 2 are run again and
-   compared.
+   compared — **done 2026-11-16**, on omega; see "The enumerator over the cursor" under D3.
 6. **`NamedGraphEnumerator`** on the cursor (Q5).
 
 **Then ADR-061 Step 5:** the words, built on the cursor.

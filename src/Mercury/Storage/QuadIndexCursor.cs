@@ -51,27 +51,39 @@ internal struct QuadIndexCursor
 
     /// <summary>
     /// When the row's version was memorized and when it was forgotten, in milliseconds since the epoch. Only an
-    /// index that keeps a memory's two times writes them (the Cognitive profile's); any other leaves them as they
-    /// were.
+    /// index that keeps a memory's two times writes them (the Cognitive profile's); <see cref="HasMemoryTimes"/>
+    /// says whether this cursor's index does.
     /// </summary>
     public long MemorizedAt, ForgottenAt;
 
     /// <summary>
-    /// Legacy (ADR-061 D11): the Cognitive entry's transaction time and its deleted mark. Carried for as long as the
-    /// result type has them (ADR-061 Step 6 removes them). The Graph index writes its own deleted mark here.
+    /// Legacy (ADR-061 D11): the Cognitive entry's transaction time, its deleted mark and when it was marked.
+    /// Carried for as long as the result type has them (ADR-061 Step 6 removes them). The Graph index writes its
+    /// own deleted mark into <see cref="LegacyIsDeleted"/>.
     /// </summary>
     public long LegacyTransactionTime;
 
     /// <inheritdoc cref="LegacyTransactionTime"/>
+    public long LegacyModifiedAt;
+
+    /// <inheritdoc cref="LegacyTransactionTime"/>
     public bool LegacyIsDeleted;
 
-    internal QuadIndexCursor(IQuadIndex index)
+    /// <summary>
+    /// Whether the index that moves this cursor writes <see cref="MemorizedAt"/> and <see cref="ForgottenAt"/>.
+    /// The index says so when it makes the cursor. Read by the one place that still gives a result made-up times
+    /// when the store keeps none (ADR-062 Step 5); it goes with those values (ADR-062 D1, D2).
+    /// </summary>
+    public readonly bool HasMemoryTimes;
+
+    internal QuadIndexCursor(IQuadIndex index, bool hasMemoryTimes = false)
     {
         _index = index;
         _state = default;
         Graph = Primary = Secondary = Tertiary = 0;
-        MemorizedAt = ForgottenAt = LegacyTransactionTime = 0;
+        MemorizedAt = ForgottenAt = LegacyTransactionTime = LegacyModifiedAt = 0;
         LegacyIsDeleted = false;
+        HasMemoryTimes = hasMemoryTimes;
     }
 
     /// <summary>

@@ -3147,7 +3147,7 @@ public sealed class QuadStore : IDisposable
             _ => selectedIndex.QueryHistory(arg1, arg2, arg3, graph)
         };
 
-        return new TemporalResultEnumerator(enumerator, indexType, _atoms);
+        return new TemporalResultEnumerator(enumerator.ToCursor(), indexType, _atoms);
     }
 
     /// <summary>
@@ -3279,7 +3279,7 @@ public sealed class QuadStore : IDisposable
         }
 
         var enumerator = selectedIndex.QueryAsOf(arg1, arg2, arg3, _clock.GetUtcNow(), graph);
-        return new TemporalResultEnumerator(enumerator, indexType, _atoms, candidateObjectAtomIds);
+        return new TemporalResultEnumerator(enumerator.ToCursor(), indexType, _atoms, candidateObjectAtomIds);
     }
 
     /// <summary>
@@ -3365,8 +3365,8 @@ public sealed class QuadStore : IDisposable
     /// <summary>
     /// Query entry for Minimal profile. Resolves SPARQL-shaped spans to atom IDs,
     /// rejects any non-empty graph constraint, queries the single GSPO index, and
-    /// wraps the resulting <see cref="MinimalQuadIndex.MinimalQuadEnumerator"/> in
-    /// a <see cref="TemporalResultEnumerator"/>. ADR-029 Minimal profile.
+    /// returns a <see cref="TemporalResultEnumerator"/> over that index's
+    /// <see cref="QuadIndexCursor"/> (ADR-062). ADR-029 Minimal profile.
     /// </summary>
     private TemporalResultEnumerator QueryMinimalCurrent(
         ReadOnlySpan<char> subject,
@@ -3385,7 +3385,7 @@ public sealed class QuadStore : IDisposable
         var tertiary = ResolveQueryTerm(@object);
 
         var enumerator = _gspoMinimal!.Query(primary, secondary, tertiary);
-        return new TemporalResultEnumerator(enumerator, _atoms, candidateObjectAtomIds);
+        return new TemporalResultEnumerator(enumerator.ToCursor(), TemporalIndexType.GSPO, _atoms, candidateObjectAtomIds);
     }
 
     /// <summary>
@@ -3464,14 +3464,14 @@ public sealed class QuadStore : IDisposable
         }
 
         var enumerator = gIndex.Query(g, primary, secondary, tertiary);
-        return new TemporalResultEnumerator(enumerator, indexType, _atoms, candidateObjectAtomIds);
+        return new TemporalResultEnumerator(enumerator.ToCursor(), indexType, _atoms, candidateObjectAtomIds);
     }
 
     /// <summary>
     /// Query entry for Reference profile. Resolves SPARQL-shaped spans to atom IDs,
-    /// chooses the right index (GSPO or GPOS), remaps dimensions, and wraps the
-    /// resulting <see cref="ReferenceQuadIndex.ReferenceQuadEnumerator"/> in a
-    /// <see cref="TemporalResultEnumerator"/> for uniform consumption by the SPARQL
+    /// chooses the right index (GSPO or GPOS), and returns a
+    /// <see cref="TemporalResultEnumerator"/> over that index's <see cref="QuadIndexCursor"/>
+    /// (ADR-062), which remaps the dimensions for uniform consumption by the SPARQL
     /// executor.
     /// </summary>
     private TemporalResultEnumerator QueryReferenceCurrent(
@@ -3500,7 +3500,7 @@ public sealed class QuadStore : IDisposable
         }
 
         var refEnum = refIndex.Query(g, primary, secondary, tertiary);
-        return new TemporalResultEnumerator(refEnum, indexType, _atoms, candidateObjectAtomIds);
+        return new TemporalResultEnumerator(refEnum.ToCursor(), indexType, _atoms, candidateObjectAtomIds);
     }
 
     private (TemporalQuadIndex Index, TemporalIndexType Type) SelectOptimalIndex(
@@ -3724,7 +3724,8 @@ public sealed class QuadStore : IDisposable
 }
 
 /// <summary>
-/// Enumerator that remaps results from different temporal indexes.
+/// The result of a read on any profile: one <see cref="QuadIndexCursor"/>, moved by the index the read uses
+/// (ADR-062 D3), and the remapping of its row to subject, predicate and object.
 /// Uses pooled buffers to avoid allocations when decoding atom strings.
 ///
 /// IMPORTANT: The spans returned by Current are only valid until the next
@@ -3736,15 +3737,10 @@ public sealed class QuadStore : IDisposable
 /// </summary>
 public struct TemporalResultEnumerator
 {
-    // Exactly one of these backing enumerators is active, chosen at construction time
-    // based on the profile of the store that produced the result. ADR-029 Phase 2d.
-    private TemporalQuadIndex.TemporalQuadEnumerator _baseEnumerator;
-    private ReferenceQuadIndex.ReferenceQuadEnumerator _referenceEnumerator;
-    private VersionedQuadIndex.VersionedQuadEnumerator _graphEnumerator;
-    private MinimalQuadIndex.MinimalQuadEnumerator _minimalEnumerator;
-    private readonly bool _isReference;
-    private readonly bool _isGraph;
-    private readonly bool _isMinimal;
+    // One cursor, moved by the index of the store's profile (ADR-062 D3). What follows is the same for every
+    // profile and is written once: the candidate filter, the mapping from the index's order to subject, predicate
+    // and object, and the decoding of atoms into the buffer.
+    private QuadIndexCursor _cursor;
 
     private readonly TemporalIndexType _indexType;
     private readonly IAtomStore _atoms;
@@ -3755,119 +3751,18 @@ public struct TemporalResultEnumerator
     private int _bufferOffset;
     private const int InitialBufferSize = 4096; // 4KB - typical for 3 URIs
 
+    /// <param name="cursor">A cursor of the index the read uses, at its start.</param>
+    /// <param name="indexType">The order of that index, which says where subject, predicate and object are in a row.</param>
+    /// <param name="atoms">The store's atoms.</param>
+    /// <param name="candidateObjectAtomIds">When given, only rows whose object is one of these atoms are returned.</param>
     internal TemporalResultEnumerator(
-        TemporalQuadIndex.TemporalQuadEnumerator baseEnumerator,
-        TemporalIndexType indexType,
-        IAtomStore atoms)
-    {
-        _baseEnumerator = baseEnumerator;
-        _referenceEnumerator = default;
-        _graphEnumerator = default;
-        _minimalEnumerator = default;
-        _isReference = false;
-        _isGraph = false;
-        _isMinimal = false;
-        _indexType = indexType;
-        _atoms = atoms;
-        _candidateObjectAtomIds = null;
-        _buffer = null;
-        _bufferOffset = 0;
-    }
-
-    internal TemporalResultEnumerator(
-        TemporalQuadIndex.TemporalQuadEnumerator baseEnumerator,
-        TemporalIndexType indexType,
-        IAtomStore atoms,
-        HashSet<long>? candidateObjectAtomIds)
-    {
-        _baseEnumerator = baseEnumerator;
-        _referenceEnumerator = default;
-        _graphEnumerator = default;
-        _minimalEnumerator = default;
-        _isReference = false;
-        _isGraph = false;
-        _isMinimal = false;
-        _indexType = indexType;
-        _atoms = atoms;
-        _candidateObjectAtomIds = candidateObjectAtomIds;
-        _buffer = null;
-        _bufferOffset = 0;
-    }
-
-    /// <summary>
-    /// Wrap a Reference-profile enumeration. Temporal fields in the projected
-    /// <see cref="ResolvedTemporalQuad"/> are synthesized (MemorizedAt=MinValue,
-    /// ForgottenAt=MaxValue, LegacyTransactionTime=MinValue, LegacyIsDeleted=false) because a Reference
-    /// store has no temporal dimension — every triple is current by construction.
-    /// </summary>
-    internal TemporalResultEnumerator(
-        ReferenceQuadIndex.ReferenceQuadEnumerator referenceEnumerator,
+        QuadIndexCursor cursor,
         TemporalIndexType indexType,
         IAtomStore atoms,
         HashSet<long>? candidateObjectAtomIds = null)
     {
-        _baseEnumerator = default;
-        _referenceEnumerator = referenceEnumerator;
-        _graphEnumerator = default;
-        _minimalEnumerator = default;
-        _isReference = true;
-        _isGraph = false;
-        _isMinimal = false;
+        _cursor = cursor;
         _indexType = indexType;
-        _atoms = atoms;
-        _candidateObjectAtomIds = candidateObjectAtomIds;
-        _buffer = null;
-        _bufferOffset = 0;
-    }
-
-    /// <summary>
-    /// Wrap a Graph-profile enumeration (ADR-029 Graph). Temporal fields are
-    /// synthesized identically to the Reference path (no time dimension); the
-    /// VersionedQuad's <c>IsDeleted</c> flag flows through into the projected
-    /// <see cref="ResolvedTemporalQuad"/>. Soft-deleted entries are filtered out
-    /// by <see cref="VersionedQuadIndex.Query"/> before they reach this enumerator,
-    /// so <see cref="ResolvedTemporalQuad.LegacyIsDeleted"/> is always false for live queries.
-    /// </summary>
-    internal TemporalResultEnumerator(
-        VersionedQuadIndex.VersionedQuadEnumerator graphEnumerator,
-        TemporalIndexType indexType,
-        IAtomStore atoms,
-        HashSet<long>? candidateObjectAtomIds = null)
-    {
-        _baseEnumerator = default;
-        _referenceEnumerator = default;
-        _graphEnumerator = graphEnumerator;
-        _minimalEnumerator = default;
-        _isReference = false;
-        _isGraph = true;
-        _isMinimal = false;
-        _indexType = indexType;
-        _atoms = atoms;
-        _candidateObjectAtomIds = candidateObjectAtomIds;
-        _buffer = null;
-        _bufferOffset = 0;
-    }
-
-    /// <summary>
-    /// Wrap a Minimal-profile enumeration (ADR-029 Minimal). Graph dimension is
-    /// projected as the default graph (empty span); temporal fields are synthesized
-    /// identically to Reference / Graph (no time dimension). Minimal has only a
-    /// single GSPO index, so <see cref="_indexType"/> is always
-    /// <see cref="TemporalIndexType.GSPO"/>.
-    /// </summary>
-    internal TemporalResultEnumerator(
-        MinimalQuadIndex.MinimalQuadEnumerator minimalEnumerator,
-        IAtomStore atoms,
-        HashSet<long>? candidateObjectAtomIds = null)
-    {
-        _baseEnumerator = default;
-        _referenceEnumerator = default;
-        _graphEnumerator = default;
-        _minimalEnumerator = minimalEnumerator;
-        _isReference = false;
-        _isGraph = false;
-        _isMinimal = true;
-        _indexType = TemporalIndexType.GSPO;
         _atoms = atoms;
         _candidateObjectAtomIds = candidateObjectAtomIds;
         _buffer = null;
@@ -3879,72 +3774,18 @@ public struct TemporalResultEnumerator
         // Reset buffer offset for new result - reuse same buffer
         _bufferOffset = 0;
 
-        if (_isReference)
-        {
-            if (_candidateObjectAtomIds is null)
-                return _referenceEnumerator.MoveNext();
-
-            while (_referenceEnumerator.MoveNext())
-            {
-                var key = _referenceEnumerator.Current;
-                long objectAtomId = _indexType switch
-                {
-                    TemporalIndexType.GPOS => key.Secondary,
-                    _ => key.Tertiary // GSPO (Reference has no GOSP/TGSP)
-                };
-                if (_candidateObjectAtomIds.Contains(objectAtomId))
-                    return true;
-            }
-            return false;
-        }
-
-        if (_isGraph)
-        {
-            if (_candidateObjectAtomIds is null)
-                return _graphEnumerator.MoveNext();
-
-            while (_graphEnumerator.MoveNext())
-            {
-                var gquad = _graphEnumerator.Current;
-                long objectAtomId = _indexType switch
-                {
-                    TemporalIndexType.GPOS => gquad.Secondary,
-                    TemporalIndexType.GOSP => gquad.Primary,
-                    _ => gquad.Tertiary // GSPO, TGSP
-                };
-                if (_candidateObjectAtomIds.Contains(objectAtomId))
-                    return true;
-            }
-            return false;
-        }
-
-        if (_isMinimal)
-        {
-            if (_candidateObjectAtomIds is null)
-                return _minimalEnumerator.MoveNext();
-
-            while (_minimalEnumerator.MoveNext())
-            {
-                // Minimal has only GSPO; Tertiary = object.
-                if (_candidateObjectAtomIds.Contains(_minimalEnumerator.Current.Tertiary))
-                    return true;
-            }
-            return false;
-        }
-
-        if (_candidateObjectAtomIds == null)
-            return _baseEnumerator.MoveNext();
+        if (_candidateObjectAtomIds is null)
+            return _cursor.MoveNext();
 
         // Candidate-filtered iteration: skip non-candidate objects at atom-ID level
         // (before expensive UTF-8 → UTF-16 string decode)
-        while (_baseEnumerator.MoveNext())
+        while (_cursor.MoveNext())
         {
-            var quad = _baseEnumerator.Current;
             long objectAtomId = _indexType switch
             {
-                TemporalIndexType.GPOS => quad.Secondary,
-                TemporalIndexType.GOSP => quad.Primary,
-                _ => quad.Tertiary // GSPO, TGSP
+                TemporalIndexType.GPOS => _cursor.Secondary,
+                TemporalIndexType.GOSP => _cursor.Primary,
+                _ => _cursor.Tertiary // GSPO, TGSP
             };
 
             if (_candidateObjectAtomIds.Contains(objectAtomId))
@@ -3957,120 +3798,29 @@ public struct TemporalResultEnumerator
     {
         get
         {
-            long graph, s, p, o;
-
-            if (_isReference)
-            {
-                var key = _referenceEnumerator.Current;
-                graph = key.Graph;
-                // Reference supports only GSPO and GPOS.
-                switch (_indexType)
-                {
-                    case TemporalIndexType.GSPO:
-                        s = key.Primary; p = key.Secondary; o = key.Tertiary;
-                        break;
-                    case TemporalIndexType.GPOS:
-                        p = key.Primary; o = key.Secondary; s = key.Tertiary;
-                        break;
-                    default:
-                        s = p = o = 0;
-                        break;
-                }
-
-                return new ResolvedTemporalQuad(
-                    graph == 0 ? ReadOnlySpan<char>.Empty : DecodeAtomToBuffer(graph),
-                    DecodeAtomToBuffer(s),
-                    DecodeAtomToBuffer(p),
-                    DecodeAtomToBuffer(o),
-                    // Synthesized temporal fields: Reference has no time dimension.
-                    DateTimeOffset.MinValue,
-                    DateTimeOffset.MaxValue,
-                    DateTimeOffset.MinValue,
-                    false);
-            }
-
-            if (_isMinimal)
-            {
-                // Minimal has only GSPO with no graph dimension. Project graph as
-                // default (empty span); temporal fields are synthesized like Reference.
-                var mkey = _minimalEnumerator.Current;
-                return new ResolvedTemporalQuad(
-                    ReadOnlySpan<char>.Empty,
-                    DecodeAtomToBuffer(mkey.Primary),
-                    DecodeAtomToBuffer(mkey.Secondary),
-                    DecodeAtomToBuffer(mkey.Tertiary),
-                    DateTimeOffset.MinValue,
-                    DateTimeOffset.MaxValue,
-                    DateTimeOffset.MinValue,
-                    false);
-            }
-
-            if (_isGraph)
-            {
-                var gquad = _graphEnumerator.Current;
-                graph = gquad.Graph;
-                // Graph supports GSPO/GPOS/GOSP/TGSP.
-                switch (_indexType)
-                {
-                    case TemporalIndexType.GSPO:
-                    case TemporalIndexType.TGSP:
-                        s = gquad.Primary; p = gquad.Secondary; o = gquad.Tertiary;
-                        break;
-                    case TemporalIndexType.GPOS:
-                        p = gquad.Primary; o = gquad.Secondary; s = gquad.Tertiary;
-                        break;
-                    case TemporalIndexType.GOSP:
-                        o = gquad.Primary; s = gquad.Secondary; p = gquad.Tertiary;
-                        break;
-                    default:
-                        s = p = o = 0;
-                        break;
-                }
-
-                // Graph has versioning (CreatedAt/ModifiedAt/Version/IsDeleted) but no
-                // bitemporal time dimension. Project MemorizedAt/ForgottenAt/LegacyTransactionTime
-                // as synthesized "always current" values (same shape as Reference); the
-                // IsDeleted flag flows through from the entry — though under live queries
-                // (the default) only live entries reach here, so it's always false.
-                return new ResolvedTemporalQuad(
-                    graph == 0 ? ReadOnlySpan<char>.Empty : DecodeAtomToBuffer(graph),
-                    DecodeAtomToBuffer(s),
-                    DecodeAtomToBuffer(p),
-                    DecodeAtomToBuffer(o),
-                    DateTimeOffset.MinValue,
-                    DateTimeOffset.MaxValue,
-                    DateTimeOffset.MinValue,
-                    gquad.IsDeleted);
-            }
-
-            var quad = _baseEnumerator.Current;
-            graph = quad.Graph;
+            long graph = _cursor.Graph;
+            long s, p, o;
 
             // Remap generic dimensions back to RDF terms based on index type
             switch (_indexType)
             {
                 case TemporalIndexType.GSPO:
-                    s = quad.Primary;    // GSPO: Primary=subject
-                    p = quad.Secondary;  // GSPO: Secondary=predicate
-                    o = quad.Tertiary;   // GSPO: Tertiary=object
+                case TemporalIndexType.TGSP:
+                    s = _cursor.Primary;    // Primary=subject
+                    p = _cursor.Secondary;  // Secondary=predicate
+                    o = _cursor.Tertiary;   // Tertiary=object
                     break;
 
                 case TemporalIndexType.GPOS:
-                    p = quad.Primary;    // GPOS: Primary=predicate
-                    o = quad.Secondary;  // GPOS: Secondary=object
-                    s = quad.Tertiary;   // GPOS: Tertiary=subject
+                    p = _cursor.Primary;    // GPOS: Primary=predicate
+                    o = _cursor.Secondary;  // GPOS: Secondary=object
+                    s = _cursor.Tertiary;   // GPOS: Tertiary=subject
                     break;
 
                 case TemporalIndexType.GOSP:
-                    o = quad.Primary;    // GOSP: Primary=object
-                    s = quad.Secondary;  // GOSP: Secondary=subject
-                    p = quad.Tertiary;   // GOSP: Tertiary=predicate
-                    break;
-
-                case TemporalIndexType.TGSP:
-                    s = quad.Primary;    // TGSP: Primary=subject
-                    p = quad.Secondary;  // TGSP: Secondary=predicate
-                    o = quad.Tertiary;   // TGSP: Tertiary=object
+                    o = _cursor.Primary;    // GOSP: Primary=object
+                    s = _cursor.Secondary;  // GOSP: Secondary=subject
+                    p = _cursor.Tertiary;   // GOSP: Tertiary=predicate
                     break;
 
                 default:
@@ -4078,19 +3828,36 @@ public struct TemporalResultEnumerator
                     break;
             }
 
+            var graphTerm = graph == 0 ? ReadOnlySpan<char>.Empty : DecodeAtomToBuffer(graph);
+            var subjectTerm = DecodeAtomToBuffer(s);
+            var predicateTerm = DecodeAtomToBuffer(p);
+            var objectTerm = DecodeAtomToBuffer(o);
+
+            // The one place where a result gets times the store does not keep (ADR-062 Step 5): the Reference, Graph
+            // and Minimal profiles keep none, and the result type still has them. The values are the earliest time,
+            // the latest and the earliest. The Graph profile's deleted mark flows through; under a live query only
+            // live entries reach here, so it is false. This goes when a read on those profiles yields the quad and
+            // nothing else (ADR-062 D1).
+            if (!_cursor.HasMemoryTimes)
+            {
+                return new ResolvedTemporalQuad(
+                    graphTerm, subjectTerm, predicateTerm, objectTerm,
+                    DateTimeOffset.MinValue,
+                    DateTimeOffset.MaxValue,
+                    DateTimeOffset.MinValue,
+                    _cursor.LegacyIsDeleted);
+            }
+
             // Clamp milliseconds to valid DateTimeOffset range
             const long MaxValidMs = 253402300799999L; // Dec 31, 9999
 
             return new ResolvedTemporalQuad(
-                graph == 0 ? ReadOnlySpan<char>.Empty : DecodeAtomToBuffer(graph),
-                DecodeAtomToBuffer(s),
-                DecodeAtomToBuffer(p),
-                DecodeAtomToBuffer(o),
-                DateTimeOffset.FromUnixTimeMilliseconds(Math.Min(quad.MemorizedAt, MaxValidMs)),
-                DateTimeOffset.FromUnixTimeMilliseconds(Math.Min(quad.ForgottenAt, MaxValidMs)),
-                DateTimeOffset.FromUnixTimeMilliseconds(Math.Min(quad.LegacyTransactionTime, MaxValidMs)),
-                quad.LegacyIsDeleted,
-                quad.LegacyIsDeleted ? DateTimeOffset.FromUnixTimeMilliseconds(Math.Min(quad.LegacyModifiedAt, MaxValidMs)) : null
+                graphTerm, subjectTerm, predicateTerm, objectTerm,
+                DateTimeOffset.FromUnixTimeMilliseconds(Math.Min(_cursor.MemorizedAt, MaxValidMs)),
+                DateTimeOffset.FromUnixTimeMilliseconds(Math.Min(_cursor.ForgottenAt, MaxValidMs)),
+                DateTimeOffset.FromUnixTimeMilliseconds(Math.Min(_cursor.LegacyTransactionTime, MaxValidMs)),
+                _cursor.LegacyIsDeleted,
+                _cursor.LegacyIsDeleted ? DateTimeOffset.FromUnixTimeMilliseconds(Math.Min(_cursor.LegacyModifiedAt, MaxValidMs)) : null
             );
         }
     }
