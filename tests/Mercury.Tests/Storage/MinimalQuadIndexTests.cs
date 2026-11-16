@@ -145,7 +145,7 @@ public class MinimalQuadIndexTests : IDisposable
         int count = 0;
         long matchedTertiary = 0;
         var e = idx.Query(100, 200, 301);
-        while (e.MoveNext()) { matchedTertiary = e.Current.Tertiary; count++; }
+        while (e.MoveNext()) { matchedTertiary = e.Tertiary; count++; }
         Assert.Equal(1, count);
         Assert.Equal(301, matchedTertiary);
     }

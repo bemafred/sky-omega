@@ -209,7 +209,7 @@ public class TemporalQuadIndexTests : IDisposable
         var lastSubject = "";
         while (results.MoveNext())
         {
-            var current = index.Atoms.GetAtomString(results.Current.Primary);
+            var current = index.Atoms.GetAtomString(results.Primary);
             Assert.True(string.CompareOrdinal(current, lastSubject) >= 0,
                 $"Out of order: {lastSubject} should come before {current}");
             lastSubject = current;
@@ -240,10 +240,9 @@ public class TemporalQuadIndexTests : IDisposable
         var results = index.QueryCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
         Assert.True(results.MoveNext());
 
-        var triple = results.Current;
-        Assert.True(triple.Primary > 0);
-        Assert.True(triple.Secondary > 0);
-        Assert.True(triple.Tertiary > 0);
+        Assert.True(results.Primary > 0);
+        Assert.True(results.Secondary > 0);
+        Assert.True(results.Tertiary > 0);
     }
 
     [Fact]
@@ -254,11 +253,11 @@ public class TemporalQuadIndexTests : IDisposable
 
         var results1 = index.QueryCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
         results1.MoveNext();
-        var subjectId1 = results1.Current.Primary;
+        var subjectId1 = results1.Primary;
 
         var results2 = index.QueryCurrent("<http://ex.org/s>", ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty);
         results2.MoveNext();
-        var subjectId2 = results2.Current.Primary;
+        var subjectId2 = results2.Primary;
 
         Assert.Equal(subjectId1, subjectId2);
     }
@@ -421,26 +420,25 @@ public class TemporalQuadIndexTests : IDisposable
         var results = index.QueryHistory("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
         Assert.True(results.MoveNext());
 
-        var triple = results.Current;
-        Assert.True(triple.MemorizedAt > 0);
-        Assert.True(triple.ForgottenAt > triple.MemorizedAt);
-        Assert.True(triple.LegacyTransactionTime > 0);
+        Assert.True(results.MemorizedAt > 0);
+        Assert.True(results.ForgottenAt > results.MemorizedAt);
+        Assert.True(results.LegacyTransactionTime > 0);
     }
 
     [Fact]
-    public void TemporalTripleEnumerator_CurrentOnlyValidDuringIteration()
+    public void TheCursor_IsAtARowOnlyAfterMoveNext()
     {
         var index = CreateIndex();
         index.AddCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
 
         var results = index.QueryCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
 
-        // Before MoveNext, Current is default
+        // Before MoveNext the cursor is at no row
+        Assert.Equal(0, results.Primary);
         Assert.True(results.MoveNext());
 
-        // After MoveNext, Current has values
-        var triple = results.Current;
-        Assert.True(triple.Primary > 0);
+        // After MoveNext it is at the row
+        Assert.True(results.Primary > 0);
     }
 
     #endregion
@@ -561,10 +559,10 @@ public class TemporalQuadIndexTests : IDisposable
             ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty);
 
         Assert.True(results.MoveNext(), "Expected first result");
-        var first = results.Current;
+        var first = (results.Primary, results.MemorizedAt);
 
         Assert.True(results.MoveNext(), "Expected second result");
-        var second = results.Current;
+        var second = (results.Primary, results.MemorizedAt);
 
         Assert.False(results.MoveNext(), "Expected only two results");
 
@@ -600,10 +598,10 @@ public class TemporalQuadIndexTests : IDisposable
             ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty);
 
         Assert.True(results.MoveNext());
-        var firstPrimary = index.Atoms.GetAtomString(results.Current.Primary);
+        var firstPrimary = index.Atoms.GetAtomString(results.Primary);
 
         Assert.True(results.MoveNext());
-        var secondPrimary = index.Atoms.GetAtomString(results.Current.Primary);
+        var secondPrimary = index.Atoms.GetAtomString(results.Primary);
 
         Assert.Equal("<http://ex.org/aaa>", firstPrimary);
         Assert.Equal("<http://ex.org/zzz>", secondPrimary);

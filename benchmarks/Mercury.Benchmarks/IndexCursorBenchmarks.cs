@@ -5,10 +5,11 @@ using SkyOmega.Mercury.Runtime;
 namespace SkyOmega.Mercury.Benchmarks;
 
 /// <summary>
-/// ADR-062 D7: what a row costs through an index's own enumerator and through its cursor. The cursor is moved by an
-/// interface call per row (<c>IQuadIndex.Advance</c>); the enumerator's <c>MoveNext</c> is a direct call. Each
-/// benchmark walks all 50,000 entries of one index and sums one atom of each row, with no decoding, so the call is
-/// as large a part of the row as it can be.
+/// ADR-062 D7: what a row costs through each index's cursor, the one read of an index. The cursor is moved by an
+/// interface call per row (<c>IQuadIndex.Advance</c>). Each benchmark walks all 50,000 entries of one index and sums
+/// one atom of each row, with no decoding, so the call is as large a part of the row as it can be. Measured against
+/// each index's own enumerator before ADR-062 Step 6 removed them: the call cost 0.5 to 0.8 ns a row (ADR-062, "The
+/// call, measured at the index").
 /// </summary>
 [MemoryDiagnoser]
 [SimpleJob(warmupCount: 3, iterationCount: 10)]
@@ -58,74 +59,38 @@ public class IndexCursorBenchmarks
             Directory.Delete(_path, true);
     }
 
-    [Benchmark(Description = "Cognitive, enumerator")]
-    public long CognitiveEnumerator()
+    [Benchmark(Description = "Cognitive")]
+    public long Cognitive()
     {
         long sum = 0;
         var rows = _cognitive.Query(-1, -1, -1, -1, _remembered);
-        while (rows.MoveNext()) sum += rows.Current.Primary;
-        return sum;
-    }
-
-    [Benchmark(Description = "Cognitive, cursor")]
-    public long CognitiveCursor()
-    {
-        long sum = 0;
-        var rows = _cognitive.Query(-1, -1, -1, -1, _remembered).ToCursor();
         while (rows.MoveNext()) sum += rows.Primary;
         return sum;
     }
 
-    [Benchmark(Description = "Graph, enumerator")]
-    public long GraphEnumerator()
+    [Benchmark(Description = "Graph")]
+    public long Graph()
     {
         long sum = 0;
         var rows = _graph.Query(-1, -1, -1, -1);
-        while (rows.MoveNext()) sum += rows.Current.Primary;
-        return sum;
-    }
-
-    [Benchmark(Description = "Graph, cursor")]
-    public long GraphCursor()
-    {
-        long sum = 0;
-        var rows = _graph.Query(-1, -1, -1, -1).ToCursor();
         while (rows.MoveNext()) sum += rows.Primary;
         return sum;
     }
 
-    [Benchmark(Description = "Reference, enumerator")]
-    public long ReferenceEnumerator()
+    [Benchmark(Description = "Reference")]
+    public long Reference()
     {
         long sum = 0;
         var rows = _reference.Query(-1, -1, -1, -1);
-        while (rows.MoveNext()) sum += rows.Current.Primary;
-        return sum;
-    }
-
-    [Benchmark(Description = "Reference, cursor")]
-    public long ReferenceCursor()
-    {
-        long sum = 0;
-        var rows = _reference.Query(-1, -1, -1, -1).ToCursor();
         while (rows.MoveNext()) sum += rows.Primary;
         return sum;
     }
 
-    [Benchmark(Description = "Minimal, enumerator")]
-    public long MinimalEnumerator()
+    [Benchmark(Description = "Minimal")]
+    public long Minimal()
     {
         long sum = 0;
         var rows = _minimal.Query(-1, -1, -1);
-        while (rows.MoveNext()) sum += rows.Current.Primary;
-        return sum;
-    }
-
-    [Benchmark(Description = "Minimal, cursor")]
-    public long MinimalCursor()
-    {
-        long sum = 0;
-        var rows = _minimal.Query(-1, -1, -1).ToCursor();
         while (rows.MoveNext()) sum += rows.Primary;
         return sum;
     }

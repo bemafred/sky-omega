@@ -1088,6 +1088,10 @@ this ADR do not answer goes to Martin.
       and is not logged. The engine cannot yet tell a caller's error from its own (ADR-060).
   - **Found while P2 was built, fixed in [ADR-063](ADR-063-an-index-file-grows-by-extents.md):** an index file
     that outgrew its initial size killed the process, and readers at the same time were given wrong pages.
+- **P5: done 2026-11-16**, on omega: [ADR-062](ADR-062-what-a-read-yields.md)'s part one, its Steps 2 to 6. Every read
+  of an index goes through one cursor. `Mercury.Tests`: 6,429 passed, 156 skipped, 0 failed. Next: P6, the words,
+  built on the cursor. P7 waits for [ADR-064](ADR-064-a-facts-states.md)'s log as well: the Graph delete writes the
+  `Retract` record that P7 removes.
 
 1. **Martin's review** of this text — **done 2026-11-14**, with the decision closure. The later part is reviewed on
    its own.

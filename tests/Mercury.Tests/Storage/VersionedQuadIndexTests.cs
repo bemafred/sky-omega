@@ -95,7 +95,7 @@ public class VersionedQuadIndexTests : IDisposable
         int count = 0;
         long matchedTertiary = 0;
         var e = idx.Query(0, 100, 200, 301);
-        while (e.MoveNext()) { matchedTertiary = e.Current.Tertiary; count++; }
+        while (e.MoveNext()) { matchedTertiary = e.Tertiary; count++; }
         Assert.Equal(1, count);
         Assert.Equal(301, matchedTertiary);
     }
@@ -117,7 +117,7 @@ public class VersionedQuadIndexTests : IDisposable
         int count = 0;
         int version = -1;
         var e = idx.Query(0, 100, 200, 300);
-        while (e.MoveNext()) { version = e.Current.Version; count++; }
+        while (e.MoveNext()) { version = e.Version; count++; }
         Assert.Equal(1, count);
         Assert.Equal(1, version);
     }
@@ -146,8 +146,8 @@ public class VersionedQuadIndexTests : IDisposable
         while (audit.MoveNext())
         {
             auditCount++;
-            auditIsDeleted = audit.Current.IsDeleted;
-            auditVersion = audit.Current.Version;
+            auditIsDeleted = audit.LegacyIsDeleted;
+            auditVersion = audit.Version;
         }
         Assert.Equal(1, auditCount);
         Assert.True(auditIsDeleted);
@@ -189,8 +189,8 @@ public class VersionedQuadIndexTests : IDisposable
         while (e.MoveNext())
         {
             count++;
-            version = e.Current.Version;
-            isDeleted = e.Current.IsDeleted;
+            version = e.Version;
+            isDeleted = e.LegacyIsDeleted;
         }
         Assert.Equal(1, count);
         Assert.False(isDeleted);

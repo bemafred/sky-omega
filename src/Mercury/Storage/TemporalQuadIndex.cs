@@ -732,7 +732,7 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
     /// <summary>
     /// Query triples with temporal constraints
     /// </summary>
-    public TemporalQuadEnumerator Query(
+    public QuadIndexCursor Query(
         long graph,
         long primary,
         long secondary,
@@ -742,20 +742,20 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
         var minKey = CreateSearchKey(graph, primary, secondary, tertiary, temporalQuery, isMin: true);
         var maxKey = CreateSearchKey(graph, primary, secondary, tertiary, temporalQuery, isMin: false);
 
-        var leafPageId = FindLeafPage(_file.RootPageId, minKey);
-
-        return new TemporalQuadEnumerator(
-            this,
-            leafPageId,
-            minKey,
-            maxKey,
-            temporalQuery);
+        var cursor = new QuadIndexCursor(this, hasMemoryTimes: true);
+        ref var state = ref cursor.State<ScanState>();
+        state.PageId = FindLeafPage(_file.RootPageId, minKey);
+        state.Slot = 0;
+        state.MinKey = minKey;
+        state.MaxKey = maxKey;
+        state.Query = temporalQuery;
+        return cursor;
     }
 
     /// <summary>
     /// Query current state (as of now)
     /// </summary>
-    public TemporalQuadEnumerator QueryCurrent(
+    public QuadIndexCursor QueryCurrent(
         ReadOnlySpan<char> primary,
         ReadOnlySpan<char> secondary,
         ReadOnlySpan<char> tertiary,
@@ -780,7 +780,7 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
     /// Internal method for named graph enumeration.
     /// </summary>
     /// <param name="now">The store's clock reading, in Unix milliseconds. The index has no clock of its own.</param>
-    internal TemporalQuadEnumerator QueryCurrentAllGraphs(long now)
+    internal QuadIndexCursor QueryCurrentAllGraphs(long now)
     {
 
         // g = -1 means wildcard for graph (all graphs)
@@ -795,7 +795,7 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
     /// Every entry of every graph (default + named), whatever its times. Internal method for the listing of the
     /// graphs that hold a period, remembered or forgotten (ADR-061 D10).
     /// </summary>
-    internal TemporalQuadEnumerator QueryEveryEntryAllGraphs()
+    internal QuadIndexCursor QueryEveryEntryAllGraphs()
     {
         // g = -1 means wildcard for graph (all graphs)
         return Query(-1, -1, -1, -1, new TemporalQuery { Type = TemporalQueryType.AllTime });
@@ -804,7 +804,7 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
     /// <summary>
     /// Query historical state (as of specific time)
     /// </summary>
-    public TemporalQuadEnumerator QueryAsOf(
+    public QuadIndexCursor QueryAsOf(
         ReadOnlySpan<char> primary,
         ReadOnlySpan<char> secondary,
         ReadOnlySpan<char> tertiary,
@@ -826,7 +826,7 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
     /// <summary>
     /// Query time range (all versions during period)
     /// </summary>
-    public TemporalQuadEnumerator QueryRange(
+    public QuadIndexCursor QueryRange(
         ReadOnlySpan<char> primary,
         ReadOnlySpan<char> secondary,
         ReadOnlySpan<char> tertiary,
@@ -850,7 +850,7 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
     /// <summary>
     /// Query evolution (all versions ever)
     /// </summary>
-    public TemporalQuadEnumerator QueryHistory(
+    public QuadIndexCursor QueryHistory(
         ReadOnlySpan<char> primary,
         ReadOnlySpan<char> secondary,
         ReadOnlySpan<char> tertiary,
@@ -1034,124 +1034,6 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
                                            // repair visits it. Nothing writes it once Retract goes (Step 6).
         public byte Flags;           // Future use
         public short Reserved;       // Padding
-    }
-
-    /// <summary>
-    /// Zero-allocation enumerator for temporal triples.
-    /// Changed from ref struct to struct to enable pooled array storage (ADR-011).
-    /// </summary>
-    internal struct TemporalQuadEnumerator
-    {
-        private readonly TemporalQuadIndex _store;
-        private long _currentPageId;
-        private int _currentSlot;
-        private readonly TemporalKey _minKey;
-        private readonly TemporalKey _maxKey;
-        private readonly TemporalQuery _query;
-        private TemporalKey _currentKey;
-        private bool _currentLegacyIsDeleted;
-        private long _currentLegacyModifiedAt;
-
-        internal TemporalQuadEnumerator(
-            TemporalQuadIndex store,
-            long startPageId,
-            TemporalKey minKey,
-            TemporalKey maxKey,
-            TemporalQuery query)
-        {
-            _store = store;
-            _currentPageId = startPageId;
-            _currentSlot = 0;
-            _minKey = minKey;
-            _maxKey = maxKey;
-            _query = query;
-            _currentKey = default;
-            _currentLegacyIsDeleted = false;
-            _currentLegacyModifiedAt = 0;
-        }
-
-        public bool MoveNext()
-        {
-            while (_currentPageId != 0)
-            {
-                var page = _store.GetPage(_currentPageId);
-
-                while (_currentSlot < page->EntryCount)
-                {
-                    ref var entry = ref page->GetEntry(_currentSlot);
-                    _currentKey = entry.Key;
-                    _currentLegacyIsDeleted = entry.LegacyIsDeleted;
-                    _currentLegacyModifiedAt = entry.LegacyModifiedAt;
-
-                    // Check spatial bounds using the index's sort order
-                    if (_store.CompareKeys(in _currentKey, in _maxKey) > 0)
-                        return false;
-
-                    if (_store.CompareKeys(in _currentKey, in _minKey) >= 0)
-                    {
-                        // Check temporal bounds AND the bound spatial dimensions. The spatial check is
-                        // load-bearing for the TGSP (time-leading) index that DURING/Range selects: there
-                        // MemorizedAt leads, so the graph/S/P/O key range cannot gate those dimensions and a
-                        // pure CompareKeys scan would leak entries from every graph/S/P/O in the time window
-                        // (the DURING over-count bug). For the spatial-leading indexes (GSPO/GPOS/GOSP) the
-                        // key range already constrains them when the bound dimensions lead the key.
-                        if (MatchesTemporalQuery(entry) && MatchesSpatialBounds(in _currentKey))
-                        {
-                            _currentSlot++;
-                            return true;
-                        }
-                    }
-
-                    _currentSlot++;
-                }
-
-                _currentPageId = page->NextLeaf;
-                _currentSlot = 0;
-            }
-
-            return false;
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private readonly bool MatchesTemporalQuery(in TemporalBTreeEntry entry) =>
-            IsSelectedByTime(in entry, in _query);
-
-        private readonly bool MatchesSpatialBounds(in TemporalKey key) =>
-            MatchesBoundDimensions(in key, in _minKey, in _maxKey);
-
-        /// <summary>
-        /// A cursor at this enumerator's position, with its bounds and its time selection (ADR-062 Step 4). The
-        /// index's query methods return the cursor itself once the enumerator over the cursor replaces this one.
-        /// </summary>
-        internal readonly QuadIndexCursor ToCursor()
-        {
-            var cursor = new QuadIndexCursor(_store, hasMemoryTimes: true);
-            ref var state = ref cursor.State<ScanState>();
-            state.PageId = _currentPageId;
-            state.Slot = _currentSlot;
-            state.MinKey = _minKey;
-            state.MaxKey = _maxKey;
-            state.Query = _query;
-            return cursor;
-        }
-
-        public readonly TemporalQuad Current
-        {
-            get => new TemporalQuad
-            {
-                Graph = _currentKey.Graph,
-                Primary = _currentKey.Primary,
-                Secondary = _currentKey.Secondary,
-                Tertiary = _currentKey.Tertiary,
-                MemorizedAt = _currentKey.MemorizedAt,
-                ForgottenAt = _currentKey.ForgottenAt,
-                LegacyTransactionTime = _currentKey.LegacyTransactionTime,
-                LegacyIsDeleted = _currentLegacyIsDeleted,
-                LegacyModifiedAt = _currentLegacyModifiedAt
-            };
-        }
-
-        public TemporalQuadEnumerator GetEnumerator() => this;
     }
 
 #if DEBUG
@@ -1762,23 +1644,4 @@ public enum TemporalQueryType
     AsOf,      // Point-in-time query
     Range,     // Time range query
     AllTime    // All versions
-}
-
-/// <summary>
-/// Temporal quad with generic dimension fields and time dimensions.
-/// The RDF-to-dimension mapping (Primary=subject, Secondary=predicate, etc.)
-/// depends on the index type and is resolved in QuadStore's TemporalResultEnumerator.
-/// </summary>
-internal struct TemporalQuad
-{
-    public long Graph;          // 64-bit graph ID (0 = default graph)
-    public long Primary;        // 64-bit, first dimension
-    public long Secondary;      // 64-bit, second dimension
-    public long Tertiary;       // 64-bit, third dimension
-    public long MemorizedAt;
-    public long ForgottenAt;
-    // Legacy (ADR-061 D11): the three fields below are copies of the entry's fields of the same names and leave with them.
-    public long LegacyTransactionTime;
-    public bool LegacyIsDeleted;      // Retracted (ADR-054 D2); visible in AllTime queries only. Goes with Retract (Step 6).
-    public long LegacyModifiedAt;     // Transaction time of the last End or Retract, else of the insert
 }

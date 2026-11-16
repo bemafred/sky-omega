@@ -164,7 +164,7 @@ public class ReferenceQuadIndexTests : IDisposable
         int seen = 0;
         while (e.MoveNext())
         {
-            Assert.Equal(expectedPrimary, e.Current.Primary);
+            Assert.Equal(expectedPrimary, e.Primary);
             expectedPrimary++;
             seen++;
         }
@@ -210,7 +210,7 @@ public class ReferenceQuadIndexTests : IDisposable
             int seen = 0;
             while (e.MoveNext())
             {
-                Assert.Equal(seen, e.Current.Primary);
+                Assert.Equal(seen, e.Primary);
                 seen++;
             }
             Assert.Equal(100, seen);

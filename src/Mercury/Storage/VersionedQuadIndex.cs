@@ -168,22 +168,26 @@ internal sealed unsafe class VersionedQuadIndex : IQuadIndex
     /// Query: yields all live entries matching the (graph, primary, secondary, tertiary)
     /// constraints. Use -1 for "any" on a dimension. Soft-deleted entries are filtered out.
     /// </summary>
-    public VersionedQuadEnumerator Query(long graph, long primary, long secondary, long tertiary)
+    public QuadIndexCursor Query(long graph, long primary, long secondary, long tertiary)
         => QueryInternal(graph, primary, secondary, tertiary, includeDeleted: false);
 
     /// <summary>
     /// Audit query: yields all entries (including soft-deleted) matching the constraints.
     /// Use for history / soft-delete audit.
     /// </summary>
-    public VersionedQuadEnumerator QueryAllVersions(long graph, long primary, long secondary, long tertiary)
+    public QuadIndexCursor QueryAllVersions(long graph, long primary, long secondary, long tertiary)
         => QueryInternal(graph, primary, secondary, tertiary, includeDeleted: true);
 
-    private VersionedQuadEnumerator QueryInternal(long graph, long primary, long secondary, long tertiary, bool includeDeleted)
+    private QuadIndexCursor QueryInternal(long graph, long primary, long secondary, long tertiary, bool includeDeleted)
     {
-        var minKey = CreateSearchKey(graph, primary, secondary, tertiary, isMin: true);
-        var maxKey = CreateSearchKey(graph, primary, secondary, tertiary, isMin: false);
-        var leafPageId = FindLeafPage(_file.RootPageId, minKey);
-        return new VersionedQuadEnumerator(this, leafPageId, minKey, maxKey, includeDeleted);
+        var cursor = new QuadIndexCursor(this);
+        ref var state = ref cursor.State<ScanState>();
+        state.MinKey = CreateSearchKey(graph, primary, secondary, tertiary, isMin: true);
+        state.MaxKey = CreateSearchKey(graph, primary, secondary, tertiary, isMin: false);
+        state.PageId = FindLeafPage(_file.RootPageId, state.MinKey);
+        state.Slot = 0;
+        state.IncludeDeleted = includeDeleted;
+        return cursor;
     }
 
     private static VersionedKey CreateSearchKey(long graph, long primary, long secondary, long tertiary, bool isMin)
@@ -307,112 +311,6 @@ internal sealed unsafe class VersionedQuadIndex : IQuadIndex
         public short Reserved;
     }
 
-    /// <summary>
-    /// Zero-allocation enumerator for versioned triples. Live entries only by default;
-    /// QueryAllVersions sets <c>includeDeleted=true</c> for audit access.
-    /// </summary>
-    internal struct VersionedQuadEnumerator
-    {
-        private readonly VersionedQuadIndex _store;
-        private long _currentPageId;
-        private int _currentSlot;
-        private readonly VersionedKey _minKey;
-        private readonly VersionedKey _maxKey;
-        private readonly bool _includeDeleted;
-        private VersionedKey _currentKey;
-        private bool _currentIsDeleted;
-        private int _currentVersion;
-        private long _currentCreatedAt;
-        private long _currentModifiedAt;
-
-        internal VersionedQuadEnumerator(
-            VersionedQuadIndex store,
-            long startPageId,
-            VersionedKey minKey,
-            VersionedKey maxKey,
-            bool includeDeleted)
-        {
-            _store = store;
-            _currentPageId = startPageId;
-            _currentSlot = 0;
-            _minKey = minKey;
-            _maxKey = maxKey;
-            _includeDeleted = includeDeleted;
-            _currentKey = default;
-            _currentIsDeleted = false;
-            _currentVersion = 0;
-            _currentCreatedAt = 0;
-            _currentModifiedAt = 0;
-        }
-
-        public bool MoveNext()
-        {
-            while (_currentPageId != 0)
-            {
-                var page = _store.GetPage(_currentPageId);
-
-                while (_currentSlot < page->EntryCount)
-                {
-                    ref var entry = ref page->GetEntry(_currentSlot);
-                    _currentKey = entry.Key;
-                    _currentIsDeleted = entry.IsDeleted;
-                    _currentVersion = entry.Version;
-                    _currentCreatedAt = entry.CreatedAt;
-                    _currentModifiedAt = entry.ModifiedAt;
-
-                    if (CompareKeys(in _currentKey, in _maxKey) > 0)
-                        return false;
-
-                    if (CompareKeys(in _currentKey, in _minKey) >= 0)
-                    {
-                        if (_includeDeleted || !_currentIsDeleted)
-                        {
-                            _currentSlot++;
-                            return true;
-                        }
-                    }
-
-                    _currentSlot++;
-                }
-
-                _currentPageId = page->NextLeaf;
-                _currentSlot = 0;
-            }
-
-            return false;
-        }
-
-        public readonly VersionedQuad Current => new VersionedQuad
-        {
-            Graph = _currentKey.Graph,
-            Primary = _currentKey.Primary,
-            Secondary = _currentKey.Secondary,
-            Tertiary = _currentKey.Tertiary,
-            CreatedAt = _currentCreatedAt,
-            ModifiedAt = _currentModifiedAt,
-            Version = _currentVersion,
-            IsDeleted = _currentIsDeleted,
-        };
-
-        public VersionedQuadEnumerator GetEnumerator() => this;
-
-        /// <summary>
-        /// A cursor at this enumerator's position, with its bounds (ADR-062 Step 4). The index's query methods
-        /// return the cursor itself once the enumerator over the cursor replaces this one.
-        /// </summary>
-        internal readonly QuadIndexCursor ToCursor()
-        {
-            var cursor = new QuadIndexCursor(_store);
-            ref var state = ref cursor.State<ScanState>();
-            state.PageId = _currentPageId;
-            state.Slot = _currentSlot;
-            state.MinKey = _minKey;
-            state.MaxKey = _maxKey;
-            state.IncludeDeleted = _includeDeleted;
-            return cursor;
-        }
-    }
-
     /// <summary>What a scan of this index keeps between rows (ADR-062 D3). It holds no object reference.</summary>
     internal struct ScanState
     {
@@ -447,6 +345,7 @@ internal sealed unsafe class VersionedQuadIndex : IQuadIndex
                     cursor.Secondary = key.Secondary;
                     cursor.Tertiary = key.Tertiary;
                     cursor.LegacyIsDeleted = entry.IsDeleted;
+                    cursor.Version = entry.Version;
                     state.Slot++;
                     return true;
                 }
@@ -788,20 +687,4 @@ internal sealed unsafe class VersionedQuadIndex : IQuadIndex
         _file.FlushPage();
         _file.SaveMetadata();
     }
-}
-
-/// <summary>
-/// Versioned quad — projected from a <see cref="VersionedQuadIndex"/> entry.
-/// No temporal fields; mutation audit only.
-/// </summary>
-internal struct VersionedQuad
-{
-    public long Graph;
-    public long Primary;
-    public long Secondary;
-    public long Tertiary;
-    public long CreatedAt;
-    public long ModifiedAt;
-    public int Version;
-    public bool IsDeleted;
 }

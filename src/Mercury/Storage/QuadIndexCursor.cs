@@ -70,6 +70,13 @@ internal struct QuadIndexCursor
     public bool LegacyIsDeleted;
 
     /// <summary>
+    /// The row's version: the number of the fact's state, odd when asserted and even when retracted (ADR-064 M2).
+    /// Only the Graph index writes it. The store's own operations read it; no read for a client returns it
+    /// (ADR-064 D4).
+    /// </summary>
+    public int Version;
+
+    /// <summary>
     /// Whether the index that moves this cursor writes <see cref="MemorizedAt"/> and <see cref="ForgottenAt"/>.
     /// The index says so when it makes the cursor. Read by the one place that still gives a result made-up times
     /// when the store keeps none (ADR-062 Step 5); it goes with those values (ADR-062 D1, D2).
@@ -83,6 +90,7 @@ internal struct QuadIndexCursor
         Graph = Primary = Secondary = Tertiary = 0;
         MemorizedAt = ForgottenAt = LegacyTransactionTime = LegacyModifiedAt = 0;
         LegacyIsDeleted = false;
+        Version = 0;
         HasMemoryTimes = hasMemoryTimes;
     }
 

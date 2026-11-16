@@ -152,12 +152,15 @@ internal sealed unsafe class MinimalQuadIndex : IQuadIndex
     /// Use -1 for "any" on a dimension. Minimal has only one index (single GSPO
     /// orientation), so non-subject-bound queries scan the entire range.
     /// </summary>
-    public MinimalQuadEnumerator Query(long primary, long secondary, long tertiary)
+    public QuadIndexCursor Query(long primary, long secondary, long tertiary)
     {
-        var minKey = CreateSearchKey(primary, secondary, tertiary, isMin: true);
-        var maxKey = CreateSearchKey(primary, secondary, tertiary, isMin: false);
-        var leafPageId = FindLeafPage(_file.RootPageId, minKey);
-        return new MinimalQuadEnumerator(this, leafPageId, minKey, maxKey);
+        var cursor = new QuadIndexCursor(this);
+        ref var state = ref cursor.State<ScanState>();
+        state.MinKey = CreateSearchKey(primary, secondary, tertiary, isMin: true);
+        state.MaxKey = CreateSearchKey(primary, secondary, tertiary, isMin: false);
+        state.PageId = FindLeafPage(_file.RootPageId, state.MinKey);
+        state.Slot = 0;
+        return cursor;
     }
 
     private static MinimalKey CreateSearchKey(long primary, long secondary, long tertiary, bool isMin)
@@ -243,76 +246,6 @@ internal sealed unsafe class MinimalQuadIndex : IQuadIndex
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public ref MinimalInternalEntry InternalEntry(int index) =>
             ref ((MinimalInternalEntry*)(Base + BTreeFile.HeaderBytes))[index];
-    }
-
-    /// <summary>Zero-allocation enumerator for a bounded leaf-page scan.</summary>
-    internal struct MinimalQuadEnumerator
-    {
-        private readonly MinimalQuadIndex _index;
-        private long _currentPageId;
-        private int _currentSlot;
-        private readonly MinimalKey _minKey;
-        private readonly MinimalKey _maxKey;
-        private MinimalKey _currentKey;
-
-        internal MinimalQuadEnumerator(MinimalQuadIndex index, long startPageId,
-            MinimalKey minKey, MinimalKey maxKey)
-        {
-            _index = index;
-            _currentPageId = startPageId;
-            _currentSlot = 0;
-            _minKey = minKey;
-            _maxKey = maxKey;
-            _currentKey = default;
-        }
-
-        public bool MoveNext()
-        {
-            while (_currentPageId != 0)
-            {
-                var view = _index.GetView(_currentPageId);
-                ref var header = ref view.Header;
-
-                while (_currentSlot < header.EntryCount)
-                {
-                    _currentKey = view.LeafEntry(_currentSlot);
-
-                    if (MinimalKey.Compare(in _currentKey, in _maxKey) > 0)
-                        return false;
-
-                    if (MinimalKey.Compare(in _currentKey, in _minKey) >= 0)
-                    {
-                        _currentSlot++;
-                        return true;
-                    }
-
-                    _currentSlot++;
-                }
-
-                _currentPageId = header.NextLeafOrLeftmostChild;
-                _currentSlot = 0;
-            }
-            return false;
-        }
-
-        public readonly MinimalKey Current => _currentKey;
-
-        public MinimalQuadEnumerator GetEnumerator() => this;
-
-        /// <summary>
-        /// A cursor at this enumerator's position, with its bounds (ADR-062 Step 4). The index's query methods
-        /// return the cursor itself once the enumerator over the cursor replaces this one.
-        /// </summary>
-        internal readonly QuadIndexCursor ToCursor()
-        {
-            var cursor = new QuadIndexCursor(_index);
-            ref var state = ref cursor.State<ScanState>();
-            state.PageId = _currentPageId;
-            state.Slot = _currentSlot;
-            state.MinKey = _minKey;
-            state.MaxKey = _maxKey;
-            return cursor;
-        }
     }
 
     /// <summary>What a scan of this index keeps between rows (ADR-062 D3). It holds no object reference.</summary>

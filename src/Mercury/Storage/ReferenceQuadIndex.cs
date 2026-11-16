@@ -248,14 +248,19 @@ internal sealed unsafe class ReferenceQuadIndex : IQuadIndex
     /// </summary>
     internal void SetDeferMsync(bool value) => _file.DeferMsync = value;
 
-    /// <summary>Number of times Query pages have been traversed (debug builds only).</summary>
-    public ReferenceQuadEnumerator Query(long graph, long primary, long secondary, long tertiary)
+    /// <summary>
+    /// A scan of the entries matching the bound dimensions; -1 leaves a dimension unbound, -2 matches nothing. The
+    /// cursor is at no row until its first <see cref="QuadIndexCursor.MoveNext"/> (ADR-062 D3).
+    /// </summary>
+    public QuadIndexCursor Query(long graph, long primary, long secondary, long tertiary)
     {
-        var minKey = BuildSearchKey(graph, primary, secondary, tertiary, isMin: true);
-        var maxKey = BuildSearchKey(graph, primary, secondary, tertiary, isMin: false);
-
-        var leafPageId = FindLeafPage(_file.RootPageId, minKey);
-        return new ReferenceQuadEnumerator(this, leafPageId, minKey, maxKey);
+        var cursor = new QuadIndexCursor(this);
+        ref var state = ref cursor.State<ScanState>();
+        state.MinKey = BuildSearchKey(graph, primary, secondary, tertiary, isMin: true);
+        state.MaxKey = BuildSearchKey(graph, primary, secondary, tertiary, isMin: false);
+        state.PageId = FindLeafPage(_file.RootPageId, state.MinKey);
+        state.Slot = 0;
+        return cursor;
     }
 
     private static ReferenceKey BuildSearchKey(long graph, long primary, long secondary, long tertiary, bool isMin)
@@ -595,81 +600,7 @@ internal sealed unsafe class ReferenceQuadIndex : IQuadIndex
 
     #endregion
 
-    #region Enumerator
-
-    /// <summary>
-    /// Zero-allocation enumerator for a bounded leaf-page scan. The enumerator walks
-    /// leaves via <see cref="ReferencePageHeader.NextLeafOrLeftmostChild"/> until a key
-    /// exceeds the max bound.
-    /// </summary>
-    internal struct ReferenceQuadEnumerator
-    {
-        private readonly ReferenceQuadIndex _index;
-        private long _currentPageId;
-        private int _currentSlot;
-        private readonly ReferenceKey _minKey;
-        private readonly ReferenceKey _maxKey;
-        private ReferenceKey _currentKey;
-
-        internal ReferenceQuadEnumerator(ReferenceQuadIndex index, long startPageId,
-            ReferenceKey minKey, ReferenceKey maxKey)
-        {
-            _index = index;
-            _currentPageId = startPageId;
-            _currentSlot = 0;
-            _minKey = minKey;
-            _maxKey = maxKey;
-            _currentKey = default;
-        }
-
-        public bool MoveNext()
-        {
-            while (_currentPageId != 0)
-            {
-                var view = _index.GetView(_currentPageId);
-                ref var header = ref view.Header;
-
-                while (_currentSlot < header.EntryCount)
-                {
-                    _currentKey = view.LeafEntry(_currentSlot);
-
-                    if (ReferenceKey.Compare(in _currentKey, in _maxKey) > 0)
-                        return false;
-
-                    if (ReferenceKey.Compare(in _currentKey, in _minKey) >= 0)
-                    {
-                        _currentSlot++;
-                        return true;
-                    }
-
-                    _currentSlot++;
-                }
-
-                _currentPageId = header.NextLeafOrLeftmostChild;
-                _currentSlot = 0;
-            }
-            return false;
-        }
-
-        public readonly ReferenceKey Current => _currentKey;
-
-        public ReferenceQuadEnumerator GetEnumerator() => this;
-
-        /// <summary>
-        /// A cursor at this enumerator's position, with its bounds (ADR-062 Step 4). The index's query methods
-        /// return the cursor itself once the enumerator over the cursor replaces this one.
-        /// </summary>
-        internal readonly QuadIndexCursor ToCursor()
-        {
-            var cursor = new QuadIndexCursor(_index);
-            ref var state = ref cursor.State<ScanState>();
-            state.PageId = _currentPageId;
-            state.Slot = _currentSlot;
-            state.MinKey = _minKey;
-            state.MaxKey = _maxKey;
-            return cursor;
-        }
-    }
+    #region Scan
 
     /// <summary>What a scan of this index keeps between rows (ADR-062 D3). It holds no object reference.</summary>
     internal struct ScanState

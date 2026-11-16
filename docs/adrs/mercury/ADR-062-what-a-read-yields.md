@@ -7,8 +7,8 @@
 Accepted by Martin on 2026-11-15: "ADR-062 and ADR-063: Accepted, update the ADR's." D1 to D7 are accepted with it.
 D7 still holds: the mechanism of D3 is measured before it is fixed, and it changes if Steps 2 and 3 say so. Q3 (the
 names) stays open. Q6 (the Graph profile's own version fields) was answered on 2026-11-16 by
-[ADR-064](ADR-064-a-facts-states.md). Steps 2 to 4 are done (2026-11-15): the cursor is
-built beside the enumerators, and nothing reads through it yet.
+[ADR-064](ADR-064-a-facts-states.md). Steps 2 to 6 are done (2026-11-15 and 2026-11-16): part one, the cursor, is
+complete, and every read of an index goes through it.
 
 Proposed — 2026-11-12.
 
@@ -508,7 +508,19 @@ The order follows D8.
    constructors and the repeated branches go. It still returns `ResolvedTemporalQuad`, with the made-up values
    written once. Every test passes; every W3C result is unchanged. The benchmarks of Step 2 are run again and
    compared — **done 2026-11-16**, on omega; see "The enumerator over the cursor" under D3.
-6. **`NamedGraphEnumerator`** on the cursor (Q5).
+6. **`NamedGraphEnumerator`** on the cursor (Q5) — **done 2026-11-16**, on omega.
+   - Each index's query methods return the cursor. The four enumerators, their `ToCursor` bridges and `VersionedQuad`
+     are gone. Every scan inside the store reads through the cursor: the rebuilds, the trigram rebuild, the
+     statistics and the graph listing.
+   - `NamedGraphEnumerator` holds one cursor: 408 bytes before, 272 after. On a store without named graphs (Minimal)
+     it holds none and scans nothing.
+   - The Graph cursor row carries the version, the store's own read of it ([ADR-064](ADR-064-a-facts-states.md) D4).
+     The cursor stays 240 bytes.
+   - `QuadIndexCursorTests` compared each cursor with its index's enumerator. They now compare it with the entries
+     the test wrote, selected and sorted in the index's key order. Two mutations fail three of them: a Graph row
+     without its version, and a Cognitive scan that skips its check of the bound dimensions.
+   - `Mercury.Tests`: 6,429 passed, 156 skipped, 0 failed. The benchmarks were not run again: the query path has read
+     through the cursor since Step 5, and Step 6 removed the bridge in front of it.
 
 **Then ADR-061 Step 5:** the words, built on the cursor.
 

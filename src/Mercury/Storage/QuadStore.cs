@@ -1959,7 +1959,7 @@ public sealed class QuadStore : IDisposable
             StoreStateFile.Write(_baseDirectory, _indexState);
             var trigramStopwatch = System.Diagnostics.Stopwatch.StartNew();
             long trigramCount = 0;
-            var gspo = _gspoIndex!.QueryEveryEntryAllGraphs().ToCursor();
+            var gspo = _gspoIndex!.QueryEveryEntryAllGraphs();
             while (gspo.MoveNext())
             {
                 // In GSPO: Tertiary = object. Check if it's a literal (atom starts with ")
@@ -2019,7 +2019,7 @@ public sealed class QuadStore : IDisposable
         Func<long, long, long, (long Subject, long Predicate, long Object)> toGspo)
     {
         long count = 0;
-        var entry = target.QueryEveryEntryAllGraphs().ToCursor();
+        var entry = target.QueryEveryEntryAllGraphs();
         while (entry.MoveNext())
         {
             var (s, p, o) = toGspo(entry.Primary, entry.Secondary, entry.Tertiary);
@@ -2055,7 +2055,7 @@ public sealed class QuadStore : IDisposable
         var phaseStopwatch = System.Diagnostics.Stopwatch.StartNew();
         try
         {
-            var gspo = _gspoIndex!.QueryEveryEntryAllGraphs().ToCursor();
+            var gspo = _gspoIndex!.QueryEveryEntryAllGraphs();
             while (gspo.MoveNext())
             {
                 var (primary, secondary, tertiary) = fromGspo(gspo.Primary, gspo.Secondary, gspo.Tertiary);
@@ -2118,7 +2118,7 @@ public sealed class QuadStore : IDisposable
         var phases = HasRebuildListener ? new List<RebuildPhaseMetrics>(4) : null;
         try
         {
-            // Source index is GSPO: VersionedQuad.{Primary, Secondary, Tertiary} = (s, p, o).
+            // Source index is GSPO: the cursor's Primary, Secondary, Tertiary = (s, p, o).
             // The remap lambda projects logical RDF roles (g, s, p, o) onto each target's
             // (Graph, Primary, Secondary, Tertiary).
             RebuildGraphIndex(_gposGraph!, "GPOS", StoreIndexState.BuildingGPOS,
@@ -2139,11 +2139,10 @@ public sealed class QuadStore : IDisposable
             _trigramIndex.Clear();
             var trigramStopwatch = System.Diagnostics.Stopwatch.StartNew();
             long trigramCount = 0;
-            var gspoEnum = _gspoGraph!.Query(-1, -1, -1, -1);
-            while (gspoEnum.MoveNext())
+            var gspo = _gspoGraph!.Query(-1, -1, -1, -1);
+            while (gspo.MoveNext())
             {
-                var quad = gspoEnum.Current;
-                var objectId = quad.Tertiary; // GSPO: Tertiary = object
+                var objectId = gspo.Tertiary; // GSPO: Tertiary = object
                 if (objectId > 0)
                 {
                     var utf8Span = _atoms.GetAtomSpan(objectId);
@@ -2191,7 +2190,7 @@ public sealed class QuadStore : IDisposable
 
     /// <summary>
     /// Per-target scan-and-fill for a Graph-profile secondary index. Mirrors
-    /// <see cref="RebuildIndex"/> (the Cognitive path) but consumes <see cref="VersionedQuad"/>
+    /// <see cref="RebuildIndex"/> (the Cognitive path) but reads a <see cref="VersionedQuadIndex"/> cursor
     /// and dispatches to <see cref="VersionedQuadIndex.AddRaw"/>. Borrows the
     /// deferred-msync pattern: rebuild is a bulk-shape operation, per-page msync
     /// would dominate wall-clock for the same reason it does in Cognitive.
@@ -2209,13 +2208,12 @@ public sealed class QuadStore : IDisposable
         var phaseStopwatch = System.Diagnostics.Stopwatch.StartNew();
         try
         {
-            var gspoEnum = _gspoGraph!.Query(-1, -1, -1, -1);
-            while (gspoEnum.MoveNext())
+            var gspo = _gspoGraph!.Query(-1, -1, -1, -1);
+            while (gspo.MoveNext())
             {
-                var quad = gspoEnum.Current;
-                // Source is GSPO: quad.Primary=Subject, quad.Secondary=Predicate, quad.Tertiary=Object.
+                // Source is GSPO: Primary=Subject, Secondary=Predicate, Tertiary=Object.
                 // The remap projects logical (g, s, p, o) onto the target's (Graph, Primary, Secondary, Tertiary).
-                var (tg, tp, ts, tt) = remap(quad.Graph, quad.Primary, quad.Secondary, quad.Tertiary);
+                var (tg, tp, ts, tt) = remap(gspo.Graph, gspo.Primary, gspo.Secondary, gspo.Tertiary);
                 target.AddRaw(tg, tp, ts, tt);
                 count++;
             }
@@ -2292,18 +2290,17 @@ public sealed class QuadStore : IDisposable
                 long gposScanned = 0;
                 long lastTickEntries = 0;
                 TimeSpan lastTickElapsed = TimeSpan.Zero;
-                var gspoEnum = _gspoReference!.Query(-1, -1, -1, -1);
-                while (gspoEnum.MoveNext())
+                var gspo = _gspoReference!.Query(-1, -1, -1, -1);
+                while (gspo.MoveNext())
                 {
-                    var key = gspoEnum.Current;
                     // GSPO layout: Primary=Subject, Secondary=Predicate, Tertiary=Object.
                     // GPOS layout: Primary=Predicate, Secondary=Object, Tertiary=Subject.
                     var gposKey = new ReferenceQuadIndex.ReferenceKey
                     {
-                        Graph = key.Graph,
-                        Primary = key.Secondary,
-                        Secondary = key.Tertiary,
-                        Tertiary = key.Primary,
+                        Graph = gspo.Graph,
+                        Primary = gspo.Secondary,
+                        Secondary = gspo.Tertiary,
+                        Tertiary = gspo.Primary,
                     };
                     sorter.Add(in gposKey);
                     gposScanned++;
@@ -2410,10 +2407,10 @@ public sealed class QuadStore : IDisposable
                 long quadsScanned = 0;
                 long lastTickEntries = 0;
                 TimeSpan lastTickElapsed = TimeSpan.Zero;
-                var trigramEnum = _gspoReference.Query(-1, -1, -1, -1);
-                while (trigramEnum.MoveNext())
+                var gspo = _gspoReference.Query(-1, -1, -1, -1);
+                while (gspo.MoveNext())
                 {
-                    var objectId = trigramEnum.Current.Tertiary;
+                    var objectId = gspo.Tertiary;
                     if (objectId > 0)
                     {
                         var utf8Span = _atoms.GetAtomSpan(objectId);
@@ -3028,13 +3025,12 @@ public sealed class QuadStore : IDisposable
         // bounds because Graph has no time dimension.
         if (_schema.Profile == StoreProfile.Graph)
         {
-            var gEnum = _gposGraph!.Query(-1, -1, -1, -1);
-            while (gEnum.MoveNext())
+            var gpos = _gposGraph!.Query(-1, -1, -1, -1);
+            while (gpos.MoveNext())
             {
-                var gquad = gEnum.Current;
-                var predicateAtom = gquad.Primary;
-                var objectAtom = gquad.Secondary;
-                var subjectAtom = gquad.Tertiary;
+                var predicateAtom = gpos.Primary;
+                var objectAtom = gpos.Secondary;
+                var subjectAtom = gpos.Tertiary;
 
                 if (!stats.TryGetValue(predicateAtom, out var entry))
                 {
@@ -3049,20 +3045,18 @@ public sealed class QuadStore : IDisposable
         else
         {
             // Cognitive profile: scan TemporalQuadIndex GPOS via AsOf-now.
-            var enumerator = _gposIndex!.QueryAsOf(
+            var gpos = _gposIndex!.QueryAsOf(
                 ReadOnlySpan<char>.Empty,  // All predicates
                 ReadOnlySpan<char>.Empty,  // All objects (Secondary in GPOS)
                 ReadOnlySpan<char>.Empty,  // All subjects (Tertiary in GPOS)
                 _clock.GetUtcNow());
 
-            while (enumerator.MoveNext())
+            while (gpos.MoveNext())
             {
-                var quad = enumerator.Current;
-
                 // In GPOS index: Primary=predicate, Secondary=object, Tertiary=subject
-                var predicateAtom = quad.Primary;
-                var objectAtom = quad.Secondary;
-                var subjectAtom = quad.Tertiary;
+                var predicateAtom = gpos.Primary;
+                var objectAtom = gpos.Secondary;
+                var subjectAtom = gpos.Tertiary;
 
                 if (!stats.TryGetValue(predicateAtom, out var entry))
                 {
@@ -3191,7 +3185,7 @@ public sealed class QuadStore : IDisposable
             _ => selectedIndex.QueryHistory(arg1, arg2, arg3, graph)
         };
 
-        return new TemporalResultEnumerator(enumerator.ToCursor(), indexType, _atoms);
+        return new TemporalResultEnumerator(enumerator, indexType, _atoms);
     }
 
     /// <summary>
@@ -3323,7 +3317,7 @@ public sealed class QuadStore : IDisposable
         }
 
         var enumerator = selectedIndex.QueryAsOf(arg1, arg2, arg3, _clock.GetUtcNow(), graph);
-        return new TemporalResultEnumerator(enumerator.ToCursor(), indexType, _atoms, candidateObjectAtomIds);
+        return new TemporalResultEnumerator(enumerator, indexType, _atoms, candidateObjectAtomIds);
     }
 
     /// <summary>
@@ -3353,7 +3347,7 @@ public sealed class QuadStore : IDisposable
         // index — surfaced by DrHook.Capture.)
         if (_gspoIndex is not null)                                                         // Cognitive (temporal)
             return new NamedGraphEnumerator(_gspoIndex.QueryCurrentAllGraphs(_clock.GetUtcNow().ToUnixTimeMilliseconds()), _atoms);
-        if (_gspoGraph is not null) return new NamedGraphEnumerator(_gspoGraph, _atoms);   // Graph (versioned)
+        if (_gspoGraph is not null) return new NamedGraphEnumerator(_gspoGraph.Query(-1, -1, -1, -1), _atoms);   // Graph: what is asserted now
         if (_gspoMinimal is not null) return new NamedGraphEnumerator(_atoms);             // Minimal: single-graph → no named graphs
         throw new ProfileCapabilityException(
             $"GetNamedGraphs is not yet implemented for the {_schema.Profile} profile. The enumerator-union " +
@@ -3429,7 +3423,7 @@ public sealed class QuadStore : IDisposable
         var tertiary = ResolveQueryTerm(@object);
 
         var enumerator = _gspoMinimal!.Query(primary, secondary, tertiary);
-        return new TemporalResultEnumerator(enumerator.ToCursor(), TemporalIndexType.GSPO, _atoms, candidateObjectAtomIds);
+        return new TemporalResultEnumerator(enumerator, TemporalIndexType.GSPO, _atoms, candidateObjectAtomIds);
     }
 
     /// <summary>
@@ -3508,7 +3502,7 @@ public sealed class QuadStore : IDisposable
         }
 
         var enumerator = gIndex.Query(g, primary, secondary, tertiary);
-        return new TemporalResultEnumerator(enumerator.ToCursor(), indexType, _atoms, candidateObjectAtomIds);
+        return new TemporalResultEnumerator(enumerator, indexType, _atoms, candidateObjectAtomIds);
     }
 
     /// <summary>
@@ -3544,7 +3538,7 @@ public sealed class QuadStore : IDisposable
         }
 
         var refEnum = refIndex.Query(g, primary, secondary, tertiary);
-        return new TemporalResultEnumerator(refEnum.ToCursor(), indexType, _atoms, candidateObjectAtomIds);
+        return new TemporalResultEnumerator(refEnum, indexType, _atoms, candidateObjectAtomIds);
     }
 
     private (TemporalQuadIndex Index, TemporalIndexType Type) SelectOptimalIndex(
@@ -4024,49 +4018,32 @@ public readonly ref struct ResolvedTemporalQuad
 /// </summary>
 public ref struct NamedGraphEnumerator
 {
-    private enum Mode { Empty, Temporal, Versioned }
-
-    // Holds EITHER the temporal OR the versioned sub-enumerator (selected by Mode) — a small ref-struct union
-    // so named-graph enumeration is profile-agnostic without growing IQuadIndex or boxing. Both sub-enumerators
-    // walk GSPO graph-first, so the distinct-graph dedup below is identical across profiles. (2026-06-28: the
-    // versioned arm fixed Graph-profile enumeration, which had no path before — DrHook.Capture dogfood.)
-    private TemporalQuadIndex.TemporalQuadEnumerator _temporal;
-    private VersionedQuadIndex.VersionedQuadEnumerator _versioned;
-    private readonly Mode _mode;
+    // One cursor over the store's GSPO index (ADR-062 Q5): it walks graph-first, so the entries of one graph are
+    // contiguous and the distinct-graph dedup below is the same on every profile. A store without named graphs (the
+    // Minimal profile) has no cursor and lists nothing: it has none to list, and nothing is scanned.
+    private QuadIndexCursor _entries;
+    private readonly bool _storeHasGraphs;
     private readonly IAtomStore _atoms;
     private long _lastGraphAtom;
     private string? _current;
 
-    /// <summary>Cognitive (temporal) named graphs — all current quads across all graphs.</summary>
-    /// <param name="entries">The entries to take the graphs from, in GSPO order: what is remembered now, or every
-    /// entry (<see cref="QuadStore.GetNamedGraphsHoldingAPeriod"/>).</param>
-    internal NamedGraphEnumerator(TemporalQuadIndex.TemporalQuadEnumerator entries, IAtomStore atoms)
+    /// <summary>The named graphs of the entries a GSPO cursor yields.</summary>
+    /// <param name="entries">A cursor over GSPO, in its order: on a Cognitive store what is remembered now, or every
+    /// entry (<see cref="QuadStore.GetNamedGraphsHoldingAPeriod"/>); on a Graph store what is asserted now.</param>
+    internal NamedGraphEnumerator(QuadIndexCursor entries, IAtomStore atoms)
     {
-        _temporal = entries;
-        _versioned = default;
-        _mode = Mode.Temporal;
+        _entries = entries;
+        _storeHasGraphs = true;
         _atoms = atoms;
         _lastGraphAtom = -1; // -1 means "no graph seen yet"
         _current = null;
     }
 
-    /// <summary>Graph (versioned) named graphs — all live entries (wildcards), graph-first via the GSPO key.</summary>
-    internal NamedGraphEnumerator(VersionedQuadIndex index, IAtomStore atoms)
-    {
-        _temporal = default;
-        _versioned = index.Query(-1, -1, -1, -1);
-        _mode = Mode.Versioned;
-        _atoms = atoms;
-        _lastGraphAtom = -1;
-        _current = null;
-    }
-
-    /// <summary>No named-graph dimension (e.g. the single-graph Minimal profile): yields nothing.</summary>
+    /// <summary>A store without named graphs (the Minimal profile): yields nothing.</summary>
     internal NamedGraphEnumerator(IAtomStore atoms)
     {
-        _temporal = default;
-        _versioned = default;
-        _mode = Mode.Empty;
+        _entries = default;
+        _storeHasGraphs = false;
         _atoms = atoms;
         _lastGraphAtom = -1;
         _current = null;
@@ -4078,19 +4055,11 @@ public ref struct NamedGraphEnumerator
     /// <summary>Move to the next distinct named graph (the default graph, atom 0, is skipped).</summary>
     public bool MoveNext()
     {
-        switch (_mode)
-        {
-            case Mode.Temporal:
-                while (_temporal.MoveNext())
-                    if (Accept(_temporal.Current.Graph)) return true;
-                return false;
-            case Mode.Versioned:
-                while (_versioned.MoveNext())
-                    if (Accept(_versioned.Current.Graph)) return true;
-                return false;
-            default:
-                return false;
-        }
+        if (!_storeHasGraphs)
+            return false;
+        while (_entries.MoveNext())
+            if (Accept(_entries.Graph)) return true;
+        return false;
     }
 
     // Accept the next DISTINCT named graph: skip the default graph (atom 0) and runs of the same graph
