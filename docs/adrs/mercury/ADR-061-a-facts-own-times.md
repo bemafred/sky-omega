@@ -499,6 +499,13 @@ stand:
     on each index's own flagged entries, and its code assumes all four reach the same result. The equal number says
     these are those entries, and that TGSP held none flagged, so nothing changed there. That is a reading of the
     number, not of the entries. Why the old delete would not have flagged an entry in TGSP is not established.
+    - **Established 2026-11-16, by running the code of that time** ([`tools/probes/index-differences/`](../../../tools/probes/index-differences/README.md)):
+      before ADR-054, `DeleteCurrent` searched each index from `ValidFrom = MinValue`. In TGSP, where the time
+      leads, that lands on the first leaf, and the scan stopped at the first entry. So TGSP marked a quad only when
+      it was TGSP's first entry; GSPO, GPOS and GOSP marked it. A telling of a marked quad, or of a remembered one,
+      was taken for a duplicate where the quad's entry is the neighbour, and inserted in TGSP, where it is not. A
+      store written with `1fa836e` and repaired as the live store was holds one entry of each kind: the 204, the 38
+      and the 9. The repair's count is GSPO's (323 = 204 ended + 119 restored), so TGSP marked none of the 323.
   - **The 9** are the fourth row of the table above: a fact told again while it was remembered.
   - **The 32 facts** were told, forgotten and told again, before ADR-054 (1.8.23, 2026-10-27). A re-insert after a
     delete was dropped then (ADR-054's context says so), and only TGSP kept it.
@@ -1091,6 +1098,8 @@ this ADR do not answer goes to Martin.
      store holds 8,238 entries in 89 graphs, 51 of them in 8 wholly forgotten graphs that no read lists; GPOS and GOSP
      equal GSPO; TGSP differs from GSPO in 204 entries that are open there and in 47 that only it holds.
    - **Open:** why the old delete left TGSP's entries unflagged, and the rule for each difference (LQ5).
+     **The first closed 2026-11-16** (M11): TGSP's key leads with the time, and the old delete and insert looked for
+     a quad's entry where only an index that leads with the quad keeps it.
 4. **Tests for the model on today's code.** Every row of M6, and the four rows of M11, each with the result the model
    gives. A batch gives one clock reading by construction (Q14). Fix what fails: the rows of M11 fail today.
    The affected counts follow the rule of D2.
