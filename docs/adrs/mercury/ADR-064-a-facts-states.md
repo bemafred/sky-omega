@@ -7,6 +7,9 @@
 Accepted by Martin on 2026-11-16: "Commit. Proposals accepted." Every proposal below was accepted with it, so every
 decision is now his. The code of Steps 3 to 8 can start.
 
+Steps 3 to 9 were built on 2026-11-17, on omega, one commit each, with Step 6 before Step 5 (see [Steps](#steps)).
+Mercury.Tests: 6,455 passed, 156 skipped, 0 failed. Whether the ADR is Completed is Martin's review.
+
 Proposed — 2026-11-16. Martin, the same day: "New ADR is mandated, this session has proved it." The session is the
 ADR-061 and ADR-062 work of 2026-11-16: fixing the Cognitive rebuild, and then asking what the Graph profile's
 version fields are for ([ADR-062](ADR-062-what-a-read-yields.md) Q6).
@@ -421,9 +424,32 @@ The links, read in the code on 2026-11-16:
      number on both profiles. On `c37dd8b`, before this step, a single write to a Minimal store was refused, as
      `Minimal_DirectAdd_ThrowsProfileCapability` stated. That test is replaced by ones for a single write, for the
      refusal of a named graph, and for a rollback.
-8. **A Reference store takes one bulk load** (D10).
+8. **A Reference store takes one bulk load** (D10). **Done 2026-11-17:**
+   - Measured first, with
+     [`tools/probes/reference-single-bulk-load/`](../../../tools/probes/reference-single-bulk-load/). A Reference
+     store with a hash atom store that holds its load takes a second one in two ways: opened again in bulk mode, which
+     D10 names, and with a batch while it is open to be queried, which the probe found. Both leave GSPO holding what
+     GPOS does not. A sorted store refused the first way. The second way failed only for a new atom, which a sorted
+     atom store cannot add at runtime.
+   - A batch is Reference's one write path, its bulk-load entry (ADR-029 D7), so both are a second load under D10.
+     A Reference store that holds atoms when it opens holds its load. It refuses bulk mode at open and `BeginBatch`
+     while it is open, whatever its atom store, and names D10. One load may still be many batches of one session.
+   - `ReferenceSingleLoadTests`: on `f13407c` four of five failed, the hash store taking both loads and the sorted
+     store's refusal naming ADR-034 only. All five pass.
+   - Seen, not changed: disposing a store while a batch holds the write lock throws `SynchronizationLockException`,
+     which hides the exception that ended the batch. It is outside this ADR.
 9. **Documents:** ADR-029 (D9), `mercury-internals.md`, `api-usage.md`, `MERCURY.md` where it describes the profiles,
-   `STATISTICS.md`.
+   `STATISTICS.md`. **Done 2026-11-17:**
+   - ADR-029: the table of Decision 1 (Graph: three indexes, 44 B, versioned; Minimal: versioned, 28 B), Decision 7
+     and its downstream commitment (one bulk load, D10), and its two open questions on Graph and Minimal, each
+     amended where it stands, with the earlier text kept. The validation records of 2026-05-16 are as they were.
+   - `mercury-internals.md`: the WAL record on Graph and Minimal (`NextVersion`), the indexes each keeps, and that
+     only Cognitive reads a clock.
+   - `README.md`: its one line on the four profiles.
+   - `api-usage.md` and `MERCURY.md` say nothing of Graph's or Minimal's layout or writes, so nothing changed there.
+     `MERCURY.md`'s "single bulk-load, then sealed" for Reference already holds.
+   - `STATISTICS.md` holds measurements per release, on every test machine. It is measured at the next release cut,
+     as its own maintenance note says.
 
 ADR-061 P6 needs only Step 2 of this list. Its P7 needs Step 4 as well. Steps 3 to 8 change Mercury code; they can
 start since the acceptance. Step 2 is done (ADR-062 Step 6, `29db7b5`). Step 4 is done (2026-11-17), so ADR-061 P7

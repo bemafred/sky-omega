@@ -4,10 +4,12 @@
 
 **Status:** Completed — 2026-04-26 (Cognitive + Reference); **Graph + Minimal profiles added 2026-05-16** as matrix-completion gestures. Graph shipped across 1.7.65 (`VersionedQuadIndex` types), 1.7.66 (`QuadStore` session-API + query path integration), 1.7.67 (bulk-load + `RebuildSecondaryIndexes` + CLI). **Minimal shipped in 1.7.68** as a single-file slice (`MinimalQuadIndex` + `QuadStore` integration + CLI + tests). All four ADR-029 profiles now ship as distinct concrete index implementations per the no-behavior-flags rule (`feedback_no_behavior_flags.md`, 2026-05-16). Reference validated end-to-end through 21.3 B Wikidata in Phase 6. Graph + Minimal validated through E2E suites totaling 28 tests covering open/add/query/persistence/profile-boundary rejections/named-graph rejection/AS_OF rejection. See [`adr-029-reference-gradient-2026-04-20.md`](../../validations/adr-029-reference-gradient-2026-04-20.md), [`21b-query-validation-2026-04-26.md`](../../validations/21b-query-validation-2026-04-26.md), [`adr-029-graph-profile-2026-05-16.md`](../../validations/adr-029-graph-profile-2026-05-16.md), and [`adr-029-minimal-profile-2026-05-16.md`](../../validations/adr-029-minimal-profile-2026-05-16.md).
 
-**2026-11-16:** [ADR-064](ADR-064-a-facts-states.md), Accepted, changes the Graph and Minimal profiles and Decision 7.
-Graph keeps no time and three indexes, and only the version of each fact; Minimal takes session writes with a log,
-soft deletes and the version; a Reference store takes one bulk load. The table and Decision 7 below are amended when
-ADR-064's code is built (its D9). Until then they describe the profiles as this ADR built them.
+**2026-11-16, amended 2026-11-17:** [ADR-064](ADR-064-a-facts-states.md), Accepted, changes the Graph and Minimal
+profiles and Decision 7, and its code is built (its Steps 3 to 8, 2026-11-17). Graph keeps no time and three indexes,
+and only the version of each fact; Minimal takes session writes with a log, soft deletes and the version; a Reference
+store takes one bulk load. The table in Decision 1, Decision 7 and the open questions are amended below (ADR-064 D9),
+each where it stands. The validation records of 2026-05-16 stay as they are: they record what was built and measured
+that day.
 
 ## Context
 
@@ -49,9 +51,16 @@ Four profiles cover the observed design space:
 | Profile | Indexes | Temporal? | Versioning? | Graph? | Entry size | Use case |
 |---|---|---|---|---|---|---|
 | **Cognitive** | GSPO, GPOS, GOSP, TGSP | yes | yes | yes | 88 B | Lucy, cognitive memory, provenance-sensitive |
-| **Graph** | GSPO, GPOS, GOSP, TGSP | no | yes | yes | 64 B | Classic named-graph store with soft-delete |
+| **Graph** | GSPO, GPOS, GOSP | no | yes | yes | 44 B | Facts that change, kept without a clock (ADR-064) |
 | **Reference** | GSPO, GPOS | no | no | yes | 32 B | Read-mostly reference dumps (Wikidata, DBpedia) |
-| **Minimal** | GSPO | no | no | no | 24 B | Single-graph Linked Data endpoints |
+| **Minimal** | GSPO | no | yes | no | 28 B | Graph without secondary indexes, named graphs or trigram index (ADR-064) |
+
+*Amended 2026-11-17 by [ADR-064](ADR-064-a-facts-states.md) D9.* For Graph and Minimal, versioning is the version of
+each fact: the number of its state, odd when asserted and even when retracted. They keep no time, and every write
+that changes a fact is logged as the change decided ("from version n to n + 1"). Graph's entry is the key, the child
+pointer and the version; Minimal's leaf entry is the key and the version. As built on 2026-05-16, Graph had TGSP as a
+fourth index and a 64 B entry with two wall-clock times and a deleted mark, and Minimal had no versioning, no log and
+a 24 B entry.
 
 Profile is chosen at `mercury --create-store --profile <name>` time, written to `store-schema.json` in the store's base directory, and read on every subsequent open. **Profile cannot change after creation** — migrating between profiles means rebuilding the store from a data source.
 
@@ -107,6 +116,11 @@ The Context above frames Reference as "immutable, non-temporal, dump-sourced". T
 
 - **Session API** (SPARQL UPDATE, `QuadStore.Add`, `QuadStore.Delete`, any per-triple write): rejected at plan time with a clear error. Same discipline as the temporal-query rejection in Decision 4 — a `Reference` store is a different *kind* of store, and queries/updates that require capabilities it doesn't have fail loudly, not silently.
 - **Bulk-load path** (`mercury --store X --bulk-load file.nt` or the equivalent programmatic interface): allowed, including against an existing Reference store. Subsequent bulk loads append to the GSPO/GPOS indexes. The bulk-load path owns the store exclusively during load (consistent with ADR-020 single-writer), honors its own durability discipline (see [ADR-030](ADR-030-bulk-load-and-rebuild-performance.md)), and writes metadata (schema, index-state) on completion.
+  - *Amended 2026-11-17 by [ADR-064](ADR-064-a-facts-states.md) D10:* a Reference store takes **one** bulk load,
+    whatever its atom store. Martin, 2026-11-16: "It should stop, yes, it is read only by design." A store that holds
+    a load refuses a second one both ways: opened in bulk mode, and a batch begun on it while it is open to be
+    queried. [ADR-034](ADR-034-sorted-atom-store-for-reference.md) D7 had made it so for a sorted atom store only.
+    Alternative (B) below is the decision now: an updated source is a new store.
 - **Deletion** is out of scope for this decision. Without versioning, a Reference store cannot soft-delete; a hard-deletion workflow would require B+Tree entry removal and atom-store GC and is a separate ADR if demanded. Today, "deleting" from a Reference store means reloading from an updated source.
 
 **Alternatives considered and rejected:**
@@ -117,7 +131,7 @@ The Context above frames Reference as "immutable, non-temporal, dump-sourced". T
 
 **Commitments this decision makes downstream:**
 
-- The bulk-load path must support appending to an existing Reference store — profile mismatch remains a hard error (Decision 2), but profile match is a valid append. Already implicitly true of today's bulk-load; Decision 7 makes it explicit.
+- The bulk-load path must support appending to an existing Reference store — profile mismatch remains a hard error (Decision 2), but profile match is a valid append. Already implicitly true of today's bulk-load; Decision 7 makes it explicit. *Withdrawn 2026-11-17 by ADR-064 D10: a Reference store takes one bulk load.*
 - [ADR-031](ADR-031-read-only-session-fast-path.md) piece 1 (Reference-profile unconditional read-only session fast path) is compatible: bulk-load runs in a separate process-level session with its own Dispose discipline; session-API callers only ever see a read-only store.
 - Deletion workflows are not provided by this ADR. If they become required, a separate ADR must define hard-delete semantics (B+Tree removal, atom-store GC, trigram cleanup).
 
@@ -192,8 +206,8 @@ The 2026-04-19 1 B bulk-load is evidence the invariant is working as designed: 1
 
 ## Open questions
 
-- **Does Graph profile pull its weight as a distinct profile?** It's between Cognitive and Reference: versioning without temporal. May collapse into Reference if no clear use case shows up. Defer to Phase 2 — implement Cognitive and Reference first, add Graph only if demanded.
-- **What should `Minimal` drop beyond the Graph column?** Possibly no trigram index either. Depends on use case; defer until one surfaces.
+- **Does Graph profile pull its weight as a distinct profile?** It's between Cognitive and Reference: versioning without temporal. May collapse into Reference if no clear use case shows up. Defer to Phase 2 — implement Cognitive and Reference first, add Graph only if demanded. *Answered 2026-11-16 by [ADR-064](ADR-064-a-facts-states.md) M1: Graph holds facts that change, kept without a clock; "Graph is not a lightweight Cognitive". Its user outside the tests is DrHook.Capture.*
+- **What should `Minimal` drop beyond the Graph column?** Possibly no trigram index either. Depends on use case; defer until one surfaces. *Answered 2026-11-16 by ADR-064 D2: Minimal is Graph without secondary indexes, named graphs or trigram index.*
 - **Cross-profile federation in a single store?** Named graphs with different schemas? Probably out of scope — a store is a store. If you want two, run two.
 - **Should schema be part of the Solid protocol's `access-control` surface?** Orthogonal to this ADR but relevant to ADR-015 (Mercury.Solid). Defer.
 - **APFS compression as a complementary option.** Not changing Mercury's architecture, but running `afsctool -cx -9` across a Reference store might compress another 20-40 %. Complementary to profile reduction, not a replacement. Documenting as a deployment option, not a design change.

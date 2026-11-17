@@ -44,7 +44,7 @@ Sky Omega uses Write-Ahead Logging (WAL) for crash safety:
 - **Batch-first design**: TxId in WAL records enables batching. Amortizing fsync across N triples is critical for performance.
 - **Transaction boundaries**: `BeginTx`/`CommitTx` markers in WAL. Recovery two-pass: collect committed TxIds, then replay only committed records.
 - **Deferred materialization**: Batched writes buffer in memory, apply to indexes only at `CommitBatch()`. `RollbackBatch()` discards buffer — indexes untouched.
-- **Transaction time per-write**: Each write generates `DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()` stored in WAL and indexes. Preserved through crash recovery.
+- **Transaction time per-write**: Each write generates `DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()` stored in WAL and indexes. Preserved through crash recovery. Cognitive only: a Graph or Minimal store reads no clock ([ADR-064](../../adrs/mercury/ADR-064-a-facts-states.md) D1).
 - **Hybrid checkpoint trigger**: Size-based (16MB) adapts to bursts; time-based (60s) bounds recovery during idle.
 
 ## Batch Write API
@@ -61,10 +61,10 @@ Use the batch API for high-throughput bulk loading (~100,000 triples/sec vs ~300
 QuadStore supports RDF named graphs for domain isolation. See [api-usage.md#named-graphs-quads](../../api/api-usage.md#named-graphs-quads).
 
 **Design notes:**
-- **Multiple index paths**: GSPO, GPOS, GOSP, TGSP for efficient query patterns from any entry point
+- **Multiple index paths**: GSPO, GPOS, GOSP, TGSP for efficient query patterns from any entry point (Cognitive; a Graph store keeps GSPO, GPOS and GOSP, a Minimal store GSPO only, ADR-064)
 - **Graph isolation**: Default graph (atom 0) and named graphs are fully isolated
 - **TemporalKey**: 56 bytes (GraphAtom + SubjectAtom + PredicateAtom + ObjectAtom + MemorizedAt + ForgottenAt + LegacyTransactionTime)
-- **WAL record**: 80 bytes (v2: includes GraphId, TransactionTimeTicks, BeginTx/CommitTx markers)
+- **WAL record**: 80 bytes (v2: includes GraphId, TransactionTimeTicks, BeginTx/CommitTx markers). On a Graph or Minimal store every record is `NextVersion`, the change decided at the write: the fact goes from the version in bytes 48 to 55 to the next, and the other time fields are 0 (ADR-064 D5).
 
 ## Pruning (`SkyOmega.Mercury.Pruning`)
 
