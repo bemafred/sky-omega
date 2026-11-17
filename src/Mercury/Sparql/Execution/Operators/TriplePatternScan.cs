@@ -25,11 +25,8 @@ internal ref struct TriplePatternScan
     private readonly ReadOnlySpan<char> _graph;
     private readonly string[]? _defaultGraphs; // a dataset's FROM graphs, whose merge is the default graph (null: no dataset)
 
-    // Temporal query parameters
-    private readonly TemporalQueryMode _temporalMode;
-    private readonly DateTimeOffset _asOfTime;
-    private readonly DateTimeOffset _rangeStart;
-    private readonly DateTimeOffset _rangeEnd;
+    // What the pattern sees, and the time variables its words bind (ADR-061 D6)
+    private readonly TemporalScope _scope;
 
     // For property path traversal
     private readonly bool _isInverse;
@@ -99,8 +96,7 @@ internal ref struct TriplePatternScan
 
     public TriplePatternScan(QuadStore store, ReadOnlySpan<char> source,
         TriplePattern pattern, BindingTable initialBindings, ReadOnlySpan<char> graph = default)
-        : this(store, source, pattern, initialBindings, graph, null,
-               TemporalQueryMode.Current, default, default, default, null)
+        : this(store, source, pattern, initialBindings, graph, null, TemporalScope.Remembered, null)
     {
     }
 
@@ -108,11 +104,10 @@ internal ref struct TriplePatternScan
     /// <param name="defaultGraphs">With an empty <paramref name="graph"/>, a dataset's FROM graphs, read as their merge
     /// (empty: FROM NAMED alone, an empty default graph); null when the query has no dataset clause, and the default
     /// graph is the store's.</param>
+    /// <param name="scope">What the pattern sees: what is remembered, or the periods its words select.</param>
     public TriplePatternScan(QuadStore store, ReadOnlySpan<char> source,
         TriplePattern pattern, BindingTable initialBindings, ReadOnlySpan<char> graph, string[]? defaultGraphs,
-        TemporalQueryMode temporalMode, DateTimeOffset asOfTime,
-        DateTimeOffset rangeStart, DateTimeOffset rangeEnd,
-        PrefixMapping[]? prefixes = null, HashSet<long>? trigramObjectCandidates = null)
+        TemporalScope scope, PrefixMapping[]? prefixes = null, HashSet<long>? trigramObjectCandidates = null)
     {
         _trigramObjectCandidates = trigramObjectCandidates;
         _store = store;
@@ -125,11 +120,7 @@ internal ref struct TriplePatternScan
         _initialized = false;
         _enumerator = default;
 
-        // Temporal parameters
-        _temporalMode = temporalMode;
-        _asOfTime = asOfTime;
-        _rangeStart = rangeStart;
-        _rangeEnd = rangeEnd;
+        _scope = scope;
 
         // Check property path type
         _isInverse = pattern.Path.Type == PathType.Inverse;
@@ -245,6 +236,9 @@ internal ref struct TriplePatternScan
                     if (!TryBindVariable(_pattern.Predicate, triple.Predicate, ref bindings))
                         continue;
                     if (!TryBindVariable(_pattern.Object, triple.Object, ref bindings))
+                        continue;
+                    // Only a pattern without a property path has words (ADR-061 D10)
+                    if (_scope.BindsTimes && !TryBindTimes(triple.MemorizedAt, triple.ForgottenAt, ref bindings))
                         continue;
                 }
 
@@ -604,8 +598,7 @@ internal ref struct TriplePatternScan
             : new TemporalResultEnumerator[_defaultGraphs.Length];
         for (int i = 0; i < reads.Length; i++)
             reads[i] = QueryGraph(subject, predicate, obj, _defaultGraphs[i]);
-        return new MergedGraphEnumerator(new GraphMerge(reads, _defaultGraphs, _store,
-            new TemporalScope(_temporalMode, _asOfTime, _rangeStart, _rangeEnd)));
+        return new MergedGraphEnumerator(new GraphMerge(reads, _defaultGraphs, _store, _scope));
     }
 
     /// <summary>The matches in one graph (empty: the store's default graph).</summary>
@@ -615,10 +608,10 @@ internal ref struct TriplePatternScan
         // ADR-024 trigram pre-filter: when the object position is a text:match variable, the caller passes the
         // trigram candidate atom IDs so the scan skips non-candidate objects at the index level (set only for a simple
         // forward pattern, whose ONLY query is this basic scan, so the object is genuinely the object position).
-        if (_trigramObjectCandidates != null && _temporalMode == TemporalQueryMode.Current)
+        if (_trigramObjectCandidates != null && _scope.IsRemembered)
             return _store.QueryCurrentWithCandidates(subject, predicate, obj, _trigramObjectCandidates, graph);
 
-        return new TemporalScope(_temporalMode, _asOfTime, _rangeStart, _rangeEnd).Query(_store, subject, predicate, obj, graph);
+        return _scope.Query(_store, subject, predicate, obj, graph);
     }
 
     /// <summary>
@@ -1657,8 +1650,42 @@ internal ref struct TriplePatternScan
         return _expandedPredicate.AsSpan();
     }
 
+    /// <summary>
+    /// Binds the time variables of the pattern's words to the matched period's times (ADR-061 D6, D10): MEMORIZED's
+    /// to when it was memorized, FORGOTTEN's to when it was forgotten, which a remembered period leaves unbound. A
+    /// time is an <c>xsd:dateTime</c> in UTC with a millisecond fraction. False when a variable is bound already to
+    /// another value.
+    /// </summary>
+    private bool TryBindTimes(DateTimeOffset memorizedAt, DateTimeOffset forgottenAt, ref BindingTable bindings)
+    {
+        Span<char> time = stackalloc char[80];
+        if (_scope.MemorizedVariableLength > 0)
+        {
+            int length = WriteTime(memorizedAt, time);
+            if (!TryBindVariable(Term.Variable(_scope.MemorizedVariableStart, _scope.MemorizedVariableLength), time[..length], ref bindings))
+                return false;
+        }
+        if (_scope.ForgottenVariableLength > 0 && !TemporalQuadIndex.IsRemembered(forgottenAt.ToUnixTimeMilliseconds()))
+        {
+            int length = WriteTime(forgottenAt, time);
+            if (!TryBindVariable(Term.Variable(_scope.ForgottenVariableStart, _scope.ForgottenVariableLength), time[..length], ref bindings))
+                return false;
+        }
+        return true;
+    }
+
+    /// <summary>Writes <paramref name="at"/> as the term <c>"…Z"^^xsd:dateTime</c>; returns its length.</summary>
+    private static int WriteTime(DateTimeOffset at, Span<char> into)
+    {
+        const string datatype = "\"^^<http://www.w3.org/2001/XMLSchema#dateTime>";
+        into[0] = '"';
+        at.UtcDateTime.TryFormat(into[1..], out int written, "yyyy-MM-dd'T'HH:mm:ss.fff'Z'", System.Globalization.CultureInfo.InvariantCulture);
+        datatype.AsSpan().CopyTo(into[(1 + written)..]);
+        return 1 + written + datatype.Length;
+    }
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private bool TryBindVariable(Term term, ReadOnlySpan<char> value, ref BindingTable bindings)
+    private bool TryBindVariable(Term term, scoped ReadOnlySpan<char> value, ref BindingTable bindings)
     {
         if (!term.IsVariable)
         {

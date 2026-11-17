@@ -6,5 +6,6 @@ internal struct SolutionModifier
     public HavingClause Having;
     public OrderByClause OrderBy;
     public LimitOffsetClause LimitOffset;
-    public TemporalClause Temporal;
+    /// <summary>Cognitive SPARQL's INCLUDING FORGOTTEN (ADR-061 D6): every pattern matches forgotten memories too.</summary>
+    public bool IncludesForgotten;
 }

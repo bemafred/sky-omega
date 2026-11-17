@@ -486,8 +486,10 @@ public class TemporalQuadIndexTests : IDisposable
             DateTimeOffset.MinValue, DateTimeOffset.MaxValue);
 
         Assert.False(retracted);
-        var results = index.QueryCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
-        Assert.True(results.MoveNext(), "The version was not retracted, so it is still current");
+        // The version has a stated end, so it is not remembered (ADR-061 D7); every entry is read to see its mark
+        var results = index.QueryHistory("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
+        Assert.True(results.MoveNext(), "The version is still in the index");
+        Assert.False(results.LegacyIsDeleted, "The version was not retracted");
     }
 
     [Fact]

@@ -44,7 +44,7 @@ public class ForgottenGraphTests : IDisposable
         store.DeleteCurrent("<http://ex.org/s>", "<http://ex.org/p>", "\"gone\"", "<http://ex.org/forgotten>");
         clock.Reading = Later;
 
-        var everything = SparqlEngine.Query(store, "SELECT ?g ?o WHERE { GRAPH ?g { ?s ?p ?o } } ALL VERSIONS", TestContext.Current.CancellationToken);
+        var everything = SparqlEngine.Query(store, "SELECT ?g ?o WHERE { GRAPH ?g { ?s ?p ?o } } INCLUDING FORGOTTEN", TestContext.Current.CancellationToken);
 
         Assert.True(everything.Success, everything.ErrorMessage);
         Assert.Equal(
@@ -71,22 +71,23 @@ public class ForgottenGraphTests : IDisposable
     }
 
     [Fact]
-    public void AGraphForgottenSince_IsFoundByAGraphVariable_AsOfATimeWhenItWasRemembered()
+    public void AGraphInWhichEverythingIsForgotten_IsFoundByAGraphVariable_InAPatternThatCarriesForgotten()
     {
-        // AS OF goes with ADR-061 Step 5. Until then it reads the past through the same listing.
         var clock = new SuppliedClock { Reading = Memorized };
-        using var store = new QuadStore(Path.Combine(_testDir, "as-of"), null, null, new StorageOptions { Clock = clock });
+        using var store = new QuadStore(Path.Combine(_testDir, "forgotten-word"), null, null, new StorageOptions { Clock = clock });
         store.AddCurrent("<http://ex.org/s>", "<http://ex.org/p>", "\"gone\"", "<http://ex.org/forgotten>");
         clock.Reading = Forgotten;
         store.DeleteCurrent("<http://ex.org/s>", "<http://ex.org/p>", "\"gone\"", "<http://ex.org/forgotten>");
         clock.Reading = Later;
 
-        var before = SparqlEngine.Query(store, "SELECT ?g WHERE { GRAPH ?g { ?s ?p ?o } } AS OF \"2031-01-01T00:30:00Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime>", TestContext.Current.CancellationToken);
-        var after = SparqlEngine.Query(store, "SELECT ?g WHERE { GRAPH ?g { ?s ?p ?o } } AS OF \"2031-01-01T01:30:00Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime>", TestContext.Current.CancellationToken);
+        var forgotten = SparqlEngine.Query(store, "SELECT ?g ?f WHERE { GRAPH ?g { ?s ?p ?o FORGOTTEN ?f } }", TestContext.Current.CancellationToken);
+        var emptyGroup = SparqlEngine.Query(store, "SELECT ?g WHERE { GRAPH ?g { } }", TestContext.Current.CancellationToken);
 
-        Assert.True(before.Success, before.ErrorMessage);
-        Assert.Equal("<http://ex.org/forgotten>", before.Rows!.Single().Values.Single());
-        Assert.True(after.Success, after.ErrorMessage);
-        Assert.Empty(after.Rows!);
+        Assert.True(forgotten.Success, forgotten.ErrorMessage);
+        var row = Assert.Single(forgotten.Rows!);
+        Assert.Equal("<http://ex.org/forgotten> \"2031-01-01T01:00:00.000Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime>", row["g"] + " " + row["f"]);
+        // A GRAPH whose group carries no FORGOTTEN ranges over the graphs that hold something remembered
+        Assert.True(emptyGroup.Success, emptyGroup.ErrorMessage);
+        Assert.Empty(emptyGroup.Rows!);
     }
 }

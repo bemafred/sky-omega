@@ -936,7 +936,8 @@ Q14). None is open for the decisions.
 
     It gives each quad of `M(t)` once, with the bounds of the period that holds `t`. With `b` a date it gives what was
     remembered just before that day began.
-  - Shown on the model (M10). It is not shown on a store: the words are not built (Step 5).
+  - Shown on the model (M10). Shown on a store on 2026-11-17, at seven times around one quad memorized, forgotten
+    and memorized again (P6, `MemoryWordsTests`).
   - On a pruned store it answers from what the prune kept (D12).
 - **Q11. "What is new since my last look".**
   - **Closed 2026-11-14:** the store guarantees that every write a query did not see is stamped at or after that
@@ -1095,6 +1096,43 @@ this ADR do not answer goes to Martin.
 - **2026-11-17: ADR-064's log is built** (its Step 4). A Graph store writes `NextVersion` records only, so no store
   writes the `Retract` record except Cognitive's `Retract` and `RetractBatched`, which P7 removes. P7 waits for nothing
   in ADR-064.
+- **P6: done 2026-11-17**, on omega: the words (D6 to D10), built on the cursor, and the old clauses removed.
+  - **The grammar.** `MEMORIZED` and `FORGOTTEN` follow the object of a triple pattern, in every abbreviated form and
+    inside `[ ]`. `INCLUDING FORGOTTEN` follows a query's solution modifiers. `AS OF`, `DURING` and `ALL VERSIONS` are
+    gone: each is now "Unexpected text after the query". The parser refuses a word twice, a bound twice, a word after a
+    property-path operator or inside `SERVICE`, a bound with a variable in it, and `INCLUDING FORGOTTEN` on a
+    sub-SELECT. A bound ends at the next word or bound, or where the triple pattern ends; a group that follows with no
+    `.` ends it too.
+  - **The read.** A Cognitive index selects by two ranges of times, one per time, and that one selection replaces the
+    three query types it had. Until P7, `QueryAsOf`, `QueryChanges`, `QueryEvolution` and `Query` with a stated time map
+    onto it. The words read GSPO, GPOS or GOSP, chosen by the bound terms (Q6). They never read TGSP: on the live store
+    TGSP differs from GSPO (LQ5).
+  - **The default view reads no clock (D7).** On Cognitive, `QueryCurrent`, the read the trigram filter narrows and
+    the listing of graphs select what has no forgotten time. Before, they selected what held at the clock's reading. The
+    two differ only for a period that `Add` with a stated time wrote: one with a stated end is no longer current, and
+    one that starts later than the reading is. One test checked that a version with a stated end "is still current"; it
+    now checks that the version was not retracted, which was its point.
+  - **The bounds** are evaluated once per pattern and query, with the query's `NOW()`. A bound is an `xsd:dateTime`
+    or an `xsd:date`, its first instant, in UTC when it has no timezone. It is rounded up to the next millisecond, so
+    `[a, b)` keeps the same stored times. Anything else is an error in the query.
+  - **The times** a word binds are `xsd:dateTime` terms in UTC with a millisecond fraction. `FORGOTTEN ?t` leaves
+    `?t` unbound for a remembered period. The time variables are in scope like a pattern's own variables (`SELECT *`,
+    and a BIND to one of them is refused).
+  - **A store that keeps no times** refuses the words before anything is read (D9; ADR-062 D2), so a pattern that is
+    never scanned is refused too. One case is checked later: an `EXISTS` inside a compound `FILTER` stays text until a
+    row reaches it, as before, so a word in it is refused when it is read. That is also when a syntax error in it is
+    found.
+  - **Tests.** `MemoryWordsTests` has 46 tests: each word alone and combined, both orders of the bounds, the empty
+    range, joins where each pattern keeps its own times, the abbreviated forms, a date bound and a bound between two
+    milliseconds, `NOW()` in a bound, the query of Q10 at seven times, `DESCRIBE`, an Update's `WHERE`, the errors on
+    Graph, Reference and Minimal, and the old clauses as syntax errors. `ForgottenGraphTests` uses the words in place of
+    `ALL VERSIONS` and `AS OF`. `QuadIndexCursorTests` checks twelve time selections against what each selects, written
+    out. `TemporalSparqlTests` (eleven tests of the old clauses) and the `DESCRIBE … AS OF` test are removed. Ten
+    mutations were made, one at a time, and each failed at least one test. The tests were written first and seen
+    failing: 43 of the 45 then written failed. `Mercury.Tests`: 6,489 passed, 156 skipped, 0 failed, the W3C suites
+    included; the solution: 6,879 passed, 160 skipped, 0 failed.
+  - **Not done here:** the documents and the `lucy` skill still describe the old clauses (P8). A release with P6 and
+    not P8 would leave them describing clauses that are gone.
 
 1. **Martin's review** of this text — **done 2026-11-14**, with the decision closure. The later part is reviewed on
    its own.
@@ -1126,6 +1164,7 @@ this ADR do not answer goes to Martin.
    - Every W3C result unchanged.
    - **Order** ([ADR-062](ADR-062-what-a-read-yields.md) D8, decided 2026-11-12): the cursor of ADR-062, its part one,
      comes before this step. The words are built once, on the cursor.
+   - **Done 2026-11-17** (P6, see Progress).
 6. **One removal** (D2): `Retract`, `RetractBatched` and `RetractedAt` go, and nothing writes `LegacyIsDeleted`. The public
    store methods follow the words: `Add` with a stated time, `QueryAsOf`, `TimeTravelTo`, `QueryChanges` and
    `QueryEvolution` go or change.

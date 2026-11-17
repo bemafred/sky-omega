@@ -45,10 +45,11 @@ internal sealed class TreeJoinExecutor
     private readonly PrefixMapping[]? _prefixes;
     private readonly string _prefixSource;
     private readonly ISparqlServiceExecutor? _serviceExecutor;
-    private readonly TemporalQueryMode _temporalMode;
-    private readonly DateTimeOffset _asOfTime;
-    private readonly DateTimeOffset _rangeStart;
-    private readonly DateTimeOffset _rangeEnd;
+    // Cognitive SPARQL's INCLUDING FORGOTTEN (ADR-061 D6): every pattern of the query sees forgotten memories too
+    private readonly bool _includesForgotten;
+    // The scope of each pattern that carries words, by the words' source offset: its bounds are evaluated once
+    // (ADR-061 D10), the first time the pattern is scanned
+    private Dictionary<int, TemporalScope>? _wordScopes;
     // Dataset (FROM NAMED / USING NAMED): which named graphs GRAPH may access. null = all; empty = none; [g…] = those.
     private readonly string[]? _namedGraphs;
     // Dataset (FROM / USING): the default-graph set. null/empty = the real unnamed default graph; [g…] = the FROM
@@ -67,8 +68,7 @@ internal sealed class TreeJoinExecutor
 
     public TreeJoinExecutor(QuadStore store, string source, DateTimeOffset now, PrefixMapping[]? prefixes = null,
         string? prefixSource = null, ISparqlServiceExecutor? serviceExecutor = null,
-        TemporalQueryMode temporalMode = TemporalQueryMode.Current,
-        DateTimeOffset asOfTime = default, DateTimeOffset rangeStart = default, DateTimeOffset rangeEnd = default,
+        bool includesForgotten = false,
         string[]? namedGraphs = null, string[]? defaultGraphs = null, bool reorderBgp = false,
         Dictionary<string, HashSet<long>>? trigramCandidatesByVar = null)
     {
@@ -78,10 +78,7 @@ internal sealed class TreeJoinExecutor
         _prefixes = prefixes;
         _prefixSource = prefixSource ?? source;
         _serviceExecutor = serviceExecutor;
-        _temporalMode = temporalMode;
-        _asOfTime = asOfTime;
-        _rangeStart = rangeStart;
-        _rangeEnd = rangeEnd;
+        _includesForgotten = includesForgotten;
         _namedGraphs = namedGraphs;
         _defaultGraphs = defaultGraphs;
         _reorderBgp = reorderBgp;
@@ -134,6 +131,7 @@ internal sealed class TreeJoinExecutor
     /// </summary>
     public List<MaterializedRow> Evaluate(ref PatternArray pa, int rootHeader, string activeGraph, int maxRows = int.MaxValue)
     {
+        RequireTimesForTheWords(ref pa, rootHeader);
         _maxRows = maxRows;
         var seed = new List<MaterializedRow> { EmptyRow() };
         // A WHERE that IS a bare sub-SELECT (single-braced `WHERE { SELECT … }`) or SERVICE parses to THAT header as the
@@ -535,6 +533,8 @@ internal sealed class TreeJoinExecutor
         {
             var subPa = new PatternArray(buf.AsSpan(0, treeBytes));
             int subRoot = new SparqlParser(_source.AsSpan()).ParsePatternTreeAt(braceOffset, ref subPa);
+            // The body is read here, when a row reaches it, so the words in it are checked here too (ADR-061 D9)
+            RequireTimesForTheWords(ref subPa, subRoot);
             return EvalGroup(ref subPa, subRoot, activeGraph, new List<MaterializedRow> { row }).Count > 0;
         }
         finally
@@ -574,7 +574,8 @@ internal sealed class TreeJoinExecutor
         }
         else
         {
-            var en = new TemporalScope(_temporalMode, _asOfTime, _rangeStart, _rangeEnd).NamedGraphs(_store);
+            // A pattern of the group that carries FORGOTTEN can match in a graph where everything is forgotten (D10)
+            var en = TemporalScope.ForQuery(_includesForgotten || CarriesForgotten(ref pa, graphHeaderIndex)).NamedGraphs(_store);
             while (en.MoveNext()) graphNames.Add(en.Current.ToString());
         }
 
@@ -768,7 +769,7 @@ internal sealed class TreeJoinExecutor
         // prologue prefixes index. ADR-055 D4 — the WHERE is the header's child subtree, parsed once with the query.
         var sub = new SparqlParser(_source.AsSpan()).ParseSubSelectClausesAt(slot.GraphTermStart, slot.SubSelectModifiersStart);
         var innerBag = new TreeJoinExecutor(_store, _source, _now, _prefixes, _prefixSource, _serviceExecutor,
-                _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _namedGraphs, _defaultGraphs)
+                _includesForgotten, _namedGraphs, _defaultGraphs)
             .Evaluate(ref pa, slot.ChildStartIndex, activeGraph);
 
         // A trailing VALUES inside the sub-SELECT joins its WHERE solutions before the modifier layer (W3C inline02), or,
@@ -1076,7 +1077,7 @@ internal sealed class TreeJoinExecutor
         // A default-graph pattern under a FROM dataset reads the merge of the FROM graphs, as one graph (the scan's
         // MergedGraphEnumerator)
         var scan = new TriplePatternScan(_store, _source.AsSpan(), patterns[index], bindings, graphs[index].AsSpan(),
-            _defaultGraphs, _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _prefixes, ObjectCandidatesFor(patterns[index]));
+            _defaultGraphs, ScopeFor(in patterns[index]), _prefixes, ObjectCandidatesFor(patterns[index]));
         try
         {
             // Stop the nested-loop scan as soon as the cap is reached — the work-saving heart of LIMIT-pushdown.
@@ -1100,6 +1101,7 @@ internal sealed class TreeJoinExecutor
     /// </summary>
     public void FoldFlatBgpAggregate(ref PatternArray pa, int rootHeader, string activeGraph, GroupedRow group)
     {
+        RequireTimesForTheWords(ref pa, rootHeader);
         var patterns = new List<TriplePattern>();
         var graphs = new List<string>();
         var e = pa.EnumerateDirectChildren(rootHeader);
@@ -1145,7 +1147,7 @@ internal sealed class TreeJoinExecutor
         }
 
         var scan = new TriplePatternScan(_store, _source.AsSpan(), patterns[index], bindings, graphs[index].AsSpan(),
-            _defaultGraphs, _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _prefixes, ObjectCandidatesFor(patterns[index]));
+            _defaultGraphs, ScopeFor(in patterns[index]), _prefixes, ObjectCandidatesFor(patterns[index]));
         try
         {
             while (scan.MoveNext(ref bindings))
@@ -1170,6 +1172,7 @@ internal sealed class TreeJoinExecutor
     public List<MaterializedRow> StreamFlatBgpTopK(ref PatternArray pa, int rootHeader, string activeGraph,
         MaterializedRowComparer comparer, int capacity)
     {
+        RequireTimesForTheWords(ref pa, rootHeader);
         // A min-PQ whose MIN is the WORST kept (the row that sorts LAST): feed it the REVERSED comparer, so Peek is the
         // eviction candidate and a better row displaces it.
         var heap = new PriorityQueue<MaterializedRow, MaterializedRow>(
@@ -1236,7 +1239,7 @@ internal sealed class TreeJoinExecutor
         }
 
         var scan = new TriplePatternScan(_store, _source.AsSpan(), patterns[index], bindings, graphs[index].AsSpan(),
-            _defaultGraphs, _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _prefixes, ObjectCandidatesFor(patterns[index]));
+            _defaultGraphs, ScopeFor(in patterns[index]), _prefixes, ObjectCandidatesFor(patterns[index]));
         try
         {
             while (scan.MoveNext(ref bindings))
@@ -1246,6 +1249,81 @@ internal sealed class TreeJoinExecutor
         {
             scan.Dispose();
         }
+    }
+
+    /// <summary>
+    /// ADR-061 D9, ADR-062 D2: a query that uses the words of Cognitive SPARQL is refused on a store that keeps no
+    /// times, before anything is read, so a pattern that would never be scanned is refused too and no word is ever
+    /// silently unbound.
+    /// </summary>
+    private void RequireTimesForTheWords(ref PatternArray pa, int rootHeader)
+    {
+        bool words = _includesForgotten;
+        var root = pa[rootHeader];
+        int end = root.IsNestableGroup ? root.ChildStartIndex + root.ChildCount : rootHeader + 1;
+        for (int i = rootHeader; i < end && !words; i++)
+            words = pa[i].Kind == PatternKind.Triple && pa[i].WordsLength > 0;
+        if (words)
+            _store.RequireTemporalProfile("MEMORIZED, FORGOTTEN and INCLUDING FORGOTTEN (Cognitive SPARQL, ADR-061 D9)");
+    }
+
+    /// <summary>Whether a triple pattern in the subtree of <paramref name="header"/> carries FORGOTTEN.</summary>
+    private static bool CarriesForgotten(ref PatternArray pa, int header)
+    {
+        var slot = pa[header];
+        for (int i = slot.ChildStartIndex; i < slot.ChildStartIndex + slot.ChildCount; i++)
+        {
+            if (pa[i].Kind == PatternKind.Triple && pa[i].CarriesForgotten)
+                return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// What <paramref name="pattern"/> lets its scan see (ADR-061 D6, D10). Without words: the query's scope. With
+    /// them: the words read again from the source, their bounds evaluated once, with the query's NOW().
+    /// </summary>
+    private TemporalScope ScopeFor(in TriplePattern pattern)
+    {
+        if (pattern.WordsLength == 0)
+            return TemporalScope.ForQuery(_includesForgotten);
+        if (_wordScopes != null && _wordScopes.TryGetValue(pattern.WordsStart, out var known))
+            return known;
+
+        var words = new SparqlParser(_source.AsSpan()).ParseMemoryWordsAt(pattern.WordsStart);
+        var times = TemporalQuery.Words(
+            BoundTime(words.Memorized.SinceStart, words.Memorized.SinceLength) ?? long.MinValue,
+            BoundTime(words.Memorized.BeforeStart, words.Memorized.BeforeLength) ?? long.MaxValue,
+            BoundTime(words.Forgotten.SinceStart, words.Forgotten.SinceLength),
+            BoundTime(words.Forgotten.BeforeStart, words.Forgotten.BeforeLength),
+            forgottenToo: _includesForgotten || words.Forgotten.IsWritten);
+        var scope = TemporalScope.ForWords(times, _includesForgotten || words.Forgotten.IsWritten,
+            words.Memorized.VariableStart, words.Memorized.VariableLength,
+            words.Forgotten.VariableStart, words.Forgotten.VariableLength);
+        (_wordScopes ??= new Dictionary<int, TemporalScope>()).Add(pattern.WordsStart, scope);
+        return scope;
+    }
+
+    /// <summary>
+    /// The time a bound names, in milliseconds since the epoch, rounded up to the next millisecond (every stored time
+    /// is a whole millisecond, so <c>[a, b)</c> keeps the same times). Null when the bound is absent. A bound is an
+    /// <c>xsd:dateTime</c>, or an <c>xsd:date</c> for its first instant; without a timezone it is UTC (ADR-061 D10).
+    /// </summary>
+    private long? BoundTime(int start, int length)
+    {
+        if (length == 0)
+            return null;
+        var value = new FilterEvaluator(_source.AsSpan(start, length), _now)
+            .EvaluateToValue(default, 0, default, _prefixes, _prefixSource.AsSpan());
+        // The bound is a constant of the query, so a bound that is not a time is an error in the query
+        var kind = value.Type == ExprValueType.Typed ? Rdf.XsdDatatype.KindOf(value.Datatype) : Rdf.XsdKind.Unknown;
+        if (kind is not (Rdf.XsdKind.DateTime or Rdf.XsdKind.Date)
+            || !XsdDateTime.TryParse(value.StringValue, kind == Rdf.XsdKind.Date, out long ticksUtc))
+            throw new SparqlParseException(
+                $"A bound of MEMORIZED or FORGOTTEN is an xsd:dateTime or an xsd:date (ADR-061 D10): {_source.Substring(start, length).Trim()}");
+        long sinceEpoch = ticksUtc - DateTime.UnixEpoch.Ticks;
+        long milliseconds = sinceEpoch / TimeSpan.TicksPerMillisecond;
+        return sinceEpoch % TimeSpan.TicksPerMillisecond > 0 ? milliseconds + 1 : milliseconds;
     }
 
     /// <summary>

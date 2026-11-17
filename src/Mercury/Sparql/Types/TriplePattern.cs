@@ -11,5 +11,8 @@ internal struct TriplePattern
     public Term Object;
     public PropertyPath Path;  // Used when HasPropertyPath is true
 
+    /// <summary>The source span of the words of Cognitive SPARQL after the pattern (ADR-061 D6); length 0: none.</summary>
+    public int WordsStart, WordsLength;
+
     public readonly bool HasPropertyPath => Path.Type != PathType.None;
 }

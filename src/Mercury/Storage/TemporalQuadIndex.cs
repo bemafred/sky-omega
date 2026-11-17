@@ -233,7 +233,10 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
     internal static readonly long OpenForgottenAt = DateTimeOffset.MaxValue.ToUnixTimeMilliseconds();
 
     /// <summary>A ForgottenAt at or above this is "no forgotten time" (year 9000 in Unix milliseconds).</summary>
-    private const long OpenThreshold = 253370764800000L;
+    internal const long OpenThreshold = 253370764800000L;
+
+    /// <summary>Whether a stored ForgottenAt is "no forgotten time": the period is remembered (ADR-061 I8).</summary>
+    internal static bool IsRemembered(long forgottenAt) => forgottenAt >= OpenThreshold;
 
     /// <summary>
     /// What the write rule needs to know about one quad at one clock reading (ADR-061 M5).
@@ -730,65 +733,65 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
     }
 
     /// <summary>
-    /// Query triples with temporal constraints
+    /// The entries with the bound dimensions (-1: unbound) whose periods <paramref name="times"/> selects.
     /// </summary>
     public QuadIndexCursor Query(
         long graph,
         long primary,
         long secondary,
         long tertiary,
-        TemporalQuery temporalQuery)
+        TemporalQuery times)
     {
-        var minKey = CreateSearchKey(graph, primary, secondary, tertiary, temporalQuery, isMin: true);
-        var maxKey = CreateSearchKey(graph, primary, secondary, tertiary, temporalQuery, isMin: false);
+        var minKey = CreateSearchKey(graph, primary, secondary, tertiary, times, isMin: true);
+        var maxKey = CreateSearchKey(graph, primary, secondary, tertiary, times, isMin: false);
 
         var cursor = new QuadIndexCursor(this, hasMemoryTimes: true);
         ref var state = ref cursor.State<ScanState>();
         state.PageId = FindLeafPage(_file.RootPageId, minKey);
         state.Slot = 0;
+        state.IncludesRetracted = times.IncludesRetracted;
         state.MinKey = minKey;
         state.MaxKey = maxKey;
-        state.Query = temporalQuery;
+        state.MemorizedSince = times.MemorizedSince;
+        state.MemorizedLatest = times.MemorizedLatest;
+        state.ForgottenSince = times.ForgottenSince;
+        state.ForgottenLatest = times.ForgottenLatest;
         return cursor;
     }
 
     /// <summary>
-    /// Query current state (as of now)
+    /// The entries with the given terms (empty: unbound) in <paramref name="graph"/> (empty: the default graph) whose
+    /// periods <paramref name="times"/> selects.
     /// </summary>
-    public QuadIndexCursor QueryCurrent(
+    public QuadIndexCursor Query(
         ReadOnlySpan<char> primary,
         ReadOnlySpan<char> secondary,
         ReadOnlySpan<char> tertiary,
+        TemporalQuery times,
         ReadOnlySpan<char> graph = default)
     {
         var g = ResolveGraphAtom(graph);
         var a = primary.IsEmpty ? -1 : _atoms.GetAtomId(primary);
         var b = secondary.IsEmpty ? -1 : _atoms.GetAtomId(secondary);
         var c = tertiary.IsEmpty ? -1 : _atoms.GetAtomId(tertiary);
-
-        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-
-        return Query(g, a, b, c, new TemporalQuery
-        {
-            Type = TemporalQueryType.AsOf,
-            AsOfTime = now
-        });
+        return Query(g, a, b, c, times);
     }
 
-    /// <summary>
-    /// Query current state across all graphs (default + named).
-    /// Internal method for named graph enumeration.
-    /// </summary>
-    /// <param name="now">The store's clock reading, in Unix milliseconds. The index has no clock of its own.</param>
-    internal QuadIndexCursor QueryCurrentAllGraphs(long now)
-    {
+    /// <summary>What is remembered: every period that has no forgotten time (ADR-061 D7). It reads no clock.</summary>
+    public QuadIndexCursor QueryCurrent(
+        ReadOnlySpan<char> primary,
+        ReadOnlySpan<char> secondary,
+        ReadOnlySpan<char> tertiary,
+        ReadOnlySpan<char> graph = default)
+        => Query(primary, secondary, tertiary, TemporalQuery.Remembered, graph);
 
+    /// <summary>
+    /// What is remembered, in every graph (default + named). Internal method for named graph enumeration.
+    /// </summary>
+    internal QuadIndexCursor QueryRememberedAllGraphs()
+    {
         // g = -1 means wildcard for graph (all graphs)
-        return Query(-1, -1, -1, -1, new TemporalQuery
-        {
-            Type = TemporalQueryType.AsOf,
-            AsOfTime = now
-        });
+        return Query(-1, -1, -1, -1, TemporalQuery.Remembered);
     }
 
     /// <summary>
@@ -798,11 +801,11 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
     internal QuadIndexCursor QueryEveryEntryAllGraphs()
     {
         // g = -1 means wildcard for graph (all graphs)
-        return Query(-1, -1, -1, -1, new TemporalQuery { Type = TemporalQueryType.AllTime });
+        return Query(-1, -1, -1, -1, TemporalQuery.Everything);
     }
 
     /// <summary>
-    /// Query historical state (as of specific time)
+    /// The periods that held at <paramref name="asOfTime"/>. Goes with <c>QueryAsOf</c> (ADR-061 Step 6).
     /// </summary>
     public QuadIndexCursor QueryAsOf(
         ReadOnlySpan<char> primary,
@@ -810,21 +813,10 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
         ReadOnlySpan<char> tertiary,
         DateTimeOffset asOfTime,
         ReadOnlySpan<char> graph = default)
-    {
-        var g = ResolveGraphAtom(graph);
-        var a = primary.IsEmpty ? -1 : _atoms.GetAtomId(primary);
-        var b = secondary.IsEmpty ? -1 : _atoms.GetAtomId(secondary);
-        var c = tertiary.IsEmpty ? -1 : _atoms.GetAtomId(tertiary);
-
-        return Query(g, a, b, c, new TemporalQuery
-        {
-            Type = TemporalQueryType.AsOf,
-            AsOfTime = asOfTime.ToUnixTimeMilliseconds()
-        });
-    }
+        => Query(primary, secondary, tertiary, TemporalQuery.AsOf(asOfTime.ToUnixTimeMilliseconds()), graph);
 
     /// <summary>
-    /// Query time range (all versions during period)
+    /// The periods that overlap <c>[rangeStart, rangeEnd)</c>. Goes with <c>QueryChanges</c> (ADR-061 Step 6).
     /// </summary>
     public QuadIndexCursor QueryRange(
         ReadOnlySpan<char> primary,
@@ -833,39 +825,18 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
         DateTimeOffset rangeStart,
         DateTimeOffset rangeEnd,
         ReadOnlySpan<char> graph = default)
-    {
-        var g = ResolveGraphAtom(graph);
-        var a = primary.IsEmpty ? -1 : _atoms.GetAtomId(primary);
-        var b = secondary.IsEmpty ? -1 : _atoms.GetAtomId(secondary);
-        var c = tertiary.IsEmpty ? -1 : _atoms.GetAtomId(tertiary);
-
-        return Query(g, a, b, c, new TemporalQuery
-        {
-            Type = TemporalQueryType.Range,
-            RangeStart = rangeStart.ToUnixTimeMilliseconds(),
-            RangeEnd = rangeEnd.ToUnixTimeMilliseconds()
-        });
-    }
+        => Query(primary, secondary, tertiary,
+            TemporalQuery.Overlapping(rangeStart.ToUnixTimeMilliseconds(), rangeEnd.ToUnixTimeMilliseconds()), graph);
 
     /// <summary>
-    /// Query evolution (all versions ever)
+    /// Every entry, retracted ones included. Goes with <c>QueryEvolution</c> (ADR-061 Step 6).
     /// </summary>
     public QuadIndexCursor QueryHistory(
         ReadOnlySpan<char> primary,
         ReadOnlySpan<char> secondary,
         ReadOnlySpan<char> tertiary,
         ReadOnlySpan<char> graph = default)
-    {
-        var g = ResolveGraphAtom(graph);
-        var a = primary.IsEmpty ? -1 : _atoms.GetAtomId(primary);
-        var b = secondary.IsEmpty ? -1 : _atoms.GetAtomId(secondary);
-        var c = tertiary.IsEmpty ? -1 : _atoms.GetAtomId(tertiary);
-
-        return Query(g, a, b, c, new TemporalQuery
-        {
-            Type = TemporalQueryType.AllTime
-        });
-    }
+        => Query(primary, secondary, tertiary, TemporalQuery.Everything, graph);
 
     /// <summary>
     /// Resolve graph span to atom ID.
@@ -1050,40 +1021,28 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
     internal void ResetPageAccessCount() => _pageAccessCount = 0;
 #endif
 
-    /// <summary>What a scan of this index keeps between rows (ADR-062 D3). It holds no object reference.</summary>
+    /// <summary>
+    /// What a scan of this index keeps between rows (ADR-062 D3). It holds no object reference. The time selection
+    /// is kept as its parts (<see cref="TemporalQuery"/>), so the state fits the cursor's block.
+    /// </summary>
     internal struct ScanState
     {
         public long PageId;
         public int Slot;
+        public bool IncludesRetracted;
         public TemporalKey MinKey;
         public TemporalKey MaxKey;
-        public TemporalQuery Query;
+        public long MemorizedSince, MemorizedLatest, ForgottenSince, ForgottenLatest;
     }
 
-    /// <summary>The time selection: whether an entry is selected by a scan's temporal query.</summary>
+    /// <summary>The time selection: whether an entry is selected by a scan's two ranges of times.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static bool IsSelectedByTime(in TemporalBTreeEntry entry, in TemporalQuery query)
+    private static bool IsSelectedByTime(in TemporalBTreeEntry entry, in ScanState state)
     {
         ref readonly var key = ref entry.Key;
-
-        return query.Type switch
-        {
-            // AsOf and Range queries exclude deleted entries
-            TemporalQueryType.AsOf =>
-                !entry.LegacyIsDeleted &&
-                key.MemorizedAt <= query.AsOfTime &&
-                key.ForgottenAt > query.AsOfTime,
-
-            TemporalQueryType.Range =>
-                !entry.LegacyIsDeleted &&
-                key.MemorizedAt < query.RangeEnd &&
-                key.ForgottenAt > query.RangeStart,
-
-            // AllTime (history/audit) includes deleted entries
-            TemporalQueryType.AllTime => true,
-
-            _ => false
-        };
+        return (state.IncludesRetracted || !entry.LegacyIsDeleted)
+            && key.MemorizedAt >= state.MemorizedSince && key.MemorizedAt <= state.MemorizedLatest
+            && key.ForgottenAt >= state.ForgottenSince && key.ForgottenAt <= state.ForgottenLatest;
     }
 
     // Post-filter the bound graph/S/P/O dimensions. A dimension is BOUND iff its min and max
@@ -1121,7 +1080,7 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
                 // The spatial check is load-bearing for the TGSP (time-leading) index: there MemorizedAt leads, so
                 // the key range cannot gate the graph/S/P/O dimensions.
                 if (CompareKeys(in key, in state.MinKey) >= 0 &&
-                    IsSelectedByTime(in entry, in state.Query) &&
+                    IsSelectedByTime(in entry, in state) &&
                     MatchesBoundDimensions(in key, in state.MinKey, in state.MaxKey))
                 {
                     cursor.Graph = key.Graph;
@@ -1546,27 +1505,14 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
         else
             graphValue = graph;
 
-        // For TimeFirst sort order, MemorizedAt is the leading dimension.
-        // Temporal overlap semantics: MemorizedAt < rangeEnd AND ForgottenAt > rangeStart.
-        // minKey.MemorizedAt stays 0 because entries starting before the query window
-        // may still overlap (their ForgottenAt extends into the window).
-        // maxKey.MemorizedAt = rangeEnd/asOfTime to skip entries that can't overlap.
-        // This narrows the scan from O(N) to O(log N + k') where k' = entries with
-        // MemorizedAt < rangeEnd. MatchesTemporalQuery post-filters ForgottenAt > rangeStart.
+        // For TimeFirst sort order, MemorizedAt is the leading dimension, so the upper key stops the scan at the
+        // latest memorized time the selection takes. The lower key stays at 0, as for an unbound dimension.
+        // IsSelectedByTime applies both ranges to every entry the key range lets through.
         long memorizedAt;
         if (_sortOrder == KeySortOrder.TimeFirst && !isMin)
-        {
-            memorizedAt = query.Type switch
-            {
-                TemporalQueryType.Range => query.RangeEnd,
-                TemporalQueryType.AsOf => query.AsOfTime,
-                _ => long.MaxValue
-            };
-        }
+            memorizedAt = query.MemorizedLatest;
         else
-        {
             memorizedAt = unboundValue;
-        }
 
         return new TemporalKey
         {
@@ -1629,14 +1575,78 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
 }
 
 /// <summary>
-/// Temporal query specification
+/// The periods a scan of a Cognitive index selects, by their two times (ADR-061 D6, D10): those memorized in
+/// <c>[MemorizedSince, MemorizedLatest]</c> and forgotten in <c>[ForgottenSince, ForgottenLatest]</c>, in milliseconds
+/// since the epoch. Every stored time is a whole millisecond, so the half-open range <c>[a, b)</c> of the words is
+/// <c>[a, b - 1]</c>, and <see cref="long.MaxValue"/> leaves a range open above. A remembered period stores "no
+/// forgotten time" at or above <see cref="TemporalQuadIndex.OpenThreshold"/>, above every time a bound can name, so a
+/// range of forgotten times takes it only when the range is open above.
 /// </summary>
 internal struct TemporalQuery
 {
-    public TemporalQueryType Type;
-    public long AsOfTime;
-    public long RangeStart;
-    public long RangeEnd;
+    public long MemorizedSince, MemorizedLatest, ForgottenSince, ForgottenLatest;
+
+    /// <summary>
+    /// Legacy: whether a retracted entry (ADR-054 D2) is selected. Only <see cref="Everything"/> selects one. Goes
+    /// with Retract (ADR-061 Step 6).
+    /// </summary>
+    public bool IncludesRetracted;
+
+    /// <summary>What is remembered: every period that has no forgotten time (ADR-061 D7).</summary>
+    public static TemporalQuery Remembered => new()
+    {
+        MemorizedSince = long.MinValue, MemorizedLatest = long.MaxValue,
+        ForgottenSince = TemporalQuadIndex.OpenThreshold, ForgottenLatest = long.MaxValue,
+    };
+
+    /// <summary>Every entry, retracted ones too.</summary>
+    public static TemporalQuery Everything => new()
+    {
+        MemorizedSince = long.MinValue, MemorizedLatest = long.MaxValue,
+        ForgottenSince = long.MinValue, ForgottenLatest = long.MaxValue,
+        IncludesRetracted = true,
+    };
+
+    /// <summary>The periods that held at <paramref name="time"/>: memorized at or before it, forgotten after it.</summary>
+    public static TemporalQuery AsOf(long time) => new()
+    {
+        MemorizedSince = long.MinValue, MemorizedLatest = time,
+        ForgottenSince = time + 1, ForgottenLatest = long.MaxValue,
+    };
+
+    /// <summary>The periods that overlap <c>[start, end)</c>: memorized before its end, forgotten after its start.</summary>
+    public static TemporalQuery Overlapping(long start, long end) => new()
+    {
+        MemorizedSince = long.MinValue, MemorizedLatest = end - 1,
+        ForgottenSince = start + 1, ForgottenLatest = long.MaxValue,
+    };
+
+    /// <summary>
+    /// The periods a pattern's words select (ADR-061 D6, D10): memorized in <c>[memorizedSince, memorizedBefore)</c>;
+    /// with a bound on the forgotten time, forgotten in that range, so a remembered period is not selected; without
+    /// one, forgotten or not when <paramref name="forgottenToo"/>, and remembered otherwise. An absent bound is null,
+    /// or <see cref="long.MinValue"/> and <see cref="long.MaxValue"/> for the memorized time.
+    /// </summary>
+    public static TemporalQuery Words(long memorizedSince, long memorizedBefore,
+        long? forgottenSince, long? forgottenBefore, bool forgottenToo)
+    {
+        var times = new TemporalQuery
+        {
+            MemorizedSince = memorizedSince,
+            MemorizedLatest = memorizedBefore == long.MaxValue ? long.MaxValue : memorizedBefore - 1,
+        };
+        if (forgottenSince is not null || forgottenBefore is not null)
+        {
+            times.ForgottenSince = forgottenSince ?? long.MinValue;
+            times.ForgottenLatest = Math.Min(forgottenBefore ?? long.MaxValue, TemporalQuadIndex.OpenThreshold) - 1;
+        }
+        else
+        {
+            times.ForgottenSince = forgottenToo ? long.MinValue : TemporalQuadIndex.OpenThreshold;
+            times.ForgottenLatest = long.MaxValue;
+        }
+        return times;
+    }
 }
 
 public enum TemporalQueryType

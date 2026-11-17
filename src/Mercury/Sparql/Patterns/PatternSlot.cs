@@ -63,6 +63,8 @@ internal ref struct PatternSlot
         Subject = new Term { Type = SubjectType, Start = SubjectStart, Length = SubjectLength },
         Predicate = new Term { Type = PredicateType, Start = PredicateStart, Length = PredicateLength },
         Object = new Term { Type = ObjectType, Start = ObjectStart, Length = ObjectLength },
+        WordsStart = WordsStart,
+        WordsLength = WordsLength,
     };
 
     public const int Size = 64;
@@ -85,7 +87,8 @@ internal ref struct PatternSlot
     
     // ───────────────────────────────────────────────────────────────────────
     // Variant: Triple (Kind == Triple)
-    // Layout: [Kind:1][pad:3][Subject:12][Predicate:12][Object:12][PathType:1][pad:3][PathIri:12] = 56 bytes
+    // Layout: [Kind:1][pad:3][Subject:12][Predicate:12][Object:12][PathType:1][CarriesForgotten:1][pad:2][PathIri:8]
+    //         [Words:8] = 60 bytes
     // ───────────────────────────────────────────────────────────────────────
     
     public ref TermType SubjectType => ref MemoryMarshal.AsRef<TermType>(_span.Slice(4, 1));
@@ -103,6 +106,21 @@ internal ref struct PatternSlot
     public ref PathType PathKind => ref MemoryMarshal.AsRef<PathType>(_span.Slice(40, 1));
     public ref int PathIriStart => ref MemoryMarshal.AsRef<int>(_span.Slice(44, 4));
     public ref int PathIriLength => ref MemoryMarshal.AsRef<int>(_span.Slice(48, 4));
+
+    /// <summary>
+    /// The source span of the words of Cognitive SPARQL after the pattern (ADR-061 D6), read again with
+    /// <c>SparqlParser.ParseMemoryWordsAt</c>; length 0: the pattern has none.
+    /// </summary>
+    public ref int WordsStart => ref MemoryMarshal.AsRef<int>(_span.Slice(52, 4));
+
+    /// <inheritdoc cref="WordsStart"/>
+    public ref int WordsLength => ref MemoryMarshal.AsRef<int>(_span.Slice(56, 4));
+
+    /// <summary>
+    /// Whether the words include FORGOTTEN: then a graph variable around the pattern ranges over every graph that
+    /// holds a period (ADR-061 D10).
+    /// </summary>
+    public ref bool CarriesForgotten => ref MemoryMarshal.AsRef<bool>(_span.Slice(41, 1));
     
     // ───────────────────────────────────────────────────────────────────────
     // Variant: Filter (Kind == Filter)
@@ -933,7 +951,7 @@ finally
 
 /// <summary>
 /// The parts of a parsed query that execution reads besides its WHERE: query type, projection, solution modifiers,
-/// dataset, prologue, CONSTRUCT template, trailing VALUES and temporal clause. Kept on the heap so executors and
+/// dataset, prologue, CONSTRUCT template, trailing VALUES and INCLUDING FORGOTTEN. Kept on the heap so executors and
 /// result presenters don't carry the large <c>Query</c> struct (ADR-009). The WHERE itself is parsed into a pattern
 /// tree from <see cref="WhereGroupStart"/> (ADR-055 D5).
 /// </summary>
@@ -974,12 +992,8 @@ internal sealed class QueryBuffer
     // DESCRIBE's targets
     public DescribeClause Describe { get; set; }
 
-    // Temporal query parameters (ADR-009 Phase 2)
-    public TemporalQueryMode TemporalMode { get; set; }
-    public int TimeStartStart { get; set; }
-    public int TimeStartLength { get; set; }
-    public int TimeEndStart { get; set; }
-    public int TimeEndLength { get; set; }
+    // Cognitive SPARQL's INCLUDING FORGOTTEN (ADR-061 D6)
+    public bool IncludesForgotten { get; set; }
 
     // CONSTRUCT template patterns (heap-allocated for simplicity)
     public TriplePattern[]? ConstructPatterns { get; set; }
@@ -1348,12 +1362,7 @@ internal static class QueryBufferAdapter
         // Copy SelectClause data to heap (avoids storing 8KB Query struct)
         buffer.SelectData = SelectClauseData.FromSelectClause(in query.SelectClause);
 
-        // Copy temporal clause parameters (ADR-009 Phase 2)
-        buffer.TemporalMode = query.SolutionModifier.Temporal.Mode;
-        buffer.TimeStartStart = query.SolutionModifier.Temporal.TimeStartStart;
-        buffer.TimeStartLength = query.SolutionModifier.Temporal.TimeStartLength;
-        buffer.TimeEndStart = query.SolutionModifier.Temporal.TimeEndStart;
-        buffer.TimeEndLength = query.SolutionModifier.Temporal.TimeEndLength;
+        buffer.IncludesForgotten = query.SolutionModifier.IncludesForgotten;
 
         // Copy prefix mappings from Prologue
         if (query.Prologue.PrefixCount > 0)

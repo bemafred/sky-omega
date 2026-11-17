@@ -10,7 +10,8 @@ internal ref partial struct SparqlParser
 {
     /// <summary>
     /// SPARQL 1.1 §18.2.1: adds the in-scope variables of the slots <c>[first, end)</c> of a tree parsed over this
-    /// parser's source. A triple pattern's variables, a GRAPH variable, a BIND variable and a VALUES block's variables
+    /// parser's source. A triple pattern's variables (with the time variables of its words, ADR-061 D6), a GRAPH
+    /// variable, a BIND variable and a VALUES block's variables
     /// are in scope, and every group, OPTIONAL, UNION and SERVICE passes its children's out (a SERVICE's endpoint
     /// variable is the caller's to bind). A sub-SELECT passes out what it projects (with <c>SELECT *</c>, its WHERE's variables and its VALUES'). MINUS and
     /// [NOT] EXISTS bodies, and FILTER expressions, bind nothing outside themselves. A blank node is not a variable.
@@ -28,6 +29,13 @@ internal ref partial struct SparqlParser
                     AddIfVariable(slot.SubjectType, slot.SubjectStart, slot.SubjectLength, ref into);
                     AddIfVariable(slot.PredicateType, slot.PredicateStart, slot.PredicateLength, ref into);
                     AddIfVariable(slot.ObjectType, slot.ObjectStart, slot.ObjectLength, ref into);
+                    if (slot.WordsLength > 0)
+                    {
+                        // The time variables of MEMORIZED and FORGOTTEN are the pattern's (ADR-061 D6)
+                        var words = new SparqlParser(_source).ParseMemoryWordsAt(slot.WordsStart);
+                        AddIfVariable(TermType.Variable, words.Memorized.VariableStart, words.Memorized.VariableLength, ref into);
+                        AddIfVariable(TermType.Variable, words.Forgotten.VariableStart, words.Forgotten.VariableLength, ref into);
+                    }
                     break;
                 case PatternKind.Bind:
                     AddIfVariable(TermType.Variable, slot.BindVarStart, slot.BindVarLength, ref into);

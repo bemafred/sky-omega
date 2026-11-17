@@ -88,15 +88,26 @@ public class QuadIndexCursorTests : IDisposable
             n++;
         }
 
-        var selections = new[]
+        // Each time selection, with what it selects written out: the periods that held at a time, those that overlap a
+        // range, every period, what is remembered (no forgotten time), and two selections of the words of ADR-061.
+        var selections = new (string Name, TemporalQuery Times, Func<long, long, bool> Selects)[]
         {
-            new TemporalQuery { Type = TemporalQueryType.AsOf, AsOfTime = 500 },        // before anything
-            new TemporalQuery { Type = TemporalQueryType.AsOf, AsOfTime = 2500 },       // half of it memorized
-            new TemporalQuery { Type = TemporalQueryType.AsOf, AsOfTime = 6500 },       // some forgotten
-            new TemporalQuery { Type = TemporalQueryType.AsOf, AsOfTime = 50_000 },     // after everything
-            new TemporalQuery { Type = TemporalQueryType.Range, RangeStart = 0, RangeEnd = 2000 },
-            new TemporalQuery { Type = TemporalQueryType.Range, RangeStart = 4500, RangeEnd = 7000 },
-            new TemporalQuery { Type = TemporalQueryType.AllTime },
+            ("as of 500", TemporalQuery.AsOf(500), (m, f) => m <= 500 && f > 500),            // before anything
+            ("as of 2500", TemporalQuery.AsOf(2500), (m, f) => m <= 2500 && f > 2500),        // half of it memorized
+            ("as of 6500", TemporalQuery.AsOf(6500), (m, f) => m <= 6500 && f > 6500),        // some forgotten
+            ("as of 50000", TemporalQuery.AsOf(50_000), (m, f) => m <= 50_000 && f > 50_000), // after everything
+            ("overlapping [0, 2000)", TemporalQuery.Overlapping(0, 2000), (m, f) => m < 2000 && f > 0),
+            ("overlapping [4500, 7000)", TemporalQuery.Overlapping(4500, 7000), (m, f) => m < 7000 && f > 4500),
+            ("everything", TemporalQuery.Everything, (m, f) => true),
+            ("remembered", TemporalQuery.Remembered, (m, f) => f == open),
+            ("memorized in [2000, 6000), forgotten or not", TemporalQuery.Words(2000, 6000, null, null, forgottenToo: true),
+                (m, f) => m >= 2000 && m < 6000),
+            ("memorized since 9000, remembered", TemporalQuery.Words(9000, long.MaxValue, null, null, forgottenToo: false),
+                (m, f) => m >= 9000 && f == open),
+            ("forgotten in [5000, 7000)", TemporalQuery.Words(long.MinValue, long.MaxValue, 5000, 7000, forgottenToo: true),
+                (m, f) => f != open && f >= 5000 && f < 7000),
+            ("forgotten since 7000", TemporalQuery.Words(long.MinValue, long.MaxValue, 7000, null, forgottenToo: true),
+                (m, f) => f != open && f >= 7000),
         };
         // -1 leaves a dimension unbound. Some patterns bind a dimension behind an unbound one, which the key range
         // cannot select by.
@@ -119,21 +130,16 @@ public class QuadIndexCursorTests : IDisposable
                 (pattern.Primary < 0 || p.Primary == pattern.Primary) &&
                 (pattern.Secondary < 0 || p.Secondary == pattern.Secondary) &&
                 (pattern.Tertiary < 0 || p.Tertiary == pattern.Tertiary) &&
-                selection.Type switch
-                {
-                    TemporalQueryType.AsOf => p.MemorizedAt <= selection.AsOfTime && p.ForgottenAt > selection.AsOfTime,
-                    TemporalQueryType.Range => p.MemorizedAt < selection.RangeEnd && p.ForgottenAt > selection.RangeStart,
-                    _ => true,
-                });
+                selection.Selects(p.MemorizedAt, p.ForgottenAt));
             var expected = (order == TemporalQuadIndex.KeySortOrder.TimeFirst
                 ? selected.OrderBy(p => p.MemorizedAt).ThenBy(p => p.Graph).ThenBy(p => p.Primary).ThenBy(p => p.Secondary).ThenBy(p => p.Tertiary)
                 : selected.OrderBy(p => p.Graph).ThenBy(p => p.Primary).ThenBy(p => p.Secondary).ThenBy(p => p.Tertiary).ThenBy(p => p.MemorizedAt))
                 .ToList();
 
-            var cursor = index.Query(pattern.Graph, pattern.Primary, pattern.Secondary, pattern.Tertiary, selection);
+            var cursor = index.Query(pattern.Graph, pattern.Primary, pattern.Secondary, pattern.Tertiary, selection.Times);
             foreach (var period in expected)
             {
-                Assert.True(cursor.MoveNext(), $"the cursor ended before {period} of {selection.Type} {pattern}");
+                Assert.True(cursor.MoveNext(), $"the cursor ended before {period} of {selection.Name} {pattern}");
                 Assert.Equal(period.Graph, cursor.Graph);
                 Assert.Equal(period.Primary, cursor.Primary);
                 Assert.Equal(period.Secondary, cursor.Secondary);
@@ -143,7 +149,7 @@ public class QuadIndexCursorTests : IDisposable
                 Assert.False(cursor.LegacyIsDeleted);
                 Assert.True(cursor.HasMemoryTimes);
             }
-            Assert.False(cursor.MoveNext(), $"the cursor has a row more than the {expected.Count} of {selection.Type} {pattern}");
+            Assert.False(cursor.MoveNext(), $"the cursor has a row more than the {expected.Count} of {selection.Name} {pattern}");
             Assert.False(cursor.MoveNext());                        // and stays at its end
 
             rowsCompared += expected.Count;

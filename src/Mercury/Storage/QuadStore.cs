@@ -515,10 +515,11 @@ public sealed class QuadStore : IDisposable
     /// Throws <see cref="ProfileCapabilityException"/> when the store's profile has no
     /// temporal dimension. Per ADR-029 Decision 4, temporal queries against non-temporal
     /// profiles fail at the API boundary — never silently degraded. After this call
-    /// returns, the four temporal-index fields are non-null.
+    /// returns, the four temporal-index fields are non-null. The SPARQL engine calls it before it reads anything
+    /// for a query that uses the words of Cognitive SPARQL (ADR-061 D9).
     /// </summary>
     [MemberNotNull(nameof(_gspoIndex), nameof(_gposIndex), nameof(_gospIndex), nameof(_tgspIndex))]
-    private void RequireTemporalProfile(string operation)
+    internal void RequireTemporalProfile(string operation)
     {
         if (_schema.HasTemporal && _gspoIndex is not null && _gposIndex is not null
             && _gospIndex is not null && _tgspIndex is not null)
@@ -3258,7 +3259,48 @@ public sealed class QuadStore : IDisposable
         }
 
         RequireTemporalProfile(nameof(Query));
-        // Select optimal index
+        // AsOf with no time is the current state: what is remembered, read with no clock (ADR-061 D7)
+        var times = queryType switch
+        {
+            TemporalQueryType.AsOf => asOfTime is null
+                ? TemporalQuery.Remembered
+                : TemporalQuery.AsOf(asOfTime.Value.ToUnixTimeMilliseconds()),
+            TemporalQueryType.Range => TemporalQuery.Overlapping(
+                (rangeStart ?? DateTimeOffset.MinValue).ToUnixTimeMilliseconds(),
+                (rangeEnd ?? DateTimeOffset.MaxValue).ToUnixTimeMilliseconds()),
+            _ => TemporalQuery.Everything
+        };
+        return QueryCognitive(subject, predicate, @object, graph, times, queryType);
+    }
+
+    /// <summary>
+    /// The read of the words of Cognitive SPARQL (ADR-061 D6, D10): the periods of the matching quads that
+    /// <paramref name="times"/> selects, each with its two times. Refused on a store that keeps no times (D9).
+    /// Empty graph means default graph. Caller must hold read lock.
+    /// </summary>
+    internal TemporalResultEnumerator QueryMemories(
+        ReadOnlySpan<char> subject,
+        ReadOnlySpan<char> predicate,
+        ReadOnlySpan<char> @object,
+        ReadOnlySpan<char> graph,
+        TemporalQuery times)
+    {
+        RequireTemporalProfile(nameof(QueryMemories));
+        return QueryCognitive(subject, predicate, @object, graph, times, TemporalQueryType.AsOf);
+    }
+
+    /// <summary>
+    /// A Cognitive read: the index chosen by the bound terms (and by <paramref name="queryType"/>, which takes TGSP
+    /// for a range), read with the time selection <paramref name="times"/>.
+    /// </summary>
+    private TemporalResultEnumerator QueryCognitive(
+        ReadOnlySpan<char> subject,
+        ReadOnlySpan<char> predicate,
+        ReadOnlySpan<char> @object,
+        ReadOnlySpan<char> graph,
+        TemporalQuery times,
+        TemporalQueryType queryType)
+    {
         var (selectedIndex, indexType) = SelectOptimalIndex(subject, predicate, @object, queryType);
 
         // Map RDF terms to index dimensions:
@@ -3286,25 +3328,11 @@ public sealed class QuadStore : IDisposable
                 break;
         }
 
-        var enumerator = queryType switch
-        {
-            TemporalQueryType.AsOf =>
-                selectedIndex.QueryAsOf(arg1, arg2, arg3,
-                    asOfTime ?? _clock.GetUtcNow(), graph),
-
-            TemporalQueryType.Range =>
-                selectedIndex.QueryRange(arg1, arg2, arg3,
-                    rangeStart ?? DateTimeOffset.MinValue,
-                    rangeEnd ?? DateTimeOffset.MaxValue, graph),
-
-            _ => selectedIndex.QueryHistory(arg1, arg2, arg3, graph)
-        };
-
-        return new TemporalResultEnumerator(enumerator, indexType, _atoms);
+        return new TemporalResultEnumerator(selectedIndex.Query(arg1, arg2, arg3, times, graph), indexType, _atoms);
     }
 
     /// <summary>
-    /// Query current state (as of now).
+    /// What is remembered (ADR-061 D7): every period that has no forgotten time. It reads no clock.
     /// Empty graph means default graph.
     /// </summary>
     public TemporalResultEnumerator QueryCurrent(
@@ -3431,7 +3459,7 @@ public sealed class QuadStore : IDisposable
                 break;
         }
 
-        var enumerator = selectedIndex.QueryAsOf(arg1, arg2, arg3, _clock.GetUtcNow(), graph);
+        var enumerator = selectedIndex.QueryCurrent(arg1, arg2, arg3, graph);
         return new TemporalResultEnumerator(enumerator, indexType, _atoms, candidateObjectAtomIds);
     }
 
@@ -3461,7 +3489,7 @@ public sealed class QuadStore : IDisposable
         // could not enumerate its own named graphs because the path was only ever wired for the temporal
         // index — surfaced by DrHook.Capture.)
         if (_gspoIndex is not null)                                                         // Cognitive (temporal)
-            return new NamedGraphEnumerator(_gspoIndex.QueryCurrentAllGraphs(_clock.GetUtcNow().ToUnixTimeMilliseconds()), _atoms);
+            return new NamedGraphEnumerator(_gspoIndex.QueryRememberedAllGraphs(), _atoms);
         if (_gspoGraph is not null) return new NamedGraphEnumerator(_gspoGraph.Query(-1, -1, -1, -1), _atoms);   // Graph: what is asserted now
         if (_gspoMinimal is not null) return new NamedGraphEnumerator(_atoms);             // Minimal: single-graph → no named graphs
         throw new ProfileCapabilityException(

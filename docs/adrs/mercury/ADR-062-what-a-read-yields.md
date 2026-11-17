@@ -522,7 +522,8 @@ The order follows D8.
    - `Mercury.Tests`: 6,429 passed, 156 skipped, 0 failed. The benchmarks were not run again: the query path has read
      through the cursor since Step 5, and Step 6 removed the bridge in front of it.
 
-**Then ADR-061 Step 5:** the words, built on the cursor.
+**Then ADR-061 Step 5:** the words, built on the cursor — **done 2026-11-17** (ADR-061 P6). A pattern with a word
+reads through the cursor like any other; the Cognitive index's time selection is now two ranges of times.
 
 **Part two: the result types.** One change with ADR-061 Step 6.
 

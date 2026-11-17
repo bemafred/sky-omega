@@ -69,11 +69,8 @@ internal partial class QueryExecutor : IDisposable
     // SERVICE clause execution — the tree's ServiceStep evaluates SERVICE against this executor (ADR-047 B3).
     private readonly ISparqlServiceExecutor? _serviceExecutor;
 
-    // Temporal query parameters
-    private readonly TemporalQueryMode _temporalMode;
-    private readonly DateTimeOffset _asOfTime;
-    private readonly DateTimeOffset _rangeStart;
-    private readonly DateTimeOffset _rangeEnd;
+    // Cognitive SPARQL's INCLUDING FORGOTTEN (ADR-061 D6)
+    private readonly bool _includesForgotten;
 
     // NOW()'s value (SPARQL 1.1 §17.4.5.1): read once, when the executor is made. One executor is one query
     // execution, and every expression it evaluates, in a sub-SELECT too, reads this value.
@@ -106,6 +103,10 @@ internal partial class QueryExecutor : IDisposable
     {
         if (maxJoinDepth <= 0)
             throw new ArgumentOutOfRangeException(nameof(maxJoinDepth), "Max join depth must be positive");
+        // ADR-061 D9: refused on a store that keeps no times, before anything is read. The words on a pattern are
+        // checked by the tree executor, which has the pattern tree.
+        if (query.SolutionModifier.IncludesForgotten)
+            store.RequireTemporalProfile("MEMORIZED, FORGOTTEN and INCLUDING FORGOTTEN (Cognitive SPARQL, ADR-061 D9)");
 
         // NOW() is a reading of the store's clock: every write this query does not see is stamped at or after it
         // (ADR-061 M9).
@@ -131,55 +132,7 @@ internal partial class QueryExecutor : IDisposable
 
         _serviceExecutor = serviceExecutor;
 
-        // Extract temporal clause parameters (from buffer instead of query)
-        _temporalMode = _buffer.TemporalMode;
-        if (_temporalMode == TemporalQueryMode.AsOf)
-        {
-            var timeStr = source.Slice(_buffer.TimeStartStart, _buffer.TimeStartLength);
-            _asOfTime = ParseDateTimeOffset(timeStr);
-        }
-        else if (_temporalMode == TemporalQueryMode.During)
-        {
-            var startStr = source.Slice(_buffer.TimeStartStart, _buffer.TimeStartLength);
-            var endStr = source.Slice(_buffer.TimeEndStart, _buffer.TimeEndLength);
-            _rangeStart = ParseDateTimeOffset(startStr);
-            _rangeEnd = ParseDateTimeOffset(endStr);
-        }
-
-    }
-
-    /// <summary>
-    /// Parse a datetime literal like "2023-06-15"^^xsd:date or "2023-06-15T10:30:00"^^xsd:dateTime
-    /// </summary>
-    private static DateTimeOffset ParseDateTimeOffset(ReadOnlySpan<char> literal)
-    {
-        // Extract value between quotes
-        int start = 0;
-        int end = literal.Length;
-
-        // Find opening quote
-        for (int i = 0; i < literal.Length; i++)
-        {
-            if (literal[i] == '"') { start = i + 1; break; }
-        }
-
-        // Find closing quote
-        for (int i = start; i < literal.Length; i++)
-        {
-            if (literal[i] == '"') { end = i; break; }
-        }
-
-        var value = literal.Slice(start, end - start);
-
-        // Try parse as DateTimeOffset
-        if (DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var result))
-            return result;
-
-        // Try parse as date only (assume start of day)
-        if (DateTime.TryParse(value.ToString(), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var dt))
-            return new DateTimeOffset(dt, TimeSpan.Zero);
-
-        return DateTimeOffset.MinValue;
+        _includesForgotten = _buffer.IncludesForgotten;
     }
 
     /// <summary>
@@ -310,7 +263,7 @@ internal partial class QueryExecutor : IDisposable
             var group = new GroupedRow(default, select, groupBindings, _source);
 
             new TreeJoinExecutor(_store, _source, _now, _prefixMappings, _source, _serviceExecutor,
-                _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _namedGraphs, _defaultGraphs, ReorderBgpInTree)
+                _includesForgotten, _namedGraphs, _defaultGraphs, ReorderBgpInTree)
                 .FoldFlatBgpAggregate(ref tree, root, "", group);
 
             group.FinalizeAggregates();
@@ -395,7 +348,7 @@ internal partial class QueryExecutor : IDisposable
 
             var comparer = new MaterializedRowComparer(orderBy, _source, _now, _prefixMappings);
             var rows = new TreeJoinExecutor(_store, _source, _now, _prefixMappings, _source, _serviceExecutor,
-                _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _namedGraphs, _defaultGraphs, ReorderBgpInTree)
+                _includesForgotten, _namedGraphs, _defaultGraphs, ReorderBgpInTree)
                 .StreamFlatBgpTopK(ref tree, root, "", comparer, capacity);
 
             var bindings = new Binding[64];
@@ -456,7 +409,7 @@ internal partial class QueryExecutor : IDisposable
             var trigramMap = TreeJoinExecutor.ResolveTrigramCandidates(_store, ref tree, root, _source);
 
             var executor = new TreeJoinExecutor(_store, _source, _now, _prefixMappings, _source, _serviceExecutor,
-                _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _namedGraphs, _defaultGraphs, ReorderBgpInTree, trigramMap);
+                _includesForgotten, _namedGraphs, _defaultGraphs, ReorderBgpInTree, trigramMap);
             var rows = executor.Evaluate(ref tree, root, "", maxRows);
 
             // A trailing (post-query) VALUES is JOINED with the whole-pattern solution (multiply + bind), not filtered; in
@@ -665,8 +618,7 @@ internal partial class QueryExecutor : IDisposable
             }
         }
 
-        return new DescribeResults(_store, resources, DescribedGraphs(),
-            new TemporalScope(_temporalMode, _asOfTime, _rangeStart, _rangeEnd));
+        return new DescribeResults(_store, resources, DescribedGraphs(), TemporalScope.ForQuery(_includesForgotten));
     }
 
     /// <summary>
@@ -687,7 +639,7 @@ internal partial class QueryExecutor : IDisposable
             return graphs;
         }
         graphs.Add("");
-        var named = new TemporalScope(_temporalMode, _asOfTime, _rangeStart, _rangeEnd).NamedGraphs(_store);
+        var named = TemporalScope.ForQuery(_includesForgotten).NamedGraphs(_store);
         while (named.MoveNext())
         {
             var g = named.Current;

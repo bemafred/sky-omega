@@ -159,23 +159,6 @@ public class DescribeTests : PooledStoreTestBase
     }
 
     [Fact]
-    public void Describe_AsOf_ReadsTheTriplesValidThen()
-    {
-        Store.Add("<http://ex/a>", "<http://ex/worksFor>", "<http://ex/Acme>",
-            new DateTimeOffset(2020, 1, 1, 0, 0, 0, TimeSpan.Zero), new DateTimeOffset(2023, 6, 30, 0, 0, 0, TimeSpan.Zero),
-            "<http://ex/g>");
-        Store.Add("<http://ex/a>", "<http://ex/worksFor>", "<http://ex/Other>",
-            new DateTimeOffset(2023, 7, 1, 0, 0, 0, TimeSpan.Zero), DateTimeOffset.MaxValue, "<http://ex/g>");
-
-        var result = SparqlEngine.Query(Store,
-            "PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> DESCRIBE <http://ex/a> AS OF \"2021-06-15\"^^xsd:date",
-            TestContext.Current.CancellationToken);
-
-        Assert.True(result.Success, result.ErrorMessage);
-        Assert.Equal(("<http://ex/a>", "<http://ex/worksFor>", "<http://ex/Acme>"), Assert.Single(result.Triples!));
-    }
-
-    [Fact]
     public void Describe_APrefixedNameThatStartsLikeAKeyword_IsATarget()
     {
         // The target list used to end at any token starting with ORDER, VALUES, FROM, …

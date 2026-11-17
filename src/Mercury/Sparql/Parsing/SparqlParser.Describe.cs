@@ -10,7 +10,7 @@ internal ref partial struct SparqlParser
     /// with it to check it, and the executor to collect what to describe, so the two cannot disagree; the list has no
     /// size limit. A target is a variable (<c>?x</c>, <c>$x</c>), an IRI (<c>&lt;…&gt;</c>) or a prefixed name (a token
     /// with a <c>:</c>); the list ends at the first token that is none of these: <c>{</c>, a keyword (WHERE, FROM, a
-    /// solution modifier, VALUES, Mercury's AS OF, DURING and ALL VERSIONS) or the end of the query. A keyword is
+    /// solution modifier, VALUES, Cognitive SPARQL's INCLUDING FORGOTTEN) or the end of the query. A keyword is
     /// told from a prefixed name by its colon, so <c>orders:x</c> is a target.
     /// </summary>
     internal ref struct DescribeTargetReader

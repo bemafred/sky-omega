@@ -45,7 +45,7 @@ public class IndexCursorBenchmarks
             _minimal.NextVersion(row, 101, 201, 0);
         }
 
-        _remembered = new TemporalQuery { Type = TemporalQueryType.AsOf, AsOfTime = 2000 };
+        _remembered = TemporalQuery.AsOf(2000);
     }
 
     [GlobalCleanup]

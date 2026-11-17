@@ -365,6 +365,8 @@ internal ref partial struct SparqlParser
                 var obj = EmitNodeTree(ref pa, written);
                 AddPathTriple(ref pa, subject, predicate, obj, path, pathStart, pathLength);
                 SkipWhitespace();
+                if (AtMemoryWord())
+                    AttachMemoryWords(ref pa, path); // ADR-061 D10: the words apply to the one pattern this object completes
                 if (Peek() != ',')
                     break;
                 Advance();
@@ -733,7 +735,15 @@ internal ref partial struct SparqlParser
         int header = pa.BeginService(_position);
         ParseServiceHead();
         int groupStart = _position;
-        ParseGroupTree(ref pa, depth + 1);
+        _serviceDepth++;
+        try
+        {
+            ParseGroupTree(ref pa, depth + 1);
+        }
+        finally
+        {
+            _serviceDepth--;
+        }
         pa.EndService(header, groupStart, _position);
     }
 
