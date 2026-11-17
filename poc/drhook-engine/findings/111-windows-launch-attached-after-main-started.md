@@ -112,6 +112,22 @@ window, before `DebugActiveProcess`:
 So the hold, not the timing, keeps `Main` from starting first. The 1000 ms run also shows that `DebugActiveProcess`
 works while dbgshim holds the runtime at its startup event, which the design depended on.
 
+### Through `drhook-mcp`
+
+2026-11-16, omega-windows. A PowerShell client (`win-mcp-launch.ps1`, in zbook's scratch directory) ran the built
+`drhook-mcp` over stdio, as an MCP client does, with one server process per row. Each launch was a `drhook_launch` of
+`dotnet DrHookSnapshotTarget.dll` with the initial breakpoint at `SNAPSHOT_HERE`, then `drhook_locals` for the argument
+`n`, then `drhook_stop`. The first call has `n` = 1.
+
+| Commit | Delay | Launches | Late | `n` was |
+|--------|-------|----------|------|---------|
+| `86af6a1b` (`main`, this fix) | none | 30 | 0 | 1 each time |
+| `9a49039b` (the fix, the delay inside the held window) | 300 ms | 10 | 0 | 1 each time |
+| `50353a5d` (no fix, the delay before the attach) | 300 ms | 5 | 5 | 7 each time |
+
+So the hold works when the attach runs inside the MCP server's request, and the check sees a late attach when there is
+one. No target was left running.
+
 ## What it meant for users
 
 On Windows any `drhook_launch` could miss a breakpoint in code that runs in the program's first moments, and its
@@ -121,6 +137,5 @@ callback to `DebugActiveProcess`: here 1 in 10 to 1 in 30.
 ## Not tested
 
 - **Windows x64.** Only omega-windows (arm64) was available; CI runs `windows-latest` (x64).
-- **`drhook-mcp` on Windows**, where the attach runs inside the MCP server's request; the engine path is the same.
 - **A deterministic regression test.** It would need a delay seam in the product. The `CaptureState` test fails about
   1 run in 10 on Windows without the fix, and CI runs it on both Windows runners on every push.
