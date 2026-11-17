@@ -1964,13 +1964,9 @@ public sealed class QuadStore : IDisposable
             return;
         }
 
-        // ADR-029 Graph profile (Commit 3): structurally parallel to Cognitive's
-        // rebuild but uses VersionedQuadIndex.AddRaw (no temporal args). Scans
-        // _gspoGraph as primary; populates _gposGraph / _gospGraph
-        // and the trigram posting list. Uses the random-insert AddRaw path rather
-        // than AppendSorted — Graph isn't aiming for Wikidata-scale; the
-        // radix-external-sort optimization is a follow-up if a Graph workload
-        // surfaces past-RAM-working-set behavior.
+        // ADR-029 Graph profile, with ADR-064 D6: parallel to Cognitive's rebuild. It compares GPOS and GOSP with
+        // GSPO first, then carries every fact GSPO holds into them at its version, and rebuilds the trigram posting
+        // list.
         if (_schema.Profile == StoreProfile.Graph)
         {
             RebuildGraphSecondaryIndexes(onProgress);
@@ -2176,41 +2172,50 @@ public sealed class QuadStore : IDisposable
     }
 
     /// <summary>
-    /// Rebuild secondary indexes for a Graph-profile store — ADR-029 Commit 3.
-    /// Scans the primary <see cref="_gspoGraph"/> once per target, remapping
-    /// (Graph, Subject, Predicate, Object) → (Graph, Primary, Secondary, Tertiary)
-    /// to populate GPOS / GOSP; then scans a final time for the trigram
-    /// posting list (literal objects only). State transitions PrimaryOnly →
-    /// BuildingGPOS → BuildingGOSP → BuildingTrigram → Ready.
+    /// Rebuild the secondary indexes of a Graph store, GPOS and GOSP, from GSPO (ADR-064 D6), then the trigram posting
+    /// list from GSPO's asserted literal objects. State transitions PrimaryOnly → BuildingGPOS → BuildingGOSP →
+    /// BuildingTrigram → Ready.
     /// </summary>
     /// <remarks>
-    /// Uses random-insert <see cref="VersionedQuadIndex.AddRaw"/> rather than
-    /// AppendSorted. AppendSorted would require a sorted scan via an external sorter
-    /// (the Reference profile's ADR-032 pattern) — VersionedQuadIndex doesn't expose
-    /// AppendSorted today, and Graph workloads aren't aimed at Wikidata-scale where
-    /// the radix-external-sort win becomes load-bearing. If a Graph workload surfaces
-    /// scale past in-memory page cache, follow the ADR-032 pattern as a sibling round.
+    /// Inserts one entry at a time rather than appending a sorted run. AppendSorted would require a sorted scan via an
+    /// external sorter (the Reference profile's ADR-032 pattern), and Graph workloads aren't aimed at Wikidata-scale
+    /// where the radix-external-sort win becomes load-bearing. If a Graph workload surfaces scale past what memory
+    /// holds, follow the ADR-032 pattern as a sibling round.
     /// </remarks>
     private void RebuildGraphSecondaryIndexes(Action<string, long>? onProgress)
     {
         _lock.EnterWriteLock();
-        _sessionMutated = true;
         var totalStopwatch = System.Diagnostics.Stopwatch.StartNew();
-        var phases = HasRebuildListener ? new List<RebuildPhaseMetrics>(4) : null;
+        var phases = HasRebuildListener ? new List<RebuildPhaseMetrics>(3) : null;
+        var started = false;
         try
         {
-            // Source index is GSPO: the cursor's Primary, Secondary, Tertiary = (s, p, o).
-            // The remap lambda projects logical RDF roles (g, s, p, o) onto each target's
-            // (Graph, Primary, Secondary, Tertiary).
+            // A rebuild replaces GPOS and GOSP with what GSPO holds (ADR-064 G6). First it looks for what that would
+            // discard: an entry of either that GSPO does not hold as it is, at its version. Resolving such a
+            // difference needs a rule, and the rebuild has none, so it then changes nothing and says how many it
+            // found (G8). An emptied or partly built index holds nothing GSPO lacks.
+            var gposOnly = CountGraphEntriesGspoDoesNotHold(_gposGraph!, static (p, o, s) => (s, p, o));
+            var gospOnly = CountGraphEntriesGspoDoesNotHold(_gospGraph!, static (o, s, p) => (s, p, o));
+            if (gposOnly + gospOnly > 0)
+            {
+                var refusal = $"The rebuild changed nothing: GPOS holds {gposOnly:N0} and GOSP {gospOnly:N0} entries " +
+                    "that GSPO does not hold as they are. A rebuild derives these indexes from GSPO and would discard " +
+                    "them; a difference between the indexes needs a rule of its own (ADR-064 G8).";
+                _logger.Warning(refusal.AsSpan());
+                throw new InvalidOperationException(refusal);
+            }
+
+            // ADR-031 Piece 2: the secondaries are now different — Dispose runs CheckpointInternal for the statistics.
+            _sessionMutated = true;
+            started = true;
+
             RebuildGraphIndex(_gposGraph!, "GPOS", StoreIndexState.BuildingGPOS,
-                (g, s, p, o) => (g, p, o, s), // GPOS: Primary=P, Secondary=O, Tertiary=S
-                onProgress, phases);
+                static (s, p, o) => (p, o, s), onProgress, phases);
 
             RebuildGraphIndex(_gospGraph!, "GOSP", StoreIndexState.BuildingGOSP,
-                (g, s, p, o) => (g, o, s, p), // GOSP: Primary=O, Secondary=S, Tertiary=P
-                onProgress, phases);
+                static (s, p, o) => (o, s, p), onProgress, phases);
 
-            // Trigram rebuild from the primary GSPO scan.
+            // Trigram rebuild from the primary GSPO scan: the literal objects of the facts that are asserted.
             _indexState = StoreIndexState.BuildingTrigram;
             StoreStateFile.Write(_baseDirectory, _indexState);
             _trigramIndex.Clear();
@@ -2253,7 +2258,7 @@ public sealed class QuadStore : IDisposable
             totalStopwatch.Stop();
             _lock.ExitWriteLock();
 
-            if (HasRebuildListener)
+            if (HasRebuildListener && started)
             {
                 EmitRebuildComplete(new RebuildMetrics(
                     Timestamp: DateTimeOffset.UtcNow,
@@ -2266,32 +2271,51 @@ public sealed class QuadStore : IDisposable
     }
 
     /// <summary>
-    /// Per-target scan-and-fill for a Graph-profile secondary index. Mirrors
-    /// <see cref="RebuildIndex"/> (the Cognitive path) but reads a <see cref="VersionedQuadIndex"/> cursor
-    /// and dispatches to <see cref="VersionedQuadIndex.AddRaw"/>. Borrows the
-    /// deferred-msync pattern: rebuild is a bulk-shape operation, per-page msync
-    /// would dominate wall-clock for the same reason it does in Cognitive.
+    /// The number of entries of a Graph secondary index that GSPO does not hold as they are, at their version
+    /// (ADR-064 G8). <paramref name="toGspo"/> takes an entry's three dimensions in the index's order and gives
+    /// subject, predicate and object. Every fact held is read, retracted ones too, in every graph.
+    /// </summary>
+    private long CountGraphEntriesGspoDoesNotHold(VersionedQuadIndex target,
+        Func<long, long, long, (long Subject, long Predicate, long Object)> toGspo)
+    {
+        long count = 0;
+        var entry = target.QueryHeld(-1, -1, -1, -1);
+        while (entry.MoveNext())
+        {
+            var (s, p, o) = toGspo(entry.Primary, entry.Secondary, entry.Tertiary);
+            var inGspo = _gspoGraph!.QueryHeld(entry.Graph, s, p, o);
+            if (!inGspo.MoveNext() || inGspo.Version != entry.Version)
+                count++;
+        }
+        return count;
+    }
+
+    /// <summary>
+    /// Rebuild one Graph secondary index from GSPO: empty it, then carry every fact GSPO holds, of every graph and
+    /// retracted ones too, at its version (ADR-064 D6, G6). <paramref name="fromGspo"/> takes subject, predicate and
+    /// object and gives the index's three dimensions. Borrows the deferred-msync pattern: a rebuild is a bulk-shape
+    /// operation, and a per-page msync would dominate wall-clock for the same reason it does in Cognitive.
     /// </summary>
     private void RebuildGraphIndex(VersionedQuadIndex target, string name, StoreIndexState duringState,
-        Func<long, long, long, long, (long Graph, long Primary, long Secondary, long Tertiary)> remap,
+        Func<long, long, long, (long Primary, long Secondary, long Tertiary)> fromGspo,
         Action<string, long>? onProgress,
         List<RebuildPhaseMetrics>? phases)
     {
         _indexState = duringState;
         StoreStateFile.Write(_baseDirectory, _indexState);
+
+        var heldBefore = target.QuadCount;
         target.Clear();
         target.SetDeferMsync(true);
         long count = 0;
         var phaseStopwatch = System.Diagnostics.Stopwatch.StartNew();
         try
         {
-            var gspo = _gspoGraph!.Query(-1, -1, -1, -1);
+            var gspo = _gspoGraph!.QueryHeld(-1, -1, -1, -1);
             while (gspo.MoveNext())
             {
-                // Source is GSPO: Primary=Subject, Secondary=Predicate, Tertiary=Object.
-                // The remap projects logical (g, s, p, o) onto the target's (Graph, Primary, Secondary, Tertiary).
-                var (tg, tp, ts, tt) = remap(gspo.Graph, gspo.Primary, gspo.Secondary, gspo.Tertiary);
-                target.AddRaw(tg, tp, ts, tt);
+                var (primary, secondary, tertiary) = fromGspo(gspo.Primary, gspo.Secondary, gspo.Tertiary);
+                target.CarryEntry(gspo.Graph, primary, secondary, tertiary, gspo.Version);
                 count++;
             }
         }
@@ -2302,6 +2326,12 @@ public sealed class QuadStore : IDisposable
             phaseStopwatch.Stop();
         }
 
+        // Clear started the index's count over at transaction 0, as if the log were emptied with it, and the log is
+        // not. The index now holds what GSPO holds, so its count is exact up to the transaction GSPO's is: without
+        // this, recovery after a crash would count again what the log holds since the last checkpoint (ADR-058).
+        target.CommitEntryCount(_gspoGraph!.CountTxId, durable: true);
+
+        _logger.Info($"Rebuilt {name} from GSPO: it held {heldBefore:N0} entries, each of them in GSPO, and holds {count:N0}.".AsSpan());
         onProgress?.Invoke(name, count);
 
         if (phases is not null)

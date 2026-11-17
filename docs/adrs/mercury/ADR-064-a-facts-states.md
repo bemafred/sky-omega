@@ -379,7 +379,16 @@ The links, read in the code on 2026-11-16:
      `Add` or `Retract` record, and refuses one in its log.
    - `AddCurrent` and `AddCurrentBatched` say whether the fact's state changed, where they said "true" before.
    - `FactStatesTests` pass.
-5. **The rebuild** carries what the store holds (D6).
+5. **The rebuild** carries what the store holds (D6). **Done 2026-11-17, after Step 6:**
+   - It compares first: an entry of GPOS or GOSP that GSPO does not hold at the same version is counted. If any is,
+     it changes nothing, logs a warning and throws: "The rebuild changed nothing: GPOS holds n and GOSP m entries
+     that GSPO does not hold as they are" (G8).
+   - Otherwise it empties each index and carries every fact GSPO holds, of every graph and retracted ones too, at
+     its version (`VersionedQuadIndex.CarryEntry`, G6). It saves each count as exact up to GSPO's transaction, as the
+     Cognitive rebuild does (ADR-058), and logs what each index held before and holds now.
+   - `AddRaw` is gone: the Graph index's changes are `NextVersion` and the rebuild's `CarryEntry`.
+   - `GraphRebuildTests` pass. Each fails under its mutation: a comparison without the version, and a carry at
+     version 1.
 6. **The layout** (D1, D3, D8): the entry holds the key, the child pointer and the version; Graph's TGSP goes; each
    file's magic number changes with its layout. **Done 2026-11-17, before Step 5:** the two are not linked, and built
    first, the layout lets the rebuild be written once, for the entry and the indexes Graph keeps.

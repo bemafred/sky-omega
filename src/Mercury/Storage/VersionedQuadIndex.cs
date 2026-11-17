@@ -108,7 +108,7 @@ internal sealed unsafe class VersionedQuadIndex : IQuadIndex
         if (fromVersion == 0)
         {
             var heldBefore = _file.EntryCount;
-            InsertIntoTree(key, _file.RootPageId);
+            InsertIntoTree(key, 1, _file.RootPageId);
             return _file.EntryCount > heldBefore;
         }
 
@@ -128,10 +128,10 @@ internal sealed unsafe class VersionedQuadIndex : IQuadIndex
     }
 
     /// <summary>
-    /// Insert a fact at version 1 when the index does not hold it, and change nothing when it does. Used by the
-    /// secondary-index rebuild.
+    /// Carry a fact into this index at the version GSPO holds it at, retracted facts included: the secondary-index
+    /// rebuild, into an index it has emptied (ADR-064 D6, G6). An index that holds the fact already is left as it is.
     /// </summary>
-    internal void AddRaw(long graph, long primary, long secondary, long tertiary)
+    internal void CarryEntry(long graph, long primary, long secondary, long tertiary, int version)
     {
         var key = new VersionedKey
         {
@@ -141,7 +141,7 @@ internal sealed unsafe class VersionedQuadIndex : IQuadIndex
             Tertiary = tertiary,
         };
 
-        InsertIntoTree(key, _file.RootPageId);
+        InsertIntoTree(key, version, _file.RootPageId);
     }
 
     /// <summary>The WAL transaction up to which the saved entry count is exact (ADR-058).</summary>
@@ -327,26 +327,26 @@ internal sealed unsafe class VersionedQuadIndex : IQuadIndex
     private VersionedBTreePage* GetPage(long pageId) =>
         _file.GetPagePointer<VersionedBTreePage>(pageId);
 
-    private void InsertIntoTree(VersionedKey key, long pageId)
+    private void InsertIntoTree(VersionedKey key, int version, long pageId)
     {
-        var result = InsertRecursive(key, pageId);
+        var result = InsertRecursive(key, version, pageId);
         if (result.DidSplit && pageId == _file.RootPageId)
         {
             CreateNewRoot(pageId, result.PromotedKey, result.NewRightPageId);
         }
     }
 
-    private SplitResult InsertRecursive(VersionedKey key, long pageId)
+    private SplitResult InsertRecursive(VersionedKey key, int version, long pageId)
     {
         var page = GetPage(pageId);
 
         if (page->IsLeaf)
         {
-            return InsertIntoLeaf(page, key);
+            return InsertIntoLeaf(page, key, version);
         }
 
         var childPageId = FindChildPage(page, key);
-        var childResult = InsertRecursive(key, childPageId);
+        var childResult = InsertRecursive(key, version, childPageId);
 
         if (childResult.DidSplit)
         {
@@ -386,7 +386,7 @@ internal sealed unsafe class VersionedQuadIndex : IQuadIndex
         _file.SaveStructure();
     }
 
-    private SplitResult InsertIntoLeaf(VersionedBTreePage* page, VersionedKey key)
+    private SplitResult InsertIntoLeaf(VersionedBTreePage* page, VersionedKey key, int version)
     {
         // Find insertion position.
         int insertPos = 0;
@@ -406,7 +406,7 @@ internal sealed unsafe class VersionedQuadIndex : IQuadIndex
         // Page-full → split.
         if (page->EntryCount >= NodeDegree)
         {
-            return SplitLeafPage(page, key);
+            return SplitLeafPage(page, key, version);
         }
 
         // Shift and insert new entry.
@@ -418,7 +418,7 @@ internal sealed unsafe class VersionedQuadIndex : IQuadIndex
         ref var newEntry = ref page->GetEntry(insertPos);
         newEntry.Key = key;
         newEntry.ChildOrValue = 0;
-        newEntry.Version = 1;
+        newEntry.Version = version;
 
         page->EntryCount++;
         _file.IncrementEntryCount();
@@ -427,7 +427,7 @@ internal sealed unsafe class VersionedQuadIndex : IQuadIndex
         return default;
     }
 
-    private SplitResult SplitLeafPage(VersionedBTreePage* page, VersionedKey key)
+    private SplitResult SplitLeafPage(VersionedBTreePage* page, VersionedKey key, int version)
     {
         var newPageId = _file.AllocatePage();
         var newPage = GetPage(newPageId);
@@ -453,11 +453,11 @@ internal sealed unsafe class VersionedQuadIndex : IQuadIndex
 
         if (CompareKeys(in key, in promotedKey) < 0)
         {
-            InsertIntoLeaf(page, key);
+            InsertIntoLeaf(page, key, version);
         }
         else
         {
-            InsertIntoLeaf(newPage, key);
+            InsertIntoLeaf(newPage, key, version);
         }
 
         _file.FlushPage();
