@@ -37,9 +37,9 @@ The substrate is `DrHook.Engine` — a BCL + P/Invoke + source-gen COM implement
 |------|---------------|-------------|
 | `drhook_launch` | **Launches a NEW process** under debugger control (Owned session). | `drhook_step_run` |
 | `drhook_attach` | **Attaches to an already-running .NET process** by PID (Borrowed session — target survives the session). | `drhook_step_launch` |
-| `drhook_stop` | **Ends the session** — the normal finish. Borrowed: detaches, target keeps running. Owned: target asked to exit gracefully — SIGTERM → SIGKILL if it doesn't exit within the ~2s window (ADR-008). | `drhook_step_stop` → `drhook_detach` |
+| `drhook_stop` | **Ends the session** — the normal finish. Borrowed: detaches, target keeps running. Owned: detaches first, then asks the target to exit — SIGTERM → SIGKILL if it doesn't exit within the ~2s window (ADR-008, finding 110). On Windows there is no exit request yet: the target is killed (ADR-016 Step 3). | `drhook_step_stop` → `drhook_detach` |
 | `drhook_detach` | Detaches and **leaves the target running** (deliberate). Borrowed: the target keeps running un-debugged. Owned: the launched target is detached cleanly (breakpoints deactivated first so it does not hang) and reparents to launchd (PPID=1) — F-010-2, closed. | *(new — ADR-011 D1)* |
-| `drhook_kill` | **Forcibly terminates** the target — anomaly escape hatch, *not* normal cleanup; every call is worth investigating. Owned: SIGTERM brief-grace (~200 ms) → SIGKILL (`DebugSession.Abandon`, ADR-008). Borrowed: SIGKILL of the attached target — a deliberate force (F-010-1, closed); the session tears down cleanly. | *(new — ADR-011 D1)* |
+| `drhook_kill` | **Forcibly terminates** the target — anomaly escape hatch, *not* normal cleanup; every call is worth investigating. Owned: SIGTERM brief-grace (~200 ms) → SIGKILL while still attached (`DebugSession.Abandon`, ADR-008); on Windows, a kill. Borrowed: SIGKILL of the attached target — a deliberate force (F-010-1, closed); the session tears down cleanly. | *(new — ADR-011 D1)* |
 
 `drhook_step_test` was **removed** in this rename (it only ever returned "not implemented") — see [What's NOT yet shipped](#whats-not-yet-shipped).
 
