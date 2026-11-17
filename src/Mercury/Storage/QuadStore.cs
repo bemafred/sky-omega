@@ -37,7 +37,6 @@ public sealed class QuadStore : IDisposable
     private readonly VersionedQuadIndex? _gspoGraph;
     private readonly VersionedQuadIndex? _gposGraph;
     private readonly VersionedQuadIndex? _gospGraph;
-    private readonly VersionedQuadIndex? _tgspGraph;
     // Reference-profile indexes. Null for Cognitive/Graph/Minimal.
     private readonly ReferenceQuadIndex? _gspoReference;
     private readonly ReferenceQuadIndex? _gposReference;
@@ -279,17 +278,15 @@ public sealed class QuadStore : IDisposable
                 break;
 
             case StoreProfile.Graph:
-                // ADR-029 Graph profile: VersionedQuadIndex × 4. No temporal sort order
-                // variants — single G→P→S→T comparison. WAL is identical to Cognitive's
-                // (LogRecord shape is shared; temporal fields are zeroed/sentinel for
-                // Graph records, costing 24 unused bytes per WAL record but avoiding
-                // a parallel WAL serialization surface).
+                // ADR-029 Graph profile, with ADR-064's model: VersionedQuadIndex × 3. Graph keeps
+                // no time, so it has no TGSP (ADR-064 D3): single G→P→S→T comparison. The WAL
+                // is Cognitive's; a Graph record is NextVersion, whose version takes the bytes
+                // of MemorizedAtTicks and whose other time fields are 0 (ADR-064 D5).
                 _wal = new WriteAheadLog(walPath, WriteAheadLog.DefaultCheckpointSizeThreshold,
                     WriteAheadLog.DefaultCheckpointTimeSeconds, _bufferManager, options.BulkMode);
                 _gspoGraph = new VersionedQuadIndex(gspoPath, _atoms, options.IndexInitialSizeBytes, options.BulkMode);
                 _gposGraph = new VersionedQuadIndex(gposPath, _atoms, options.IndexInitialSizeBytes, options.BulkMode);
                 _gospGraph = new VersionedQuadIndex(gospPath, _atoms, options.IndexInitialSizeBytes, options.BulkMode);
-                _tgspGraph = new VersionedQuadIndex(tgspPath, _atoms, options.IndexInitialSizeBytes, options.BulkMode);
                 break;
 
             case StoreProfile.Reference:
@@ -821,7 +818,7 @@ public sealed class QuadStore : IDisposable
     /// </summary>
     private int HeldVersion(QuadIds quad)
     {
-        var held = _gspoGraph!.QueryAllVersions(quad.Graph, quad.Subject, quad.Predicate, quad.Object);
+        var held = _gspoGraph!.QueryHeld(quad.Graph, quad.Subject, quad.Predicate, quad.Object);
         return held.MoveNext() ? held.Version : 0;
     }
 
@@ -1740,7 +1737,6 @@ public sealed class QuadStore : IDisposable
         _gspoGraph?.Flush();
         _gposGraph?.Flush();
         _gospGraph?.Flush();
-        _tgspGraph?.Flush();
         _gspoReference?.Flush();
         _gposReference?.Flush();
         _gspoMinimal?.Flush();
@@ -1970,7 +1966,7 @@ public sealed class QuadStore : IDisposable
 
         // ADR-029 Graph profile (Commit 3): structurally parallel to Cognitive's
         // rebuild but uses VersionedQuadIndex.AddRaw (no temporal args). Scans
-        // _gspoGraph as primary; populates _gposGraph / _gospGraph / _tgspGraph
+        // _gspoGraph as primary; populates _gposGraph / _gospGraph
         // and the trigram posting list. Uses the random-insert AddRaw path rather
         // than AppendSorted — Graph isn't aiming for Wikidata-scale; the
         // radix-external-sort optimization is a follow-up if a Graph workload
@@ -2183,9 +2179,9 @@ public sealed class QuadStore : IDisposable
     /// Rebuild secondary indexes for a Graph-profile store — ADR-029 Commit 3.
     /// Scans the primary <see cref="_gspoGraph"/> once per target, remapping
     /// (Graph, Subject, Predicate, Object) → (Graph, Primary, Secondary, Tertiary)
-    /// to populate GPOS / GOSP / TGSP; then scans a final time for the trigram
+    /// to populate GPOS / GOSP; then scans a final time for the trigram
     /// posting list (literal objects only). State transitions PrimaryOnly →
-    /// BuildingGPOS → BuildingGOSP → BuildingTGSP → BuildingTrigram → Ready.
+    /// BuildingGPOS → BuildingGOSP → BuildingTrigram → Ready.
     /// </summary>
     /// <remarks>
     /// Uses random-insert <see cref="VersionedQuadIndex.AddRaw"/> rather than
@@ -2212,10 +2208,6 @@ public sealed class QuadStore : IDisposable
 
             RebuildGraphIndex(_gospGraph!, "GOSP", StoreIndexState.BuildingGOSP,
                 (g, s, p, o) => (g, o, s, p), // GOSP: Primary=O, Secondary=S, Tertiary=P
-                onProgress, phases);
-
-            RebuildGraphIndex(_tgspGraph!, "TGSP", StoreIndexState.BuildingTGSP,
-                (g, s, p, o) => (g, s, p, o), // TGSP: Primary=S, Secondary=P, Tertiary=O (same as GSPO; no time-leading variant for Graph)
                 onProgress, phases);
 
             // Trigram rebuild from the primary GSPO scan.
@@ -2787,7 +2779,6 @@ public sealed class QuadStore : IDisposable
         _gspoGraph?.CommitEntryCount(txId, durable);
         _gposGraph?.CommitEntryCount(txId, durable);
         _gospGraph?.CommitEntryCount(txId, durable);
-        _tgspGraph?.CommitEntryCount(txId, durable);
     }
 
     /// <summary>
@@ -2915,7 +2906,6 @@ public sealed class QuadStore : IDisposable
         {
             changed |= ApplyNextVersion(_gposGraph!, record, record.PredicateId, record.ObjectId, record.SubjectId, fromVersion);
             changed |= ApplyNextVersion(_gospGraph!, record, record.ObjectId, record.SubjectId, record.PredicateId, fromVersion);
-            changed |= ApplyNextVersion(_tgspGraph!, record, record.SubjectId, record.PredicateId, record.ObjectId, fromVersion);
 
             // The next version is odd: the fact is asserted.
             if (fromVersion % 2 == 0)
@@ -3777,7 +3767,6 @@ public sealed class QuadStore : IDisposable
             _gspoGraph?.ReturnToSavedEntryCount();
             _gposGraph?.ReturnToSavedEntryCount();
             _gospGraph?.ReturnToSavedEntryCount();
-            _tgspGraph?.ReturnToSavedEntryCount();
         }
         else if (_sessionMutated)
         {
@@ -3792,7 +3781,6 @@ public sealed class QuadStore : IDisposable
         _gspoGraph?.Dispose();
         _gposGraph?.Dispose();
         _gospGraph?.Dispose();
-        _tgspGraph?.Dispose();
         _gspoReference?.Dispose();
         _gposReference?.Dispose();
         _gspoMinimal?.Dispose();
@@ -3832,7 +3820,6 @@ public sealed class QuadStore : IDisposable
             _gspoGraph?.Clear();
             _gposGraph?.Clear();
             _gospGraph?.Clear();
-            _tgspGraph?.Clear();
             _gspoReference?.Clear();
             _gposReference?.Clear();
             _gspoMinimal?.Clear();
@@ -3993,9 +3980,9 @@ public struct TemporalResultEnumerator
 
             // The one place where a result gets times the store does not keep (ADR-062 Step 5): the Reference, Graph
             // and Minimal profiles keep none, and the result type still has them. The values are the earliest time,
-            // the latest and the earliest. The Graph profile's deleted mark flows through; under a live query only
-            // live entries reach here, so it is false. This goes when a read on those profiles yields the quad and
-            // nothing else (ADR-062 D1).
+            // the latest and the earliest. Their indexes write no deleted mark: a read on them yields only what a
+            // client sees, so the mark is false. This goes when a read on those profiles yields the quad and nothing
+            // else (ADR-062 D1).
             if (!_cursor.HasMemoryTimes)
             {
                 return new ResolvedTemporalQuad(

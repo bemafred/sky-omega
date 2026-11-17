@@ -53,6 +53,14 @@ public class VersionedQuadIndexTests : IDisposable
     }
 
     [Fact]
+    public void Layout_Entry_HoldsTheKeyTheChildPointerAndTheVersion_In44Bytes()
+    {
+        // ADR-064 D1: a Graph entry holds the quad, the child pointer and the version, and no time. 371 fit a page.
+        Assert.Equal(44, Marshal.SizeOf<VersionedQuadIndex.VersionedBTreeEntry>());
+        Assert.Equal(44, VersionedQuadIndex.EntryBytes);
+    }
+
+    [Fact]
     public void Layout_VersionedKey_FieldOrder_GraphPrimarySecondaryTertiary()
     {
         // Lexicographic comparison depends on field order. Confirm Graph leads, then
@@ -134,8 +142,8 @@ public class VersionedQuadIndexTests : IDisposable
         int heldCount = 0;
         int heldVersion = 0;
         bool heldRetracted = false;
-        var held = idx.QueryAllVersions(0, 100, 200, 300);
-        while (held.MoveNext()) { heldCount++; heldVersion = held.Version; heldRetracted = held.LegacyIsDeleted; }
+        var held = idx.QueryHeld(0, 100, 200, 300);
+        while (held.MoveNext()) { heldCount++; heldVersion = held.Version; heldRetracted = held.Version % 2 == 0; }
         Assert.Equal(1, heldCount);
         Assert.Equal(2, heldVersion);
         Assert.True(heldRetracted);
@@ -146,7 +154,7 @@ public class VersionedQuadIndexTests : IDisposable
         int version = 0;
         bool retracted = true;
         var again = idx.Query(0, 100, 200, 300);
-        while (again.MoveNext()) { version = again.Version; retracted = again.LegacyIsDeleted; }
+        while (again.MoveNext()) { version = again.Version; retracted = again.Version % 2 == 0; }
         Assert.Equal(3, version);
         Assert.False(retracted);
     }
@@ -164,7 +172,7 @@ public class VersionedQuadIndexTests : IDisposable
         Assert.False(idx.NextVersion(0, 100, 200, 999, 1));   // a fact the index does not hold
 
         int version = 0;
-        var held = idx.QueryAllVersions(-1, -1, -1, -1);
+        var held = idx.QueryHeld(-1, -1, -1, -1);
         while (held.MoveNext()) version = held.Version;
         Assert.Equal(2, version);
         Assert.Equal(1, idx.QuadCount);

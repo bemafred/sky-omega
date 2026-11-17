@@ -91,8 +91,8 @@ public class QuadStoreGraphProfileTests : IDisposable
     [Fact]
     public void Graph_BatchedAddAndCommit_PopulatesAllIndexes()
     {
-        // Session API: BeginBatch / AddBatched / CommitBatch. All four indexes
-        // (GSPO/GPOS/GOSP/TGSP) populated by the non-bulk-mode ApplyToIndexesById path.
+        // Session API: BeginBatch / AddBatched / CommitBatch. All three indexes
+        // (GSPO/GPOS/GOSP) take each NextVersion record of the batch at commit (ADR-064 D3, D5).
         var dir = NewStoreDir("batched");
         using var store = CreateGraphStore(dir);
 
@@ -230,7 +230,7 @@ public class QuadStoreGraphProfileTests : IDisposable
         // ADR-029 Graph profile Commit 3: bulk-load + RebuildSecondaryIndexes.
         // Opens the store in bulk mode (only the primary GSPO index is written
         // inline by ApplyToIndexesById; secondaries deferred), populates triples,
-        // then runs RebuildSecondaryIndexes to fill GPOS/GOSP/TGSP + trigram.
+        // then runs RebuildSecondaryIndexes to fill GPOS/GOSP + trigram.
         var dir = NewStoreDir("bulk_rebuild");
         Directory.CreateDirectory(dir);
 

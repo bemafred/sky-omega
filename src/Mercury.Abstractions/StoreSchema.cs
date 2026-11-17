@@ -47,7 +47,7 @@ public sealed record StoreSchema(
 
         StoreProfile.Graph => new StoreSchema(
             Profile: StoreProfile.Graph,
-            Indexes: new[] { "gspo", "gpos", "gosp", "tgsp" },
+            Indexes: new[] { "gspo", "gpos", "gosp" },
             HasGraph: true,
             HasTemporal: false,
             HasVersioning: true,

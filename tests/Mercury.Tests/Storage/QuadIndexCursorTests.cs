@@ -195,7 +195,7 @@ public class QuadIndexCursorTests : IDisposable
                 (pattern.Tertiary < 0 || e.Tertiary == pattern.Tertiary)).ToList();
 
             var cursor = withRetracted
-                ? index.QueryAllVersions(pattern.Graph, pattern.Primary, pattern.Secondary, pattern.Tertiary)
+                ? index.QueryHeld(pattern.Graph, pattern.Primary, pattern.Secondary, pattern.Tertiary)
                 : index.Query(pattern.Graph, pattern.Primary, pattern.Secondary, pattern.Tertiary);
             foreach (var entry in expected)
             {
@@ -205,7 +205,7 @@ public class QuadIndexCursorTests : IDisposable
                 Assert.Equal(entry.Secondary, cursor.Secondary);
                 Assert.Equal(entry.Tertiary, cursor.Tertiary);
                 Assert.Equal(entry.Version, cursor.Version);
-                Assert.Equal(entry.Retracted, cursor.LegacyIsDeleted);
+                Assert.False(cursor.LegacyIsDeleted);         // the Graph index writes no deleted mark (ADR-064 D1)
                 if (entry.Retracted) retractedRowsSeen++;
             }
             Assert.False(cursor.MoveNext(), $"the cursor has a row more than the {expected.Count} of {pattern}, retracted included: {withRetracted}");

@@ -43,7 +43,7 @@ public class FactStatesTests : IDisposable
         var lines = new List<string>();
         using var atoms = new HashAtomStore(Path.Combine(dir, "atoms"));
         using var held = new VersionedQuadIndex(Path.Combine(dir, index + ".tdb"), atoms, 1L << 20);
-        var entries = held.QueryAllVersions(-1, -1, -1, -1);
+        var entries = held.QueryHeld(-1, -1, -1, -1);
         while (entries.MoveNext())
         {
             var (s, p, o) = index switch

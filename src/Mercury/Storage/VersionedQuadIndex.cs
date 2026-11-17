@@ -6,11 +6,10 @@ using SkyOmega.Mercury.Runtime;
 namespace SkyOmega.Mercury.Storage;
 
 /// <summary>
-/// B+Tree index for RDF quads (graph + triple) with versioning and soft-delete but
-/// no bitemporal semantics. ADR-029 Graph profile — concrete index parallel to
-/// <see cref="TemporalQuadIndex"/> (Cognitive) and <see cref="ReferenceQuadIndex"/>
-/// (Reference). 64-byte entries: 32 B key (G,S,P,O) + 8 B ChildOrValue + 24 B
-/// versioning metadata (CreatedAt, ModifiedAt, Version, IsDeleted).
+/// B+Tree index for RDF quads (graph + triple) that numbers each fact's states and keeps no time. ADR-029 Graph
+/// profile, with the model of ADR-064 — concrete index parallel to <see cref="TemporalQuadIndex"/> (Cognitive) and
+/// <see cref="ReferenceQuadIndex"/> (Reference). 44-byte entries: the 32 B key (G, S, P, O), the 8 B child pointer and
+/// the 4 B version (ADR-064 D1). Nothing in an entry is read from a clock (G9).
 /// </summary>
 /// <remarks>
 /// <para><b>Mutation semantics (ADR-064 M5).</b> Key uniqueness is <c>(G, S, P, O)</c>. The one change is
@@ -19,19 +18,25 @@ namespace SkyOmega.Mercury.Storage;
 /// only when it holds the fact at that version, and applying a change twice changes nothing.</para>
 /// <para><b>Query semantics.</b> Single sort order (G → P → S → T). No AS_OF, no
 /// time-range queries — the SPARQL planner rejects temporal queries against the
-/// Graph profile at plan time. Soft-deleted entries are filtered out by default;
-/// audit access (include deleted) is via the explicit <see cref="QueryAllVersions"/>
-/// surface.</para>
+/// Graph profile at plan time. <see cref="Query"/> yields the facts that are asserted, what a client sees;
+/// <see cref="QueryHeld"/> yields every fact the index holds, retracted ones too, for the store's own
+/// operations.</para>
 /// <para><b>Backing file:</b> FileStream + mmap + page-cache + metadata header are
 /// delegated to <see cref="BTreeFile"/> in <c>Mercury.Runtime</c>.</para>
 /// <para><b>INTERNAL USE ONLY.</b> Public surface is via <see cref="QuadStore"/>.</para>
 /// </remarks>
 internal sealed unsafe class VersionedQuadIndex : IQuadIndex
 {
-    private const int NodeDegree = 255; // (16384 - 32) / 64 bytes per versioned entry
+    /// <summary>The size of an entry: key, child pointer and version (ADR-064 D1).</summary>
+    internal const int EntryBytes = 44;
 
-    /// <summary>File-format magic for VersionedQuadIndex pages. "GRAPHIDX" as long.</summary>
-    private const long MagicNumber = 0x4752415048494458L;
+    private const int NodeDegree = (BTreeFile.PageSize - BTreeFile.HeaderBytes) / EntryBytes;   // 371
+
+    /// <summary>
+    /// File-format magic for VersionedQuadIndex pages: "GRAPHVER" as long, since ADR-064 D8. The earlier layout's
+    /// "GRAPHIDX" (0x4752415048494458), whose entries held two wall-clock times and a deleted mark, is refused.
+    /// </summary>
+    private const long MagicNumber = 0x4752415048564552L;
 
     private readonly BTreeFile _file;
     private readonly IAtomStore _atoms;
@@ -116,7 +121,6 @@ internal sealed unsafe class VersionedQuadIndex : IQuadIndex
             if (cmp < 0) continue;
             if (entry.Version != fromVersion) return false;
             entry.Version = checked(fromVersion + 1);
-            entry.IsDeleted = entry.Version % 2 == 0;
             _file.FlushPage();
             return true;
         }
@@ -154,20 +158,20 @@ internal sealed unsafe class VersionedQuadIndex : IQuadIndex
     }
 
     /// <summary>
-    /// Query: yields all live entries matching the (graph, primary, secondary, tertiary)
-    /// constraints. Use -1 for "any" on a dimension. Soft-deleted entries are filtered out.
+    /// Query: yields the facts that are asserted, those whose version is odd, matching the (graph, primary,
+    /// secondary, tertiary) constraints: what a client sees (ADR-064 M2). Use -1 for "any" on a dimension.
     /// </summary>
     public QuadIndexCursor Query(long graph, long primary, long secondary, long tertiary)
-        => QueryInternal(graph, primary, secondary, tertiary, includeDeleted: false);
+        => QueryInternal(graph, primary, secondary, tertiary, includeRetracted: false);
 
     /// <summary>
-    /// Audit query: yields all entries (including soft-deleted) matching the constraints.
-    /// Use for history / soft-delete audit.
+    /// Yields every fact the index holds matching the constraints, retracted ones too, each with its version: the
+    /// store's own read of the version (ADR-064 D4).
     /// </summary>
-    public QuadIndexCursor QueryAllVersions(long graph, long primary, long secondary, long tertiary)
-        => QueryInternal(graph, primary, secondary, tertiary, includeDeleted: true);
+    public QuadIndexCursor QueryHeld(long graph, long primary, long secondary, long tertiary)
+        => QueryInternal(graph, primary, secondary, tertiary, includeRetracted: true);
 
-    private QuadIndexCursor QueryInternal(long graph, long primary, long secondary, long tertiary, bool includeDeleted)
+    private QuadIndexCursor QueryInternal(long graph, long primary, long secondary, long tertiary, bool includeRetracted)
     {
         var cursor = new QuadIndexCursor(this);
         ref var state = ref cursor.State<ScanState>();
@@ -175,7 +179,7 @@ internal sealed unsafe class VersionedQuadIndex : IQuadIndex
         state.MaxKey = CreateSearchKey(graph, primary, secondary, tertiary, isMin: false);
         state.PageId = FindLeafPage(_file.RootPageId, state.MinKey);
         state.Slot = 0;
-        state.IncludeDeleted = includeDeleted;
+        state.IncludeRetracted = includeRetracted;
         return cursor;
     }
 
@@ -260,21 +264,15 @@ internal sealed unsafe class VersionedQuadIndex : IQuadIndex
     }
 
     /// <summary>
-    /// B+Tree entry for versioned triple (64 bytes).
-    /// Key: 32 bytes + Child/Value: 8 bytes + Metadata: 24 bytes.
+    /// B+Tree entry of the Graph profile, <see cref="EntryBytes"/> long (ADR-064 D1): the key, the child pointer of
+    /// an internal page, and in a leaf the fact's version, odd when asserted and even when retracted.
     /// </summary>
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
-    private struct VersionedBTreeEntry
+    internal struct VersionedBTreeEntry
     {
         public VersionedKey Key;
         public long ChildOrValue;
-
-        public long CreatedAt;
-        public long ModifiedAt;
         public int Version;
-        public bool IsDeleted;
-        public byte Flags;
-        public short Reserved;
     }
 
     /// <summary>What a scan of this index keeps between rows (ADR-062 D3). It holds no object reference.</summary>
@@ -282,7 +280,7 @@ internal sealed unsafe class VersionedQuadIndex : IQuadIndex
     {
         public long PageId;
         public int Slot;
-        public bool IncludeDeleted;
+        public bool IncludeRetracted;
         public VersionedKey MinKey;
         public VersionedKey MaxKey;
     }
@@ -304,13 +302,12 @@ internal sealed unsafe class VersionedQuadIndex : IQuadIndex
                 if (CompareKeys(in key, in state.MaxKey) > 0)
                     return false;
 
-                if (CompareKeys(in key, in state.MinKey) >= 0 && (state.IncludeDeleted || !entry.IsDeleted))
+                if (CompareKeys(in key, in state.MinKey) >= 0 && (state.IncludeRetracted || entry.Version % 2 == 1))
                 {
                     cursor.Graph = key.Graph;
                     cursor.Primary = key.Primary;
                     cursor.Secondary = key.Secondary;
                     cursor.Tertiary = key.Tertiary;
-                    cursor.LegacyIsDeleted = entry.IsDeleted;
                     cursor.Version = entry.Version;
                     state.Slot++;
                     return true;
@@ -373,6 +370,7 @@ internal sealed unsafe class VersionedQuadIndex : IQuadIndex
         ref var entry = ref newRoot->GetEntry(0);
         entry.Key = promotedKey;
         entry.ChildOrValue = newRightPageId;
+        entry.Version = 0;
 
         var oldRoot = GetPage(oldRootPageId);
         oldRoot->ParentPageId = newRootId;
@@ -417,16 +415,10 @@ internal sealed unsafe class VersionedQuadIndex : IQuadIndex
             page->GetEntry(i) = page->GetEntry(i - 1);
         }
 
-        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         ref var newEntry = ref page->GetEntry(insertPos);
         newEntry.Key = key;
         newEntry.ChildOrValue = 0;
-        newEntry.CreatedAt = now;
-        newEntry.ModifiedAt = now;
         newEntry.Version = 1;
-        newEntry.IsDeleted = false;
-        newEntry.Flags = 0;
-        newEntry.Reserved = 0;
 
         page->EntryCount++;
         _file.IncrementEntryCount();
@@ -498,14 +490,11 @@ internal sealed unsafe class VersionedQuadIndex : IQuadIndex
             page->GetEntry(i) = page->GetEntry(i - 1);
         }
 
-        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        // An internal entry separates two children: it names no fact, so it holds no version.
         ref var newEntry = ref page->GetEntry(insertPos);
         newEntry.Key = key;
         newEntry.ChildOrValue = rightChildPageId;
-        newEntry.CreatedAt = now;
-        newEntry.ModifiedAt = now;
-        newEntry.Version = 1;
-        newEntry.IsDeleted = false;
+        newEntry.Version = 0;
 
         page->EntryCount++;
 

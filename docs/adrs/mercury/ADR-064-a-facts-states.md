@@ -381,7 +381,20 @@ The links, read in the code on 2026-11-16:
    - `FactStatesTests` pass.
 5. **The rebuild** carries what the store holds (D6).
 6. **The layout** (D1, D3, D8): the entry holds the key, the child pointer and the version; Graph's TGSP goes; each
-   file's magic number changes with its layout.
+   file's magic number changes with its layout. **Done 2026-11-17, before Step 5:** the two are not linked, and built
+   first, the layout lets the rebuild be written once, for the entry and the indexes Graph keeps.
+   - A Graph entry is 44 bytes: the 32-byte key, the 8-byte child pointer and the 4-byte version. 371 entries fit a
+     page, where 255 of the 64-byte entry did. `CreatedAt`, `ModifiedAt`, `IsDeleted`, `Flags` and `Reserved` are
+     gone, and nothing in the index reads a clock (G9).
+   - A read for a client yields the facts whose version is odd. `QueryHeld`, formerly `QueryAllVersions`, yields
+     every fact held with its version, for the store's own operations.
+   - The magic number is "GRAPHVER" (`0x4752415048564552`). A file in the earlier layout, "GRAPHIDX", is refused at
+     open by the check that exists.
+   - A Graph store has GSPO, GPOS and GOSP; its schema lists those three.
+   - `GraphLayoutTests` pass: the same writes at other times leave byte-identical index files, a Graph store has no
+     `tgsp.tdb`, and a file with the earlier magic number is refused.
+   - Seen, not changed: a store refused at open leaves the files it had opened before the refused one open. That is
+     the existing check's behaviour for every profile, and D8 adds nothing to it.
 7. **Minimal's write path** (D2): the log, session writes, soft deletes, the version.
 8. **A Reference store takes one bulk load** (D10).
 9. **Documents:** ADR-029 (D9), `mercury-internals.md`, `api-usage.md`, `MERCURY.md` where it describes the profiles,
