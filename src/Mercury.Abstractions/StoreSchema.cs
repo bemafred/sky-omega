@@ -68,7 +68,7 @@ public sealed record StoreSchema(
             Indexes: new[] { "gspo" },
             HasGraph: false,
             HasTemporal: false,
-            HasVersioning: false,
+            HasVersioning: true,
             KeyLayoutVersion: CurrentKeyLayoutVersion,
             AtomStore: AtomStoreImplementation.Hash),
 

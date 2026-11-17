@@ -404,7 +404,23 @@ The links, read in the code on 2026-11-16:
      `tgsp.tdb`, and a file with the earlier magic number is refused.
    - Seen, not changed: a store refused at open leaves the files it had opened before the refused one open. That is
      the existing check's behaviour for every profile, and D8 adds nothing to it.
-7. **Minimal's write path** (D2): the log, session writes, soft deletes, the version.
+7. **Minimal's write path** (D2): the log, session writes, soft deletes, the version. **Done 2026-11-17:**
+   - A Minimal store has a log. Its writes, single or batched, go through Graph's: each assert or retract is decided
+     from the version GSPO holds and logged as `NextVersion` (D5). A write that names a graph is refused before
+     anything is logged. Its schema says `hasVersioning: true`.
+   - The leaf entry is 28 bytes, the 24-byte key and the 4-byte version, so 584 fit a page where 681 did. Internal
+     entries are as before. The magic number is "MINIMVER" (`0x4D494E494D564552`); the earlier "MINIMAL\0" is
+     refused.
+   - The batch path with no log is gone, along with what came with it. A rollback could not undo a batch, because
+     what `AddCurrentBatched` wrote was in the index at once. Now the batch is applied at commit, and a rollback
+     leaves the store as it was.
+   - A Minimal store collects no predicate statistics at a checkpoint: it has no GPOS to scan, and it collected none
+     before it had a log.
+   - The tests: `FactStatesTests` run the table of M4 and recovery after a real kill on Minimal too, and
+     `FactStatesLayoutTests`, formerly `GraphLayoutTests`, run identical files and the refusal of the earlier magic
+     number on both profiles. On `c37dd8b`, before this step, a single write to a Minimal store was refused, as
+     `Minimal_DirectAdd_ThrowsProfileCapability` stated. That test is replaced by ones for a single write, for the
+     refusal of a named graph, and for a rollback.
 8. **A Reference store takes one bulk load** (D10).
 9. **Documents:** ADR-029 (D9), `mercury-internals.md`, `api-usage.md`, `MERCURY.md` where it describes the profiles,
    `STATISTICS.md`.

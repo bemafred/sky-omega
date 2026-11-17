@@ -32,7 +32,7 @@ public class StoreSchemaTests : IDisposable
     [InlineData(StoreProfile.Cognitive, true, true, true, 4)]
     [InlineData(StoreProfile.Graph, true, false, true, 3)]
     [InlineData(StoreProfile.Reference, true, false, false, 2)]
-    [InlineData(StoreProfile.Minimal, false, false, false, 1)]
+    [InlineData(StoreProfile.Minimal, false, false, true, 1)]
     public void ForProfile_ReturnsCanonicalShape(
         StoreProfile profile, bool expectGraph, bool expectTemporal, bool expectVersioning, int expectedIndexCount)
     {

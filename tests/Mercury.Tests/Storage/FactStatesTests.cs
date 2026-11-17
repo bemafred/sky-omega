@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using SkyOmega.Mercury.Abstractions;
 using SkyOmega.Mercury.Runtime;
 using SkyOmega.Mercury.Storage;
 using Xunit;
@@ -8,11 +9,12 @@ using Xunit;
 namespace SkyOmega.Mercury.Tests.Storage;
 
 /// <summary>
-/// ADR-064 M2 to M5: on a Graph store a fact's states form a sequence, asserted, retracted, asserted and so on, and
+/// ADR-064 M2 to M5: on a Graph or Minimal store a fact's states form a sequence, asserted, retracted, asserted and so on, and
 /// the fact's version names the state it is in: odd is asserted, even is retracted. Asserting a fact that is asserted,
 /// or retracting one that is not, changes nothing (G2); every other assert or retract raises the version by one (G3),
 /// inside a batch too (M2). Every index holds the same versions, retracted facts included (G5), and recovery changes
 /// nothing (G7). A client sees the facts whose version is odd; the quad count counts every fact the store holds.
+/// Minimal is Graph without secondary indexes or named graphs (D2): it holds the same versions in its one index.
 ///
 /// What an index holds is read from its file once the store is closed, through the index's own cursor: no read of the
 /// store returns a version (ADR-064 D4).
@@ -35,15 +37,18 @@ public class FactStatesTests : IDisposable
     public void Dispose() => TempPath.SafeCleanup(_root);
 
     /// <summary>
-    /// What one index file of a closed Graph store holds, one line per fact, sorted: subject, predicate, object, the
-    /// graph when it is a named one, and the version. <paramref name="index"/> is gspo, gpos or gosp.
+    /// What one index file of a closed Graph or Minimal store holds, one line per fact, sorted: subject, predicate,
+    /// object, the graph when it is a named one, and the version. <paramref name="index"/> is gspo, gpos or gosp; a
+    /// Minimal store has gspo only.
     /// </summary>
-    private static List<string> HeldIn(string dir, string index)
+    private static List<string> HeldIn(string dir, StoreProfile profile, string index)
     {
         var lines = new List<string>();
+        var path = Path.Combine(dir, index + ".tdb");
         using var atoms = new HashAtomStore(Path.Combine(dir, "atoms"));
-        using var held = new VersionedQuadIndex(Path.Combine(dir, index + ".tdb"), atoms, 1L << 20);
-        var entries = held.QueryHeld(-1, -1, -1, -1);
+        using var graphIndex = profile == StoreProfile.Graph ? new VersionedQuadIndex(path, atoms, 1L << 20) : null;
+        using var minimalIndex = profile == StoreProfile.Minimal ? new MinimalQuadIndex(path, atoms, 1L << 20) : null;
+        var entries = graphIndex is not null ? graphIndex.QueryHeld(-1, -1, -1, -1) : minimalIndex!.QueryHeld(-1, -1, -1);
         while (entries.MoveNext())
         {
             var (s, p, o) = index switch
@@ -60,14 +65,18 @@ public class FactStatesTests : IDisposable
     }
 
     [Theory]
-    [InlineData(false)]   // each operation is a single write
-    [InlineData(true)]    // every operation is in one batch
-    public void EachAssertOrRetract_ThatChangesAFact_IsAStateOfItsOwn_AndEveryIndexHoldsItsVersion(bool inOneBatch)
+    [InlineData(StoreProfile.Graph, false)]     // each operation is a single write
+    [InlineData(StoreProfile.Graph, true)]      // every operation is in one batch
+    [InlineData(StoreProfile.Minimal, false)]
+    [InlineData(StoreProfile.Minimal, true)]
+    public void EachAssertOrRetract_ThatChangesAFact_IsAStateOfItsOwn_AndEveryIndexHoldsItsVersion(StoreProfile profile, bool inOneBatch)
     {
         var dir = Path.Combine(_root, "store");
-        var options = new StorageOptions { Profile = StoreProfile.Graph, IndexInitialSizeBytes = 1L << 20, AtomDataInitialSizeBytes = 1L << 20 };
+        var options = new StorageOptions { Profile = profile, IndexInitialSizeBytes = 1L << 20, AtomDataInitialSizeBytes = 1L << 20 };
+        var hasNamedGraphs = profile == StoreProfile.Graph;
 
-        // One fact for each row of M4's table, and the same fact as s3's in a named graph, which is another fact (G1).
+        // One fact for each row of M4's table, and on Graph the same fact as s3's in a named graph, which is another
+        // fact (G1).
         using (var store = new QuadStore(dir, null, null, options))
         {
             if (inOneBatch) store.BeginBatch();
@@ -95,7 +104,8 @@ public class FactStatesTests : IDisposable
             AssertFact("<urn:states:s6>", "\"six\"");
             RetractFact("<urn:states:s6>", "\"six\"");
             RetractFact("<urn:states:s6>", "\"six\"");                                      // retract, even: nothing
-            AssertFact("<urn:states:s3>", "\"three\"", G);                                  // assert, none: 1
+            if (hasNamedGraphs)
+                AssertFact("<urn:states:s3>", "\"three\"", G);                              // assert, none: 1
             if (inOneBatch) store.CommitBatch();
 
             // A client sees the facts whose version is odd.
@@ -107,6 +117,7 @@ public class FactStatesTests : IDisposable
                 ("<urn:states:s6>", "\"six\"", "", false),
             })
             {
+                if (graph != "" && !hasNamedGraphs) continue;
                 var rows = 0;
                 var current = store.QueryCurrent(subject, P, @object, graph);
                 while (current.MoveNext()) rows++;
@@ -114,8 +125,8 @@ public class FactStatesTests : IDisposable
                 Assert.True(rows == (seen ? 1 : 0), $"{subject} {@object} {graph}: {rows} rows");
             }
 
-            // Six facts are held: s4 was never asserted.
-            Assert.Equal(6, store.GetStatistics().QuadCount);
+            // s4 was never asserted, so it is not held: six facts on Graph, five on Minimal.
+            Assert.Equal(hasNamedGraphs ? 6 : 5, store.GetStatistics().QuadCount);
         }
 
         List<string> held =
@@ -127,9 +138,18 @@ public class FactStatesTests : IDisposable
             "<urn:states:s5> <urn:states:p> \"five\" v2",
             "<urn:states:s6> <urn:states:p> \"six\" v2",
         ];
-        Assert.Equal(held, HeldIn(dir, "gspo"));
-        Assert.Equal(held, HeldIn(dir, "gpos"));
-        Assert.Equal(held, HeldIn(dir, "gosp"));
+        if (!hasNamedGraphs)
+            held.Remove("<urn:states:s3> <urn:states:p> \"three\" <urn:states:g> v1");
+        Assert.Equal(held, HeldIn(dir, profile, "gspo"));
+        if (hasNamedGraphs)
+        {
+            Assert.Equal(held, HeldIn(dir, profile, "gpos"));
+            Assert.Equal(held, HeldIn(dir, profile, "gosp"));
+        }
+        else
+        {
+            Assert.False(File.Exists(Path.Combine(dir, "gpos.tdb")));
+        }
     }
 
     /// <summary>
@@ -140,22 +160,24 @@ public class FactStatesTests : IDisposable
     /// test then opens stores in which some index files are the earlier ones and some the later ones.
     /// </summary>
     [Theory]
-    [InlineData("")]                   // every index has applied all of the log
-    [InlineData("gspo gpos gosp")]     // every index is at the earlier point
-    [InlineData("gpos gosp")]          // GSPO is ahead of the other two
-    [InlineData("gspo")]               // GSPO is behind the other two
-    [InlineData("gosp")]               // GOSP is behind the other two
-    public void ReplayingTheLog_OntoIndexesAtDifferentPoints_GivesTheVersionsOfAnUninterruptedRun(string indexesAtTheEarlierPoint)
+    [InlineData(StoreProfile.Graph, "")]                   // every index has applied all of the log
+    [InlineData(StoreProfile.Graph, "gspo gpos gosp")]     // every index is at the earlier point
+    [InlineData(StoreProfile.Graph, "gpos gosp")]          // GSPO is ahead of the other two
+    [InlineData(StoreProfile.Graph, "gspo")]               // GSPO is behind the other two
+    [InlineData(StoreProfile.Graph, "gosp")]               // GOSP is behind the other two
+    [InlineData(StoreProfile.Minimal, "")]                 // its one index has applied all of the log
+    [InlineData(StoreProfile.Minimal, "gspo")]             // its one index is at the earlier point
+    public void ReplayingTheLog_OntoIndexesAtDifferentPoints_GivesTheVersionsOfAnUninterruptedRun(StoreProfile profile, string indexesAtTheEarlierPoint)
     {
         var killed = Path.Combine(_root, "killed");
         var earlier = Path.Combine(_root, "earlier");
 
-        CrashTarget.Run("states-first", killed, "Graph", 0).AssertExitedCleanly();
+        CrashTarget.Run("states-first", killed, profile.ToString(), 0).AssertExitedCleanly();
         Directory.CreateDirectory(earlier);
         foreach (var file in Directory.GetFiles(killed))
             File.Copy(file, Path.Combine(earlier, Path.GetFileName(file)));
 
-        CrashTarget.Run("states-killed", killed, "Graph", 0).AssertKilledAfter("changed");
+        CrashTarget.Run("states-killed", killed, profile.ToString(), 0).AssertKilledAfter("changed");
 
         foreach (var index in indexesAtTheEarlierPoint.Split(' ', StringSplitOptions.RemoveEmptyEntries))
             File.Copy(Path.Combine(earlier, index + ".tdb"), Path.Combine(killed, index + ".tdb"), overwrite: true);
@@ -183,8 +205,11 @@ public class FactStatesTests : IDisposable
             "<urn:states:s> <urn:states:p> \"E\" v1",
             "<urn:states:s> <urn:states:p> \"K\" v1",    // asserted again, which changed nothing
         ];
-        Assert.Equal(held, HeldIn(killed, "gspo"));
-        Assert.Equal(held, HeldIn(killed, "gpos"));
-        Assert.Equal(held, HeldIn(killed, "gosp"));
+        Assert.Equal(held, HeldIn(killed, profile, "gspo"));
+        if (profile == StoreProfile.Graph)
+        {
+            Assert.Equal(held, HeldIn(killed, profile, "gpos"));
+            Assert.Equal(held, HeldIn(killed, profile, "gosp"));
+        }
     }
 }

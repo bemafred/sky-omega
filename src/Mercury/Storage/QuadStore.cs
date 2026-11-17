@@ -74,7 +74,6 @@ public sealed class QuadStore : IDisposable
     // ADR-029 Minimal profile: same shape as Reference's bulk-active flag — no WAL,
     // writes go straight into the single GSPO index. CommitBatch is a no-op (no WAL
     // marker); durability via FlushToDisk at the end of the bulk-load session.
-    private bool _minimalBulkActive;
     // ADR-031 Piece 2: tracks whether anything has actually been written since the
     // last checkpoint. Set by every mutation entry point; reset by CheckpointInternal.
     // Dispose gates the 14-min CollectPredicateStatistics + WAL-checkpoint-marker path
@@ -115,6 +114,12 @@ public sealed class QuadStore : IDisposable
     /// Graph store (ADR-064 M4); <c>DELETE</c> forgets it, or retracts it.
     /// </summary>
     private enum Asked : byte { Insert, Delete }
+
+    /// <summary>
+    /// A Graph or Minimal store numbers each fact's states and keeps no time (ADR-064 M2): its writes are decided from
+    /// the version the store holds, and its log holds <see cref="LogOperation.NextVersion"/> records.
+    /// </summary>
+    private bool NumbersFactStates => _schema.Profile is StoreProfile.Graph or StoreProfile.Minimal;
 
     /// <summary>A quad by its four atoms: its identity until ADR-053 makes one term one atom (ADR-061 I1).</summary>
     private readonly record struct QuadIds(long Graph, long Subject, long Predicate, long Object);
@@ -296,11 +301,12 @@ public sealed class QuadStore : IDisposable
                 break;
 
             case StoreProfile.Minimal:
-                // ADR-029 Minimal profile: single GSPO index, no graph dimension, no
-                // versioning, no temporal, no WAL. Bulk-load is the session-API entry
-                // (same shape as Reference) — Decision 7 stance applies. Re-add is a
-                // no-op enforced at the B+Tree level. Distinct concrete class
-                // (MinimalQuadIndex, 24 B leaf entries) per the no-behavior-flags rule.
+                // ADR-029 Minimal profile, with ADR-064 D2: Graph without secondary indexes, named
+                // graphs or trigram index. A single GSPO index, no graph dimension, no time; session
+                // writes with a log, soft deletes and each fact's version, as Graph. Distinct
+                // concrete class (MinimalQuadIndex, 28 B leaf entries) per the no-behavior-flags rule.
+                _wal = new WriteAheadLog(walPath, WriteAheadLog.DefaultCheckpointSizeThreshold,
+                    WriteAheadLog.DefaultCheckpointTimeSeconds, _bufferManager, options.BulkMode);
                 _gspoMinimal = new MinimalQuadIndex(gspoPath, _atoms, options.IndexInitialSizeBytes, options.BulkMode);
                 break;
 
@@ -610,8 +616,8 @@ public sealed class QuadStore : IDisposable
         try
         {
             ThrowIfStoppedOverUnappliedWrite();
-            // A Graph store keeps no time (ADR-064 D1): an Add with stated times asserts the fact.
-            if (_schema.Profile == StoreProfile.Graph)
+            // A Graph or Minimal store keeps no time (ADR-064 D1, D2): an Add with stated times asserts the fact.
+            if (NumbersFactStates)
             {
                 ChangeStateHoldingWriteLock(new QuadIds(graph.IsEmpty ? 0 : _atoms.Intern(graph),
                     _atoms.Intern(subject), _atoms.Intern(predicate), _atoms.Intern(@object)), Asked.Insert);
@@ -696,8 +702,8 @@ public sealed class QuadStore : IDisposable
             var quad = new QuadIds(graph.IsEmpty ? 0 : _atoms.Intern(graph),
                 _atoms.Intern(subject), _atoms.Intern(predicate), _atoms.Intern(@object));
 
-            // A Graph store keeps no time (ADR-064 D1): it reads no clock.
-            if (_schema.Profile == StoreProfile.Graph)
+            // A Graph or Minimal store keeps no time (ADR-064 D1, D2): it reads no clock.
+            if (NumbersFactStates)
                 return ChangeStateHoldingWriteLock(quad, Asked.Insert);
 
             // One reading of the clock, taken under the lock, is the stamp (ADR-061 I12). Reading it before the
@@ -784,12 +790,13 @@ public sealed class QuadStore : IDisposable
     }
 
     /// <summary>
-    /// One single write on a Graph store, with the write lock held: decide the change from the version GSPO holds
-    /// (ADR-064 M4), and when there is one, log it, apply it and save the counts. Returns whether the fact's state
+    /// One single write on a Graph or Minimal store, with the write lock held: decide the change from the version GSPO
+    /// holds (ADR-064 M4), and when there is one, log it, apply it and save the counts. Returns whether the fact's state
     /// changed.
     /// </summary>
     private bool ChangeStateHoldingWriteLock(QuadIds quad, Asked asked)
     {
+        RefuseNamedGraphOnMinimal(quad);
         if (DecideNextVersion(asked, HeldVersion(quad), quad) is not { } record)
             return false;
 
@@ -813,13 +820,26 @@ public sealed class QuadStore : IDisposable
     }
 
     /// <summary>
-    /// The version GSPO holds a fact at on a Graph store, or 0 when it holds none. The store's own read of the
-    /// version, through the index's cursor (ADR-064 D4).
+    /// The version GSPO holds a fact at on a Graph or Minimal store, or 0 when it holds none. The store's own read of
+    /// the version, through the index's cursor (ADR-064 D4).
     /// </summary>
     private int HeldVersion(QuadIds quad)
     {
-        var held = _gspoGraph!.QueryHeld(quad.Graph, quad.Subject, quad.Predicate, quad.Object);
+        var held = _schema.Profile == StoreProfile.Minimal
+            ? _gspoMinimal!.QueryHeld(quad.Subject, quad.Predicate, quad.Object)
+            : _gspoGraph!.QueryHeld(quad.Graph, quad.Subject, quad.Predicate, quad.Object);
         return held.MoveNext() ? held.Version : 0;
+    }
+
+    /// <summary>
+    /// A Minimal store has no named graphs (ADR-064 D2): a write that names one is refused, before anything is logged.
+    /// </summary>
+    private void RefuseNamedGraphOnMinimal(QuadIds quad)
+    {
+        if (quad.Graph != 0 && _schema.Profile == StoreProfile.Minimal)
+            throw new ProfileCapabilityException(
+                "Minimal profile does not support named graphs (hasGraph=false per ADR-029). " +
+                "Use Cognitive / Graph / Reference if your workload requires multi-graph semantics.");
     }
 
     /// <summary>
@@ -860,8 +880,8 @@ public sealed class QuadStore : IDisposable
             if (!TryResolveQuadIds(subject, predicate, @object, graph, out var graphId, out var subjectId, out var predicateId, out var objectId))
                 return false;
 
-            // A Graph store keeps no time (ADR-064 D1): the interval is not read, and the fact is retracted.
-            if (_schema.Profile == StoreProfile.Graph)
+            // A Graph or Minimal store keeps no time (ADR-064 D1, D2): the interval is not read, and the fact is retracted.
+            if (NumbersFactStates)
                 return ChangeStateHoldingWriteLock(new QuadIds(graphId, subjectId, predicateId, objectId), Asked.Delete);
 
             // Cognitive retracts only an exact, live version, so a retract that finds nothing writes nothing.
@@ -919,7 +939,7 @@ public sealed class QuadStore : IDisposable
                 return false;
 
             var quad = new QuadIds(graphId, subjectId, predicateId, objectId);
-            if (_schema.Profile == StoreProfile.Graph)
+            if (NumbersFactStates)
                 return ChangeStateHoldingWriteLock(quad, Asked.Delete);
             return ChangeHoldingWriteLock(quad, Asked.Delete, _clock.GetUtcNow().ToUnixTimeMilliseconds());
         }
@@ -1073,24 +1093,13 @@ public sealed class QuadStore : IDisposable
         try
         {
             ThrowIfStoppedOverUnappliedWrite();
-            if (_activeBatchTxId >= 0 || _referenceBulkActive || _minimalBulkActive)
+            if (_activeBatchTxId >= 0 || _referenceBulkActive)
                 throw new InvalidOperationException("A batch is already active.");
 
             // ADR-058 D7: a damaged store refuses the batch here, before the WAL begin record is
             // written, so a refused write leaves the store's files as they were.
             if (_atoms.WriteRefusal is { } refusal)
                 throw new InvalidOperationException($"Operation '{nameof(BeginBatch)}' refused. {refusal}");
-
-            // ADR-029 Minimal profile: same shape as Reference but with a single GSPO
-            // index and no graph dimension. No WAL, no sorter (Minimal is mid-scale,
-            // not Wikidata-scale), no SortedAtomBulkBuilder. Writes go straight into
-            // _gspoMinimal via AddRaw on each AddCurrentBatched call; durability comes
-            // from FlushToDisk at the session's end.
-            if (_schema.Profile == StoreProfile.Minimal)
-            {
-                _minimalBulkActive = true;
-                return;
-            }
 
             // ADR-029 Decision 7: Reference allows bulk-load as a programmatic interface
             // but has no WAL. Hold the writer lock and set a flag; all writes go straight
@@ -1194,14 +1203,6 @@ public sealed class QuadStore : IDisposable
             AddReferenceBulkTriple(subject, predicate, @object, graph);
             return;
         }
-        // Minimal-profile bulk: single GSPO index, no graph. Non-empty graph rejected
-        // at the API boundary — Minimal's schema declares hasGraph=false (ADR-029).
-        if (_schema.Profile == StoreProfile.Minimal)
-        {
-            AddMinimalBulkTriple(subject, predicate, @object, graph);
-            return;
-        }
-
         RequireWriteCapableProfile(nameof(AddBatched));
         if (_activeBatchTxId < 0)
             throw new InvalidOperationException("No active batch. Call BeginBatch() first.");
@@ -1212,8 +1213,8 @@ public sealed class QuadStore : IDisposable
         var predicateId = _atoms.Intern(predicate);
         var objectId = _atoms.Intern(@object);
 
-        // A Graph store keeps no time (ADR-064 D1): an Add with stated times asserts the fact.
-        if (_schema.Profile == StoreProfile.Graph)
+        // A Graph or Minimal store keeps no time (ADR-064 D1, D2): an Add with stated times asserts the fact.
+        if (NumbersFactStates)
         {
             AskStateInBatch(new QuadIds(graphId, subjectId, predicateId, objectId), Asked.Insert);
             return;
@@ -1305,42 +1306,11 @@ public sealed class QuadStore : IDisposable
     }
 
     /// <summary>
-    /// Materialize a single Minimal-profile triple inside an active bulk-load batch.
-    /// ADR-029 Minimal: no graph dimension, no WAL, single GSPO index. Non-empty
-    /// graph spans are rejected at the API boundary — Minimal's schema declares
-    /// hasGraph=false; queries against a Minimal store with a graph constraint
-    /// also fail at plan time.
-    /// </summary>
-    private void AddMinimalBulkTriple(
-        ReadOnlySpan<char> subject,
-        ReadOnlySpan<char> predicate,
-        ReadOnlySpan<char> @object,
-        ReadOnlySpan<char> graph)
-    {
-        if (!_minimalBulkActive)
-            throw new InvalidOperationException("No active batch. Call BeginBatch() first.");
-        if (!graph.IsEmpty)
-            throw new ProfileCapabilityException(
-                "Minimal profile does not support named graphs (hasGraph=false per ADR-029). " +
-                "Use Cognitive / Graph / Reference if your workload requires multi-graph semantics.");
-
-        // Mutation tracking is irrelevant for Minimal (no WAL, no CheckpointInternal),
-        // but flip the flag so the invariant "pure-query leaves flag false" holds uniformly.
-        _sessionMutated = true;
-
-        var subjectId = _atoms.Intern(subject);
-        var predicateId = _atoms.Intern(predicate);
-        var objectId = _atoms.Intern(@object);
-
-        _gspoMinimal!.AddRaw(subjectId, predicateId, objectId);
-    }
-
-    /// <summary>
     /// Memorize a fact in the current batch — a SPARQL insert of one quad (see <see cref="AddCurrent"/>). Every
     /// operation of a batch has the batch's one clock reading, so on a Cognitive store only the last operation on a
     /// quad in the batch counts (ADR-061 M2); the change is decided and logged at CommitBatch.
-    /// Returns true if the fact was not remembered when this was called and is now (ADR-061 D2), or on a Graph store,
-    /// was not asserted and is now (ADR-064 M4); on Reference and Minimal, always true.
+    /// Returns true if the fact was not remembered when this was called and is now (ADR-061 D2), or on a Graph or
+    /// Minimal store, was not asserted and is now (ADR-064 M4); on Reference, always true.
     /// </summary>
     public bool AddCurrentBatched(
         ReadOnlySpan<char> subject,
@@ -1348,9 +1318,9 @@ public sealed class QuadStore : IDisposable
         ReadOnlySpan<char> @object,
         ReadOnlySpan<char> graph = default)
     {
-        if (_schema.Profile is StoreProfile.Reference or StoreProfile.Minimal)
+        if (_schema.Profile == StoreProfile.Reference)
         {
-            // Reference and Minimal keep no times: the batch's reading is not stored.
+            // Reference keeps no times: the batch's reading is not stored.
             AddBatched(subject, predicate, @object, _batchCurrentFrom, DateTimeOffset.MaxValue, graph);
             return true;
         }
@@ -1361,18 +1331,19 @@ public sealed class QuadStore : IDisposable
         // Intern atoms (IAtomStore is append-only — orphans from rollback are harmless)
         var quad = new QuadIds(graph.IsEmpty ? 0 : _atoms.Intern(graph),
             _atoms.Intern(subject), _atoms.Intern(predicate), _atoms.Intern(@object));
-        if (_schema.Profile == StoreProfile.Graph)
+        if (NumbersFactStates)
             return AskStateInBatch(quad, Asked.Insert);
         return AskInBatch(quad, Asked.Insert);
     }
 
     /// <summary>
-    /// One assert or retract of the current batch on a Graph store (ADR-064 M2, M4). Each one that changes the fact is
+    /// One assert or retract of the current batch on a Graph or Minimal store (ADR-064 M2, M4). Each one that changes the fact is
     /// a state of its own: it is decided from the version the batch's earlier operations took the fact to, or else
     /// from the version GSPO holds, and logged now. Returns whether the fact's state changed.
     /// </summary>
     private bool AskStateInBatch(QuadIds quad, Asked asked)
     {
+        RefuseNamedGraphOnMinimal(quad);
         _batchVersions ??= new();
         if (!_batchVersions.TryGetValue(quad, out var held))
             held = HeldVersion(quad);
@@ -1450,8 +1421,8 @@ public sealed class QuadStore : IDisposable
         if (!TryResolveQuadIds(subject, predicate, @object, graph, out var graphId, out var subjectId, out var predicateId, out var objectId))
             return false;
 
-        // A Graph store keeps no time (ADR-064 D1): the interval is not read, and the fact is retracted.
-        if (_schema.Profile == StoreProfile.Graph)
+        // A Graph or Minimal store keeps no time (ADR-064 D1, D2): the interval is not read, and the fact is retracted.
+        if (NumbersFactStates)
             return AskStateInBatch(new QuadIds(graphId, subjectId, predicateId, objectId), Asked.Delete);
 
         // The version may be in the indexes or added earlier in this batch (a pruning copy adds a version and
@@ -1500,7 +1471,7 @@ public sealed class QuadStore : IDisposable
             return false;
 
         var quad = new QuadIds(graphId, subjectId, predicateId, objectId);
-        if (_schema.Profile == StoreProfile.Graph)
+        if (NumbersFactStates)
             return AskStateInBatch(quad, Asked.Delete);
         return AskInBatch(quad, Asked.Delete);
     }
@@ -1548,17 +1519,6 @@ public sealed class QuadStore : IDisposable
                     _trigramIndex.Flush();
                 }
                 _referenceBulkActive = false;
-                CheckDiskSpaceAfterWrite();
-                return;
-            }
-
-            // Minimal-profile commit: flush the single GSPO index, release lock. No WAL,
-            // no sorter, no trigram (Minimal doesn't index literals — the single-index
-            // simplicity is the point).
-            if (_minimalBulkActive)
-            {
-                _gspoMinimal!.Flush();
-                _minimalBulkActive = false;
                 CheckDiskSpaceAfterWrite();
                 return;
             }
@@ -1646,16 +1606,6 @@ public sealed class QuadStore : IDisposable
         // that is not held would throw over the commit's own exception.
         if (!_lock.IsWriteLockHeld)
             return;
-
-        // Minimal profile rollback: no WAL, no sorter — once AddCurrentBatched writes
-        // a triple, it's already in _gspoMinimal. Per ADR-026's pattern, a mid-bulk
-        // failure means "delete the store and retry"; RollbackBatch just releases the lock.
-        if (_minimalBulkActive)
-        {
-            _minimalBulkActive = false;
-            _lock.ExitWriteLock();
-            return;
-        }
 
         // Reference profile has no WAL — once AddCurrentBatched writes a triple, it is
         // already in the indexes. Per ADR-026, a mid-bulk failure means "delete the store
@@ -2729,10 +2679,10 @@ public sealed class QuadStore : IDisposable
         // mutated flag so Dispose knows to run CheckpointInternal.
         _sessionMutated = true;
 
-        // A Graph store's log holds the decided change, never the operation (ADR-064 D5).
-        if (_schema.Profile == StoreProfile.Graph)
+        // A Graph or Minimal store's log holds the decided change, never the operation (ADR-064 D5).
+        if (NumbersFactStates)
             throw new InvalidDataException(
-                $"WAL record (TxId {record.TxId}) is an Add, which a Graph store does not write: its log holds NextVersion records (ADR-064 D5).");
+                $"WAL record (TxId {record.TxId}) is an Add, which a {_schema.Profile} store does not write: its log holds NextVersion records (ADR-064 D5).");
 
         // Cognitive profile path.
         // LogRecord stores valid-time as .UtcTicks (100-ns since year 1); the B+Tree
@@ -2809,6 +2759,7 @@ public sealed class QuadStore : IDisposable
         _gspoGraph?.CommitEntryCount(txId, durable);
         _gposGraph?.CommitEntryCount(txId, durable);
         _gospGraph?.CommitEntryCount(txId, durable);
+        _gspoMinimal?.CommitEntryCount(txId, durable);
     }
 
     /// <summary>
@@ -2917,19 +2868,28 @@ public sealed class QuadStore : IDisposable
     }
 
     /// <summary>
-    /// Apply a NextVersion record to every index of a Graph store (ADR-064 M5). Each index changes only when it holds
-    /// the fact at the record's version, so an index that already holds the change, or a later one, is left as it is.
-    /// A fact that becomes asserted makes its literal object searchable, as an Add did.
+    /// Apply a NextVersion record to every index of a Graph or Minimal store (ADR-064 M5). Each index changes only when
+    /// it holds the fact at the record's version, so an index that already holds the change, or a later one, is left
+    /// as it is. On a Graph store, a fact that becomes asserted makes its literal object searchable, as an Add did;
+    /// Minimal has no trigram index (D2).
     /// </summary>
     private bool ApplyNextVersionToIndexesById(in LogRecord record)
     {
-        if (_schema.Profile != StoreProfile.Graph)
-            throw new InvalidDataException($"WAL record (TxId {record.TxId}) is a NextVersion, which only a Graph store writes (ADR-064 D5).");
+        if (!NumbersFactStates)
+            throw new InvalidDataException($"WAL record (TxId {record.TxId}) is a NextVersion, which only a Graph or Minimal store writes (ADR-064 D5).");
 
         // ADR-031 Piece 2: a change of a fact's state is a mutation — track it.
         _sessionMutated = true;
 
         var fromVersion = checked((int)record.FromVersion);
+        if (_schema.Profile == StoreProfile.Minimal)
+        {
+            var changedInGspo = _gspoMinimal!.NextVersion(record.SubjectId, record.PredicateId, record.ObjectId, fromVersion);
+            if (_recovering && fromVersion == 0)
+                _gspoMinimal.AdjustRecoveredEntryCount(FirstAssertCountOwed(record, _gspoMinimal.CountTxId, changedInGspo));
+            return changedInGspo;
+        }
+
         var changed = ApplyNextVersion(_gspoGraph!, record, record.SubjectId, record.PredicateId, record.ObjectId, fromVersion);
 
         if (!_bulkLoadMode)
@@ -2950,25 +2910,26 @@ public sealed class QuadStore : IDisposable
     }
 
     /// <summary>
-    /// Apply one NextVersion record to one Graph index, and keep the index's entry count right during recovery. A
-    /// decided change always took effect when it was first applied. So in recovery a fact's first assert, the one
-    /// change that adds an entry, counts by the transaction it belongs to, whatever the page already held: one more
-    /// entry after the index's saved count (<see cref="VersionedQuadIndex.CountTxId"/>), none at or before it (ADR-058).
+    /// Apply one NextVersion record to one Graph index, and keep the index's entry count right during recovery
+    /// (<see cref="FirstAssertCountOwed"/>).
     /// </summary>
     private bool ApplyNextVersion(VersionedQuadIndex index, in LogRecord record,
         long primary, long secondary, long tertiary, int fromVersion)
     {
         var changed = index.NextVersion(record.GraphId, primary, secondary, tertiary, fromVersion);
-
         if (_recovering && fromVersion == 0)
-        {
-            var counted = changed ? 1 : 0;
-            var owed = record.TxId > index.CountTxId ? 1 : 0;
-            index.AdjustRecoveredEntryCount(owed - counted);
-        }
-
+            index.AdjustRecoveredEntryCount(FirstAssertCountOwed(record, index.CountTxId, changed));
         return changed;
     }
+
+    /// <summary>
+    /// What a fact's first assert, the one change that adds an entry, still owes an index's entry count when recovery
+    /// replays it (ADR-058). A decided change always took effect when it was first applied, so it counts by the
+    /// transaction it belongs to, whatever the page already held: one entry after the index's saved count
+    /// (<paramref name="countTxId"/>), none at or before it, less the one the replay itself added.
+    /// </summary>
+    private static int FirstAssertCountOwed(in LogRecord record, long countTxId, bool addedByTheReplay) =>
+        (record.TxId > countTxId ? 1 : 0) - (addedByTheReplay ? 1 : 0);
 
     /// <summary>
     /// Apply a Retract record (Cognitive): the version with exactly the record's interval is marked LegacyIsDeleted
@@ -2977,10 +2938,10 @@ public sealed class QuadStore : IDisposable
     /// </summary>
     private bool ApplyRetractToIndexesById(in LogRecord record)
     {
-        // A Graph store's log holds the decided change, never the operation (ADR-064 D5).
-        if (_schema.Profile == StoreProfile.Graph)
+        // A Graph or Minimal store's log holds the decided change, never the operation (ADR-064 D5).
+        if (NumbersFactStates)
             throw new InvalidDataException(
-                $"WAL record (TxId {record.TxId}) is a Retract, which a Graph store does not write: its log holds NextVersion records (ADR-064 D5).");
+                $"WAL record (TxId {record.TxId}) is a Retract, which a {_schema.Profile} store does not write: its log holds NextVersion records (ADR-064 D5).");
 
         // ADR-031 Piece 2: a retract is a mutation — track it.
         _sessionMutated = true;
@@ -3011,8 +2972,8 @@ public sealed class QuadStore : IDisposable
     /// </summary>
     private bool ApplyEndToIndexesById(in LogRecord record)
     {
-        if (_schema.Profile == StoreProfile.Graph)
-            throw new InvalidDataException($"WAL record (TxId {record.TxId}) is an End, which a Graph store (no valid time) never writes.");
+        if (NumbersFactStates)
+            throw new InvalidDataException($"WAL record (TxId {record.TxId}) is an End, which a {_schema.Profile} store (no valid time) never writes.");
 
         _sessionMutated = true;
         var versionFromMs = UtcTicksToUnixMs(record.MemorizedAtTicks);
@@ -3159,6 +3120,10 @@ public sealed class QuadStore : IDisposable
     {
         var stats = new System.Collections.Generic.Dictionary<long, (long count, System.Collections.Generic.HashSet<long> subjects, System.Collections.Generic.HashSet<long> objects)>();
         long totalTriples = 0;
+
+        // A Minimal store has no GPOS to scan, and collected no statistics before it had a log (ADR-064 D2).
+        if (_schema.Profile == StoreProfile.Minimal)
+            return;
 
         // ADR-029 Graph profile: scan via the VersionedQuadIndex GPOS instead of
         // TemporalQuadIndex. Same Predicate→Object→Subject mapping; no temporal
@@ -3797,6 +3762,7 @@ public sealed class QuadStore : IDisposable
             _gspoGraph?.ReturnToSavedEntryCount();
             _gposGraph?.ReturnToSavedEntryCount();
             _gospGraph?.ReturnToSavedEntryCount();
+            _gspoMinimal?.ReturnToSavedEntryCount();
         }
         else if (_sessionMutated)
         {

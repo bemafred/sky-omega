@@ -6,26 +6,23 @@ using SkyOmega.Mercury.Runtime;
 namespace SkyOmega.Mercury.Storage;
 
 /// <summary>
-/// B+Tree index for RDF triples under the Minimal storage profile (ADR-029 Decision 3
-/// completion, 2026-05-16): 24-byte keys carrying only Primary/Secondary/Tertiary atom IDs,
-/// no graph dimension, no temporal dimension, no versioning, no soft-delete. Suited to
-/// single-graph Linked Data endpoints — the simplest RDF store shape Mercury supports.
-/// Distinct concrete class per the no-behavior-flags rule (`feedback_no_behavior_flags.md`,
-/// 2026-05-16). Closes the four-profile matrix alongside <see cref="TemporalQuadIndex"/>,
-/// <see cref="VersionedQuadIndex"/>, and <see cref="ReferenceQuadIndex"/>.
+/// B+Tree index for RDF triples under the Minimal storage profile (ADR-029, with the model of ADR-064): Graph without
+/// secondary indexes, named graphs or trigram index. A 24-byte key of Primary/Secondary/Tertiary atom IDs, no graph
+/// dimension and no time; each fact's states are numbered by its version, odd asserted and even retracted (ADR-064 M2).
+/// Distinct concrete class per the no-behavior-flags rule (`feedback_no_behavior_flags.md`, 2026-05-16), alongside
+/// <see cref="TemporalQuadIndex"/>, <see cref="VersionedQuadIndex"/>, and <see cref="ReferenceQuadIndex"/>.
 /// </summary>
 /// <remarks>
 /// <para><strong>INTERNAL USE ONLY:</strong> Accessed through <see cref="QuadStore"/>
 /// under its reader/writer lock; not safe for direct concurrent use.</para>
 ///
-/// <para><strong>Layout:</strong> Leaf entries are 24 B (the key itself). Internal entries
-/// are 32 B (24 B separator key + 8 B right-child page id). Page size is 16 KB with a 32 B
-/// header. Leaves hold up to 681 entries; internals hold up to 510. Single sort order:
-/// Primary → Secondary → Tertiary.</para>
+/// <para><strong>Layout:</strong> Leaf entries are 28 B: the 24 B key and the 4 B version (ADR-064 D2). Internal
+/// entries are 32 B (24 B separator key + 8 B right-child page id). Page size is 16 KB with a 32 B header. Leaves
+/// hold up to 584 entries; internals hold up to 510. Single sort order: Primary → Secondary → Tertiary.</para>
 ///
-/// <para><strong>Set semantics:</strong> Re-adding the same (P,S,T) triple is a silent
-/// no-op. Mercury's Minimal profile is bulk-load-only at the session API per ADR-029
-/// Decision 7 (no WAL, no soft-delete metadata to update).</para>
+/// <para><strong>Mutation semantics (ADR-064 M5):</strong> the one change is <see cref="NextVersion"/>, as on the
+/// Graph index: the fact goes from the version the store decided on to the next, and an index that does not hold it
+/// at that version changes nothing.</para>
 ///
 /// <para><strong>Graph dimension:</strong> not stored. QuadStore enforces graph=default
 /// at the API boundary for Minimal-profile stores; queries with named-graph constraints
@@ -37,9 +34,9 @@ namespace SkyOmega.Mercury.Storage;
 /// </remarks>
 internal sealed unsafe class MinimalQuadIndex : IQuadIndex
 {
-    private const int LeafEntryBytes = 24;
+    internal const int LeafEntryBytes = 28;
     private const int InternalEntryBytes = 32;
-    internal const int LeafDegree = (BTreeFile.PageSize - BTreeFile.HeaderBytes) / LeafEntryBytes;          // 681
+    internal const int LeafDegree = (BTreeFile.PageSize - BTreeFile.HeaderBytes) / LeafEntryBytes;          // 584
     internal const int InternalDegree = (BTreeFile.PageSize - BTreeFile.HeaderBytes) / InternalEntryBytes;  // 510
 
     private readonly BTreeFile _file;
@@ -49,9 +46,10 @@ internal sealed unsafe class MinimalQuadIndex : IQuadIndex
     /// <summary>
     /// Magic number stamped into the index file header. Distinct from Reference / Cognitive /
     /// Graph magics so opening a wrong-profile store fails loudly at metadata load.
-    /// "MINIMAL\0".
+    /// "MINIMVER", since ADR-064 D8. The earlier layout's "MINIMAL\0" (0x4D494E494D414C00), whose leaf entries held
+    /// the key only, is refused.
     /// </summary>
-    private const long MagicNumber = 0x4D494E494D414C00L;
+    private const long MagicNumber = 0x4D494E494D564552L;
 
     /// <summary>Create a Minimal index with a shared IAtomStore (owned by QuadStore).</summary>
     internal MinimalQuadIndex(string filePath, IAtomStore? sharedAtoms,
@@ -124,35 +122,81 @@ internal sealed unsafe class MinimalQuadIndex : IQuadIndex
 
     internal void SetDeferMsync(bool value) => _file.DeferMsync = value;
 
-    // ===== Public add =====
+    /// <summary>The WAL transaction up to which the saved entry count is exact (ADR-058).</summary>
+    internal long CountTxId => _file.CountTxId;
 
-    /// <summary>Add a triple, interning the string forms into atom IDs first.</summary>
-    public void Add(ReadOnlySpan<char> primary, ReadOnlySpan<char> secondary, ReadOnlySpan<char> tertiary)
-    {
-        var p = _atoms.Intern(primary);
-        var s = _atoms.Intern(secondary);
-        var t = _atoms.Intern(tertiary);
-        AddRaw(p, s, t);
-    }
+    /// <summary>Save the entry count as exact up to WAL transaction <paramref name="txId"/> (ADR-058).</summary>
+    internal void CommitEntryCount(long txId, bool durable) => _file.CommitEntryCount(txId, durable);
 
     /// <summary>
-    /// Append a triple by pre-resolved atom IDs. Duplicate keys (exact P/S/T match) are
-    /// silent no-ops — RDF set semantics enforced at the B+Tree level.
+    /// Take the entry count back to the one last saved with its transaction, before a close that follows a
+    /// transaction this index did not finish applying (ADR-058, ADR-061 M7).
     /// </summary>
-    internal void AddRaw(long primary, long secondary, long tertiary)
+    internal void ReturnToSavedEntryCount() => _file.ReturnToSavedEntryCount();
+
+    /// <summary>
+    /// Change the entry count by one without touching the tree. WAL recovery uses it: a decided change counts by the
+    /// transaction it belongs to, whatever the page already held (ADR-058, ADR-064 M5).
+    /// </summary>
+    internal void AdjustRecoveredEntryCount(int delta)
+    {
+        if (delta > 0) _file.IncrementEntryCount();
+        else if (delta < 0) _file.DecrementEntryCount();
+    }
+
+    // ===== The one change =====
+
+    /// <summary>
+    /// The fact goes from version <paramref name="fromVersion"/> to the next (ADR-064 M5). An index that holds it at
+    /// that version holds it at the next one; with <paramref name="fromVersion"/> 0, an index that does not hold it
+    /// holds it at version 1. In any other state nothing changes, so applying the change again, to an index at any
+    /// earlier point of the log, changes nothing more. Returns whether the index changed.
+    /// </summary>
+    internal bool NextVersion(long primary, long secondary, long tertiary, int fromVersion)
     {
         var key = new MinimalKey { Primary = primary, Secondary = secondary, Tertiary = tertiary };
-        InsertIntoTree(key, _file.RootPageId);
+
+        if (fromVersion == 0)
+        {
+            var heldBefore = _file.EntryCount;
+            InsertIntoTree(key, _file.RootPageId);
+            return _file.EntryCount > heldBefore;
+        }
+
+        var view = GetView(FindLeafPage(_file.RootPageId, key));
+        int count = view.Header.EntryCount;
+        for (int i = 0; i < count; i++)
+        {
+            ref var entry = ref view.LeafEntry(i);
+            var cmp = MinimalKey.Compare(in entry.Key, in key);
+            if (cmp > 0) break;
+            if (cmp < 0) continue;
+            if (entry.Version != fromVersion) return false;
+            entry.Version = checked(fromVersion + 1);
+            _file.FlushPage();
+            return true;
+        }
+        return false;
     }
 
     // ===== Query =====
 
     /// <summary>
-    /// Query: yields all entries matching the (primary, secondary, tertiary) constraints.
-    /// Use -1 for "any" on a dimension. Minimal has only one index (single GSPO
-    /// orientation), so non-subject-bound queries scan the entire range.
+    /// Query: yields the facts that are asserted, those whose version is odd, matching the (primary, secondary,
+    /// tertiary) constraints: what a client sees (ADR-064 M2). Use -1 for "any" on a dimension. Minimal has only one
+    /// index (single GSPO orientation), so non-subject-bound queries scan the entire range.
     /// </summary>
     public QuadIndexCursor Query(long primary, long secondary, long tertiary)
+        => QueryInternal(primary, secondary, tertiary, includeRetracted: false);
+
+    /// <summary>
+    /// Yields every fact the index holds matching the constraints, retracted ones too, each with its version: the
+    /// store's own read of the version (ADR-064 D4).
+    /// </summary>
+    public QuadIndexCursor QueryHeld(long primary, long secondary, long tertiary)
+        => QueryInternal(primary, secondary, tertiary, includeRetracted: true);
+
+    private QuadIndexCursor QueryInternal(long primary, long secondary, long tertiary, bool includeRetracted)
     {
         var cursor = new QuadIndexCursor(this);
         ref var state = ref cursor.State<ScanState>();
@@ -160,6 +204,7 @@ internal sealed unsafe class MinimalQuadIndex : IQuadIndex
         state.MaxKey = CreateSearchKey(primary, secondary, tertiary, isMin: false);
         state.PageId = FindLeafPage(_file.RootPageId, state.MinKey);
         state.Slot = 0;
+        state.IncludeRetracted = includeRetracted;
         return cursor;
     }
 
@@ -208,6 +253,14 @@ internal sealed unsafe class MinimalQuadIndex : IQuadIndex
         public override readonly int GetHashCode() => HashCode.Combine(Primary, Secondary, Tertiary);
     }
 
+    /// <summary>Leaf entry: the fact's key and its version, odd when asserted and even when retracted (ADR-064 D2).</summary>
+    [StructLayout(LayoutKind.Sequential, Pack = 1)]
+    internal struct MinimalLeafEntry
+    {
+        public MinimalKey Key;     // 24 B
+        public int Version;        //  4 B
+    }
+
     /// <summary>Internal-node entry: separator key + right-child page pointer.</summary>
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
     private struct MinimalInternalEntry
@@ -240,8 +293,8 @@ internal sealed unsafe class MinimalQuadIndex : IQuadIndex
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public ref MinimalKey LeafEntry(int index) =>
-            ref ((MinimalKey*)(Base + BTreeFile.HeaderBytes))[index];
+        public ref MinimalLeafEntry LeafEntry(int index) =>
+            ref ((MinimalLeafEntry*)(Base + BTreeFile.HeaderBytes))[index];
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public ref MinimalInternalEntry InternalEntry(int index) =>
@@ -253,6 +306,7 @@ internal sealed unsafe class MinimalQuadIndex : IQuadIndex
     {
         public long PageId;
         public int Slot;
+        public bool IncludeRetracted;
         public MinimalKey MinKey;
         public MinimalKey MaxKey;
     }
@@ -269,18 +323,20 @@ internal sealed unsafe class MinimalQuadIndex : IQuadIndex
 
             while (state.Slot < header.EntryCount)
             {
-                ref var key = ref view.LeafEntry(state.Slot);
+                ref var entry = ref view.LeafEntry(state.Slot);
+                ref var key = ref entry.Key;
 
                 if (MinimalKey.Compare(in key, in state.MaxKey) > 0)
                     return false;
 
-                if (MinimalKey.Compare(in key, in state.MinKey) >= 0)
+                if (MinimalKey.Compare(in key, in state.MinKey) >= 0 && (state.IncludeRetracted || entry.Version % 2 == 1))
                 {
                     // This index has no graph dimension: every quad is in the default graph.
                     cursor.Graph = 0;
                     cursor.Primary = key.Primary;
                     cursor.Secondary = key.Secondary;
                     cursor.Tertiary = key.Tertiary;
+                    cursor.Version = entry.Version;
                     state.Slot++;
                     return true;
                 }
@@ -339,10 +395,10 @@ internal sealed unsafe class MinimalQuadIndex : IQuadIndex
         int insertPos = 0;
         while (insertPos < count)
         {
-            var cmp = MinimalKey.Compare(in key, in view.LeafEntry(insertPos));
+            var cmp = MinimalKey.Compare(in key, in view.LeafEntry(insertPos).Key);
             if (cmp < 0) break;
             if (cmp == 0)
-                return default; // RDF set semantics — exact duplicate is a no-op.
+                return default; // The index holds the fact already, at some version: nothing changes (ADR-064 M5).
             insertPos++;
         }
 
@@ -352,7 +408,7 @@ internal sealed unsafe class MinimalQuadIndex : IQuadIndex
         for (int i = count; i > insertPos; i--)
             view.LeafEntry(i) = view.LeafEntry(i - 1);
 
-        view.LeafEntry(insertPos) = key;
+        view.LeafEntry(insertPos) = new MinimalLeafEntry { Key = key, Version = 1 };
         view.Header.EntryCount = (short)(count + 1);
         _file.IncrementEntryCount();
         _file.FlushPage();
@@ -380,7 +436,7 @@ internal sealed unsafe class MinimalQuadIndex : IQuadIndex
         newHeader.EntryCount = (short)(pageHeader.EntryCount - mid);
         pageHeader.EntryCount = (short)mid;
 
-        var promoted = newView.LeafEntry(0);
+        var promoted = newView.LeafEntry(0).Key;
 
         if (MinimalKey.Compare(in key, in promoted) < 0)
             InsertIntoLeaf(page, key);
@@ -486,7 +542,9 @@ internal sealed unsafe class MinimalQuadIndex : IQuadIndex
 
         _file.RootPageId = newRootId;
         _file.FlushPage();
-        _file.SaveMetadata();
+        // ADR-058: save the new root now, but not the entry count, which may include
+        // entries of a transaction that has not finished applying.
+        _file.SaveStructure();
     }
 
     private long FindLeafPage(long pageId, MinimalKey key)

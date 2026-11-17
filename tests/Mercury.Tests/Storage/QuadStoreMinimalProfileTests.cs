@@ -8,11 +8,10 @@ using Xunit;
 namespace SkyOmega.Mercury.Tests.Storage;
 
 /// <summary>
-/// ADR-029 Phase 2d completion: QuadStore dispatch tests for the Minimal profile.
-/// Session-API writes via BeginBatch / AddCurrentBatched / CommitBatch (same shape
-/// as Reference's bulk-load entry); queries via QueryCurrent on the single GSPO
-/// index. Named-graph constraints, temporal queries, and direct Add() all reject
-/// at the API boundary with clear ProfileCapabilityException messages.
+/// ADR-029 Phase 2d completion, with ADR-064 D2: QuadStore dispatch tests for the Minimal profile, Graph without
+/// secondary indexes, named graphs or trigram index. Session writes with a log, single and batched; queries via
+/// QueryCurrent on the single GSPO index. Named-graph constraints and temporal queries reject at the API boundary
+/// with clear ProfileCapabilityException messages. The model's own tests are in FactStatesTests.
 /// </summary>
 public class QuadStoreMinimalProfileTests : IDisposable
 {
@@ -44,15 +43,14 @@ public class QuadStoreMinimalProfileTests : IDisposable
         Assert.Equal(StoreProfile.Minimal, store.Schema.Profile);
         Assert.False(store.Schema.HasGraph);
         Assert.False(store.Schema.HasTemporal);
-        Assert.False(store.Schema.HasVersioning);
+        Assert.True(store.Schema.HasVersioning);   // ADR-064 D2: each fact's states are numbered.
         Assert.True(File.Exists(Path.Combine(dir, StoreSchema.FileName)));
         // Single index declared in the schema.
         Assert.Single(store.Schema.Indexes);
         Assert.Equal("gspo", store.Schema.Indexes[0]);
 
-        // No WAL.
-        var (txId, _, _) = store.GetWalStatistics();
-        Assert.Equal(0, txId);
+        // ADR-064 D2: Minimal has a log, as Graph.
+        Assert.True(File.Exists(Path.Combine(dir, "wal.log")));
     }
 
     [Fact]
@@ -129,18 +127,65 @@ public class QuadStoreMinimalProfileTests : IDisposable
     }
 
     [Fact]
-    public void Minimal_DirectAdd_ThrowsProfileCapability()
+    public void Minimal_NamedGraphInASingleWrite_ThrowsProfileCapability_AndLogsNothing()
     {
-        // Public Add() is the WAL-durable single-triple path; Minimal has no WAL,
-        // so it rejects via RequireWriteCapableProfile's HasVersioning check —
-        // same stance as Reference (Decision 7: use BeginBatch as the bulk-load entry).
-        var dir = NewStoreDir("direct_add_reject");
+        // ADR-064 D2: Minimal takes single writes, as Graph does, and has no named graphs.
+        var dir = NewStoreDir("single_write_graph_reject");
         using var store = CreateMinimalStore(dir);
+        var (txBefore, _, _) = store.GetWalStatistics();
 
         var ex = Assert.Throws<ProfileCapabilityException>(() =>
-            store.Add("s", "p", "o", DateTimeOffset.UtcNow, DateTimeOffset.MaxValue));
+            store.AddCurrent("<http://ex/s>", "<http://ex/p>", "<http://ex/o>", "<http://ex/g1>"));
         Assert.Contains("Minimal", ex.Message);
-        Assert.Contains("ADR-029", ex.Message);
+        Assert.Contains("named graphs", ex.Message);
+
+        var (txAfter, _, _) = store.GetWalStatistics();
+        Assert.Equal(txBefore, txAfter);
+        Assert.Equal(0, store.GetStatistics().QuadCount);
+    }
+
+    [Fact]
+    public void Minimal_SingleWrites_AssertAndRetract_WhatAClientSeesFollows()
+    {
+        var dir = NewStoreDir("single_writes");
+        using var store = CreateMinimalStore(dir);
+
+        Assert.True(store.AddCurrent("<http://ex/s>", "<http://ex/p>", "<http://ex/o>"));
+        Assert.False(store.AddCurrent("<http://ex/s>", "<http://ex/p>", "<http://ex/o>"));
+        int before = 0;
+        var e1 = store.QueryCurrent("<http://ex/s>", "", "");
+        while (e1.MoveNext()) before++;
+        Assert.Equal(1, before);
+
+        Assert.True(store.DeleteCurrent("<http://ex/s>", "<http://ex/p>", "<http://ex/o>"));
+        Assert.False(store.DeleteCurrent("<http://ex/s>", "<http://ex/p>", "<http://ex/o>"));
+        int after = 0;
+        var e2 = store.QueryCurrent("<http://ex/s>", "", "");
+        while (e2.MoveNext()) after++;
+        Assert.Equal(0, after);
+
+        // The retracted fact is held: deletes are soft (ADR-064).
+        Assert.Equal(1, store.GetStatistics().QuadCount);
+    }
+
+    [Fact]
+    public void Minimal_RollbackBatch_LeavesTheStoreAsItWas()
+    {
+        // ADR-064 D2: a batch is logged and applied at commit, so a rollback leaves nothing behind. Before the log,
+        // what a batch had added was in the index already, and a rollback could not take it out.
+        var dir = NewStoreDir("rollback");
+        using var store = CreateMinimalStore(dir);
+
+        store.BeginBatch();
+        store.AddCurrentBatched("<http://ex/s>", "<http://ex/p>", "<http://ex/o1>");
+        store.AddCurrentBatched("<http://ex/s>", "<http://ex/p>", "<http://ex/o2>");
+        store.RollbackBatch();
+
+        int count = 0;
+        var e = store.QueryCurrent("<http://ex/s>", "", "");
+        while (e.MoveNext()) count++;
+        Assert.Equal(0, count);
+        Assert.Equal(0, store.GetStatistics().QuadCount);
     }
 
     [Fact]

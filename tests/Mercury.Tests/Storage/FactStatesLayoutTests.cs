@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Threading;
+using SkyOmega.Mercury.Abstractions;
 using SkyOmega.Mercury.Runtime;
 using SkyOmega.Mercury.Storage;
 using SkyOmega.Mercury.Tests.Fixtures;
@@ -9,31 +10,35 @@ using Xunit;
 namespace SkyOmega.Mercury.Tests.Storage;
 
 /// <summary>
-/// ADR-064 D1, D3, D8 and G9: a Graph entry holds the quad, the child pointer and the version, and nothing read from a
-/// clock; Graph keeps GSPO, GPOS and GOSP, and no TGSP; and each index file's magic number changes with its layout, so
-/// a file in the earlier layout is refused when the store opens.
+/// ADR-064 D1, D2, D3, D8 and G9: a Graph entry holds the quad, the child pointer and the version, and a Minimal leaf
+/// entry the triple and the version; nothing in either is read from a clock. Graph keeps GSPO, GPOS and GOSP, and no
+/// TGSP. Each index file's magic number changes with its layout, so a file in the earlier layout is refused when the
+/// store opens.
 /// </summary>
-public class GraphLayoutTests : IDisposable
+public class FactStatesLayoutTests : IDisposable
 {
     private const string P = "<urn:layout:p>";
     private const string G = "<urn:layout:g>";
 
     private readonly string _root;
 
-    public GraphLayoutTests()
+    public FactStatesLayoutTests()
     {
-        var tempPath = TempPath.Test("graph-layout");
+        var tempPath = TempPath.Test("fact-states-layout");
         tempPath.MarkOwnership();
         _root = tempPath;
     }
 
     public void Dispose() => TempPath.SafeCleanup(_root);
 
-    [Fact]
-    public void TheSameWrites_AtOtherTimes_LeaveTheSameIndexFiles()
+    [Theory]
+    [InlineData(StoreProfile.Graph)]
+    [InlineData(StoreProfile.Minimal)]
+    public void TheSameWrites_AtOtherTimes_LeaveTheSameIndexFiles(StoreProfile profile)
     {
         var first = Path.Combine(_root, "first");
         var second = Path.Combine(_root, "second");
+        var yGraph = profile == StoreProfile.Graph ? G : "";
 
         // The first store's clock moves a minute at each write. The second's stands still in another year, and every
         // write to it reads a later wall clock than every write to the first.
@@ -45,16 +50,16 @@ public class GraphLayoutTests : IDisposable
             void Tick() { if (dir == first) clock.Reading = clock.Reading.AddMinutes(1); }
 
             using var store = new QuadStore(dir, null, null,
-                new StorageOptions { Profile = StoreProfile.Graph, Clock = clock, IndexInitialSizeBytes = 1L << 20, AtomDataInitialSizeBytes = 1L << 20 });
+                new StorageOptions { Profile = profile, Clock = clock, IndexInitialSizeBytes = 1L << 20, AtomDataInitialSizeBytes = 1L << 20 });
             store.AddCurrent("<urn:layout:x>", P, "\"x\"");
             Tick();
             store.DeleteCurrent("<urn:layout:x>", P, "\"x\"");
             Tick();
             store.AddCurrent("<urn:layout:x>", P, "\"x\"");
             Tick();
-            store.AddCurrent("<urn:layout:y>", P, "\"y\"", G);
+            store.AddCurrent("<urn:layout:y>", P, "\"y\"", yGraph);
             Tick();
-            store.DeleteCurrent("<urn:layout:y>", P, "\"y\"", G);
+            store.DeleteCurrent("<urn:layout:y>", P, "\"y\"", yGraph);
             Tick();
             store.BeginBatch();
             store.AddCurrentBatched("<urn:layout:z>", P, "\"z\"");
@@ -62,7 +67,8 @@ public class GraphLayoutTests : IDisposable
             store.CommitBatch();
         }
 
-        foreach (var index in new[] { "gspo.tdb", "gpos.tdb", "gosp.tdb" })
+        var indexes = profile == StoreProfile.Graph ? new[] { "gspo.tdb", "gpos.tdb", "gosp.tdb" } : new[] { "gspo.tdb" };
+        foreach (var index in indexes)
         {
             var inFirst = File.ReadAllBytes(Path.Combine(first, index));
             var inSecond = File.ReadAllBytes(Path.Combine(second, index));
@@ -85,23 +91,27 @@ public class GraphLayoutTests : IDisposable
         Assert.False(File.Exists(Path.Combine(dir, "tgsp.tdb")));
     }
 
-    [Fact]
-    public void AnIndexFileInTheEarlierLayout_IsRefusedWhenTheStoreOpens()
+    /// <summary>
+    /// The earlier layouts' magic numbers, at byte 24 of the header (ADR-029, 2026-05-16): "GRAPHIDX", whose entries
+    /// held two wall-clock times and a deleted mark, and "MINIMAL\0", whose leaf entries held the key only.
+    /// </summary>
+    [Theory]
+    [InlineData(StoreProfile.Graph, "gpos.tdb", 0x4752415048494458L)]
+    [InlineData(StoreProfile.Minimal, "gspo.tdb", 0x4D494E494D414C00L)]
+    public void AnIndexFileInTheEarlierLayout_IsRefusedWhenTheStoreOpens(StoreProfile profile, string index, long earlierMagic)
     {
         var dir = Path.Combine(_root, "store");
-        var options = new StorageOptions { Profile = StoreProfile.Graph, IndexInitialSizeBytes = 1L << 20, AtomDataInitialSizeBytes = 1L << 20 };
+        var options = new StorageOptions { Profile = profile, IndexInitialSizeBytes = 1L << 20, AtomDataInitialSizeBytes = 1L << 20 };
         using (var store = new QuadStore(dir, null, null, options))
             store.AddCurrent("<urn:layout:x>", P, "\"x\"");
 
-        // The earlier layout's magic number, "GRAPHIDX", at byte 24 of the header: its entries held two wall-clock
-        // times and a deleted flag (ADR-029, 2026-05-16).
-        using (var file = new FileStream(Path.Combine(dir, "gpos.tdb"), FileMode.Open, FileAccess.ReadWrite))
+        using (var file = new FileStream(Path.Combine(dir, index), FileMode.Open, FileAccess.ReadWrite))
         {
             file.Position = 24;
-            file.Write(BitConverter.GetBytes(0x4752415048494458L));
+            file.Write(BitConverter.GetBytes(earlierMagic));
         }
 
         var refusal = Assert.Throws<InvalidDataException>(() => new QuadStore(dir, null, null, options));
-        Assert.Contains("gpos.tdb", refusal.Message);
+        Assert.Contains(index, refusal.Message);
     }
 }

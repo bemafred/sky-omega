@@ -282,7 +282,7 @@ public class QuadIndexCursorTests : IDisposable
         for (long secondary = 101; secondary <= 105; secondary++)
         for (long tertiary = 201; tertiary <= 205; tertiary++)
         {
-            index.AddRaw(primary, secondary, tertiary);
+            index.NextVersion(primary, secondary, tertiary, 0);
             entries.Add((primary, secondary, tertiary));
         }
 

@@ -21,7 +21,7 @@
 //                  to 6 that make each of the four decided changes (begin, end, remove, continue), then the
 //                  process is killed. <tag> and <count> are not used by these two modes. See Periods below.
 //
-//   states-first   ADR-064: a store of the profile <tag> names (Graph). Single writes assert K, A and B, a
+//   states-first   ADR-064: a store of the profile <tag> names (Graph or Minimal). Single writes assert K, A and B, a
 //                  batch asserts C, then a clean exit.
 //   states-killed  ADR-064: on the store states-first left, single writes and two batches that make each kind of
 //                  change of M4, and repeat some that change nothing, then the process is killed. <count> is not
