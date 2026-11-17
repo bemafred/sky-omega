@@ -71,6 +71,10 @@ public sealed class QuadStore : IDisposable
     // in-bulk flag lets AddCurrentBatched / CommitBatch enforce the "must be inside
     // BeginBatch" contract without fabricating a tx id that has no durable meaning.
     private bool _referenceBulkActive;
+
+    // ADR-064 D10: a Reference store takes one bulk load, whatever its atom store (ADR-007, ADR-034 D7). A store that
+    // holds atoms when it opens holds its load: it refuses bulk mode at open and a batch while it is open.
+    private readonly bool _referenceHoldsItsLoad;
     // ADR-029 Minimal profile: same shape as Reference's bulk-active flag — no WAL,
     // writes go straight into the single GSPO index. CommitBatch is a no-op (no WAL
     // marker); durability via FlushToDisk at the end of the bulk-load session.
@@ -246,17 +250,17 @@ public sealed class QuadStore : IDisposable
         if (_atoms.WriteRefusal is { } refusal)
             _logger.Error(refusal.AsSpan());
 
-        // ADR-034 Decision 7: SortedAtomStore-backed stores accept exactly ONE bulk-load
-        // (the build that populates the vocab files). A second bulk-load against an
-        // already-populated Sorted store violates the single-bulk-load contract —
-        // recreate the store to replace contents.
-        if (_atoms is SortedAtomStore sas && _bulkLoadMode && sas.AtomCount > 0)
+        // ADR-064 D10: a Reference store takes one bulk load, whatever its atom store; it is read-only by design
+        // (ADR-007). ADR-034 D7 made this so for a sorted atom store. A second bulk load against a store that holds its
+        // load is refused — recreate the store to replace its contents.
+        _referenceHoldsItsLoad = _schema.Profile == StoreProfile.Reference && _atoms.AtomCount > 0;
+        if (_referenceHoldsItsLoad && _bulkLoadMode)
         {
+            var atomCount = _atoms.AtomCount;
             _atoms.Dispose();
             throw new ProfileCapabilityException(
-                "ADR-034 Decision 7: SortedAtomStore-backed Reference stores are single-bulk-load. " +
-                "This store already has " + sas.AtomCount + " atoms; recreate the store to replace contents, " +
-                "or open without --bulk-load for query.");
+                "ADR-064 D10: a Reference store takes one bulk load, and this one holds " + atomCount + " atoms. " +
+                "Recreate the store to replace its contents, or open it without --bulk-load to query it.");
         }
 
         // Create trigram index for full-text search (both profile families index it).
@@ -1106,6 +1110,12 @@ public sealed class QuadStore : IDisposable
             // into the Reference indexes and become durable on CommitBatch's Flush.
             if (_schema.Profile == StoreProfile.Reference)
             {
+                // ADR-064 D10: a batch is Reference's one write path, its bulk-load entry. A store that held its load
+                // when it opened takes no second one this way either.
+                if (_referenceHoldsItsLoad)
+                    throw new ProfileCapabilityException(
+                        "ADR-064 D10: a Reference store takes one bulk load, and this one holds it: it takes no batch. " +
+                        "Recreate the store to replace its contents.");
                 _referenceBulkActive = true;
                 // ADR-033: sorter is allocated lazily on first AddReferenceBulkTriple
                 // and persists across many BeginBatch/CommitBatch cycles. See _bulkSorter
