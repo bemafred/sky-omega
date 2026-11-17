@@ -11,7 +11,11 @@ identified. Not reproduced. Not fixed.** It is the first stack record of the "si
 has the same frames, `Win32EventLoop + 384` → `UnrecoverableError + 412` → `SetDCB` → `SendRequestMessageAndWait`,
 on runtime 10.0.15. **2026-11-16:** the Order section below places the failed event as the target ends, before the
 detach. That is the window [finding 110](110-owned-teardown-signalled-an-attached-target.md) closed for `drhook_stop` by
-detaching first. Whether that removes this hang too is not shown: it was never reproduced.
+detaching first. Whether that removes this hang too is not shown: it was never reproduced. A third single timeout in
+`Dispose`, in the same VSTest test, came on CI the same night (job 133039135604, macOS x64, 01:45 UTC, old order). The
+managed stack in the watcher's record ends in `ICorDebug.Terminate`; the job log has no native stack, so it is not
+shown to be this hang. **Not reproduced in 200 runs on macbook** (see the macbook section below): 100 with the old
+order, 100 with detach first.
 
 ## Symptom
 
@@ -146,6 +150,40 @@ rules it out.
 - **The rule the ADR cites, seen in practice.** The documentation says `ICorDebug::Terminate` should not be called
   before `ExitProcess` has arrived for every process. Whether `ExitProcess` arrived here is not recorded.
 
+## Not reproduced on macbook (2026-11-16)
+
+Run on macbook (Apple M1 Pro, 8 cores, macOS 26.4.1, runtime 10.0.15), with eight busy loops. Only the VSTest attach
+tests ran (`FullyQualifiedName~AttachAndOwn_`, 12 tests), since this hang has been seen only in them. The run had
+100 pairs, each one run of A and then one of B:
+
+- **A:** `b208d9ff`, the old order: the target ends while attached, which is this hang's window.
+- **B:** `86af6a1b`, which detaches first.
+
+Between them, DrHook changes only in `499d28e2` (detach first) and in the Windows launch of `86af6a1b`. These tests
+attach rather than launch, so the launch change is not on their path.
+
+A run still going at 75 s was sampled with `sample` and classified by its native stacks:
+
+- `CordbProcess::UnrecoverableError` on a thread counts as this hang.
+- An attach waiting in `DacDbiInterfaceImpl::FlushCache` counts as finding 100's.
+
+| | Runs | Exit 0 | This hang | Finding 100's | Other |
+|---|---|---|---|---|---|
+| A, old order | 100 | 76 | 0 | 24 | 0 |
+| B, detach first | 100 | 100 | 0 | 0 | 0 |
+
+No process and no busy loop was left. The log is `~/diag/f103-b208d9ff-86af6a1b-out/f103.log` on macbook (sha256
+`472e8ef88d378cc64d8c7e81f66b7dbea36d47a6106698ea7cbce715ae89c2d0`), with each hung run's sample next to it.
+
+What this shows:
+
+- **This hang is rare even in its window.** It did not come once in 100 old-order runs, under the same load that
+  brought finding 100's cascade in 24 of them. Nor had finding 110's 40 old-order runs of the integration suite on
+  macbook.
+- **It does not show that detach first removes it.** If it is that rare, 100 runs of B could not show it either way.
+- **Detach first removes finding 100's cascade on `main`**, as [finding 110](110-owned-teardown-signalled-an-attached-target.md)
+  measured at an experiment commit: 24 of 100 against 0 of 100.
+
 ## Next
 
 1. **Find the trigger.** Disassemble `libmscordbi` 10.0.14 for osx-arm64 at `Win32EventLoop + 384`, to confirm the
@@ -154,6 +192,9 @@ rules it out.
      taken by the watcher would hold it. The watcher takes none today.
 2. **Reproduce it.** Probe 100's flood-kill mode samples until the event thread is inside `ReadMemory`. A variant
    would sample for `UnrecoverableError` instead, or would run the VSTest flood test in a loop until it hangs
-   ([ADR-015](../../../docs/adrs/drhook/ADR-015-run-until-anomaly.md)). Neither has been run.
+   ([ADR-015](../../../docs/adrs/drhook/ADR-015-run-until-anomaly.md)). The loop has been run, on macbook, 100 times
+   with the old order, and did not reproduce it (above). The probe variant has not been run.
+   - **Watch CI.** If it comes again on a commit that detaches first, detach first does not remove it. Every CI run since
+     `499d28e2` detaches first.
 3. **Report upstream together with finding 100.** It is the same kind of problem: a request with no timeout made by
    the thread that would handle the exit, here on an error path whose catch expects an exception that never comes.

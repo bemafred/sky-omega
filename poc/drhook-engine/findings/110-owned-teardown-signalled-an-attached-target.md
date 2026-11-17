@@ -149,6 +149,13 @@ Counting the six of ten at `d4f11f2a`: old order 15 of 40, detach first 0 of 40.
 in every run, in 40 to 43 s. On zbook (Linux x64) the experiment's detach first passed `DrHook.Engine.IntegrationTests`
 and `DrHook.Engine.Tests` in 5 of 5 runs, and no target was left.
 
+On `main`, 2026-11-16, also on macbook with eight busy loops, a run for [finding 103](103-terminate-waits-on-error-write.md)
+compared the commits before and after this change. Each of the 100 pairs ran the VSTest attach tests
+(`FullyQualifiedName~AttachAndOwn_`) once at each commit:
+
+- `b208d9ff`, the old order, hung in 24 of 100 runs, each time with an attach waiting in `FlushCache`.
+- `86af6a1b`, detach first, hung in 0 of 100.
+
 Deactivating the breakpoints alone narrows the window but cannot close it: a dying target still ends its threads under
 the debugger.
 

@@ -586,6 +586,20 @@ end for the other scenarios, or what a kill does (Step 6).
 asked mid-flood under the debugger; the same target without a handler, to record what an unhandled signal does under
 a debugger; a Generic Host server stopped through its own lifetime; on Windows, a console process launched in its own
 group and sent CTRL+BREAK, built and reviewed before it runs.
+*Constructions recorded 2026-11-16* ([finding 112](../../../poc/drhook-engine/findings/112-cancellation.md); probe 112
+on zbook and macbook, 20 borrowed sessions per child, each child ending with an attach that must succeed; Windows is
+not built).
+
+- **Its own shutdown code.** A target with its own SIGTERM handler, or a Generic Host stopped by SIGTERM or by itself,
+  ended cleanly under the debugger mid-flood: 240 of 240 sessions, and every final attach succeeded.
+- **After a detach.** All three signalled targets ended normally: 240 of 240.
+- **No handler.** SIGTERM to a program without one is an abrupt end: exit 143, and no `ProcessExit`. Attached, it lost
+  the debugger in 6 of 14 sessions, on both machines and both read paths. Each lost session had no `ProcessExited`,
+  and the next attach blocked, which fits finding 105's race.
+
+So `drhook_stop`'s detach-first order is safe for each of these targets. `drhook_kill` is not, for a program without a
+handler, since it signals while attached; nor is an owner's signal to a borrowed target. What Abandon should do is
+left to Step 6.
 
 **Step 4 — The failure boundary.** The failure matrix, the extraordinary ends (a kill, a stack overflow,
 `Environment.FailFast`) and, where it can be induced, a `DebuggerError`, each in a process of its own. Recorded,

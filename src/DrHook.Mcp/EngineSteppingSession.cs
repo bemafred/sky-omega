@@ -518,7 +518,8 @@ public sealed class EngineSteppingSession : IDisposable
         }
     }
 
-    // drhook_stop — the normal session end. Owned: Dispose's ADR-008 graceful SIGTERM→(2s)→SIGKILL.
+    // drhook_stop — the normal session end. Owned: Dispose detaches, then asks the target to exit (SIGTERM, 2 s, then a
+    // kill; finding 110). Windows has no exit request yet, so the target is killed (ADR-016 Step 3).
     // Borrowed: Dispose detaches, target left running. Dispatches internally via DebugSession._ownsTarget.
     public Task<string> StopAsync(string hypothesis, CancellationToken ct)
     {
@@ -538,7 +539,9 @@ public sealed class EngineSteppingSession : IDisposable
             ["hypothesis"] = hypothesis,
             ["mode"] = owned ? "owned" : "borrowed",
             ["disposition"] = owned
-                ? "Owned: target asked to exit (SIGTERM, then SIGKILL if it has not exited within the natural-exit window, ADR-008)"
+                ? OperatingSystem.IsWindows()
+                    ? "Owned: detached, then the target killed (Windows has no exit request yet, ADR-016 Step 3)"
+                    : "Owned: detached, then the target asked to exit (SIGTERM; killed if it has not exited within the natural-exit window, ADR-008)"
                 : "Borrowed: detached, target left running",
             ["totalSteps"] = steps,
             ["sessionHypothesis"] = sessionHypothesis,
@@ -624,7 +627,9 @@ public sealed class EngineSteppingSession : IDisposable
             ["pid"] = pid,
             ["targetExit"] = TargetExitToJson(exit),
             ["disposition"] = owned
-                ? "forcibly terminated (SIGTERM brief-grace → SIGKILL, DebugSession.Abandon)"
+                ? OperatingSystem.IsWindows()
+                    ? "forcibly terminated while attached (killed, DebugSession.Abandon)"
+                    : "forcibly terminated while attached (SIGTERM brief-grace → SIGKILL, DebugSession.Abandon)"
                 : "forcibly terminated (SIGKILL — Borrowed force, F-010-1)",
             ["totalSteps"] = steps,
             ["sessionHypothesis"] = hyp,

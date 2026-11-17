@@ -275,10 +275,16 @@ internal sealed unsafe class DbgShim : IDisposable
     /// ends to drain, the handles to dispose; the caller still <c>DebugActiveProcess</c>es to complete the attach.
     /// <paramref name="targetExit"/> is the exit watch, started at the spawn. On failure it throws
     /// <see cref="LaunchFailedException"/> and leaves no process behind.</summary>
+    /// <para><paramref name="attachWhileHeld"/> is called on this thread with the <c>ICorDebug</c>, the target's pid and
+    /// its exit watch, while dbgshim's startup callback holds the target's runtime (finding 111): dbgshim lets the
+    /// runtime continue when the callback returns, and on Windows the runtime does not wait for a debugger after that,
+    /// so an attach made later found Main already running. If it throws, the target is ended as on any failed launch,
+    /// and <paramref name="pUnknown"/> is set, for the caller to release.</para>
     public void LaunchWithDebuggerWindows(string program, IReadOnlyList<string> args, string? workingDirectory,
-        IReadOnlyDictionary<string, string>? env, TimeSpan startupTimeout, out WindowsSpawnedProcess child, out nint pUnknown,
-        out Task<TargetExit> targetExit)
+        IReadOnlyDictionary<string, string>? env, TimeSpan startupTimeout, Action<nint, int, Task<TargetExit>> attachWhileHeld,
+        out WindowsSpawnedProcess child, out nint pUnknown, out Task<TargetExit> targetExit)
     {
+        ArgumentNullException.ThrowIfNull(attachWhileHeld);
         pUnknown = 0;
         WindowsSpawnedProcess spawned;
         try { spawned = WindowsSpawn.SpawnSuspendedRedirected(program, args, workingDirectory, env); }
@@ -292,7 +298,7 @@ internal sealed unsafe class DbgShim : IDisposable
         // The child is suspended: its end is read from now on.
         Task<TargetExit> ended = ProcessLifetime.ObserveEnd(spawned.ProcessId);
 
-        var ctx = new StartupContext();
+        var ctx = new StartupContext { HoldUntilAttached = true };
         GCHandle handle = GCHandle.Alloc(ctx);
         nint pContext = GCHandle.ToIntPtr(handle);
         nint unregisterToken = 0;
@@ -316,16 +322,22 @@ internal sealed unsafe class DbgShim : IDisposable
             if (ctx.HResult < 0)
                 throw FailedAfterSpawn("runtime startup", ctx.HResult, $"dbgshim's runtime-startup callback reported HRESULT 0x{ctx.HResult:X8}");
 
+            // The runtime is held in the callback: attach now, then let it go (finally).
             pUnknown = ctx.PCordb;
+            attachWhileHeld(ctx.PCordb, spawned.ProcessId, ended);
             child = spawned;
             targetExit = ended;
             settled = true;
         }
         finally
         {
+            // Release the held callback BEFORE unregistering: dbgshim's Unregister waits for its startup thread, which
+            // waits here. After Unregister returns, that thread has left the callback, so the events can be disposed.
+            ctx.Attached.Set();
             if (unregisterToken != 0) _unregisterForRuntimeStartup(unregisterToken);
             handle.Free();
             ctx.Signaled.Dispose();
+            ctx.Attached.Dispose();
             if (!settled)
             {
                 // An unexpected exception: end and release the child as before.
@@ -453,12 +465,23 @@ internal sealed unsafe class DbgShim : IDisposable
         public nint PCordb;
         public int HResult;
         public readonly ManualResetEventSlim Signaled = new(false);
+
+        /// <summary>True: the callback waits for <see cref="Attached"/> before it returns (Windows, finding 111).</summary>
+        public bool HoldUntilAttached;
+
+        /// <summary>Set by the launching thread once its attach is done, or given up; releases the held callback.</summary>
+        public readonly ManualResetEventSlim Attached = new(false);
     }
+
+    /// <summary>How long a held startup callback waits for the attach (finding 111). An attach takes milliseconds; the
+    /// bound only keeps a launching thread that never signals from holding the target's runtime for ever. Past it the
+    /// runtime runs on, and the attach happens late, as before the hold.</summary>
+    private static readonly TimeSpan StartupHold = TimeSpan.FromSeconds(15);
 
     // SUBSTRATE RULE 1 — O(1)-stack thunk (ENG-STK-3, finding 55):
     // Runs on libdbgshim's internal startup thread, whose stack budget we do NOT own. Must
-    // stay O(1) stack: GCHandle.FromIntPtr + field writes + Signaled.Set. NO stackalloc,
-    // NO recursion, NO synchronous user code. Phase 8 IL-size test guards against drift.
+    // stay O(1) stack: GCHandle.FromIntPtr + field writes + Signaled.Set, and (Windows, finding 111) a bounded wait on
+    // Attached. NO stackalloc, NO recursion, NO synchronous user code: the attach itself runs on the launching thread.
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
     private static void StartupCallbackThunk(nint pCordb, nint parameter, int hr)
     {
@@ -471,6 +494,9 @@ internal sealed unsafe class DbgShim : IDisposable
             ctx.PCordb = pCordb;
             ctx.HResult = hr;
             ctx.Signaled.Set();
+            // FINDING 111: dbgshim lets the runtime continue as soon as this returns (on Windows it sets the runtime's
+            // ContinueStartupEvent on the way out). Held here, the runtime waits until the launching thread has attached.
+            if (ctx.HoldUntilAttached && hr >= 0) ctx.Attached.Wait(StartupHold);
         }
     }
 

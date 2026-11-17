@@ -56,6 +56,9 @@ platforms, given each platform's read function (a file descriptor on POSIX, a pi
 
 ## Still open on Windows
 
+- (Found 2026-11-16, [finding 111](111-windows-launch-attached-after-main-started.md), fixed.) The runtime did not wait
+  for the attach that followed `LaunchWithDebuggerWindows`, so `Main` could run before DrHook had attached.
+
 - `RequestExit` (graceful stop). The child's own console (`CREATE_NO_WINDOW`) bears on the design:
   `GenerateConsoleCtrlEvent` reaches only processes that share the caller's console.
 - The probe corpus and `drhook-mcp` on Windows; Windows x64.

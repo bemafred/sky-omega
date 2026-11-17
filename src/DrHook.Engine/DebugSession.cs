@@ -382,7 +382,9 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
     /// <summary>Launch a .NET process under debug control via dbgshim's RegisterForRuntimeStartup
     /// flow: spawn suspended → register a startup callback → resume → await the callback. On return,
     /// the debugger is attached BEFORE managed code has run, so a <c>Debugger.Break()</c> at the top
-    /// of <c>Main</c> surfaces as the first stop (finding 42). Backs <c>drhook_launch</c> in the
+    /// of <c>Main</c> surfaces as the first stop (finding 42). On POSIX the runtime waits for the attach (a 1 s delay
+    /// before it changed nothing on Linux or macOS); on Windows it does not, so there the attach is made while dbgshim's
+    /// startup callback holds the runtime (finding 111). Backs <c>drhook_launch</c> in the
     /// MCP rewrite. <paramref name="program"/> is typically the <c>dotnet</c> host with the target
     /// DLL as an argument.</summary>
     /// <exception cref="DebugEngineException">The launch failed or the runtime didn't initialize.</exception>
@@ -436,14 +438,21 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
             // CreateProcessForLaunch let the debuggee share the host's stdin/stdout/stderr — probe 64 saw it
             // write to the MCP channel and read the client's request line. WindowsSpawn gives it NUL stdin and
             // DrHook-owned pipes, and applies env overrides in the same CreateProcess call.
+            // FINDING 111: the attach runs inside the launch, while dbgshim's startup callback holds the target's runtime.
+            // Attached after the launch returned, as on POSIX, Main had sometimes already started on Windows, so the
+            // entry-module hold came from the attach's fake LoadModule events and a breakpoint missed the first call.
+            DebugSession? windowsSession = null;
             dbgShim.LaunchWithDebuggerWindows(program, args, workingDirectory, env, TimeSpan.FromSeconds(30),
-                out WindowsSpawnedProcess spawned, out pUnknown, out Task<TargetExit> windowsTargetExit);
+                (pCordb, pid, windowsTargetExit) =>
+                {
+                    try { targetProcess = Process.GetProcessById(pid); } catch (ArgumentException) { /* exited already */ }
+                    windowsSession = FromCordbg(dbgShim, sink, pid, pCordb, ownsTarget: true,
+                        targetProcess: targetProcess, naturalExitTimeout: naturalExitTimeout ?? DefaultNaturalExitTimeout, targetExit: windowsTargetExit,
+                        entryModule: entryModule, imageBaseDir: launchedImageDir ?? ImageDirOf(targetProcess), targetRuntimeMajor: targetRuntimeMajor);
+                },
+                out WindowsSpawnedProcess spawned, out pUnknown, out Task<TargetExit> _);
             windowsChild = spawned;
-            try { targetProcess = Process.GetProcessById(windowsChild!.ProcessId); } catch (ArgumentException) { /* exited already */ }
-            DebugSession windowsSession = FromCordbg(dbgShim, sink, windowsChild!.ProcessId, pUnknown, ownsTarget: true,
-                targetProcess: targetProcess, naturalExitTimeout: naturalExitTimeout ?? DefaultNaturalExitTimeout, targetExit: windowsTargetExit,
-                entryModule: entryModule, imageBaseDir: launchedImageDir ?? ImageDirOf(targetProcess), targetRuntimeMajor: targetRuntimeMajor);
-            windowsSession.BeginConsoleDrain(windowsChild.StdoutRead, windowsChild.StderrRead);
+            windowsSession!.BeginConsoleDrain(windowsChild.StdoutRead, windowsChild.StderrRead);
             windowsChild.Dispose(); // the process and thread handles; the session owns the pipe read ends now
             return windowsSession;
         }
