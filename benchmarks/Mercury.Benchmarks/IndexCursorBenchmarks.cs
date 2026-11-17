@@ -40,7 +40,7 @@ public class IndexCursorBenchmarks
         for (long row = 1; row <= Rows; row++)
         {
             _cognitive.BeginPeriod(0, row, 101, 201, memorizedAt: 1000);
-            _graph.AddRaw(0, row, 101, 201);
+            _graph.NextVersion(0, row, 101, 201, 0);
             _reference.AddRaw(0, row, 101, 201);
             _minimal.AddRaw(row, 101, 201);
         }

@@ -1092,6 +1092,9 @@ this ADR do not answer goes to Martin.
   of an index goes through one cursor. `Mercury.Tests`: 6,429 passed, 156 skipped, 0 failed. Next: P6, the words,
   built on the cursor. P7 waits for [ADR-064](ADR-064-a-facts-states.md)'s log as well: the Graph delete writes the
   `Retract` record that P7 removes.
+- **2026-11-17: ADR-064's log is built** (its Step 4). A Graph store writes `NextVersion` records only, so no store
+  writes the `Retract` record except Cognitive's `Retract` and `RetractBatched`, which P7 removes. P7 waits for nothing
+  in ADR-064.
 
 1. **Martin's review** of this text — **done 2026-11-14**, with the decision closure. The later part is reviewed on
    its own.

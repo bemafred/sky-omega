@@ -13,17 +13,10 @@ namespace SkyOmega.Mercury.Storage;
 /// versioning metadata (CreatedAt, ModifiedAt, Version, IsDeleted).
 /// </summary>
 /// <remarks>
-/// <para><b>Mutation semantics.</b> Key uniqueness is <c>(G, S, P, O)</c>:</para>
-/// <list type="bullet">
-///   <item>Insert with key not present → new entry, <c>Version=1</c>,
-///   <c>CreatedAt=ModifiedAt=now</c>, <c>IsDeleted=false</c>.</item>
-///   <item>Insert with key present and <c>!IsDeleted</c> → no-op (RDF set semantics).</item>
-///   <item>Insert with key present and <c>IsDeleted</c> → un-delete: bump
-///   <c>Version</c>, set <c>ModifiedAt=now</c>, <c>IsDeleted=false</c>.</item>
-///   <item>Delete with key present and <c>!IsDeleted</c> → soft-delete: bump
-///   <c>Version</c>, set <c>ModifiedAt=now</c>, <c>IsDeleted=true</c>; return <c>true</c>.</item>
-///   <item>Delete with key missing or already <c>IsDeleted</c> → return <c>false</c>.</item>
-/// </list>
+/// <para><b>Mutation semantics (ADR-064 M5).</b> Key uniqueness is <c>(G, S, P, O)</c>. The one change is
+/// <see cref="NextVersion"/>: the fact goes from the version the store decided on to the next, where an odd version
+/// is asserted and an even one retracted. The store decides it from what GSPO holds (ADR-064 M4), so an index changes
+/// only when it holds the fact at that version, and applying a change twice changes nothing.</para>
 /// <para><b>Query semantics.</b> Single sort order (G → P → S → T). No AS_OF, no
 /// time-range queries — the SPARQL planner rejects temporal queries against the
 /// Graph profile at plan time. Soft-deleted entries are filtered out by default;
@@ -92,25 +85,47 @@ internal sealed unsafe class VersionedQuadIndex : IQuadIndex
     internal static int CompareKeys(in VersionedKey a, in VersionedKey b) => VersionedKey.Compare(in a, in b);
 
     /// <summary>
-    /// Add a quad. Resolves atoms via the shared store. If the key is already
-    /// present and not deleted, no-op; if deleted, un-delete (bump version).
+    /// The fact goes from version <paramref name="fromVersion"/> to the next (ADR-064 M5). An index that holds it at
+    /// that version holds it at the next one; with <paramref name="fromVersion"/> 0, an index that does not hold it
+    /// holds it at version 1. In any other state nothing changes, so applying the change again, to an index at any
+    /// earlier point of the log, changes nothing more. Returns whether the index changed.
     /// </summary>
-    public void Add(
-        ReadOnlySpan<char> primary,
-        ReadOnlySpan<char> secondary,
-        ReadOnlySpan<char> tertiary,
-        ReadOnlySpan<char> graph = default)
+    internal bool NextVersion(long graph, long primary, long secondary, long tertiary, int fromVersion)
     {
-        var g = graph.IsEmpty ? 0 : _atoms.Intern(graph);
-        var p = _atoms.Intern(primary);
-        var s = _atoms.Intern(secondary);
-        var t = _atoms.Intern(tertiary);
-        AddRaw(g, p, s, t);
+        var key = new VersionedKey
+        {
+            Graph = graph,
+            Primary = primary,
+            Secondary = secondary,
+            Tertiary = tertiary,
+        };
+
+        if (fromVersion == 0)
+        {
+            var heldBefore = _file.EntryCount;
+            InsertIntoTree(key, _file.RootPageId);
+            return _file.EntryCount > heldBefore;
+        }
+
+        var page = GetPage(FindLeafPage(_file.RootPageId, key));
+        for (int i = 0; i < page->EntryCount; i++)
+        {
+            ref var entry = ref page->GetEntry(i);
+            int cmp = CompareKeys(in entry.Key, in key);
+            if (cmp > 0) break;
+            if (cmp < 0) continue;
+            if (entry.Version != fromVersion) return false;
+            entry.Version = checked(fromVersion + 1);
+            entry.IsDeleted = entry.Version % 2 == 0;
+            _file.FlushPage();
+            return true;
+        }
+        return false;
     }
 
     /// <summary>
-    /// Add a quad with pre-resolved atom IDs. Used by QuadStore replay paths +
-    /// secondary-index rebuild — atom IDs are already known.
+    /// Insert a fact at version 1 when the index does not hold it, and change nothing when it does. Used by the
+    /// secondary-index rebuild.
     /// </summary>
     internal void AddRaw(long graph, long primary, long secondary, long tertiary)
     {
@@ -125,43 +140,17 @@ internal sealed unsafe class VersionedQuadIndex : IQuadIndex
         InsertIntoTree(key, _file.RootPageId);
     }
 
-    /// <summary>
-    /// Soft-delete a quad with pre-resolved atom IDs. Returns true if the entry was
-    /// found and live (and is now soft-deleted); false if not found or already deleted.
-    /// </summary>
-    internal bool DeleteRaw(long graph, long primary, long secondary, long tertiary)
-    {
-        var key = new VersionedKey
-        {
-            Graph = graph,
-            Primary = primary,
-            Secondary = secondary,
-            Tertiary = tertiary,
-        };
-
-        return DeleteFromTree(key);
-    }
+    /// <summary>The WAL transaction up to which the saved entry count is exact (ADR-058).</summary>
+    internal long CountTxId => _file.CountTxId;
 
     /// <summary>
-    /// Soft-delete a triple via spans. Returns true if found and live; false otherwise.
+    /// Change the entry count by one without touching the tree. WAL recovery uses it: a decided change counts by the
+    /// transaction it belongs to, whatever the page already held (ADR-058, ADR-064 M5).
     /// </summary>
-    public bool Delete(
-        ReadOnlySpan<char> primary,
-        ReadOnlySpan<char> secondary,
-        ReadOnlySpan<char> tertiary,
-        ReadOnlySpan<char> graph = default)
+    internal void AdjustRecoveredEntryCount(int delta)
     {
-        var g = graph.IsEmpty ? 0 : _atoms.GetAtomId(graph);
-        var p = _atoms.GetAtomId(primary);
-        var s = _atoms.GetAtomId(secondary);
-        var t = _atoms.GetAtomId(tertiary);
-
-        if (p == 0 || s == 0 || t == 0)
-            return false;
-        if (!graph.IsEmpty && g == 0)
-            return false;
-
-        return DeleteRaw(g, p, s, t);
+        if (delta > 0) _file.IncrementEntryCount();
+        else if (delta < 0) _file.DecrementEntryCount();
     }
 
     /// <summary>
@@ -208,29 +197,6 @@ internal sealed unsafe class VersionedQuadIndex : IQuadIndex
             Secondary = secondary < 0 ? unboundValue : secondary,
             Tertiary = tertiary < 0 ? unboundValue : tertiary,
         };
-    }
-
-    private bool DeleteFromTree(VersionedKey key)
-    {
-        var leafPageId = FindLeafPage(_file.RootPageId, key);
-        var page = GetPage(leafPageId);
-
-        for (int i = 0; i < page->EntryCount; i++)
-        {
-            ref var entry = ref page->GetEntry(i);
-            int cmp = CompareKeys(in entry.Key, in key);
-            if (cmp == 0)
-            {
-                if (entry.IsDeleted) return false;
-                entry.IsDeleted = true;
-                entry.Version = checked(entry.Version + 1);
-                entry.ModifiedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-                _file.FlushPage();
-                return true;
-            }
-            if (cmp > 0) break;
-        }
-        return false;
     }
 
     private struct SplitResult
@@ -432,16 +398,7 @@ internal sealed unsafe class VersionedQuadIndex : IQuadIndex
             int cmp = CompareKeys(in key, in entry.Key);
             if (cmp == 0)
             {
-                // Duplicate key. RDF idempotency: live entry → no-op. Soft-deleted
-                // entry → un-delete (bump version, set ModifiedAt). Either way no
-                // new row is inserted.
-                if (entry.IsDeleted)
-                {
-                    entry.IsDeleted = false;
-                    entry.Version = checked(entry.Version + 1);
-                    entry.ModifiedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-                    _file.FlushPage();
-                }
+                // The index holds the fact already, at some version: nothing changes (ADR-064 M5).
                 return default;
             }
             if (cmp < 0) break;

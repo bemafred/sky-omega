@@ -107,8 +107,15 @@ public sealed class QuadStore : IDisposable
     private Dictionary<QuadIds, int>? _batchQuadPositions;
     private List<BatchQuad>? _batchQuads;
 
-    /// <summary>What a write asks of a quad (ADR-061 D2): <c>INSERT</c> memorizes, <c>DELETE</c> forgets.</summary>
-    private enum Asked : byte { Memorize, Forget }
+    // ADR-064 M2: on a Graph store every operation of a batch that changes a fact is a state of its own. The batch
+    // keeps, per fact it changed, the version the change took it to; the next operation on the fact starts there.
+    private Dictionary<QuadIds, int>? _batchVersions;
+
+    /// <summary>
+    /// What a write asks of a quad: <c>INSERT</c> memorizes it on a Cognitive store (ADR-061 D2) and asserts it on a
+    /// Graph store (ADR-064 M4); <c>DELETE</c> forgets it, or retracts it.
+    /// </summary>
+    private enum Asked : byte { Insert, Delete }
 
     /// <summary>A quad by its four atoms: its identity until ADR-053 makes one term one atom (ADR-061 I1).</summary>
     private readonly record struct QuadIds(long Graph, long Subject, long Predicate, long Object);
@@ -606,6 +613,13 @@ public sealed class QuadStore : IDisposable
         try
         {
             ThrowIfStoppedOverUnappliedWrite();
+            // A Graph store keeps no time (ADR-064 D1): an Add with stated times asserts the fact.
+            if (_schema.Profile == StoreProfile.Graph)
+            {
+                ChangeStateHoldingWriteLock(new QuadIds(graph.IsEmpty ? 0 : _atoms.Intern(graph),
+                    _atoms.Intern(subject), _atoms.Intern(predicate), _atoms.Intern(@object)), Asked.Insert);
+                return;
+            }
             AddHoldingWriteLock(subject, predicate, @object, memorizedAt, forgottenAt, graph,
                 transactionTime: _clock.GetUtcNow().ToUnixTimeMilliseconds());
         }
@@ -666,7 +680,8 @@ public sealed class QuadStore : IDisposable
     /// decides what changes (ADR-061 M5): a fact that is remembered stays as it is, a fact forgotten in this clock
     /// reading continues its period, and any other fact begins a period at this reading.
     /// Thread-safe: acquires write lock.
-    /// Returns true if the fact was not remembered before and is now (ADR-061 D2); on a Graph store, always true.
+    /// Returns true if the fact was not remembered before and is now (ADR-061 D2), or on a Graph store, was not
+    /// asserted before and is now (ADR-064 M4).
     /// </summary>
     public bool AddCurrent(
         ReadOnlySpan<char> subject,
@@ -681,19 +696,16 @@ public sealed class QuadStore : IDisposable
         try
         {
             ThrowIfStoppedOverUnappliedWrite();
-            // One reading of the clock, taken under the lock, is the stamp (ADR-061 I12). Reading it before the
-            // lock let a write carry a stamp earlier than the NOW() of a query that did not see it.
-            var now = _clock.GetUtcNow();
-            if (_schema.Profile != StoreProfile.Cognitive)
-            {
-                AddHoldingWriteLock(subject, predicate, @object, now, DateTimeOffset.MaxValue, graph,
-                    transactionTime: now.ToUnixTimeMilliseconds());
-                return true;
-            }
-
             var quad = new QuadIds(graph.IsEmpty ? 0 : _atoms.Intern(graph),
                 _atoms.Intern(subject), _atoms.Intern(predicate), _atoms.Intern(@object));
-            return ChangeHoldingWriteLock(quad, Asked.Memorize, now.ToUnixTimeMilliseconds());
+
+            // A Graph store keeps no time (ADR-064 D1): it reads no clock.
+            if (_schema.Profile == StoreProfile.Graph)
+                return ChangeStateHoldingWriteLock(quad, Asked.Insert);
+
+            // One reading of the clock, taken under the lock, is the stamp (ADR-061 I12). Reading it before the
+            // lock let a write carry a stamp earlier than the NOW() of a query that did not see it.
+            return ChangeHoldingWriteLock(quad, Asked.Insert, _clock.GetUtcNow().ToUnixTimeMilliseconds());
         }
         finally
         {
@@ -737,7 +749,7 @@ public sealed class QuadStore : IDisposable
     /// </summary>
     private static LogRecord? DecideChange(Asked asked, TemporalQuadIndex.QuadAtReading before, QuadIds quad, long clockReadingMs)
     {
-        if (asked == Asked.Memorize)
+        if (asked == Asked.Insert)
         {
             // Remembered: nothing (I3).
             if (before.HoldingMemorizedAt is not null)
@@ -775,9 +787,62 @@ public sealed class QuadStore : IDisposable
     }
 
     /// <summary>
+    /// One single write on a Graph store, with the write lock held: decide the change from the version GSPO holds
+    /// (ADR-064 M4), and when there is one, log it, apply it and save the counts. Returns whether the fact's state
+    /// changed.
+    /// </summary>
+    private bool ChangeStateHoldingWriteLock(QuadIds quad, Asked asked)
+    {
+        if (DecideNextVersion(asked, HeldVersion(quad), quad) is not { } record)
+            return false;
+
+        // The WAL record holds only atom IDs, so the atoms must be durable first (ADR-058 D6)
+        MakeAtomsDurable();
+        _wal!.Append(record);
+
+        // The log has committed the record: a failure from here on stops the store (ADR-061 M7).
+        try
+        {
+            ApplyRecordToIndexesById(record);
+            CommitIndexCounts(_wal.CurrentTxId, durable: false);
+        }
+        catch (Exception cause)
+        {
+            throw StopOverUnappliedWrite(cause);
+        }
+        CheckpointIfNeeded();
+        CheckDiskSpaceAfterWrite();
+        return true;
+    }
+
+    /// <summary>
+    /// The version GSPO holds a fact at on a Graph store, or 0 when it holds none. The store's own read of the
+    /// version, through the index's cursor (ADR-064 D4).
+    /// </summary>
+    private int HeldVersion(QuadIds quad)
+    {
+        var held = _gspoGraph!.QueryAllVersions(quad.Graph, quad.Subject, quad.Predicate, quad.Object);
+        return held.MoveNext() ? held.Version : 0;
+    }
+
+    /// <summary>
+    /// The change an assert or a retract makes to a fact held at <paramref name="held"/> (ADR-064 M4), or null when it
+    /// changes nothing: an assert of a fact that is asserted, or a retract of one that is not. An odd version is
+    /// asserted; 0 is a fact the store does not hold.
+    /// </summary>
+    private static LogRecord? DecideNextVersion(Asked asked, int held, QuadIds quad)
+    {
+        var asserted = held % 2 == 1;
+        if (asked == Asked.Insert ? asserted : !asserted)
+            return null;
+        return LogRecord.CreateNextVersion(quad.Graph, quad.Subject, quad.Predicate, quad.Object, held);
+    }
+
+    /// <summary>
     /// Retract the version of a quad valid for exactly [memorizedAt, forgottenAt): it was recorded in error, and leaves every
     /// AS OF and DURING view while ALL VERSIONS keeps it, flagged (ADR-054 D2). This is not what a SPARQL delete does;
-    /// that is <see cref="DeleteCurrent"/>. Thread-safe: acquires write lock.
+    /// that is <see cref="DeleteCurrent"/>. On a Graph store, which keeps no time, the interval is not read and the
+    /// fact is retracted, as <see cref="DeleteCurrent"/> does (ADR-064 M4). Thread-safe: acquires write lock.
     /// Returns true if that live version was found and retracted, false otherwise.
     /// </summary>
     public bool Retract(
@@ -798,10 +863,12 @@ public sealed class QuadStore : IDisposable
             if (!TryResolveQuadIds(subject, predicate, @object, graph, out var graphId, out var subjectId, out var predicateId, out var objectId))
                 return false;
 
-            // Graph has no valid time: its versioned delete ignores the interval. Cognitive retracts only an exact,
-            // live version, so a retract that finds nothing writes nothing.
-            if (_schema.Profile != StoreProfile.Graph &&
-                !_gspoIndex!.HoldsLiveEntry(graphId, subjectId, predicateId, objectId,
+            // A Graph store keeps no time (ADR-064 D1): the interval is not read, and the fact is retracted.
+            if (_schema.Profile == StoreProfile.Graph)
+                return ChangeStateHoldingWriteLock(new QuadIds(graphId, subjectId, predicateId, objectId), Asked.Delete);
+
+            // Cognitive retracts only an exact, live version, so a retract that finds nothing writes nothing.
+            if (!_gspoIndex!.HoldsLiveEntry(graphId, subjectId, predicateId, objectId,
                     UtcTicksToUnixMs(memorizedAt.UtcTicks), UtcTicksToUnixMs(forgottenAt.UtcTicks)))
                 return false;
 
@@ -832,9 +899,11 @@ public sealed class QuadStore : IDisposable
     /// <summary>
     /// Forget a fact — a SPARQL delete of one quad. On a Cognitive store the write rule decides what changes
     /// (ADR-061 M5): the period that holds ends at this clock reading and stays in the store with both times; a fact
-    /// memorized in this same reading leaves no period. On a Graph store (no times) the entry is soft-deleted.
+    /// memorized in this same reading leaves no period. On a Graph store (no times) the fact is retracted: its version
+    /// goes to the next, even one, and the store keeps it (ADR-064 M4).
     /// Thread-safe: acquires write lock.
-    /// Returns true if the fact was remembered and is not any more (ADR-061 D2), false if there was nothing to forget.
+    /// Returns true if the fact was remembered, or asserted, and is not any more (ADR-061 D2), false if there was
+    /// nothing to forget.
     /// </summary>
     public bool DeleteCurrent(
         ReadOnlySpan<char> subject,
@@ -852,28 +921,10 @@ public sealed class QuadStore : IDisposable
             if (!TryResolveQuadIds(subject, predicate, @object, graph, out var graphId, out var subjectId, out var predicateId, out var objectId))
                 return false;
 
-            var nowMs = _clock.GetUtcNow().ToUnixTimeMilliseconds();
-            if (_schema.Profile != StoreProfile.Graph)
-                return ChangeHoldingWriteLock(new QuadIds(graphId, subjectId, predicateId, objectId), Asked.Forget, nowMs);
-
-            var record = LogRecord.CreateRetract(subjectId, predicateId, objectId,
-                DateTimeOffset.MinValue, DateTimeOffset.MaxValue, graphId, transactionTimeTicks: nowMs);
-
-            _wal!.Append(record);
-
-            // The log has committed the record: a failure from here on stops the store (ADR-061 M7).
-            bool deleted;
-            try
-            {
-                deleted = ApplyRecordToIndexesById(record);
-            }
-            catch (Exception cause)
-            {
-                throw StopOverUnappliedWrite(cause);
-            }
-            CheckpointIfNeeded();
-            CheckDiskSpaceAfterWrite();
-            return deleted;
+            var quad = new QuadIds(graphId, subjectId, predicateId, objectId);
+            if (_schema.Profile == StoreProfile.Graph)
+                return ChangeStateHoldingWriteLock(quad, Asked.Delete);
+            return ChangeHoldingWriteLock(quad, Asked.Delete, _clock.GetUtcNow().ToUnixTimeMilliseconds());
         }
         finally
         {
@@ -1115,6 +1166,7 @@ public sealed class QuadStore : IDisposable
             _batchBuffer.Clear();
             _batchQuadPositions?.Clear();
             _batchQuads?.Clear();
+            _batchVersions?.Clear();
             _batchCurrentFrom = _clock.GetUtcNow();
             _batchTransactionTimeTicks = _batchCurrentFrom.ToUnixTimeMilliseconds();
         }
@@ -1162,6 +1214,13 @@ public sealed class QuadStore : IDisposable
         var subjectId = _atoms.Intern(subject);
         var predicateId = _atoms.Intern(predicate);
         var objectId = _atoms.Intern(@object);
+
+        // A Graph store keeps no time (ADR-064 D1): an Add with stated times asserts the fact.
+        if (_schema.Profile == StoreProfile.Graph)
+        {
+            AskStateInBatch(new QuadIds(graphId, subjectId, predicateId, objectId), Asked.Insert);
+            return;
+        }
 
         // 2. Write to WAL without fsync — transaction time captured at BeginBatch
         var record = LogRecord.CreateAdd(subjectId, predicateId, objectId, memorizedAt, forgottenAt, graphId,
@@ -1283,8 +1342,8 @@ public sealed class QuadStore : IDisposable
     /// Memorize a fact in the current batch — a SPARQL insert of one quad (see <see cref="AddCurrent"/>). Every
     /// operation of a batch has the batch's one clock reading, so on a Cognitive store only the last operation on a
     /// quad in the batch counts (ADR-061 M2); the change is decided and logged at CommitBatch.
-    /// Returns true if the fact was not remembered when this was called and is now (ADR-061 D2); on a store without
-    /// times, always true.
+    /// Returns true if the fact was not remembered when this was called and is now (ADR-061 D2), or on a Graph store,
+    /// was not asserted and is now (ADR-064 M4); on Reference and Minimal, always true.
     /// </summary>
     public bool AddCurrentBatched(
         ReadOnlySpan<char> subject,
@@ -1292,9 +1351,9 @@ public sealed class QuadStore : IDisposable
         ReadOnlySpan<char> @object,
         ReadOnlySpan<char> graph = default)
     {
-        if (_schema.Profile != StoreProfile.Cognitive)
+        if (_schema.Profile is StoreProfile.Reference or StoreProfile.Minimal)
         {
-            // Reference, Minimal and Graph keep no times: the batch's reading is not stored.
+            // Reference and Minimal keep no times: the batch's reading is not stored.
             AddBatched(subject, predicate, @object, _batchCurrentFrom, DateTimeOffset.MaxValue, graph);
             return true;
         }
@@ -1305,7 +1364,29 @@ public sealed class QuadStore : IDisposable
         // Intern atoms (IAtomStore is append-only — orphans from rollback are harmless)
         var quad = new QuadIds(graph.IsEmpty ? 0 : _atoms.Intern(graph),
             _atoms.Intern(subject), _atoms.Intern(predicate), _atoms.Intern(@object));
-        return AskInBatch(quad, Asked.Memorize);
+        if (_schema.Profile == StoreProfile.Graph)
+            return AskStateInBatch(quad, Asked.Insert);
+        return AskInBatch(quad, Asked.Insert);
+    }
+
+    /// <summary>
+    /// One assert or retract of the current batch on a Graph store (ADR-064 M2, M4). Each one that changes the fact is
+    /// a state of its own: it is decided from the version the batch's earlier operations took the fact to, or else
+    /// from the version GSPO holds, and logged now. Returns whether the fact's state changed.
+    /// </summary>
+    private bool AskStateInBatch(QuadIds quad, Asked asked)
+    {
+        _batchVersions ??= new();
+        if (!_batchVersions.TryGetValue(quad, out var held))
+            held = HeldVersion(quad);
+
+        if (DecideNextVersion(asked, held, quad) is not { } record)
+            return false;
+
+        _wal!.AppendBatch(record, _activeBatchTxId);
+        _batchBuffer!.Add(record);
+        _batchVersions[quad] = held + 1;
+        return true;
     }
 
     /// <summary>
@@ -1321,7 +1402,7 @@ public sealed class QuadStore : IDisposable
         if (_batchQuadPositions.TryGetValue(quad, out var position))
         {
             var touched = _batchQuads[position];
-            remembered = touched.Last == Asked.Memorize;
+            remembered = touched.Last == Asked.Insert;
             touched.Last = asked;
             _batchQuads[position] = touched;
         }
@@ -1349,7 +1430,7 @@ public sealed class QuadStore : IDisposable
             _batchQuads.Add(new BatchQuad { Quad = quad, Before = before, Last = asked });
         }
 
-        return asked == Asked.Memorize ? !remembered : remembered;
+        return asked == Asked.Insert ? !remembered : remembered;
     }
 
     /// <summary>
@@ -1372,26 +1453,27 @@ public sealed class QuadStore : IDisposable
         if (!TryResolveQuadIds(subject, predicate, @object, graph, out var graphId, out var subjectId, out var predicateId, out var objectId))
             return false;
 
-        if (_schema.Profile != StoreProfile.Graph)
+        // A Graph store keeps no time (ADR-064 D1): the interval is not read, and the fact is retracted.
+        if (_schema.Profile == StoreProfile.Graph)
+            return AskStateInBatch(new QuadIds(graphId, subjectId, predicateId, objectId), Asked.Delete);
+
+        // The version may be in the indexes or added earlier in this batch (a pruning copy adds a version and
+        // retracts it in one batch); a Retract of it already buffered means there is nothing left to retract.
+        var fromMs = UtcTicksToUnixMs(memorizedAt.UtcTicks);
+        var toMs = UtcTicksToUnixMs(forgottenAt.UtcTicks);
+        bool addedInBatch = false;
+        foreach (var buffered in _batchBuffer!)
         {
-            // The version may be in the indexes or added earlier in this batch (a pruning copy adds a version and
-            // retracts it in one batch); a Retract of it already buffered means there is nothing left to retract.
-            var fromMs = UtcTicksToUnixMs(memorizedAt.UtcTicks);
-            var toMs = UtcTicksToUnixMs(forgottenAt.UtcTicks);
-            bool addedInBatch = false;
-            foreach (var buffered in _batchBuffer!)
-            {
-                if (!IsSameQuad(buffered, graphId, subjectId, predicateId, objectId)
-                    || UtcTicksToUnixMs(buffered.MemorizedAtTicks) != fromMs || UtcTicksToUnixMs(buffered.ForgottenAtTicks) != toMs)
-                    continue;
-                if (buffered.Operation == LogOperation.Retract)
-                    return false;
-                if (buffered.Operation == LogOperation.Add)
-                    addedInBatch = true;
-            }
-            if (!addedInBatch && !_gspoIndex!.HoldsLiveEntry(graphId, subjectId, predicateId, objectId, fromMs, toMs))
+            if (!IsSameQuad(buffered, graphId, subjectId, predicateId, objectId)
+                || UtcTicksToUnixMs(buffered.MemorizedAtTicks) != fromMs || UtcTicksToUnixMs(buffered.ForgottenAtTicks) != toMs)
+                continue;
+            if (buffered.Operation == LogOperation.Retract)
                 return false;
+            if (buffered.Operation == LogOperation.Add)
+                addedInBatch = true;
         }
+        if (!addedInBatch && !_gspoIndex!.HoldsLiveEntry(graphId, subjectId, predicateId, objectId, fromMs, toMs))
+            return false;
 
         var record = LogRecord.CreateRetract(subjectId, predicateId, objectId, memorizedAt, forgottenAt, graphId,
             transactionTimeTicks: _batchTransactionTimeTicks);
@@ -1403,8 +1485,9 @@ public sealed class QuadStore : IDisposable
     /// <summary>
     /// Forget a fact in the current batch — a SPARQL delete of one quad (see <see cref="DeleteCurrent"/>). Every
     /// operation of a batch has the batch's one clock reading, so on a Cognitive store only the last operation on a
-    /// quad in the batch counts (ADR-061 M2); the change is decided and logged at CommitBatch.
-    /// Returns true if the fact was remembered when this was called and is not any more (ADR-061 D2).
+    /// quad in the batch counts (ADR-061 M2); the change is decided and logged at CommitBatch. On a Graph store every
+    /// retract that changes the fact is a state of its own (ADR-064 M2).
+    /// Returns true if the fact was remembered, or asserted, when this was called and is not any more (ADR-061 D2).
     /// </summary>
     public bool DeleteCurrentBatched(
         ReadOnlySpan<char> subject,
@@ -1416,13 +1499,13 @@ public sealed class QuadStore : IDisposable
         if (_activeBatchTxId < 0)
             throw new InvalidOperationException("No active batch. Call BeginBatch() first.");
 
-        if (_schema.Profile == StoreProfile.Graph)
-            return RetractBatched(subject, predicate, @object, DateTimeOffset.MinValue, DateTimeOffset.MaxValue, graph);
-
         if (!TryResolveQuadIds(subject, predicate, @object, graph, out var graphId, out var subjectId, out var predicateId, out var objectId))
             return false;
 
-        return AskInBatch(new QuadIds(graphId, subjectId, predicateId, objectId), Asked.Forget);
+        var quad = new QuadIds(graphId, subjectId, predicateId, objectId);
+        if (_schema.Profile == StoreProfile.Graph)
+            return AskStateInBatch(quad, Asked.Delete);
+        return AskInBatch(quad, Asked.Delete);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -1540,6 +1623,7 @@ public sealed class QuadStore : IDisposable
             finally
             {
                 _batchBuffer?.Clear();
+                _batchVersions?.Clear();
             }
 
             CheckpointIfNeeded();
@@ -1606,6 +1690,7 @@ public sealed class QuadStore : IDisposable
         _batchBuffer?.Clear();
         _batchQuadPositions?.Clear();
         _batchQuads?.Clear();
+        _batchVersions?.Clear();
         _activeBatchTxId = -1;
         _lock.ExitWriteLock();
     }
@@ -2622,28 +2707,10 @@ public sealed class QuadStore : IDisposable
         // mutated flag so Dispose knows to run CheckpointInternal.
         _sessionMutated = true;
 
-        // ADR-029 Graph profile: dispatch by profile. VersionedQuadIndex has no
-        // temporal fields, so the WAL's MemorizedAt/ForgottenAt/TransactionTime are
-        // ignored on the Graph path. CreatedAt/ModifiedAt/Version are recorded
-        // inside VersionedQuadIndex from `DateTimeOffset.UtcNow` at insert time.
+        // A Graph store's log holds the decided change, never the operation (ADR-064 D5).
         if (_schema.Profile == StoreProfile.Graph)
-        {
-            _gspoGraph!.AddRaw(record.GraphId, record.SubjectId, record.PredicateId, record.ObjectId);
-
-            if (!_bulkLoadMode)
-            {
-                _gposGraph!.AddRaw(record.GraphId, record.PredicateId, record.ObjectId, record.SubjectId);
-                _gospGraph!.AddRaw(record.GraphId, record.ObjectId, record.SubjectId, record.PredicateId);
-                _tgspGraph!.AddRaw(record.GraphId, record.SubjectId, record.PredicateId, record.ObjectId);
-
-                var utf8Span = _atoms.GetAtomSpan(record.ObjectId);
-                if (utf8Span.Length > 0 && utf8Span[0] == (byte)'"')
-                {
-                    _trigramIndex.IndexAtom(record.ObjectId, utf8Span);
-                }
-            }
-            return;
-        }
+            throw new InvalidDataException(
+                $"WAL record (TxId {record.TxId}) is an Add, which a Graph store does not write: its log holds NextVersion records (ADR-064 D5).");
 
         // Cognitive profile path.
         // LogRecord stores valid-time as .UtcTicks (100-ns since year 1); the B+Tree
@@ -2744,6 +2811,8 @@ public sealed class QuadStore : IDisposable
             case LogOperation.RemovePeriod:
             case LogOperation.ContinuePeriod:
                 return ApplyPeriodChangeToIndexesById(record);
+            case LogOperation.NextVersion:
+                return ApplyNextVersionToIndexesById(record);
             default:
                 throw new InvalidDataException(
                     $"WAL record (TxId {record.TxId}) has operation {(byte)record.Operation}, which this Mercury does not know. " +
@@ -2827,23 +2896,74 @@ public sealed class QuadStore : IDisposable
     }
 
     /// <summary>
-    /// Apply a Retract record. Graph (no valid time): the versioned soft delete. Cognitive: the version with exactly the
-    /// record's interval is marked LegacyIsDeleted (ADR-054 D2); a record written before ADR-054 by DeleteCurrent carries
-    /// [MinValue, MaxValue] and is replayed with the meaning it had then (mark the first overlapping version).
+    /// Apply a NextVersion record to every index of a Graph store (ADR-064 M5). Each index changes only when it holds
+    /// the fact at the record's version, so an index that already holds the change, or a later one, is left as it is.
+    /// A fact that becomes asserted makes its literal object searchable, as an Add did.
+    /// </summary>
+    private bool ApplyNextVersionToIndexesById(in LogRecord record)
+    {
+        if (_schema.Profile != StoreProfile.Graph)
+            throw new InvalidDataException($"WAL record (TxId {record.TxId}) is a NextVersion, which only a Graph store writes (ADR-064 D5).");
+
+        // ADR-031 Piece 2: a change of a fact's state is a mutation — track it.
+        _sessionMutated = true;
+
+        var fromVersion = checked((int)record.FromVersion);
+        var changed = ApplyNextVersion(_gspoGraph!, record, record.SubjectId, record.PredicateId, record.ObjectId, fromVersion);
+
+        if (!_bulkLoadMode)
+        {
+            changed |= ApplyNextVersion(_gposGraph!, record, record.PredicateId, record.ObjectId, record.SubjectId, fromVersion);
+            changed |= ApplyNextVersion(_gospGraph!, record, record.ObjectId, record.SubjectId, record.PredicateId, fromVersion);
+            changed |= ApplyNextVersion(_tgspGraph!, record, record.SubjectId, record.PredicateId, record.ObjectId, fromVersion);
+
+            // The next version is odd: the fact is asserted.
+            if (fromVersion % 2 == 0)
+            {
+                var utf8Span = _atoms.GetAtomSpan(record.ObjectId);
+                if (utf8Span.Length > 0 && utf8Span[0] == (byte)'"')
+                    _trigramIndex.IndexAtom(record.ObjectId, utf8Span);
+            }
+        }
+
+        return changed;
+    }
+
+    /// <summary>
+    /// Apply one NextVersion record to one Graph index, and keep the index's entry count right during recovery. A
+    /// decided change always took effect when it was first applied. So in recovery a fact's first assert, the one
+    /// change that adds an entry, counts by the transaction it belongs to, whatever the page already held: one more
+    /// entry after the index's saved count (<see cref="VersionedQuadIndex.CountTxId"/>), none at or before it (ADR-058).
+    /// </summary>
+    private bool ApplyNextVersion(VersionedQuadIndex index, in LogRecord record,
+        long primary, long secondary, long tertiary, int fromVersion)
+    {
+        var changed = index.NextVersion(record.GraphId, primary, secondary, tertiary, fromVersion);
+
+        if (_recovering && fromVersion == 0)
+        {
+            var counted = changed ? 1 : 0;
+            var owed = record.TxId > index.CountTxId ? 1 : 0;
+            index.AdjustRecoveredEntryCount(owed - counted);
+        }
+
+        return changed;
+    }
+
+    /// <summary>
+    /// Apply a Retract record (Cognitive): the version with exactly the record's interval is marked LegacyIsDeleted
+    /// (ADR-054 D2); a record written before ADR-054 by DeleteCurrent carries [MinValue, MaxValue] and is replayed with
+    /// the meaning it had then (mark the first overlapping version).
     /// </summary>
     private bool ApplyRetractToIndexesById(in LogRecord record)
     {
+        // A Graph store's log holds the decided change, never the operation (ADR-064 D5).
+        if (_schema.Profile == StoreProfile.Graph)
+            throw new InvalidDataException(
+                $"WAL record (TxId {record.TxId}) is a Retract, which a Graph store does not write: its log holds NextVersion records (ADR-064 D5).");
+
         // ADR-031 Piece 2: a retract is a mutation — track it.
         _sessionMutated = true;
-
-        if (_schema.Profile == StoreProfile.Graph)
-        {
-            var g1 = _gspoGraph!.DeleteRaw(record.GraphId, record.SubjectId, record.PredicateId, record.ObjectId);
-            var g2 = _gposGraph!.DeleteRaw(record.GraphId, record.PredicateId, record.ObjectId, record.SubjectId);
-            var g3 = _gospGraph!.DeleteRaw(record.GraphId, record.ObjectId, record.SubjectId, record.PredicateId);
-            var g4 = _tgspGraph!.DeleteRaw(record.GraphId, record.SubjectId, record.PredicateId, record.ObjectId);
-            return g1 || g2 || g3 || g4;
-        }
 
         var memorizedAtMs = UtcTicksToUnixMs(record.MemorizedAtTicks);
         var forgottenAtMs = UtcTicksToUnixMs(record.ForgottenAtTicks);

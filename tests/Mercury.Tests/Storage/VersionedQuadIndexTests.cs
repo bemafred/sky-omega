@@ -10,7 +10,7 @@ namespace SkyOmega.Mercury.Tests.Storage;
 /// <summary>
 /// Tests for <see cref="VersionedQuadIndex"/> — Graph profile B+Tree (versioned, no temporal).
 /// Mirrors the TemporalQuadIndex test surface where applicable; the Graph-specific
-/// semantics (no-op on duplicate, un-delete on re-add, single sort order) are exercised
+/// semantics (a fact's next version, ADR-064 M5, and the single sort order) are exercised
 /// directly.
 /// </summary>
 public class VersionedQuadIndexTests : IDisposable
@@ -66,15 +66,15 @@ public class VersionedQuadIndexTests : IDisposable
         Assert.True(c.CompareTo(d) > 0, "Primary must outweigh Secondary/Tertiary");
     }
 
-    // ===== Basic Add and Query =====
+    // ===== Basic insert and Query =====
 
     [Fact]
-    public void Add_ThreeDistinctTriples_QueryReturnsAllThree()
+    public void ThreeDistinctFacts_QueryReturnsAllThree()
     {
         var idx = CreateIndex();
-        idx.AddRaw(0, 100, 200, 300);
-        idx.AddRaw(0, 100, 200, 301);
-        idx.AddRaw(0, 101, 200, 300);
+        idx.NextVersion(0, 100, 200, 300, 0);
+        idx.NextVersion(0, 100, 200, 301, 0);
+        idx.NextVersion(0, 101, 200, 300, 0);
 
         Assert.Equal(3, idx.QuadCount);
 
@@ -88,9 +88,9 @@ public class VersionedQuadIndexTests : IDisposable
     public void Query_SpecificTertiary_ReturnsOnlyMatching()
     {
         var idx = CreateIndex();
-        idx.AddRaw(0, 100, 200, 300);
-        idx.AddRaw(0, 100, 200, 301);
-        idx.AddRaw(0, 100, 200, 302);
+        idx.NextVersion(0, 100, 200, 300, 0);
+        idx.NextVersion(0, 100, 200, 301, 0);
+        idx.NextVersion(0, 100, 200, 302, 0);
 
         int count = 0;
         long matchedTertiary = 0;
@@ -100,20 +100,16 @@ public class VersionedQuadIndexTests : IDisposable
         Assert.Equal(301, matchedTertiary);
     }
 
-    // ===== Duplicate-add semantics (no-op) =====
+    // ===== A fact's next version (ADR-064 M5) =====
 
     [Fact]
-    public void Add_SameTripleTwice_QuadCountStaysAtOne()
+    public void NextVersion_FromZero_HoldsTheFactAtVersion1_AndAgain_ChangesNothing()
     {
-        // RDF set semantics: re-adding a live triple is a no-op. Version does NOT
-        // advance — the default in this profile is "no-op-on-re-add" (the alternative
-        // "explicit touch" would be a separate API).
         var idx = CreateIndex();
-        idx.AddRaw(0, 100, 200, 300);
-        idx.AddRaw(0, 100, 200, 300);
+        Assert.True(idx.NextVersion(0, 100, 200, 300, 0));
+        Assert.False(idx.NextVersion(0, 100, 200, 300, 0));
 
         Assert.Equal(1, idx.QuadCount);
-
         int count = 0;
         int version = -1;
         var e = idx.Query(0, 100, 200, 300);
@@ -122,92 +118,69 @@ public class VersionedQuadIndexTests : IDisposable
         Assert.Equal(1, version);
     }
 
-    // ===== Soft-delete semantics =====
-
     [Fact]
-    public void DeleteRaw_LiveEntry_ReturnsTrueAndMarksDeleted()
+    public void NextVersion_FromTheVersionHeld_TakesTheFactToTheNext_AnEvenVersionIsRetracted()
     {
         var idx = CreateIndex();
-        idx.AddRaw(0, 100, 200, 300);
+        idx.NextVersion(0, 100, 200, 300, 0);
 
-        Assert.True(idx.DeleteRaw(0, 100, 200, 300));
-
-        // Live query excludes deleted entries.
+        // Version 2: retracted. A read of what is asserted does not see it; the index holds it.
+        Assert.True(idx.NextVersion(0, 100, 200, 300, 1));
         int liveCount = 0;
         var live = idx.Query(0, 100, 200, 300);
         while (live.MoveNext()) liveCount++;
         Assert.Equal(0, liveCount);
 
-        // Audit query includes deleted entries.
-        int auditCount = 0;
-        bool auditIsDeleted = false;
-        int auditVersion = 0;
-        var audit = idx.QueryAllVersions(0, 100, 200, 300);
-        while (audit.MoveNext())
-        {
-            auditCount++;
-            auditIsDeleted = audit.LegacyIsDeleted;
-            auditVersion = audit.Version;
-        }
-        Assert.Equal(1, auditCount);
-        Assert.True(auditIsDeleted);
-        Assert.Equal(2, auditVersion); // 1 from Add, then bumped on Delete
-    }
+        int heldCount = 0;
+        int heldVersion = 0;
+        bool heldRetracted = false;
+        var held = idx.QueryAllVersions(0, 100, 200, 300);
+        while (held.MoveNext()) { heldCount++; heldVersion = held.Version; heldRetracted = held.LegacyIsDeleted; }
+        Assert.Equal(1, heldCount);
+        Assert.Equal(2, heldVersion);
+        Assert.True(heldRetracted);
+        Assert.Equal(1, idx.QuadCount);
 
-    [Fact]
-    public void DeleteRaw_MissingEntry_ReturnsFalse()
-    {
-        var idx = CreateIndex();
-        idx.AddRaw(0, 100, 200, 300);
-
-        Assert.False(idx.DeleteRaw(0, 100, 200, 999));
-    }
-
-    [Fact]
-    public void DeleteRaw_AlreadyDeleted_ReturnsFalse()
-    {
-        var idx = CreateIndex();
-        idx.AddRaw(0, 100, 200, 300);
-        Assert.True(idx.DeleteRaw(0, 100, 200, 300));
-        Assert.False(idx.DeleteRaw(0, 100, 200, 300));
-    }
-
-    // ===== Re-add un-deletes =====
-
-    [Fact]
-    public void AddRaw_AfterDelete_UnDeletesAndBumpsVersion()
-    {
-        var idx = CreateIndex();
-        idx.AddRaw(0, 100, 200, 300);    // Version 1, live
-        Assert.True(idx.DeleteRaw(0, 100, 200, 300)); // Version 2, deleted
-        idx.AddRaw(0, 100, 200, 300);    // Should un-delete, bump to Version 3
-
-        int count = 0;
+        // Version 3: asserted again.
+        Assert.True(idx.NextVersion(0, 100, 200, 300, 2));
         int version = 0;
-        bool isDeleted = true;
-        var e = idx.Query(0, 100, 200, 300);
-        while (e.MoveNext())
-        {
-            count++;
-            version = e.Version;
-            isDeleted = e.LegacyIsDeleted;
-        }
-        Assert.Equal(1, count);
-        Assert.False(isDeleted);
+        bool retracted = true;
+        var again = idx.Query(0, 100, 200, 300);
+        while (again.MoveNext()) { version = again.Version; retracted = again.LegacyIsDeleted; }
         Assert.Equal(3, version);
+        Assert.False(retracted);
+    }
+
+    [Fact]
+    public void NextVersion_FromAVersionTheIndexDoesNotHold_ChangesNothing()
+    {
+        var idx = CreateIndex();
+        idx.NextVersion(0, 100, 200, 300, 0);
+        idx.NextVersion(0, 100, 200, 300, 1);
+
+        Assert.False(idx.NextVersion(0, 100, 200, 300, 0));   // the index holds the fact
+        Assert.False(idx.NextVersion(0, 100, 200, 300, 1));   // the change is applied already
+        Assert.False(idx.NextVersion(0, 100, 200, 300, 3));   // a version the fact has not reached
+        Assert.False(idx.NextVersion(0, 100, 200, 999, 1));   // a fact the index does not hold
+
+        int version = 0;
+        var held = idx.QueryAllVersions(-1, -1, -1, -1);
+        while (held.MoveNext()) version = held.Version;
+        Assert.Equal(2, version);
+        Assert.Equal(1, idx.QuadCount);
     }
 
     // ===== Page split =====
 
     [Fact]
-    public void Add_ExceedsNodeDegree_PageSplits_AllQueryable()
+    public void MoreFactsThanANodeHolds_PageSplits_AllQueryable()
     {
         // NodeDegree = 255. Insert 1000 entries to force multiple page splits.
         var idx = CreateIndex();
         const int N = 1000;
         for (int i = 1; i <= N; i++)
         {
-            idx.AddRaw(0, 100, 200, i);
+            idx.NextVersion(0, 100, 200, i, 0);
         }
 
         Assert.Equal(N, idx.QuadCount);
@@ -224,9 +197,9 @@ public class VersionedQuadIndexTests : IDisposable
     public void Persistence_EntriesSurviveDisposeAndReopen()
     {
         var idx1 = CreateIndex();
-        idx1.AddRaw(0, 100, 200, 300);
-        idx1.AddRaw(0, 100, 200, 301);
-        idx1.AddRaw(0, 100, 200, 302);
+        idx1.NextVersion(0, 100, 200, 300, 0);
+        idx1.NextVersion(0, 100, 200, 301, 0);
+        idx1.NextVersion(0, 100, 200, 302, 0);
         idx1.Dispose();
         _index = null;
 
@@ -245,8 +218,8 @@ public class VersionedQuadIndexTests : IDisposable
     public void Clear_EmptiesIndex_QueryReturnsNothing()
     {
         var idx = CreateIndex();
-        idx.AddRaw(0, 100, 200, 300);
-        idx.AddRaw(0, 101, 201, 301);
+        idx.NextVersion(0, 100, 200, 300, 0);
+        idx.NextVersion(0, 101, 201, 301, 0);
 
         idx.Clear();
 
@@ -264,8 +237,8 @@ public class VersionedQuadIndexTests : IDisposable
     public void Query_GraphIsolation_SeparateGraphsDoNotLeak()
     {
         var idx = CreateIndex();
-        idx.AddRaw(graph: 1, primary: 100, secondary: 200, tertiary: 300);
-        idx.AddRaw(graph: 2, primary: 100, secondary: 200, tertiary: 300);
+        idx.NextVersion(graph: 1, primary: 100, secondary: 200, tertiary: 300, fromVersion: 0);
+        idx.NextVersion(graph: 2, primary: 100, secondary: 200, tertiary: 300, fromVersion: 0);
 
         int g1 = 0;
         var e1 = idx.Query(1, 100, 200, 300);
@@ -286,9 +259,9 @@ public class VersionedQuadIndexTests : IDisposable
     public void Query_AllWildcards_ReturnsEverything()
     {
         var idx = CreateIndex();
-        idx.AddRaw(0, 100, 200, 300);
-        idx.AddRaw(1, 101, 201, 301);
-        idx.AddRaw(2, 102, 202, 302);
+        idx.NextVersion(0, 100, 200, 300, 0);
+        idx.NextVersion(1, 101, 201, 301, 0);
+        idx.NextVersion(2, 102, 202, 302, 0);
 
         int count = 0;
         var e = idx.Query(-1, -1, -1, -1);

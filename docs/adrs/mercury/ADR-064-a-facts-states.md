@@ -354,7 +354,31 @@ The links, read in the code on 2026-11-16:
    - a rebuild that carries retracted facts and their versions, and refuses when the indexes differ (G6, G8);
    - recovery after a real kill, as `tests/Mercury.CrashTarget` does (G7);
    - every index agrees after every operation (G5).
-4. **The log holds the decided change** (D5). Before ADR-061 P7.
+
+   **Graph's, written 2026-11-17** and run on `91cbf5c`: 12 tests, of which 9 fail.
+   - `FactStatesTests`: the table of M4 in single writes and in one batch passes, since today's index already
+     follows it. Recovery fails in 4 of its 5 cases, each holding a fact at v5 that an uninterrupted run holds at v3.
+     The case that passes has every index at the earlier point, where replaying the operations from exactly there
+     gives the right versions.
+   - `GraphRebuildTests`: a lost GPOS and GOSP are rebuilt with 4 entries, not 6, and a difference in version is not
+     refused.
+   - `GraphLayoutTests`: the same writes at other times give different files; TGSP exists; the earlier layout's
+     magic number is accepted.
+
+   What an index holds is read from its file once the store is closed, through the index's cursor, so no read of the
+   store returns a version (D4). Each test is committed with the step that makes it pass. Minimal's come with Step 7.
+4. **The log holds the decided change** (D5). Before ADR-061 P7. **Done 2026-11-17:**
+   - A Graph store logs one record, `NextVersion`: the fact goes from the version in the record to the next. It is
+     applied in each index only when that index holds the fact at that version. The record's version uses the bytes
+     of `MemorizedAtTicks`, and its other time fields are 0.
+   - Each assert or retract is decided from the version GSPO holds, read through the cursor (D4). In a batch, each
+     one starts from the version the batch's earlier operations took the fact to (M2).
+   - The Graph index has one change, `NextVersion`. Its soft delete and its un-delete on a re-add are gone.
+   - In recovery, a fact's first assert counts by its transaction, as Cognitive's decided changes do (ADR-058).
+   - On a Graph store, `Add` and `Retract` with stated times assert and retract the fact. A Graph store writes no
+     `Add` or `Retract` record, and refuses one in its log.
+   - `AddCurrent` and `AddCurrentBatched` say whether the fact's state changed, where they said "true" before.
+   - `FactStatesTests` pass.
 5. **The rebuild** carries what the store holds (D6).
 6. **The layout** (D1, D3, D8): the entry holds the key, the child pointer and the version; Graph's TGSP goes; each
    file's magic number changes with its layout.
@@ -364,7 +388,8 @@ The links, read in the code on 2026-11-16:
    `STATISTICS.md`.
 
 ADR-061 P6 needs only Step 2 of this list. Its P7 needs Step 4 as well. Steps 3 to 8 change Mercury code; they can
-start since the acceptance. Step 2 is done (ADR-062 Step 6, `29db7b5`).
+start since the acceptance. Step 2 is done (ADR-062 Step 6, `29db7b5`). Step 4 is done (2026-11-17), so ADR-061 P7
+waits for nothing in this ADR.
 
 ## Not in this ADR
 

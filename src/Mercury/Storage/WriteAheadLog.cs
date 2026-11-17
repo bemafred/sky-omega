@@ -446,6 +446,14 @@ internal enum LogOperation : byte
     /// </summary>
     ContinuePeriod = 9,
 
+    /// <summary>
+    /// ADR-064 M5: on a Graph store, the fact goes from version <see cref="LogRecord.FromVersion"/> to the next. An odd
+    /// version is asserted, an even one retracted, and version 0 is a fact the index does not hold. Applies when the
+    /// index holds the fact at FromVersion, and reads no clock, so applying it again, to an index at any earlier point
+    /// of the log, changes nothing more.
+    /// </summary>
+    NextVersion = 10,
+
     Checkpoint = 255
 }
 
@@ -464,6 +472,9 @@ internal enum LogOperation : byte
 /// [56-63] ForgottenAtTicks (8 bytes)
 /// [64-71] TransactionTimeTicks (8 bytes) - when the system recorded the fact
 /// [72-79] Checksum (8 bytes)
+///
+/// A <see cref="LogOperation.NextVersion"/> record (Graph, ADR-064 D5) holds no time: bytes 48 to 55 hold
+/// <see cref="FromVersion"/>, and 56 to 71 are 0.
 /// </summary>
 [StructLayout(LayoutKind.Explicit, Size = 80)]
 internal struct LogRecord
@@ -476,6 +487,8 @@ internal struct LogRecord
     [FieldOffset(32)] public long PredicateId;
     [FieldOffset(40)] public long ObjectId;
     [FieldOffset(48)] public long MemorizedAtTicks;
+    /// <summary>The version a <see cref="LogOperation.NextVersion"/> record changes the fact from (ADR-064 M5).</summary>
+    [FieldOffset(48)] public long FromVersion;
     [FieldOffset(56)] public long ForgottenAtTicks;
     [FieldOffset(64)] public long TransactionTimeTicks;
     [FieldOffset(72)] public long Checksum;
@@ -540,6 +553,23 @@ internal struct LogRecord
             MemorizedAtTicks = DateTimeOffset.FromUnixTimeMilliseconds(memorizedAtMs).UtcTicks,
             ForgottenAtTicks = DateTimeOffset.FromUnixTimeMilliseconds(forgottenAtMs).UtcTicks,
             TransactionTimeTicks = clockReadingMs
+        };
+    }
+
+    /// <summary>
+    /// Create a log record that takes a fact on a Graph store from version <paramref name="fromVersion"/> to the next
+    /// (ADR-064 M5): 0 to 1 is its first assert.
+    /// </summary>
+    public static LogRecord CreateNextVersion(long graphId, long subjectId, long predicateId, long objectId, int fromVersion)
+    {
+        return new LogRecord
+        {
+            Operation = LogOperation.NextVersion,
+            GraphId = graphId,
+            SubjectId = subjectId,
+            PredicateId = predicateId,
+            ObjectId = objectId,
+            FromVersion = fromVersion
         };
     }
 

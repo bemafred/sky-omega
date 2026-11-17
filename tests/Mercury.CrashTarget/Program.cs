@@ -21,9 +21,16 @@
 //                  to 6 that make each of the four decided changes (begin, end, remove, continue), then the
 //                  process is killed. <tag> and <count> are not used by these two modes. See Periods below.
 //
+//   states-first   ADR-064: a store of the profile <tag> names (Graph). Single writes assert K, A and B, a
+//                  batch asserts C, then a clean exit.
+//   states-killed  ADR-064: on the store states-first left, single writes and two batches that make each kind of
+//                  change of M4, and repeat some that change nothing, then the process is killed. <count> is not
+//                  used by these two modes. See States below.
+//
 // Each step prints one line on stdout, so a test can tell how far the target got.
 
 using System.Diagnostics;
+using SkyOmega.Mercury.Abstractions;
 using SkyOmega.Mercury.Storage;
 
 if (args.Length < 4)
@@ -74,6 +81,47 @@ if (mode is "periods-first" or "periods-killed")
     periods.CommitBatch();
     clock.Reading = Periods.Reading(6);
     periods.DeleteCurrent(Periods.S, Periods.P, "\"D\"");       // end
+    Say("changed");
+    Kill();
+    return 3; // not reached
+}
+
+if (mode is "states-first" or "states-killed")
+{
+    var states = new QuadStore(storePath, null, null, new StorageOptions { Profile = Enum.Parse<StoreProfile>(tag) });
+    Say("opened");
+
+    if (mode == "states-first")
+    {
+        states.AddCurrent(States.S, States.P, "\"K\"");                 // v1
+        states.AddCurrent(States.S, States.P, "\"A\"");                 // v1
+        states.AddCurrent(States.S, States.P, "\"B\"");                 // v1
+        states.BeginBatch();
+        states.AddCurrentBatched(States.S, States.P, "\"C\"");          // v1
+        states.CommitBatch();
+        Say("committed");
+        states.Dispose();
+        Say("disposed");
+        return 0;
+    }
+
+    states.DeleteCurrent(States.S, States.P, "\"A\"");                  // v2
+    states.AddCurrent(States.S, States.P, "\"A\"");                     // v3
+    states.DeleteCurrent(States.S, States.P, "\"B\"");                  // v2
+    states.DeleteCurrent(States.S, States.P, "\"B\"");                  // retracted already: nothing
+    states.AddCurrent(States.S, States.P, "\"K\"");                     // asserted already: nothing
+    states.BeginBatch();
+    states.DeleteCurrentBatched(States.S, States.P, "\"C\"");           // v2
+    states.AddCurrentBatched(States.S, States.P, "\"C\"");              // v3
+    states.DeleteCurrentBatched(States.S, States.P, "\"C\"");           // v4
+    states.CommitBatch();
+    states.BeginBatch();
+    states.AddCurrentBatched(States.S, States.P, "\"D\"");              // v1
+    states.DeleteCurrentBatched(States.S, States.P, "\"D\"");           // v2
+    states.AddCurrentBatched(States.S, States.P, "\"D\"");              // v3
+    states.AddCurrentBatched(States.S, States.P, "\"D\"");              // asserted already: nothing
+    states.CommitBatch();
+    states.AddCurrent(States.S, States.P, "\"E\"");                     // v1
     Say("changed");
     Kill();
     return 3; // not reached
@@ -156,6 +204,16 @@ internal static class Periods
 
     /// <summary>Clock reading <paramref name="n"/>: n minutes after 2031-01-01T00:00:00Z.</summary>
     public static DateTimeOffset Reading(int n) => new DateTimeOffset(2031, 1, 1, 0, 0, 0, TimeSpan.Zero).AddMinutes(n);
+}
+
+/// <summary>
+/// What the two states modes write (ADR-064). FactStatesTests states the same subject and predicate to check the
+/// reopened store.
+/// </summary>
+internal static class States
+{
+    public const string S = "<urn:states:s>";
+    public const string P = "<urn:states:p>";
 }
 
 /// <summary>A clock whose reading the program sets. It stands still until the program moves it.</summary>

@@ -160,7 +160,7 @@ public class QuadIndexCursorTests : IDisposable
     {
         using var index = new VersionedQuadIndex(Path.Combine(_testDir, "graph.tdb"), null, 4L << 20);
 
-        // 3,000 quads; every fourth is retracted, which leaves its entry at version 2 with a deleted mark. The entries
+        // 3,000 quads; every fourth is retracted, which takes its entry to version 2, an even one. The entries
         // written are kept beside the index, in key order: graph, then the three dimensions.
         var entries = new List<(long Graph, long Primary, long Secondary, long Tertiary, int Version, bool Retracted)>();
         int n = 0;
@@ -169,9 +169,9 @@ public class QuadIndexCursorTests : IDisposable
         for (long secondary = 101; secondary <= 105; secondary++)
         for (long tertiary = 201; tertiary <= 205; tertiary++)
         {
-            index.AddRaw(graph, primary, secondary, tertiary);
+            index.NextVersion(graph, primary, secondary, tertiary, 0);
             bool retracted = n % 4 == 0;
-            if (retracted) Assert.True(index.DeleteRaw(graph, primary, secondary, tertiary));
+            if (retracted) Assert.True(index.NextVersion(graph, primary, secondary, tertiary, 1));
             entries.Add((graph, primary, secondary, tertiary, retracted ? 2 : 1, retracted));
             n++;
         }
