@@ -528,8 +528,12 @@ what succeeds and where the failure boundary is before any new infrastructure is
 - Linux stack capture: `ptrace_scope=1` stops `gdb` from attaching to a non-descendant. Decided: constructions that
   need no capture. No outside debugger or stack sampler is attached to the debugger process; a probe establishes
   what it needs from inside that process or from outcomes alone.
-- Open: which machines may run the extraordinary probes of Steps 4 and 5, and the risk accepted on each (proposed:
-  CI runners and VMs only).
+- Which machines may run the extraordinary probes of Steps 4 and 5, and the risk accepted on each. Proposed on
+  2026-10-31, the day elite hung out of reach of a reset: CI runners and VMs only. Since then, Step 4's runs have hung
+  only the probe's own child process, which its parent ends; the machine itself was never affected (findings 104,
+  105). Martin approved omega for Step 4 on 2026-11-05. **Decided 2026-11-17 (Martin), for Step 5:** macbook,
+  omega-windows and omega-ubuntu as well as the runners ("We have macbook as well. And we also have omega-windows and
+  omega-ubuntu").
 - Every machine at the same commit, with its runtimes listed (`dotnet --list-runtimes`).
 
 **Step 1 — Platform facts (probe 101, read-only).** Attach to an idle target, change nothing, and record the
@@ -683,6 +687,20 @@ Having lost the worker, the supervisor cannot always know what became of the tar
 known state, when that was observed and how certain it is, and unknown when nothing establishes it. Also recorded,
 per platform: what happens to a target held stopped when its worker dies. What the snapshot cannot see, native frames
 and native threads, is filed in the limits register: [drhook-snapshot-native-frames](../../limits/drhook-snapshot-native-frames.md).
+*Recorded 2026-11-17* ([finding 106](../../../poc/drhook-engine/findings/106-worker-process.md); probe 106 at
+`81859423` on zbook, macbook and omega-windows, 20 runs per mode each, RESULT(0) on every machine; not yet run on
+omega-ubuntu or the runners).
+
+- **Recovery.** On Linux and macOS a native crash lost the worker's debugger in 18 to 45 % of attempts. The worker
+  called it lost 2 s after the target was gone; a `ProcessExited` that did come came within 35 ms. The supervisor
+  discarded the worker in 3 to 15 ms, and a fresh worker's session succeeded 2.4 to 3.7 s later: 76 of 76.
+- **Detection from outside.** With the worker's verdict ignored, a 30 s bound on its next command found every loss,
+  36 of 36, and agreed with the worker's facts each time.
+- **Windows.** The debugger was never lost (0 of 320 attempts), as findings 104 and 105 predict.
+- **A target held at a stop when its worker dies.** On Linux and macOS it stays held, and a new attach fails with
+  `CORDBG_E_TIMEOUT` (80 of 80). On Windows it dies with the worker (40 of 40).
+- **The journal.** It recorded each discard before the kill, with the target's last known state, who observed it, and
+  how certain that was.
 
 **Step 6 — Decide (Epistemics).** From Steps 2 to 5: the session end for each scenario; the operation contracts; what
 replaces ADR-008's Decision 1; the bounds, detection and anomalies for the extraordinary ends; the worker's lifetime
