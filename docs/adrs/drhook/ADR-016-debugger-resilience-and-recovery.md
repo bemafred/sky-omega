@@ -528,8 +528,12 @@ what succeeds and where the failure boundary is before any new infrastructure is
 - Linux stack capture: `ptrace_scope=1` stops `gdb` from attaching to a non-descendant. Decided: constructions that
   need no capture. No outside debugger or stack sampler is attached to the debugger process; a probe establishes
   what it needs from inside that process or from outcomes alone.
-- Open: which machines may run the extraordinary probes of Steps 4 and 5, and the risk accepted on each (proposed:
-  CI runners and VMs only).
+- Which machines may run the extraordinary probes of Steps 4 and 5, and the risk accepted on each. Proposed on
+  2026-10-31, the day elite hung out of reach of a reset: CI runners and VMs only. Since then, Step 4's runs have hung
+  only the probe's own child process, which its parent ends; the machine itself was never affected (findings 104,
+  105). Martin approved omega for Step 4 on 2026-11-05. **Decided 2026-11-17 (Martin), for Step 5:** macbook,
+  omega-windows and omega-ubuntu as well as the runners ("We have macbook as well. And we also have omega-windows and
+  omega-ubuntu").
 - Every machine at the same commit, with its runtimes listed (`dotnet --list-runtimes`).
 
 **Step 1 — Platform facts (probe 101, read-only).** Attach to an idle target, change nothing, and record the
@@ -587,8 +591,8 @@ asked mid-flood under the debugger; the same target without a handler, to record
 a debugger; a Generic Host server stopped through its own lifetime; on Windows, a console process launched in its own
 group and sent CTRL+BREAK, built and reviewed before it runs.
 *Constructions recorded 2026-11-16* ([finding 112](../../../poc/drhook-engine/findings/112-cancellation.md); probe 112
-on zbook and macbook, 20 borrowed sessions per child, each child ending with an attach that must succeed; Windows is
-not built).
+on zbook and macbook, 20 borrowed sessions per child, each child ending with an attach that must succeed; Windows
+below).
 
 - **Its own shutdown code.** A target with its own SIGTERM handler, or a Generic Host stopped by SIGTERM or by itself,
   ended cleanly under the debugger mid-flood: 240 of 240 sessions, and every final attach succeeded.
@@ -600,6 +604,21 @@ not built).
 So `drhook_stop`'s detach-first order is safe for each of these targets. `drhook_kill` is not, for a program without a
 handler, since it signals while attached; nor is an owner's signal to a borrowed target. What Abandon should do is
 left to Step 6.
+*Windows recorded 2026-11-17* ([finding 112, Windows](../../../poc/drhook-engine/findings/112-cancellation.md#windows-ctrlbreak-to-the-targets-own-process-group); probe 112 at `b08b8604` on omega-windows, 20 sessions
+per child, then break-handler detached alone, 100 sessions). The target was started in its own process group and sent
+CTRL+BREAK from its console.
+
+- **Its own shutdown code.** A handler (`PosixSignal.SIGQUIT`) or a Generic Host ended cleanly while attached, 40 of
+  40, and host-self-stop 20 of 20.
+- **No handler, attached.** DrHook takes the event and the target runs on. The runtime passes CTRL+C and CTRL+BREAK
+  to an attached debugger as `ControlCTrap`, and DrHook's `S_OK` answer counts the event as handled, so the target
+  never reaches Windows' default end (read in `release/10.0`; 20 of 20). The debugger was never lost.
+- **No handler, detached.** An abrupt end: `0xC000013A`, without `ProcessExit`.
+- **After a detach.** The target stayed held twice in 120 break-handler sessions. This is Step 2's held Windows target
+  (finding 102, 2 of 80); the record cannot say what held it.
+
+What DrHook answers to `ControlCTrap`, and whether `drhook_stop` on Windows should send CTRL+BREAK after its detach
+instead of killing, are left to Step 6.
 
 **Step 4 — The failure boundary.** The failure matrix, the extraordinary ends (a kill, a stack overflow,
 `Environment.FailFast`) and, where it can be induced, a `DebuggerError`, each in a process of its own. Recorded,
@@ -683,6 +702,20 @@ Having lost the worker, the supervisor cannot always know what became of the tar
 known state, when that was observed and how certain it is, and unknown when nothing establishes it. Also recorded,
 per platform: what happens to a target held stopped when its worker dies. What the snapshot cannot see, native frames
 and native threads, is filed in the limits register: [drhook-snapshot-native-frames](../../limits/drhook-snapshot-native-frames.md).
+*Recorded 2026-11-17* ([finding 106](../../../poc/drhook-engine/findings/106-worker-process.md); probe 106 at
+`81859423` on zbook, macbook, omega-windows and omega-ubuntu, 20 runs per mode each, RESULT(0) on every machine; not
+yet run on the runners).
+
+- **Recovery.** On Linux and macOS a native crash lost the worker's debugger in 11 to 45 % of attempts. The worker
+  called it lost 2 s after the target was gone; a `ProcessExited` that did come came within 35 ms. The supervisor
+  discarded the worker in 1 to 15 ms, and a fresh worker's session succeeded 2.3 to 3.7 s later: 104 of 104.
+- **Detection from outside.** With the worker's verdict ignored, a 30 s bound on its next command found every loss,
+  53 of 53, and agreed with the worker's facts each time.
+- **Windows.** The debugger was never lost (0 of 320 attempts), as findings 104 and 105 predict.
+- **A target held at a stop when its worker dies.** On Linux and macOS it stays held, and a new attach fails with
+  `CORDBG_E_TIMEOUT` (120 of 120). On Windows it dies with the worker (40 of 40).
+- **The journal.** It recorded each discard before the kill, with the target's last known state, who observed it, and
+  how certain that was.
 
 **Step 6 — Decide (Epistemics).** From Steps 2 to 5: the session end for each scenario; the operation contracts; what
 replaces ADR-008's Decision 1; the bounds, detection and anomalies for the extraordinary ends; the worker's lifetime

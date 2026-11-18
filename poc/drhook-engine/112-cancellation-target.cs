@@ -23,6 +23,11 @@
 //                    "host-stopped".
 //   host-self-stop   the same host, stopped by itself through IHostApplicationLifetime.StopApplication 1.5 s after its
 //                    flood began; no signal. Marker: "stopping", "service-stopped", "host-stopped".
+// Windows has no SIGTERM to send; its request to a console program is CTRL+BREAK, which .NET reports as SIGQUIT. The
+// Windows kinds are the same programs asked that way:
+//   break-handler    as term-handler, with its handler on SIGQUIT (cancelling it is supported on Windows).
+//   break-default    as term-default: no handler, so Windows' own handling of CTRL+BREAK applies.
+//   host-break       as host-term: CTRL+BREAK reaches the host's console lifetime as SIGQUIT.
 
 using System;
 using System.Diagnostics;
@@ -52,9 +57,11 @@ switch (kind)
         return 0;
 
     case "term-handler":
+    case "break-handler":
     {
         using var cancelled = new ManualResetEventSlim(false);
-        using PosixSignalRegistration registration = PosixSignalRegistration.Create(PosixSignal.SIGTERM, context =>
+        PosixSignal signal = kind == "break-handler" ? PosixSignal.SIGQUIT : PosixSignal.SIGTERM;
+        using PosixSignalRegistration registration = PosixSignalRegistration.Create(signal, context =>
         {
             context.Cancel = true;
             Mark("signal");
@@ -68,6 +75,7 @@ switch (kind)
     }
 
     case "term-default":
+    case "break-default":
     {
         AppDomain.CurrentDomain.ProcessExit += (_, _) => Mark("process-exit");
         StartFlood(static () => false);
@@ -77,6 +85,7 @@ switch (kind)
     }
 
     case "host-term":
+    case "host-break":
     case "host-self-stop":
     {
         HostApplicationBuilder builder = Host.CreateApplicationBuilder(Array.Empty<string>());

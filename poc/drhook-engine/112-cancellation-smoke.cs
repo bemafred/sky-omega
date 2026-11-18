@@ -36,9 +36,25 @@
 // transport; on macOS a dotnet-hosted target and one started through its ad hoc signed apphost (both over the
 // transport on omega and macbook, where SIP is enabled). Every session records the path it got.
 //
-// Windows: not run by this probe. A Windows program has no SIGTERM; its equivalent is CTRL+BREAK sent to a console
-// process group, which needs a target started in its own group and a sender on its console. ADR-016 Step 3 has that
-// construction built and reviewed before it runs; it is not built yet. On Windows this probe exits 2.
+// Windows (ADR-016 Step 3: built, to be reviewed before it runs). A Windows program has no SIGTERM. The request a
+// console program can be sent is CTRL+BREAK, which .NET reports as SIGQUIT, and it can be limited to one process group
+// (GenerateConsoleCtrlEvent; CTRL+C cannot). So on Windows:
+//   - Each target is started in its own process group (ProcessStartInfo.CreateNewProcessGroup), on the child's console.
+//     A program in its own group is the group's root, so the group's id is the target's PID. Its standard streams
+//     are pipes the child drains; it still shares the child's console, which is what the event needs.
+//   - The child sends GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, target PID). The event reaches only the target's
+//     group, and only processes on the sender's console, so neither the child nor the parent receives it.
+//   - The kinds are break-handler (its own SIGQUIT handler cancels the default and the flood), break-default (no
+//     handler: Windows' own handling of CTRL+BREAK, which ends the process; what that looks like under the debugger is
+//     recorded, not predicted), host-break (a Generic Host, whose console lifetime takes SIGQUIT), and host-self-stop.
+//     The orders are the same.
+//   - The child needs a console. When it has none (GetConsoleProcessList returns 0, as for a process started detached),
+//     it allocates one (AllocConsole), keeping its own standard handles, which are the parent's pipes. Which happened is
+//     recorded.
+//   - Not predicted: mscordbi debugs a Windows target through the Win32 debugging API, and a debugged console program
+//     that receives CTRL+BREAK raises DBG_CONTROL_BREAK to its debugger first. Whether DrHook sees a stop for it, and
+//     how the target then ends, is what the records will show.
+//   - Windows has one read path (no transport), so one path is run: the dotnet host, "own-group".
 //
 // Recorded per session: the read path; attach, exit and Dispose times; the time from the signal to the exit; stops
 // other than the exit; the debugger's events and anomalies; whether the target ended, its exit code, and what its
@@ -60,8 +76,8 @@
 //
 // Output: a report on stdout; with --out <file>, the facts as JSON.
 // Result codes: 0 every session usable and every final attach succeeded; 1 otherwise, which is a finding about DrHook
-// or mscordbi, not a fault of the probe; 2 the probe could not run (Windows, bad arguments, target build failed or
-// left no apphost).
+// or mscordbi, not a fault of the probe; 2 the probe could not run (bad arguments, target build failed or left no
+// apphost).
 //
 // Usage (from poc/drhook-engine):
 //   dotnet run --no-cache 112-cancellation-smoke.cs [--sessions N] [--only <kind>/<order>] [--out facts.json]
@@ -81,12 +97,6 @@ using SkyOmega.DrHook.Engine;
 
 if (args.Length == 9 && args[0] == "child")
     return Child(args[1], args[2], args[3], args[4], args[5], args[6], int.Parse(args[7], CultureInfo.InvariantCulture), int.Parse(args[8], CultureInfo.InvariantCulture));
-
-if (OperatingSystem.IsWindows())
-{
-    Console.WriteLine("FAIL(2): probe 112 is POSIX only; Step 3's Windows construction (CTRL+BREAK to a process group) is built and reviewed separately");
-    return 2;
-}
 
 int sessions = 20;
 string? outFile = null;
@@ -110,16 +120,24 @@ JsonObject environment = EnvironmentFacts(host, runtimeDirectory, appHost, sessi
 Console.WriteLine("environment:");
 foreach (var (key, value) in environment) Console.WriteLine($"  {key}: {value?.ToJsonString().Trim('"')}");
 
-(string Launcher, string Mode)[] paths = OperatingSystem.IsMacOS()
-    ? new[] { ("dotnet", "descendant"), ("apphost", "descendant") }
+(string Launcher, string Mode)[] paths = OperatingSystem.IsWindows() ? new[] { ("dotnet", "own-group") }
+    : OperatingSystem.IsMacOS() ? new[] { ("dotnet", "descendant"), ("apphost", "descendant") }
     : new[] { ("dotnet", "descendant"), ("dotnet", "reparented") };
-(string Kind, string Order)[] constructions =
-{
-    ("term-handler", "attached"), ("term-handler", "detached"),
-    ("term-default", "attached"), ("term-default", "detached"),
-    ("host-term", "attached"), ("host-term", "detached"),
-    ("host-self-stop", "attached"),
-};
+(string Kind, string Order)[] constructions = OperatingSystem.IsWindows()
+    ? new[]
+    {
+        ("break-handler", "attached"), ("break-handler", "detached"),
+        ("break-default", "attached"), ("break-default", "detached"),
+        ("host-break", "attached"), ("host-break", "detached"),
+        ("host-self-stop", "attached"),
+    }
+    : new[]
+    {
+        ("term-handler", "attached"), ("term-handler", "detached"),
+        ("term-default", "attached"), ("term-default", "detached"),
+        ("host-term", "attached"), ("host-term", "detached"),
+        ("host-self-stop", "attached"),
+    };
 if (only is not null)
 {
     constructions = constructions.Where(c => $"{c.Kind}/{c.Order}" == only).ToArray();
@@ -197,6 +215,12 @@ static JsonObject RunChild(string kind, string order, string launcher, string mo
         if (line is null) break;
         if (line.StartsWith("child: stage=", StringComparison.Ordinal)) { lastStage = line["child: stage=".Length..]; continue; }
         if (line.StartsWith("child: target=", StringComparison.Ordinal)) { targets.Add((int.Parse(line["child: target=".Length..], CultureInfo.InvariantCulture), Stopwatch.StartNew())); continue; }
+        if (line.StartsWith("child: console=", StringComparison.Ordinal))
+        {
+            record["console"] = JsonNode.Parse(line["child: console=".Length..]);
+            Console.WriteLine($"    console: {line["child: console=".Length..]}");
+            continue;
+        }
         if (line.StartsWith("child: session=", StringComparison.Ordinal))
         {
             JsonNode s = JsonNode.Parse(line["child: session=".Length..])!;
@@ -263,6 +287,8 @@ static JsonObject RunChild(string kind, string order, string launcher, string mo
 static int Child(string kind, string order, string launcher, string mode, string host, string dll, int sessions, int seed)
 {
     const int SIGTERM = 15;
+    const uint CTRL_BREAK_EVENT = 1;
+    const int STD_INPUT_HANDLE = -10, STD_OUTPUT_HANDLE = -11, STD_ERROR_HANDLE = -12;
     var clock = Stopwatch.StartNew();
     var random = new Random(seed);
     var steps = new StepClock();
@@ -289,13 +315,35 @@ static int Child(string kind, string order, string launcher, string mode, string
     }) { IsBackground = true };
     watchdog.Start();
 
+    // Windows: CTRL+BREAK reaches only processes on the sender's console, so this process needs one for its targets to
+    // share. Console.Out is already in use (the stage lines), so it keeps writing to the parent's pipe whatever
+    // AllocConsole does to the standard handles; they are restored anyway.
+    if (OperatingSystem.IsWindows())
+    {
+        Line("stage=0 console");
+        uint attached = GetConsoleProcessList(new uint[64], 64);
+        var console = new JsonObject { ["processesOnConsole"] = attached };
+        if (attached == 0)
+        {
+            IntPtr stdIn = GetStdHandle(STD_INPUT_HANDLE), stdOut = GetStdHandle(STD_OUTPUT_HANDLE), stdErr = GetStdHandle(STD_ERROR_HANDLE);
+            bool allocated = AllocConsole();
+            console["allocated"] = allocated;
+            if (!allocated) console["allocError"] = Marshal.GetLastPInvokeError();
+            SetStdHandle(STD_INPUT_HANDLE, stdIn);
+            SetStdHandle(STD_OUTPUT_HANDLE, stdOut);
+            SetStdHandle(STD_ERROR_HANDLE, stdErr);
+        }
+        else console["allocated"] = false;
+        Line($"console={console.ToJsonString()}");
+    }
+
     string[] command = launcher == "dotnet" ? new[] { host, dll } : new[] { AppHostOf(dll) };
     string? dotnetRoot = launcher == "apphost" ? DotnetRootOf(host) : null;
     string expectedMarker = kind switch
     {
-        "term-handler" => "signal cancelled",
-        "host-term" or "host-self-stop" => "stopping service-stopped host-stopped",
-        _ => "", // term-default: recorded, not predicted
+        "term-handler" or "break-handler" => "signal cancelled",
+        "host-term" or "host-break" or "host-self-stop" => "stopping service-stopped host-stopped",
+        _ => "", // term-default, break-default: recorded, not predicted
     };
     bool signalled = kind != "host-self-stop";
     bool allUsable = true;
@@ -350,10 +398,21 @@ static int Child(string kind, string order, string launcher, string mode, string
             if (signalled)
             {
                 Step(k, "signal", 5_000);
-                int rc = kill(pid, SIGTERM);
-                sinceSignal = Stopwatch.StartNew();
-                s["signalErrno"] = rc == 0 ? 0 : Marshal.GetLastPInvokeError();
-                if (rc != 0) deviations.Add("kill(SIGTERM) failed");
+                if (OperatingSystem.IsWindows())
+                {
+                    // The group's id is its root's PID, and the target is the root of its own group.
+                    bool sent = GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, (uint)pid);
+                    sinceSignal = Stopwatch.StartNew();
+                    s["signalError"] = sent ? 0 : Marshal.GetLastPInvokeError();
+                    if (!sent) deviations.Add("GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT) failed");
+                }
+                else
+                {
+                    int rc = kill(pid, SIGTERM);
+                    sinceSignal = Stopwatch.StartNew();
+                    s["signalErrno"] = rc == 0 ? 0 : Marshal.GetLastPInvokeError();
+                    if (rc != 0) deviations.Add("kill(SIGTERM) failed");
+                }
             }
             if (order == "attached")
             {
@@ -394,7 +453,8 @@ static int Child(string kind, string order, string launcher, string mode, string
         }
         s["targetEnded"] = ended;
         s["endWaitMs"] = ending.ElapsedMilliseconds;
-        // Descendant: bash's `wait` returns the target's status, 128 + the signal number for a signal's end.
+        // Descendant: bash's `wait` returns the target's status, 128 + the signal number for a signal's end. Windows: the
+        // target's own exit code (the child started it).
         s["exitCode"] = ended && waitable is not null ? waitable.ExitCode : null;
         string markerText = File.Exists(marker) ? string.Join(' ', File.ReadAllLines(marker).Where(l => l.Length > 0)) : "";
         s["marker"] = markerText;
@@ -474,10 +534,29 @@ static int Child(string kind, string order, string launcher, string mode, string
 // Descendant: bash starts the target and waits for it, so it is bash's child and this process's grandchild (finding
 // 87: not a direct child of the debugger process); bash's exit status is then the target's. Reparented: bash starts it
 // and exits at once, so it is handed to init or the nearest subreaper. For the apphost, DOTNET_ROOT points it at the
-// probe's own runtime, so the debugger never mixes runtime versions (finding 86).
+// probe's own runtime, so the debugger never mixes runtime versions (finding 86). Windows, as probe 102: a direct
+// child, whose first line shows its runtime is up (on Unix the attach itself waits for the target's debugger thread,
+// finding 99); it is also the root of a process group of its own, on this process's console. It prints only that
+// line, so its stdout pipe is not drained; its stdin is closed; its stderr is this process's.
 static (int Pid, Process? Waitable) StartTarget(string mode, string[] command, string? dotnetRoot, string[] targetArgs)
 {
     string[] arguments = command.Skip(1).Concat(targetArgs).ToArray();
+    if (OperatingSystem.IsWindows())
+    {
+        var start = new ProcessStartInfo(command[0])
+        {
+            UseShellExecute = false,
+            CreateNewProcessGroup = true,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+        };
+        foreach (string a in arguments) start.ArgumentList.Add(a);
+        if (dotnetRoot is not null) start.Environment["DOTNET_ROOT"] = dotnetRoot;
+        Process target = Process.Start(start)!;
+        target.StandardInput.Close();
+        target.StandardOutput.ReadLine();
+        return (target.Id, target);
+    }
     var psi = new ProcessStartInfo("bash") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
     psi.ArgumentList.Add("-c");
     psi.ArgumentList.Add(mode == "descendant"
@@ -497,6 +576,7 @@ static (int Pid, Process? Waitable) StartTarget(string mode, string[] command, s
 // The call mscordbi makes when it attaches (PAL_OpenProcessMemory), from the same process; what it opens is released.
 static JsonObject MemoryOpen(int pid)
 {
+    if (OperatingSystem.IsWindows()) return new JsonObject { ["call"] = "none", ["reads"] = "direct" }; // no transport
     if (OperatingSystem.IsMacOS())
     {
         uint self = MachTaskSelf();
@@ -515,6 +595,7 @@ static JsonObject MemoryOpen(int pid)
 static JsonArray DebugPipes(int pid)
 {
     var names = new JsonArray();
+    if (OperatingSystem.IsWindows()) return names;
     foreach (string entry in Directory.EnumerateFileSystemEntries(Path.GetTempPath())
         .Where(e => Path.GetFileName(e).StartsWith($"clr-debug-pipe-{pid}-", StringComparison.Ordinal) || Path.GetFileName(e).StartsWith($"dotnet-diagnostic-{pid}-", StringComparison.Ordinal))
         .OrderBy(e => e, StringComparer.Ordinal))
@@ -550,7 +631,12 @@ static JsonArray OwnThreads()
     return threads;
 }
 
-static bool TargetAlive(int pid) => kill(pid, 0) == 0 || Marshal.GetLastPInvokeError() != 3; // 3 = ESRCH
+static bool TargetAlive(int pid)
+{
+    if (!OperatingSystem.IsWindows()) return kill(pid, 0) == 0 || Marshal.GetLastPInvokeError() != 3; // 3 = ESRCH
+    try { using Process p = Process.GetProcessById(pid); return !p.HasExited; }
+    catch (ArgumentException) { return false; }
+}
 
 // ---- the environment, recorded once by the parent -----------------------------------------------------------------
 
@@ -593,7 +679,7 @@ static JsonObject EnvironmentFacts(string host, string runtimeDirectory, string 
 static string DotnetHostOf(string runtimeDirectory)
 {
     string root = Path.GetFullPath(Path.Combine(runtimeDirectory, "..", "..", ".."));
-    string candidate = Path.Combine(root, "dotnet");
+    string candidate = Path.Combine(root, OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet");
     return File.Exists(candidate) ? candidate : "dotnet";
 }
 
@@ -601,7 +687,7 @@ static string DotnetHostOf(string runtimeDirectory)
 static string? DotnetRootOf(string host) => Path.IsPathRooted(host) ? Path.GetDirectoryName(host) : null;
 
 // The SDK puts a program's apphost beside its dll: the same name without .dll.
-static string AppHostOf(string dll) => Path.ChangeExtension(dll, null);
+static string AppHostOf(string dll) => Path.ChangeExtension(dll, OperatingSystem.IsWindows() ? ".exe" : null);
 
 // A read-only command, bounded at 10 s; its output, or the reason there is none.
 static string Run(string file, params string[] arguments)
@@ -648,6 +734,13 @@ static uint MachTaskSelf()
 [DllImport("libc", SetLastError = true)] static extern int open([MarshalAs(UnmanagedType.LPUTF8Str)] string path, int flags);
 [DllImport("libc")] static extern int close(int fd);
 [DllImport("libc", SetLastError = true)] static extern int kill(int pid, int sig);
+
+// Windows only.
+[DllImport("kernel32", SetLastError = true)] static extern bool GenerateConsoleCtrlEvent(uint dwCtrlEvent, uint dwProcessGroupId);
+[DllImport("kernel32", SetLastError = true)] static extern uint GetConsoleProcessList(uint[] lpdwProcessList, uint dwProcessCount);
+[DllImport("kernel32", SetLastError = true)] static extern bool AllocConsole();
+[DllImport("kernel32", SetLastError = true)] static extern IntPtr GetStdHandle(int nStdHandle);
+[DllImport("kernel32", SetLastError = true)] static extern bool SetStdHandle(int nStdHandle, IntPtr hHandle);
 
 // Counts the debugger's events and keeps its anomalies; nothing here acts on the target.
 sealed class Sink : IDebugEventSink

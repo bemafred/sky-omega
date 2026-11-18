@@ -1,0 +1,176 @@
+{"act":"discard-worker","worker":1841425,"reason":"debugger-stuck: target gone, no ProcessExited within 2 s","target":{"pid":1841434,"state":"crashed: gone","observedBy":"worker","observedAtRunMs":7155,"certainty":"observed (waitid on the worker\u0027s own child)"},"at":"2026-11-17T11:08:39.7461611Z"}
+{"act":"discarded","worker":1841425,"ended":true,"ms":1,"at":"2026-11-17T11:08:39.7481571Z"}
+{"act":"discard-worker","worker":1850785,"reason":"debugger-stuck: target gone, no ProcessExited within 2 s","target":{"pid":1850794,"state":"crashed: gone","observedBy":"worker","observedAtRunMs":10145,"certainty":"observed (waitid on the worker\u0027s own child)"},"at":"2026-11-17T11:08:54.3096046Z"}
+{"act":"discarded","worker":1850785,"ended":true,"ms":4,"at":"2026-11-17T11:08:54.3145221Z"}
+{"act":"discard-worker","worker":1889847,"reason":"debugger-stuck: target gone, no ProcessExited within 2 s","target":{"pid":1889856,"state":"crashed: gone","observedBy":"worker","observedAtRunMs":8698,"certainty":"observed (waitid on the worker\u0027s own child)"},"at":"2026-11-17T11:09:31.2600395Z"}
+{"act":"discarded","worker":1889847,"ended":true,"ms":1,"at":"2026-11-17T11:09:31.2616220Z"}
+{"act":"discard-worker","worker":1912024,"reason":"debugger-stuck: target gone, no ProcessExited within 2 s","target":{"pid":1912033,"state":"crashed: gone","observedBy":"worker","observedAtRunMs":16583,"certainty":"observed (waitid on the worker\u0027s own child)"},"at":"2026-11-17T11:09:52.1761219Z"}
+{"act":"discarded","worker":1912024,"ended":true,"ms":1,"at":"2026-11-17T11:09:52.1775916Z"}
+{"act":"discard-worker","worker":1923851,"reason":"debugger-stuck: target gone, no ProcessExited within 2 s","target":{"pid":1923860,"state":"crashed: gone","observedBy":"worker","observedAtRunMs":8529,"certainty":"observed (waitid on the worker\u0027s own child)"},"at":"2026-11-17T11:10:05.0555039Z"}
+{"act":"discarded","worker":1923851,"ended":true,"ms":1,"at":"2026-11-17T11:10:05.0565909Z"}
+{"act":"discard-worker","worker":1930587,"reason":"debugger-stuck: target gone, no ProcessExited within 2 s","target":{"pid":1930596,"state":"crashed: gone","observedBy":"worker","observedAtRunMs":5984,"certainty":"observed (waitid on the worker\u0027s own child)"},"at":"2026-11-17T11:10:15.3916214Z"}
+{"act":"discarded","worker":1930587,"ended":true,"ms":1,"at":"2026-11-17T11:10:15.3926869Z"}
+{"act":"discard-worker","worker":1968829,"reason":"debugger-stuck: target gone, no ProcessExited within 2 s","target":{"pid":1968838,"state":"crashed: gone","observedBy":"worker","observedAtRunMs":1606,"certainty":"observed (waitid on the worker\u0027s own child)"},"at":"2026-11-17T11:10:48.0175080Z"}
+{"act":"discarded","worker":1968829,"ended":true,"ms":1,"at":"2026-11-17T11:10:48.0186750Z"}
+{"act":"discard-worker","worker":1970201,"reason":"debugger-stuck: target gone, no ProcessExited within 2 s","target":{"pid":1970210,"state":"crashed: gone","observedBy":"worker","observedAtRunMs":3912,"certainty":"observed (waitid on the worker\u0027s own child)"},"at":"2026-11-17T11:10:56.2777213Z"}
+{"act":"discarded","worker":1970201,"ended":true,"ms":1,"at":"2026-11-17T11:10:56.2788728Z"}
+{"act":"discard-worker","worker":2007813,"reason":"debugger-stuck: target gone, no ProcessExited within 2 s","target":{"pid":2007822,"state":"crashed: gone","observedBy":"worker","observedAtRunMs":4457,"certainty":"observed (waitid on the worker\u0027s own child)"},"at":"2026-11-17T11:11:29.4417343Z"}
+{"act":"discarded","worker":2007813,"ended":true,"ms":5,"at":"2026-11-17T11:11:29.4474005Z"}
+{"act":"discard-worker","worker":2072871,"reason":"debugger-stuck: target gone, no ProcessExited within 2 s","target":{"pid":2072880,"state":"crashed: gone","observedBy":"worker","observedAtRunMs":3701,"certainty":"observed (waitid on the worker\u0027s own child)"},"at":"2026-11-17T11:12:29.9936671Z"}
+{"act":"discarded","worker":2072871,"ended":true,"ms":3,"at":"2026-11-17T11:12:29.9975589Z"}
+{"act":"discard-worker","worker":2078362,"reason":"debugger-stuck: target gone, no ProcessExited within 2 s","target":{"pid":2078371,"state":"crashed: gone","observedBy":"worker","observedAtRunMs":1817,"certainty":"observed (waitid on the worker\u0027s own child)"},"at":"2026-11-17T11:12:36.2397570Z"}
+{"act":"discarded","worker":2078362,"ended":true,"ms":4,"at":"2026-11-17T11:12:36.2440044Z"}
+{"act":"discard-worker","worker":2080156,"reason":"held-target: the healthy worker is ended with its target at a stop","target":{"pid":2080165,"state":"held at a Break stop","round":"1","observedBy":"worker","observedAtRunMs":80,"certainty":"observed"},"at":"2026-11-17T11:12:38.7555662Z"}
+{"act":"discarded","worker":2080156,"ended":true,"ms":0,"at":"2026-11-17T11:12:38.7562938Z"}
+{"act":"kill-target","pid":2080165,"reason":"probe 106\u0027s own target still running 60 s after its last session","beat":"1","at":"2026-11-17T11:13:59.1640031Z"}
+{"act":"discard-worker","worker":2080426,"reason":"held-target: the healthy worker is ended with its target at a stop","target":{"pid":2080437,"state":"held at a Break stop","round":"1","observedBy":"worker","observedAtRunMs":82,"certainty":"observed"},"at":"2026-11-17T11:13:59.2483248Z"}
+{"act":"discarded","worker":2080426,"ended":true,"ms":0,"at":"2026-11-17T11:13:59.2491410Z"}
+{"act":"kill-target","pid":2080437,"reason":"probe 106\u0027s own target still running 60 s after its last session","beat":"1","at":"2026-11-17T11:15:19.7993918Z"}
+{"act":"discard-worker","worker":2080697,"reason":"held-target: the healthy worker is ended with its target at a stop","target":{"pid":2080708,"state":"held at a Break stop","round":"1","observedBy":"worker","observedAtRunMs":46,"certainty":"observed"},"at":"2026-11-17T11:15:19.8459129Z"}
+{"act":"discarded","worker":2080697,"ended":true,"ms":0,"at":"2026-11-17T11:15:19.8466197Z"}
+{"act":"kill-target","pid":2080708,"reason":"probe 106\u0027s own target still running 60 s after its last session","beat":"1","at":"2026-11-17T11:16:40.1963065Z"}
+{"act":"discard-worker","worker":2080965,"reason":"held-target: the healthy worker is ended with its target at a stop","target":{"pid":2080979,"state":"held at a Break stop","round":"1","observedBy":"worker","observedAtRunMs":50,"certainty":"observed"},"at":"2026-11-17T11:16:40.2470801Z"}
+{"act":"discarded","worker":2080965,"ended":true,"ms":1,"at":"2026-11-17T11:16:40.2482263Z"}
+{"act":"kill-target","pid":2080979,"reason":"probe 106\u0027s own target still running 60 s after its last session","beat":"1","at":"2026-11-17T11:18:00.4566931Z"}
+{"act":"discard-worker","worker":2081567,"reason":"held-target: the healthy worker is ended with its target at a stop","target":{"pid":2081578,"state":"held at a Break stop","round":"1","observedBy":"worker","observedAtRunMs":49,"certainty":"observed"},"at":"2026-11-17T11:18:00.5062262Z"}
+{"act":"discarded","worker":2081567,"ended":true,"ms":0,"at":"2026-11-17T11:18:00.5071366Z"}
+{"act":"kill-target","pid":2081578,"reason":"probe 106\u0027s own target still running 60 s after its last session","beat":"1","at":"2026-11-17T11:19:20.7261170Z"}
+{"act":"discard-worker","worker":2081846,"reason":"held-target: the healthy worker is ended with its target at a stop","target":{"pid":2081857,"state":"held at a Break stop","round":"1","observedBy":"worker","observedAtRunMs":51,"certainty":"observed"},"at":"2026-11-17T11:19:20.7774965Z"}
+{"act":"discarded","worker":2081846,"ended":true,"ms":0,"at":"2026-11-17T11:19:20.7783937Z"}
+{"act":"kill-target","pid":2081857,"reason":"probe 106\u0027s own target still running 60 s after its last session","beat":"1","at":"2026-11-17T11:20:41.0610803Z"}
+{"act":"discard-worker","worker":2082115,"reason":"held-target: the healthy worker is ended with its target at a stop","target":{"pid":2082127,"state":"held at a Break stop","round":"1","observedBy":"worker","observedAtRunMs":48,"certainty":"observed"},"at":"2026-11-17T11:20:41.1095604Z"}
+{"act":"discarded","worker":2082115,"ended":true,"ms":0,"at":"2026-11-17T11:20:41.1103674Z"}
+{"act":"kill-target","pid":2082127,"reason":"probe 106\u0027s own target still running 60 s after its last session","beat":"1","at":"2026-11-17T11:22:01.4292844Z"}
+{"act":"discard-worker","worker":2082383,"reason":"held-target: the healthy worker is ended with its target at a stop","target":{"pid":2082394,"state":"held at a Break stop","round":"1","observedBy":"worker","observedAtRunMs":48,"certainty":"observed"},"at":"2026-11-17T11:22:01.4776032Z"}
+{"act":"discarded","worker":2082383,"ended":true,"ms":0,"at":"2026-11-17T11:22:01.4784240Z"}
+{"act":"kill-target","pid":2082394,"reason":"probe 106\u0027s own target still running 60 s after its last session","beat":"1","at":"2026-11-17T11:23:21.7555558Z"}
+{"act":"discard-worker","worker":2082643,"reason":"held-target: the healthy worker is ended with its target at a stop","target":{"pid":2082657,"state":"held at a Break stop","round":"1","observedBy":"worker","observedAtRunMs":49,"certainty":"observed"},"at":"2026-11-17T11:23:21.8054975Z"}
+{"act":"discarded","worker":2082643,"ended":true,"ms":0,"at":"2026-11-17T11:23:21.8064970Z"}
+{"act":"kill-target","pid":2082657,"reason":"probe 106\u0027s own target still running 60 s after its last session","beat":"1","at":"2026-11-17T11:24:42.2765610Z"}
+{"act":"discard-worker","worker":2082907,"reason":"held-target: the healthy worker is ended with its target at a stop","target":{"pid":2082918,"state":"held at a Break stop","round":"1","observedBy":"worker","observedAtRunMs":84,"certainty":"observed"},"at":"2026-11-17T11:24:42.3616058Z"}
+{"act":"discarded","worker":2082907,"ended":true,"ms":0,"at":"2026-11-17T11:24:42.3624022Z"}
+{"act":"kill-target","pid":2082918,"reason":"probe 106\u0027s own target still running 60 s after its last session","beat":"1","at":"2026-11-17T11:26:02.5466326Z"}
+{"act":"discard-worker","worker":2083170,"reason":"held-target: the healthy worker is ended with its target at a stop","target":{"pid":2083181,"state":"held at a Break stop","round":"1","observedBy":"worker","observedAtRunMs":49,"certainty":"observed"},"at":"2026-11-17T11:26:02.5965188Z"}
+{"act":"discarded","worker":2083170,"ended":true,"ms":0,"at":"2026-11-17T11:26:02.5974651Z"}
+{"act":"kill-target","pid":2083181,"reason":"probe 106\u0027s own target still running 60 s after its last session","beat":"1","at":"2026-11-17T11:27:22.8734347Z"}
+{"act":"discard-worker","worker":2083432,"reason":"held-target: the healthy worker is ended with its target at a stop","target":{"pid":2083443,"state":"held at a Break stop","round":"1","observedBy":"worker","observedAtRunMs":51,"certainty":"observed"},"at":"2026-11-17T11:27:22.9251190Z"}
+{"act":"discarded","worker":2083432,"ended":true,"ms":0,"at":"2026-11-17T11:27:22.9259399Z"}
+{"act":"kill-target","pid":2083443,"reason":"probe 106\u0027s own target still running 60 s after its last session","beat":"1","at":"2026-11-17T11:28:43.1644633Z"}
+{"act":"discard-worker","worker":2083690,"reason":"held-target: the healthy worker is ended with its target at a stop","target":{"pid":2083702,"state":"held at a Break stop","round":"1","observedBy":"worker","observedAtRunMs":50,"certainty":"observed"},"at":"2026-11-17T11:28:43.2150921Z"}
+{"act":"discarded","worker":2083690,"ended":true,"ms":0,"at":"2026-11-17T11:28:43.2159004Z"}
+{"act":"kill-target","pid":2083702,"reason":"probe 106\u0027s own target still running 60 s after its last session","beat":"1","at":"2026-11-17T11:30:03.5654788Z"}
+{"act":"discard-worker","worker":2083958,"reason":"held-target: the healthy worker is ended with its target at a stop","target":{"pid":2083973,"state":"held at a Break stop","round":"1","observedBy":"worker","observedAtRunMs":50,"certainty":"observed"},"at":"2026-11-17T11:30:03.6166015Z"}
+{"act":"discarded","worker":2083958,"ended":true,"ms":1,"at":"2026-11-17T11:30:03.6181650Z"}
+{"act":"kill-target","pid":2083973,"reason":"probe 106\u0027s own target still running 60 s after its last session","beat":"1","at":"2026-11-17T11:31:24.0423801Z"}
+{"act":"discard-worker","worker":2084227,"reason":"held-target: the healthy worker is ended with its target at a stop","target":{"pid":2084239,"state":"held at a Break stop","round":"1","observedBy":"worker","observedAtRunMs":50,"certainty":"observed"},"at":"2026-11-17T11:31:24.0930314Z"}
+{"act":"discarded","worker":2084227,"ended":true,"ms":0,"at":"2026-11-17T11:31:24.0938709Z"}
+{"act":"kill-target","pid":2084239,"reason":"probe 106\u0027s own target still running 60 s after its last session","beat":"1","at":"2026-11-17T11:32:44.3688440Z"}
+{"act":"discard-worker","worker":2084487,"reason":"held-target: the healthy worker is ended with its target at a stop","target":{"pid":2084499,"state":"held at a Break stop","round":"1","observedBy":"worker","observedAtRunMs":51,"certainty":"observed"},"at":"2026-11-17T11:32:44.4202271Z"}
+{"act":"discarded","worker":2084487,"ended":true,"ms":0,"at":"2026-11-17T11:32:44.4211221Z"}
+{"act":"kill-target","pid":2084499,"reason":"probe 106\u0027s own target still running 60 s after its last session","beat":"1","at":"2026-11-17T11:34:04.8388696Z"}
+{"act":"discard-worker","worker":2084767,"reason":"held-target: the healthy worker is ended with its target at a stop","target":{"pid":2084778,"state":"held at a Break stop","round":"1","observedBy":"worker","observedAtRunMs":50,"certainty":"observed"},"at":"2026-11-17T11:34:04.8893082Z"}
+{"act":"discarded","worker":2084767,"ended":true,"ms":0,"at":"2026-11-17T11:34:04.8901979Z"}
+{"act":"kill-target","pid":2084778,"reason":"probe 106\u0027s own target still running 60 s after its last session","beat":"1","at":"2026-11-17T11:35:25.2368413Z"}
+{"act":"discard-worker","worker":2085028,"reason":"held-target: the healthy worker is ended with its target at a stop","target":{"pid":2085039,"state":"held at a Break stop","round":"1","observedBy":"worker","observedAtRunMs":83,"certainty":"observed"},"at":"2026-11-17T11:35:25.3211883Z"}
+{"act":"discarded","worker":2085028,"ended":true,"ms":0,"at":"2026-11-17T11:35:25.3221331Z"}
+{"act":"kill-target","pid":2085039,"reason":"probe 106\u0027s own target still running 60 s after its last session","beat":"1","at":"2026-11-17T11:36:45.5798523Z"}
+{"act":"discard-worker","worker":2085289,"reason":"held-target: the healthy worker is ended with its target at a stop","target":{"pid":2085300,"state":"held at a Break stop","round":"1","observedBy":"worker","observedAtRunMs":51,"certainty":"observed"},"at":"2026-11-17T11:36:45.6316580Z"}
+{"act":"discarded","worker":2085289,"ended":true,"ms":0,"at":"2026-11-17T11:36:45.6324301Z"}
+{"act":"kill-target","pid":2085300,"reason":"probe 106\u0027s own target still running 60 s after its last session","beat":"1","at":"2026-11-17T11:38:05.7944719Z"}
+{"act":"discard-worker","worker":2085550,"reason":"held-target: the healthy worker is ended with its target at a stop","target":{"pid":2085561,"state":"held at a Break stop","round":"1","observedBy":"worker","observedAtRunMs":50,"certainty":"observed"},"at":"2026-11-17T11:38:05.8448474Z"}
+{"act":"discarded","worker":2085550,"ended":true,"ms":0,"at":"2026-11-17T11:38:05.8456885Z"}
+{"act":"kill-target","pid":2085561,"reason":"probe 106\u0027s own target still running 60 s after its last session","beat":"1","at":"2026-11-17T11:39:26.2102855Z"}
+{"act":"discard-worker","worker":2085815,"reason":"held-target: the healthy worker is ended with its target at a stop","target":{"pid":2085826,"state":"held at a Break stop","round":"20","observedBy":"worker","observedAtRunMs":1086,"certainty":"observed"},"at":"2026-11-17T11:39:27.2982742Z"}
+{"act":"discarded","worker":2085815,"ended":true,"ms":1,"at":"2026-11-17T11:39:27.2994188Z"}
+{"act":"kill-target","pid":2085826,"reason":"probe 106\u0027s own target still running 60 s after its last session","beat":"20","at":"2026-11-17T11:40:47.6097042Z"}
+{"act":"discard-worker","worker":2086080,"reason":"held-target: the healthy worker is ended with its target at a stop","target":{"pid":2086090,"state":"held at a Break stop","round":"20","observedBy":"worker","observedAtRunMs":1066,"certainty":"observed"},"at":"2026-11-17T11:40:48.6774586Z"}
+{"act":"discarded","worker":2086080,"ended":true,"ms":0,"at":"2026-11-17T11:40:48.6784532Z"}
+{"act":"kill-target","pid":2086090,"reason":"probe 106\u0027s own target still running 60 s after its last session","beat":"20","at":"2026-11-17T11:42:09.1002314Z"}
+{"act":"discard-worker","worker":2086341,"reason":"held-target: the healthy worker is ended with its target at a stop","target":{"pid":2086353,"state":"held at a Break stop","round":"20","observedBy":"worker","observedAtRunMs":1147,"certainty":"observed"},"at":"2026-11-17T11:42:10.2491876Z"}
+{"act":"discarded","worker":2086341,"ended":true,"ms":1,"at":"2026-11-17T11:42:10.2510259Z"}
+{"act":"kill-target","pid":2086353,"reason":"probe 106\u0027s own target still running 60 s after its last session","beat":"20","at":"2026-11-17T11:43:30.7319047Z"}
+{"act":"discard-worker","worker":2086607,"reason":"held-target: the healthy worker is ended with its target at a stop","target":{"pid":2086619,"state":"held at a Break stop","round":"20","observedBy":"worker","observedAtRunMs":1092,"certainty":"observed"},"at":"2026-11-17T11:43:31.8249482Z"}
+{"act":"discarded","worker":2086607,"ended":true,"ms":0,"at":"2026-11-17T11:43:31.8258686Z"}
+{"act":"kill-target","pid":2086619,"reason":"probe 106\u0027s own target still running 60 s after its last session","beat":"20","at":"2026-11-17T11:44:52.2149804Z"}
+{"act":"discard-worker","worker":2086876,"reason":"held-target: the healthy worker is ended with its target at a stop","target":{"pid":2086886,"state":"held at a Break stop","round":"21","observedBy":"worker","observedAtRunMs":1154,"certainty":"observed"},"at":"2026-11-17T11:44:53.3722493Z"}
+{"act":"discarded","worker":2086876,"ended":true,"ms":1,"at":"2026-11-17T11:44:53.3738313Z"}
+{"act":"kill-target","pid":2086886,"reason":"probe 106\u0027s own target still running 60 s after its last session","beat":"21","at":"2026-11-17T11:46:13.8029667Z"}
+{"act":"discard-worker","worker":2087138,"reason":"held-target: the healthy worker is ended with its target at a stop","target":{"pid":2087147,"state":"held at a Break stop","round":"20","observedBy":"worker","observedAtRunMs":1147,"certainty":"observed"},"at":"2026-11-17T11:46:14.9517837Z"}
+{"act":"discarded","worker":2087138,"ended":true,"ms":1,"at":"2026-11-17T11:46:14.9537150Z"}
+{"act":"kill-target","pid":2087147,"reason":"probe 106\u0027s own target still running 60 s after its last session","beat":"20","at":"2026-11-17T11:47:35.2860301Z"}
+{"act":"discard-worker","worker":2087405,"reason":"held-target: the healthy worker is ended with its target at a stop","target":{"pid":2087415,"state":"held at a Break stop","round":"20","observedBy":"worker","observedAtRunMs":1112,"certainty":"observed"},"at":"2026-11-17T11:47:36.4009211Z"}
+{"act":"discarded","worker":2087405,"ended":true,"ms":0,"at":"2026-11-17T11:47:36.4019413Z"}
+{"act":"kill-target","pid":2087415,"reason":"probe 106\u0027s own target still running 60 s after its last session","beat":"20","at":"2026-11-17T11:48:56.9148183Z"}
+{"act":"discard-worker","worker":2087669,"reason":"held-target: the healthy worker is ended with its target at a stop","target":{"pid":2087679,"state":"held at a Break stop","round":"20","observedBy":"worker","observedAtRunMs":1126,"certainty":"observed"},"at":"2026-11-17T11:48:58.0420059Z"}
+{"act":"discarded","worker":2087669,"ended":true,"ms":1,"at":"2026-11-17T11:48:58.0433033Z"}
+{"act":"kill-target","pid":2087679,"reason":"probe 106\u0027s own target still running 60 s after its last session","beat":"20","at":"2026-11-17T11:50:18.4087921Z"}
+{"act":"discard-worker","worker":2087931,"reason":"held-target: the healthy worker is ended with its target at a stop","target":{"pid":2087941,"state":"held at a Break stop","round":"20","observedBy":"worker","observedAtRunMs":1110,"certainty":"observed"},"at":"2026-11-17T11:50:19.5225668Z"}
+{"act":"discarded","worker":2087931,"ended":true,"ms":1,"at":"2026-11-17T11:50:19.5242620Z"}
+{"act":"kill-target","pid":2087941,"reason":"probe 106\u0027s own target still running 60 s after its last session","beat":"20","at":"2026-11-17T11:51:40.0553287Z"}
+{"act":"discard-worker","worker":2088200,"reason":"held-target: the healthy worker is ended with its target at a stop","target":{"pid":2088211,"state":"held at a Break stop","round":"20","observedBy":"worker","observedAtRunMs":1124,"certainty":"observed"},"at":"2026-11-17T11:51:41.1817882Z"}
+{"act":"discarded","worker":2088200,"ended":true,"ms":1,"at":"2026-11-17T11:51:41.1836117Z"}
+{"act":"kill-target","pid":2088211,"reason":"probe 106\u0027s own target still running 60 s after its last session","beat":"20","at":"2026-11-17T11:53:01.7250306Z"}
+{"act":"discard-worker","worker":2088512,"reason":"held-target: the healthy worker is ended with its target at a stop","target":{"pid":2088521,"state":"held at a Break stop","round":"21","observedBy":"worker","observedAtRunMs":1153,"certainty":"observed"},"at":"2026-11-17T11:53:02.8805945Z"}
+{"act":"discarded","worker":2088512,"ended":true,"ms":1,"at":"2026-11-17T11:53:02.8824311Z"}
+{"act":"kill-target","pid":2088521,"reason":"probe 106\u0027s own target still running 60 s after its last session","beat":"21","at":"2026-11-17T11:54:23.4081817Z"}
+{"act":"discard-worker","worker":2088776,"reason":"held-target: the healthy worker is ended with its target at a stop","target":{"pid":2088787,"state":"held at a Break stop","round":"20","observedBy":"worker","observedAtRunMs":1139,"certainty":"observed"},"at":"2026-11-17T11:54:24.5509144Z"}
+{"act":"discarded","worker":2088776,"ended":true,"ms":1,"at":"2026-11-17T11:54:24.5526255Z"}
+{"act":"kill-target","pid":2088787,"reason":"probe 106\u0027s own target still running 60 s after its last session","beat":"20","at":"2026-11-17T11:55:45.0686334Z"}
+{"act":"discard-worker","worker":2089039,"reason":"held-target: the healthy worker is ended with its target at a stop","target":{"pid":2089049,"state":"held at a Break stop","round":"20","observedBy":"worker","observedAtRunMs":1142,"certainty":"observed"},"at":"2026-11-17T11:55:46.2135492Z"}
+{"act":"discarded","worker":2089039,"ended":true,"ms":1,"at":"2026-11-17T11:55:46.2151699Z"}
+{"act":"kill-target","pid":2089049,"reason":"probe 106\u0027s own target still running 60 s after its last session","beat":"20","at":"2026-11-17T11:57:06.4956927Z"}
+{"act":"discard-worker","worker":2089305,"reason":"held-target: the healthy worker is ended with its target at a stop","target":{"pid":2089314,"state":"held at a Break stop","round":"20","observedBy":"worker","observedAtRunMs":1108,"certainty":"observed"},"at":"2026-11-17T11:57:07.6076991Z"}
+{"act":"discarded","worker":2089305,"ended":true,"ms":1,"at":"2026-11-17T11:57:07.6094868Z"}
+{"act":"kill-target","pid":2089314,"reason":"probe 106\u0027s own target still running 60 s after its last session","beat":"20","at":"2026-11-17T11:58:27.9726421Z"}
+{"act":"discard-worker","worker":2089570,"reason":"held-target: the healthy worker is ended with its target at a stop","target":{"pid":2089579,"state":"held at a Break stop","round":"20","observedBy":"worker","observedAtRunMs":1135,"certainty":"observed"},"at":"2026-11-17T11:58:29.1112599Z"}
+{"act":"discarded","worker":2089570,"ended":true,"ms":1,"at":"2026-11-17T11:58:29.1128391Z"}
+{"act":"kill-target","pid":2089579,"reason":"probe 106\u0027s own target still running 60 s after its last session","beat":"20","at":"2026-11-17T11:59:49.4694150Z"}
+{"act":"discard-worker","worker":2089831,"reason":"held-target: the healthy worker is ended with its target at a stop","target":{"pid":2089843,"state":"held at a Break stop","round":"20","observedBy":"worker","observedAtRunMs":1111,"certainty":"observed"},"at":"2026-11-17T11:59:50.5825164Z"}
+{"act":"discarded","worker":2089831,"ended":true,"ms":1,"at":"2026-11-17T11:59:50.5836106Z"}
+{"act":"kill-target","pid":2089843,"reason":"probe 106\u0027s own target still running 60 s after its last session","beat":"20","at":"2026-11-17T12:01:10.9460934Z"}
+{"act":"discard-worker","worker":2090100,"reason":"held-target: the healthy worker is ended with its target at a stop","target":{"pid":2090109,"state":"held at a Break stop","round":"20","observedBy":"worker","observedAtRunMs":1128,"certainty":"observed"},"at":"2026-11-17T12:01:12.0762516Z"}
+{"act":"discarded","worker":2090100,"ended":true,"ms":1,"at":"2026-11-17T12:01:12.0780307Z"}
+{"act":"kill-target","pid":2090109,"reason":"probe 106\u0027s own target still running 60 s after its last session","beat":"20","at":"2026-11-17T12:02:32.5910236Z"}
+{"act":"discard-worker","worker":2090363,"reason":"held-target: the healthy worker is ended with its target at a stop","target":{"pid":2090374,"state":"held at a Break stop","round":"20","observedBy":"worker","observedAtRunMs":1103,"certainty":"observed"},"at":"2026-11-17T12:02:33.6950476Z"}
+{"act":"discarded","worker":2090363,"ended":true,"ms":1,"at":"2026-11-17T12:02:33.6966297Z"}
+{"act":"kill-target","pid":2090374,"reason":"probe 106\u0027s own target still running 60 s after its last session","beat":"20","at":"2026-11-17T12:03:54.0752898Z"}
+{"act":"discard-worker","worker":2090626,"reason":"held-target: the healthy worker is ended with its target at a stop","target":{"pid":2090636,"state":"held at a Break stop","round":"20","observedBy":"worker","observedAtRunMs":1129,"certainty":"observed"},"at":"2026-11-17T12:03:55.2065530Z"}
+{"act":"discarded","worker":2090626,"ended":true,"ms":1,"at":"2026-11-17T12:03:55.2077333Z"}
+{"act":"kill-target","pid":2090636,"reason":"probe 106\u0027s own target still running 60 s after its last session","beat":"20","at":"2026-11-17T12:05:15.7028426Z"}
+{"act":"discard-worker","worker":2090904,"reason":"held-target: the healthy worker is ended with its target at a stop","target":{"pid":2090914,"state":"held at a Break stop","round":"20","observedBy":"worker","observedAtRunMs":1110,"certainty":"observed"},"at":"2026-11-17T12:05:16.8158168Z"}
+{"act":"discarded","worker":2090904,"ended":true,"ms":1,"at":"2026-11-17T12:05:16.8175253Z"}
+{"act":"kill-target","pid":2090914,"reason":"probe 106\u0027s own target still running 60 s after its last session","beat":"20","at":"2026-11-17T12:06:37.3335701Z"}
+{"act":"discard-worker","worker":2123842,"reason":"suspected unresponsive: a command not answered within its bound","target":{"pid":2123851,"state":"crashed: gone (the worker\u0027s report)","observedBy":"worker","certainty":"reported by a worker later suspected"},"at":"2026-11-17T12:07:50.5455673Z"}
+{"act":"discarded","worker":2123842,"ended":true,"ms":4,"at":"2026-11-17T12:07:50.5498838Z"}
+{"act":"discard-worker","worker":2142756,"reason":"suspected unresponsive: a command not answered within its bound","target":{"pid":2142765,"state":"crashed: gone (the worker\u0027s report)","observedBy":"worker","certainty":"reported by a worker later suspected"},"at":"2026-11-17T12:08:49.6594425Z"}
+{"act":"discarded","worker":2142756,"ended":true,"ms":4,"at":"2026-11-17T12:08:49.6640792Z"}
+{"act":"discard-worker","worker":2188472,"reason":"suspected unresponsive: a command not answered within its bound","target":{"pid":2188481,"state":"crashed: gone (the worker\u0027s report)","observedBy":"worker","certainty":"reported by a worker later suspected"},"at":"2026-11-17T12:10:19.5155204Z"}
+{"act":"discarded","worker":2188472,"ended":true,"ms":4,"at":"2026-11-17T12:10:19.5202071Z"}
+{"act":"discard-worker","worker":2226041,"reason":"suspected unresponsive: a command not answered within its bound","target":{"pid":2226050,"state":"crashed: gone (the worker\u0027s report)","observedBy":"worker","certainty":"reported by a worker later suspected"},"at":"2026-11-17T12:11:40.3443595Z"}
+{"act":"discarded","worker":2226041,"ended":true,"ms":4,"at":"2026-11-17T12:11:40.3489817Z"}
+{"act":"discard-worker","worker":2232536,"reason":"suspected unresponsive: a command not answered within its bound","target":{"pid":2232548,"state":"crashed: gone (the worker\u0027s report)","observedBy":"worker","certainty":"reported by a worker later suspected"},"at":"2026-11-17T12:12:22.4605353Z"}
+{"act":"discarded","worker":2232536,"ended":true,"ms":4,"at":"2026-11-17T12:12:22.4650846Z"}
+{"act":"discard-worker","worker":2234976,"reason":"suspected unresponsive: a command not answered within its bound","target":{"pid":2234985,"state":"crashed: gone (the worker\u0027s report)","observedBy":"worker","certainty":"reported by a worker later suspected"},"at":"2026-11-17T12:13:00.9825622Z"}
+{"act":"discarded","worker":2234976,"ended":true,"ms":4,"at":"2026-11-17T12:13:00.9873874Z"}
+{"act":"discard-worker","worker":2246882,"reason":"suspected unresponsive: a command not answered within its bound","target":{"pid":2246891,"state":"crashed: gone (the worker\u0027s report)","observedBy":"worker","certainty":"reported by a worker later suspected"},"at":"2026-11-17T12:13:46.8619231Z"}
+{"act":"discarded","worker":2246882,"ended":true,"ms":4,"at":"2026-11-17T12:13:46.8662904Z"}
+{"act":"discard-worker","worker":2258140,"reason":"suspected unresponsive: a command not answered within its bound","target":{"pid":2258149,"state":"crashed: gone (the worker\u0027s report)","observedBy":"worker","certainty":"reported by a worker later suspected"},"at":"2026-11-17T12:14:35.9402511Z"}
+{"act":"discarded","worker":2258140,"ended":true,"ms":4,"at":"2026-11-17T12:14:35.9446173Z"}
+{"act":"discard-worker","worker":2268618,"reason":"suspected unresponsive: a command not answered within its bound","target":{"pid":2268627,"state":"crashed: gone (the worker\u0027s report)","observedBy":"worker","certainty":"reported by a worker later suspected"},"at":"2026-11-17T12:15:19.2580151Z"}
+{"act":"discarded","worker":2268618,"ended":true,"ms":4,"at":"2026-11-17T12:15:19.2630462Z"}
+{"act":"discard-worker","worker":2288358,"reason":"suspected unresponsive: a command not answered within its bound","target":{"pid":2288367,"state":"crashed: gone (the worker\u0027s report)","observedBy":"worker","certainty":"reported by a worker later suspected"},"at":"2026-11-17T12:16:18.4893392Z"}
+{"act":"discarded","worker":2288358,"ended":true,"ms":5,"at":"2026-11-17T12:16:18.4960022Z"}
+{"act":"discard-worker","worker":2290026,"reason":"suspected unresponsive: a command not answered within its bound","target":{"pid":2290035,"state":"crashed: gone (the worker\u0027s report)","observedBy":"worker","certainty":"reported by a worker later suspected"},"at":"2026-11-17T12:16:56.9289993Z"}
+{"act":"discarded","worker":2290026,"ended":true,"ms":4,"at":"2026-11-17T12:16:56.9338789Z"}
+{"act":"discard-worker","worker":2296073,"reason":"suspected unresponsive: a command not answered within its bound","target":{"pid":2296082,"state":"crashed: gone (the worker\u0027s report)","observedBy":"worker","certainty":"reported by a worker later suspected"},"at":"2026-11-17T12:17:34.7622209Z"}
+{"act":"discarded","worker":2296073,"ended":true,"ms":4,"at":"2026-11-17T12:17:34.7666195Z"}
+{"act":"discard-worker","worker":2320028,"reason":"suspected unresponsive: a command not answered within its bound","target":{"pid":2320037,"state":"crashed: gone (the worker\u0027s report)","observedBy":"worker","certainty":"reported by a worker later suspected"},"at":"2026-11-17T12:18:33.0556939Z"}
+{"act":"discarded","worker":2320028,"ended":true,"ms":4,"at":"2026-11-17T12:18:33.0601481Z"}
+{"act":"discard-worker","worker":2332846,"reason":"suspected unresponsive: a command not answered within its bound","target":{"pid":2332858,"state":"crashed: gone (the worker\u0027s report)","observedBy":"worker","certainty":"reported by a worker later suspected"},"at":"2026-11-17T12:19:24.4162497Z"}
+{"act":"discarded","worker":2332846,"ended":true,"ms":4,"at":"2026-11-17T12:19:24.4205730Z"}
+{"act":"discard-worker","worker":2357273,"reason":"suspected unresponsive: a command not answered within its bound","target":{"pid":2357282,"state":"crashed: gone (the worker\u0027s report)","observedBy":"worker","certainty":"reported by a worker later suspected"},"at":"2026-11-17T12:20:29.1658775Z"}
+{"act":"discarded","worker":2357273,"ended":true,"ms":4,"at":"2026-11-17T12:20:29.1709183Z"}
+{"act":"discard-worker","worker":2361757,"reason":"suspected unresponsive: a command not answered within its bound","target":{"pid":2361766,"state":"crashed: gone (the worker\u0027s report)","observedBy":"worker","certainty":"reported by a worker later suspected"},"at":"2026-11-17T12:21:07.6542443Z"}
+{"act":"discarded","worker":2361757,"ended":true,"ms":4,"at":"2026-11-17T12:21:07.6589653Z"}
+{"act":"discard-worker","worker":2415695,"reason":"suspected unresponsive: a command not answered within its bound","target":{"pid":2415704,"state":"crashed: gone (the worker\u0027s report)","observedBy":"worker","certainty":"reported by a worker later suspected"},"at":"2026-11-17T12:22:55.8087003Z"}
+{"act":"discarded","worker":2415695,"ended":true,"ms":4,"at":"2026-11-17T12:22:55.8135205Z"}
