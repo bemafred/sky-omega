@@ -212,7 +212,7 @@ public class PruningTests : IDisposable
         _source.AddCurrent("<http://example.org/s2>", "<http://example.org/p>", "<http://example.org/o2>");
         _source.DeleteCurrent("<http://example.org/s1>", "<http://example.org/p>", "<http://example.org/o1>");
 
-        // Transfer with default options (FlattenToCurrent)
+        // Transfer: a prune keeps what is remembered (ADR-061 D12; the times are in PruneKeepsWhatIsRememberedTests)
         var transfer = new PruningTransfer(_source, _target!);
         var result = transfer.Execute();
 
@@ -221,92 +221,6 @@ public class PruningTests : IDisposable
         Assert.Equal(1, result.TotalScanned); // Only current quads scanned
         Assert.Equal(1, result.TotalMatched);
         Assert.Equal(1, result.TotalWritten);
-    }
-
-    [Fact]
-    public void HistoryMode_PreserveVersions_TransfersAllVersions()
-    {
-        CreateStores();
-
-        // Add a quad with history (simulate by adding multiple versions)
-        _source!.Add("<http://example.org/s>", "<http://example.org/p>", "<http://example.org/v1>",
-            DateTimeOffset.UtcNow.AddDays(-2), DateTimeOffset.UtcNow.AddDays(-1));
-        _source.Add("<http://example.org/s>", "<http://example.org/p>", "<http://example.org/v2>",
-            DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.MaxValue);
-
-        // Transfer with history preservation
-        var options = new TransferOptions
-        {
-            HistoryMode = HistoryMode.PreserveVersions
-        };
-        var transfer = new PruningTransfer(_source, _target!, options);
-        var result = transfer.Execute();
-
-        // Verify - both versions transferred
-        Assert.True(result.Success);
-        Assert.Equal(2, result.TotalScanned);
-        Assert.Equal(2, result.TotalMatched);
-        Assert.Equal(2, result.TotalWritten);
-    }
-
-    [Fact]
-    public void HistoryMode_PreserveVersions_KeepsADeletedFactAsHistory()
-    {
-        // ADR-054 D1: a delete ends the fact, so the version is history, not a retraction.
-        CreateStores();
-        var t0 = DateTimeOffset.UtcNow.AddHours(-2);
-        _source!.Add("<http://example.org/s>", "<http://example.org/status>", "\"open\"", t0, DateTimeOffset.MaxValue);
-        _source.DeleteCurrent("<http://example.org/s>", "<http://example.org/status>", "\"open\"");
-
-        var options = new TransferOptions { HistoryMode = HistoryMode.PreserveVersions };
-        var result = new PruningTransfer(_source, _target!, options).Execute();
-
-        Assert.True(result.Success);
-        Assert.Equal(1, result.TotalWritten);
-        _target!.AcquireReadLock();
-        try
-        {
-            var past = _target.QueryAsOf("<http://example.org/s>", "<http://example.org/status>", "\"open\"", t0.AddHours(1));
-            Assert.True(past.MoveNext(), "The ended fact is in the target's past view");
-            past.Dispose();
-            var now = _target.QueryCurrent("<http://example.org/s>", "<http://example.org/status>", "\"open\"");
-            Assert.False(now.MoveNext(), "and not current");
-            now.Dispose();
-        }
-        finally
-        {
-            _target.ReleaseReadLock();
-        }
-    }
-
-    [Fact]
-    public void HistoryMode_PreserveAll_KeepsARetractedVersionRetracted()
-    {
-        CreateStores();
-        var t0 = DateTimeOffset.UtcNow.AddHours(-2);
-        _source!.Add("<http://example.org/s>", "<http://example.org/p>", "\"wrong\"", t0, DateTimeOffset.MaxValue);
-        Assert.True(_source.Retract("<http://example.org/s>", "<http://example.org/p>", "\"wrong\"", t0, DateTimeOffset.MaxValue));
-
-        var options = new TransferOptions { HistoryMode = HistoryMode.PreserveAll };
-        var result = new PruningTransfer(_source, _target!, options).Execute();
-
-        Assert.True(result.Success);
-        Assert.Equal(1, result.TotalWritten);
-        _target!.AcquireReadLock();
-        try
-        {
-            var past = _target.QueryAsOf("<http://example.org/s>", "<http://example.org/p>", "\"wrong\"", t0.AddHours(1));
-            Assert.False(past.MoveNext(), "A retracted version does not hold again in the target");
-            past.Dispose();
-            var history = _target.QueryEvolution("<http://example.org/s>", "<http://example.org/p>", "\"wrong\"");
-            Assert.True(history.MoveNext());
-            Assert.True(history.Current.LegacyIsDeleted, "It is kept, as a retraction");
-            history.Dispose();
-        }
-        finally
-        {
-            _target.ReleaseReadLock();
-        }
     }
 
     [Fact]
@@ -477,18 +391,14 @@ public class PruningTests : IDisposable
             "<http://example.org/g>",
             "<http://example.org/s>",
             "<http://example.org/p>",
-            "<http://example.org/o>",
-            DateTimeOffset.MinValue,
-            DateTimeOffset.MaxValue));
+            "<http://example.org/o>"));
 
         // Also empty values
         Assert.True(filter.ShouldInclude(
             ReadOnlySpan<char>.Empty,
             ReadOnlySpan<char>.Empty,
             ReadOnlySpan<char>.Empty,
-            ReadOnlySpan<char>.Empty,
-            DateTimeOffset.MinValue,
-            DateTimeOffset.MaxValue));
+            ReadOnlySpan<char>.Empty));
     }
 
     [Fact]
@@ -501,18 +411,14 @@ public class PruningTests : IDisposable
             ReadOnlySpan<char>.Empty,
             "<http://example.org/s>",
             "<http://example.org/p>",
-            "<http://example.org/o>",
-            DateTimeOffset.MinValue,
-            DateTimeOffset.MaxValue));
+            "<http://example.org/o>"));
 
         // Named graph should fail
         Assert.False(filter.ShouldInclude(
             "<http://example.org/graph>",
             "<http://example.org/s>",
             "<http://example.org/p>",
-            "<http://example.org/o>",
-            DateTimeOffset.MinValue,
-            DateTimeOffset.MaxValue));
+            "<http://example.org/o>"));
     }
 
     [Fact]
@@ -527,26 +433,20 @@ public class PruningTests : IDisposable
             "<http://example.org/graph1>",
             "<http://example.org/s>",
             "<http://example.org/other>",
-            "<http://example.org/o>",
-            DateTimeOffset.MinValue,
-            DateTimeOffset.MaxValue));
+            "<http://example.org/o>"));
 
         // Matches predicate
         Assert.True(filter.ShouldInclude(
             "<http://example.org/graph2>",
             "<http://example.org/s>",
             "<http://example.org/important>",
-            "<http://example.org/o>",
-            DateTimeOffset.MinValue,
-            DateTimeOffset.MaxValue));
+            "<http://example.org/o>"));
 
         // Matches neither
         Assert.False(filter.ShouldInclude(
             "<http://example.org/graph2>",
             "<http://example.org/s>",
             "<http://example.org/other>",
-            "<http://example.org/o>",
-            DateTimeOffset.MinValue,
-            DateTimeOffset.MaxValue));
+            "<http://example.org/o>"));
     }
 }

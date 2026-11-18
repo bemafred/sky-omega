@@ -76,7 +76,6 @@ public static class PruneEngine
             // Build transfer options
             var transferOptions = new TransferOptions
             {
-                HistoryMode = options.HistoryMode,
                 DryRun = options.DryRun
             };
 
@@ -84,7 +83,6 @@ public static class PruneEngine
             {
                 transferOptions = new TransferOptions
                 {
-                    HistoryMode = options.HistoryMode,
                     DryRun = options.DryRun,
                     Filter = filter
                 };

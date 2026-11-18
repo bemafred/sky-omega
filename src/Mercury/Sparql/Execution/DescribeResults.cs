@@ -24,7 +24,7 @@ internal ref struct DescribeResults
     private int _graph;
     private bool _asSubject;
     private bool _open;
-    private TemporalResultEnumerator _currentEnumerator;
+    private ResultEnumerator _currentEnumerator;
 
     private ConstructedTriple _current;
     private char[]? _outputBuffer;

@@ -4,444 +4,202 @@ using SkyOmega.Mercury.Runtime;
 namespace SkyOmega.Mercury.Examples;
 
 /// <summary>
-/// Examples demonstrating bitemporal querying capabilities
+/// The store's clock, set by an example to show writes a day apart. A store's two times are readings of its own clock,
+/// taken at the write (ADR-061 D1, I11): no writer states one.
+/// </summary>
+internal sealed class ExampleClock : TimeProvider
+{
+    public DateTimeOffset Reading = new(2031, 1, 1, 0, 0, 0, TimeSpan.Zero);
+    public override DateTimeOffset GetUtcNow() => Reading;
+}
+
+/// <summary>
+/// Examples of memory time on a Cognitive store (ADR-061). Each period of a fact has two times: when the store memorized
+/// it and when it forgot it. When something happened in the world is content, a triple of its own (D3).
 /// </summary>
 public static class TemporalExamples
 {
     public static void RunAll()
     {
-        Console.WriteLine("=== Sky Omega Temporal RDF Examples ===");
+        Console.WriteLine("=== Sky Omega Memory Time Examples ===");
         Console.WriteLine();
 
-        Example_BasicTemporal();
-        Example_TimeTravelQuery();
-        Example_VersionTracking();
-        Example_TemporalRangeQuery();
-        Example_BiTemporalCorrections();
-        Example_EvolutionTracking();
-        Example_SnapshotReconstruction();
-        Example_TemporalPersistence();
+        Example_MemorizeAndForget();
+        Example_WhatWasRememberedAtATime();
+        Example_MemorizedSince();
+        Example_RememberedAgain();
+        Example_Persistence();
     }
 
-    public static void Example_BasicTemporal()
+    public static void Example_MemorizeAndForget()
     {
-        Console.WriteLine("Example: Basic Temporal Triples");
-        Console.WriteLine("--------------------------------");
-
-        var dbPath = TempPath.Example("temporal-basic").FullPath;
-        if (Directory.Exists(dbPath))
-            Directory.Delete(dbPath, true);
-
-        using var store = new QuadStore(dbPath);
-
-        // Alice worked at Anthropic from 2020 to 2023
-        store.Add(
-            "<http://ex.org/alice>",
-            "<http://ex.org/worksFor>",
-            "<http://ex.org/Anthropic>",
-            new DateTimeOffset(2020, 1, 1, 0, 0, 0, TimeSpan.Zero),
-            new DateTimeOffset(2023, 6, 30, 0, 0, 0, TimeSpan.Zero)
-        );
-
-        // Alice works at OpenAI from 2023 onwards
-        store.Add(
-            "<http://ex.org/alice>",
-            "<http://ex.org/worksFor>",
-            "<http://ex.org/OpenAI>",
-            new DateTimeOffset(2023, 7, 1, 0, 0, 0, TimeSpan.Zero),
-            DateTimeOffset.MaxValue
-        );
-
-        // Query current state
-        Console.WriteLine("\nCurrent state (2025):");
-        var current = store.QueryCurrent(
-            "<http://ex.org/alice>",
-            "<http://ex.org/worksFor>",
-            ReadOnlySpan<char>.Empty
-        );
-
-        while (current.MoveNext())
-        {
-            var triple = current.Current;
-            Console.WriteLine($"  {triple.Subject.ToString()} works for {triple.Object.ToString()}");
-            Console.WriteLine($"    Valid: {triple.MemorizedAt:yyyy-MM-dd} to {triple.ForgottenAt:yyyy-MM-dd}");
-        }
-
-        Console.WriteLine();
-    }
-
-    public static void Example_TimeTravelQuery()
-    {
-        Console.WriteLine("Example: Time-Travel Queries");
+        Console.WriteLine("Example: Memorize and Forget");
         Console.WriteLine("----------------------------");
 
-        var dbPath = TempPath.Example("timetravel").FullPath;
+        var dbPath = TempPath.Example("memory-basic").FullPath;
         if (Directory.Exists(dbPath))
             Directory.Delete(dbPath, true);
 
-        using var store = new QuadStore(dbPath);
+        var clock = new ExampleClock();
+        using var store = new QuadStore(dbPath, null, null, new StorageOptions { Clock = clock });
 
-        // Create employment history
-        var periods = new[]
-        {
-            ("Google", new DateTimeOffset(2015, 1, 1, 0, 0, 0, TimeSpan.Zero), new DateTimeOffset(2018, 12, 31, 0, 0, 0, TimeSpan.Zero)),
-            ("Anthropic", new DateTimeOffset(2019, 1, 1, 0, 0, 0, TimeSpan.Zero), new DateTimeOffset(2022, 6, 30, 0, 0, 0, TimeSpan.Zero)),
-            ("OpenAI", new DateTimeOffset(2022, 7, 1, 0, 0, 0, TimeSpan.Zero), DateTimeOffset.MaxValue)
-        };
+        // A SPARQL INSERT memorizes; a DELETE forgets, and the period stays in the store with both times
+        store.AddCurrent("<http://ex.org/alice>", "<http://ex.org/status>", "\"on leave\"");
+        clock.Reading = clock.Reading.AddDays(10);
+        store.DeleteCurrent("<http://ex.org/alice>", "<http://ex.org/status>", "\"on leave\"");
+        store.AddCurrent("<http://ex.org/alice>", "<http://ex.org/status>", "\"at work\"");
 
-        foreach (var (company, from, to) in periods)
+        Console.WriteLine("\nWhat is remembered:");
+        var current = store.QueryCurrent("<http://ex.org/alice>", "<http://ex.org/status>", ReadOnlySpan<char>.Empty);
+        while (current.MoveNext())
+            Console.WriteLine($"  {current.Current.Subject.ToString()} {current.Current.Object.ToString()}");
+        current.Dispose();
+
+        Console.WriteLine("\nEvery period, forgotten ones too:");
+        var every = store.QueryMemories("<http://ex.org/alice>", "<http://ex.org/status>", ReadOnlySpan<char>.Empty,
+            includingForgotten: true);
+        while (every.MoveNext())
         {
-            store.Add(
-                "<http://ex.org/bob>",
-                "<http://ex.org/worksFor>",
-                $"<http://ex.org/{company}>",
-                from,
-                to
-            );
+            var memory = every.Current;
+            var forgotten = memory.ForgottenAt is { } at ? $"{at:yyyy-MM-dd}" : "(remembered)";
+            Console.WriteLine($"  {memory.Object.ToString()}: memorized {memory.MemorizedAt:yyyy-MM-dd}, forgotten {forgotten}");
         }
+        every.Dispose();
 
-        // Time-travel queries
-        var queryDates = new[]
+        Console.WriteLine();
+    }
+
+    public static void Example_WhatWasRememberedAtATime()
+    {
+        Console.WriteLine("Example: What Was Remembered at a Time");
+        Console.WriteLine("--------------------------------------");
+
+        var dbPath = TempPath.Example("memory-at-a-time").FullPath;
+        if (Directory.Exists(dbPath))
+            Directory.Delete(dbPath, true);
+
+        var clock = new ExampleClock();
+        using var store = new QuadStore(dbPath, null, null, new StorageOptions { Clock = clock });
+
+        var day0 = clock.Reading;
+        store.AddCurrent("<http://ex.org/bob>", "<http://ex.org/project>", "<http://ex.org/Alpha>");
+        clock.Reading = day0.AddDays(30);
+        store.DeleteCurrent("<http://ex.org/bob>", "<http://ex.org/project>", "<http://ex.org/Alpha>");
+        store.AddCurrent("<http://ex.org/bob>", "<http://ex.org/project>", "<http://ex.org/Beta>");
+
+        // What was remembered at t is two reads (ADR-061 Q10), with b one millisecond after t: what was memorized
+        // before b and is remembered, and what was memorized before b and forgotten since b
+        foreach (var t in new[] { day0.AddDays(15), day0.AddDays(45) })
         {
-            new DateTimeOffset(2017, 6, 1, 0, 0, 0, TimeSpan.Zero),
-            new DateTimeOffset(2020, 6, 1, 0, 0, 0, TimeSpan.Zero),
-            new DateTimeOffset(2024, 6, 1, 0, 0, 0, TimeSpan.Zero)
-        };
-
-        foreach (var date in queryDates)
-        {
-            Console.WriteLine($"\nWhere did Bob work on {date:yyyy-MM-dd}?");
-
-            var results = store.TimeTravelTo(
-                date,
-                "<http://ex.org/bob>",
-                "<http://ex.org/worksFor>",
-                ReadOnlySpan<char>.Empty
-            );
-
-            if (results.MoveNext())
-            {
-                var triple = results.Current;
-                Console.WriteLine($"  Answer: {triple.Object.ToString()}");
-            }
+            Console.WriteLine($"\nWhat was remembered on {t:yyyy-MM-dd}?");
+            var b = t.AddMilliseconds(1);
+            var remembered = store.QueryMemories("<http://ex.org/bob>", "<http://ex.org/project>", ReadOnlySpan<char>.Empty,
+                memorizedBefore: b);
+            while (remembered.MoveNext())
+                Console.WriteLine($"  {remembered.Current.Object.ToString()}");
+            remembered.Dispose();
+            var forgottenSince = store.QueryMemories("<http://ex.org/bob>", "<http://ex.org/project>", ReadOnlySpan<char>.Empty,
+                memorizedBefore: b, forgottenSince: b);
+            while (forgottenSince.MoveNext())
+                Console.WriteLine($"  {forgottenSince.Current.Object.ToString()}");
+            forgottenSince.Dispose();
         }
 
         Console.WriteLine();
     }
 
-    public static void Example_VersionTracking()
+    public static void Example_MemorizedSince()
     {
-        Console.WriteLine("Example: Version Tracking");
-        Console.WriteLine("-------------------------");
+        Console.WriteLine("Example: What Was Memorized Since a Time");
+        Console.WriteLine("----------------------------------------");
 
-        var dbPath = TempPath.Example("versions").FullPath;
+        var dbPath = TempPath.Example("memory-since").FullPath;
         if (Directory.Exists(dbPath))
             Directory.Delete(dbPath, true);
 
-        using var store = new QuadStore(dbPath);
+        var clock = new ExampleClock();
+        using var store = new QuadStore(dbPath, null, null, new StorageOptions { Clock = clock });
 
-        // Track salary changes over time
-        var salaryHistory = new[]
+        var day0 = clock.Reading;
+        for (int day = 0; day < 5; day++)
         {
-            (80000, new DateTimeOffset(2020, 1, 1, 0, 0, 0, TimeSpan.Zero), new DateTimeOffset(2021, 1, 1, 0, 0, 0, TimeSpan.Zero)),
-            (90000, new DateTimeOffset(2021, 1, 1, 0, 0, 0, TimeSpan.Zero), new DateTimeOffset(2022, 1, 1, 0, 0, 0, TimeSpan.Zero)),
-            (100000, new DateTimeOffset(2022, 1, 1, 0, 0, 0, TimeSpan.Zero), new DateTimeOffset(2023, 1, 1, 0, 0, 0, TimeSpan.Zero)),
-            (120000, new DateTimeOffset(2023, 1, 1, 0, 0, 0, TimeSpan.Zero), DateTimeOffset.MaxValue)
-        };
-
-        foreach (var (salary, from, to) in salaryHistory)
-        {
-            store.Add(
-                "<http://ex.org/charlie>",
-                "<http://ex.org/salary>",
-                $"\"{salary}\"",
-                from,
-                to
-            );
+            clock.Reading = day0.AddDays(day);
+            store.AddCurrent("<http://ex.org/notes>", "<http://ex.org/entry>", $"\"note {day}\"");
         }
 
-        // Query all versions
-        Console.WriteLine("\nSalary evolution:");
-        var evolution = store.QueryEvolution(
-            "<http://ex.org/charlie>",
-            "<http://ex.org/salary>",
-            ReadOnlySpan<char>.Empty
-        );
-
-        int version = 1;
-        while (evolution.MoveNext())
-        {
-            var triple = evolution.Current;
-            Console.WriteLine($"  Version {version}: {triple.Object.ToString()}");
-            Console.WriteLine($"    Period: {triple.MemorizedAt:yyyy-MM-dd} to {triple.ForgottenAt:yyyy-MM-dd}");
-            version++;
-        }
+        var since = day0.AddDays(3);
+        Console.WriteLine($"\nMemorized since {since:yyyy-MM-dd}:");
+        var recent = store.QueryMemories("<http://ex.org/notes>", "<http://ex.org/entry>", ReadOnlySpan<char>.Empty,
+            memorizedSince: since);
+        while (recent.MoveNext())
+            Console.WriteLine($"  {recent.Current.Object.ToString()} ({recent.Current.MemorizedAt:yyyy-MM-dd})");
+        recent.Dispose();
 
         Console.WriteLine();
     }
 
-    public static void Example_TemporalRangeQuery()
+    public static void Example_RememberedAgain()
     {
-        Console.WriteLine("Example: Temporal Range Queries");
+        Console.WriteLine("Example: A Fact Remembered Again");
         Console.WriteLine("--------------------------------");
 
-        var dbPath = TempPath.Example("range").FullPath;
+        var dbPath = TempPath.Example("memory-again").FullPath;
         if (Directory.Exists(dbPath))
             Directory.Delete(dbPath, true);
 
-        using var store = new QuadStore(dbPath);
+        var clock = new ExampleClock();
+        using var store = new QuadStore(dbPath, null, null, new StorageOptions { Clock = clock });
 
-        // Track project assignments
-        var projects = new[]
-        {
-            ("ProjectAlpha", new DateTimeOffset(2023, 1, 1, 0, 0, 0, TimeSpan.Zero), new DateTimeOffset(2023, 3, 31, 0, 0, 0, TimeSpan.Zero)),
-            ("ProjectBeta", new DateTimeOffset(2023, 4, 1, 0, 0, 0, TimeSpan.Zero), new DateTimeOffset(2023, 6, 30, 0, 0, 0, TimeSpan.Zero)),
-            ("ProjectGamma", new DateTimeOffset(2023, 7, 1, 0, 0, 0, TimeSpan.Zero), new DateTimeOffset(2023, 9, 30, 0, 0, 0, TimeSpan.Zero)),
-            ("ProjectDelta", new DateTimeOffset(2023, 10, 1, 0, 0, 0, TimeSpan.Zero), new DateTimeOffset(2023, 12, 31, 0, 0, 0, TimeSpan.Zero))
-        };
+        // Memorized, forgotten at a later reading and memorized again at a reading after that: two periods
+        store.AddCurrent("<http://ex.org/carol>", "<http://ex.org/likes>", "<http://ex.org/tea>");
+        clock.Reading = clock.Reading.AddDays(7);
+        store.DeleteCurrent("<http://ex.org/carol>", "<http://ex.org/likes>", "<http://ex.org/tea>");
+        clock.Reading = clock.Reading.AddDays(7);
+        store.AddCurrent("<http://ex.org/carol>", "<http://ex.org/likes>", "<http://ex.org/tea>");
 
-        foreach (var (project, from, to) in projects)
+        Console.WriteLine("\nThe periods of one fact:");
+        var periods = store.QueryMemories("<http://ex.org/carol>", "<http://ex.org/likes>", "<http://ex.org/tea>",
+            includingForgotten: true);
+        while (periods.MoveNext())
         {
-            store.Add(
-                "<http://ex.org/dana>",
-                "<http://ex.org/assignedTo>",
-                $"<http://ex.org/{project}>",
-                from,
-                to
-            );
+            var memory = periods.Current;
+            var forgotten = memory.ForgottenAt is { } at ? $"{at:yyyy-MM-dd}" : "(remembered)";
+            Console.WriteLine($"  memorized {memory.MemorizedAt:yyyy-MM-dd}, forgotten {forgotten}");
         }
-
-        // Query what happened during Q2 2023
-        Console.WriteLine("\nProjects during Q2 2023 (April-June):");
-        var q2Results = store.QueryChanges(
-            new DateTimeOffset(2023, 4, 1, 0, 0, 0, TimeSpan.Zero),
-            new DateTimeOffset(2023, 6, 30, 0, 0, 0, TimeSpan.Zero),
-            "<http://ex.org/dana>",
-            "<http://ex.org/assignedTo>",
-            ReadOnlySpan<char>.Empty
-        );
-
-        while (q2Results.MoveNext())
-        {
-            var triple = q2Results.Current;
-            Console.WriteLine($"  {triple.Object.ToString()}");
-            Console.WriteLine($"    Duration: {triple.MemorizedAt:yyyy-MM-dd} to {triple.ForgottenAt:yyyy-MM-dd}");
-        }
+        periods.Dispose();
 
         Console.WriteLine();
     }
 
-    public static void Example_BiTemporalCorrections()
+    public static void Example_Persistence()
     {
-        Console.WriteLine("Example: Bitemporal Corrections");
+        Console.WriteLine("Example: Memory Time Persistence");
         Console.WriteLine("--------------------------------");
 
-        var dbPath = TempPath.Example("bitemporal").FullPath;
+        var dbPath = TempPath.Example("memory-persist").FullPath;
         if (Directory.Exists(dbPath))
             Directory.Delete(dbPath, true);
 
-        using var store = new QuadStore(dbPath);
-
-        // Initially recorded: Eve worked at Acme from 2020-2023
-        store.Add(
-            "<http://ex.org/eve>",
-            "<http://ex.org/worksFor>",
-            "<http://ex.org/Acme>",
-            new DateTimeOffset(2020, 1, 1, 0, 0, 0, TimeSpan.Zero),
-            new DateTimeOffset(2023, 1, 1, 0, 0, 0, TimeSpan.Zero)
-        );
-
-        // Later discovered: Actually left in 2022
-        store.Add(
-            "<http://ex.org/eve>",
-            "<http://ex.org/worksFor>",
-            "<http://ex.org/Acme>",
-            new DateTimeOffset(2020, 1, 1, 0, 0, 0, TimeSpan.Zero),
-            new DateTimeOffset(2022, 12, 31, 0, 0, 0, TimeSpan.Zero)
-        );
-
-        Console.WriteLine("Bitemporal model explained:");
-        Console.WriteLine("  Valid-time: When fact was true in reality");
-        Console.WriteLine("  Transaction-time: When fact was recorded in DB");
-        Console.WriteLine("\n  This enables:");
-        Console.WriteLine("    - What we KNOW now about the past");
-        Console.WriteLine("    - What we KNEW then about the past");
-        Console.WriteLine("    - When our knowledge changed");
-        Console.WriteLine();
-    }
-
-    public static void Example_EvolutionTracking()
-    {
-        Console.WriteLine("Example: Entity Evolution Tracking");
-        Console.WriteLine("-----------------------------------");
-
-        var dbPath = TempPath.Example("evolution").FullPath;
-        if (Directory.Exists(dbPath))
-            Directory.Delete(dbPath, true);
-
-        using var store = new QuadStore(dbPath);
-
-        // Track organization name changes
-        var names = new[]
+        var clock = new ExampleClock();
+        Console.WriteLine("Phase 1: Creating the store...");
+        using (var store = new QuadStore(dbPath, null, null, new StorageOptions { Clock = clock }))
         {
-            ("Twitter", new DateTimeOffset(2006, 7, 15, 0, 0, 0, TimeSpan.Zero), new DateTimeOffset(2023, 7, 24, 0, 0, 0, TimeSpan.Zero)),
-            ("X Corp", new DateTimeOffset(2023, 7, 24, 0, 0, 0, TimeSpan.Zero), DateTimeOffset.MaxValue)
-        };
-
-        foreach (var (name, from, to) in names)
-        {
-            store.Add(
-                "<http://ex.org/company1>",
-                "<http://ex.org/hasName>",
-                $"\"{name}\"",
-                from,
-                to
-            );
-        }
-
-        // Track CEO changes
-        var ceos = new[]
-        {
-            ("Jack Dorsey", new DateTimeOffset(2006, 7, 15, 0, 0, 0, TimeSpan.Zero), new DateTimeOffset(2008, 10, 16, 0, 0, 0, TimeSpan.Zero)),
-            ("Evan Williams", new DateTimeOffset(2008, 10, 16, 0, 0, 0, TimeSpan.Zero), new DateTimeOffset(2010, 10, 4, 0, 0, 0, TimeSpan.Zero)),
-            ("Dick Costolo", new DateTimeOffset(2010, 10, 4, 0, 0, 0, TimeSpan.Zero), new DateTimeOffset(2015, 7, 1, 0, 0, 0, TimeSpan.Zero)),
-            ("Jack Dorsey", new DateTimeOffset(2015, 7, 1, 0, 0, 0, TimeSpan.Zero), new DateTimeOffset(2021, 11, 29, 0, 0, 0, TimeSpan.Zero)),
-            ("Parag Agrawal", new DateTimeOffset(2021, 11, 29, 0, 0, 0, TimeSpan.Zero), new DateTimeOffset(2022, 10, 27, 0, 0, 0, TimeSpan.Zero)),
-            ("Elon Musk", new DateTimeOffset(2022, 10, 27, 0, 0, 0, TimeSpan.Zero), DateTimeOffset.MaxValue)
-        };
-
-        foreach (var (ceo, from, to) in ceos)
-        {
-            store.Add(
-                "<http://ex.org/company1>",
-                "<http://ex.org/hasCEO>",
-                $"<http://ex.org/{ceo.Replace(" ", "")}>",
-                from,
-                to
-            );
-        }
-
-        // Query evolution
-        Console.WriteLine("\nCompany evolution (first 5 entries):");
-        var evolution = store.QueryEvolution(
-            "<http://ex.org/company1>",
-            ReadOnlySpan<char>.Empty,
-            ReadOnlySpan<char>.Empty
-        );
-
-        int count = 0;
-        while (evolution.MoveNext() && count < 5)
-        {
-            var triple = evolution.Current;
-            Console.WriteLine($"  {triple.Predicate.ToString()}: {triple.Object.ToString()}");
-            Console.WriteLine($"    {triple.MemorizedAt:yyyy-MM-dd} to {triple.ForgottenAt:yyyy-MM-dd}");
-            count++;
-        }
-
-        Console.WriteLine();
-    }
-
-    public static void Example_SnapshotReconstruction()
-    {
-        Console.WriteLine("Example: Historical Snapshot Reconstruction");
-        Console.WriteLine("-------------------------------------------");
-
-        var dbPath = TempPath.Example("snapshot").FullPath;
-        if (Directory.Exists(dbPath))
-            Directory.Delete(dbPath, true);
-
-        using var store = new QuadStore(dbPath);
-
-        // Build knowledge base about a country over time
-        store.Add("<http://ex.org/Country1>", "<http://ex.org/population>", "\"10M\"",
-            new DateTimeOffset(2000, 1, 1, 0, 0, 0, TimeSpan.Zero),
-            new DateTimeOffset(2010, 1, 1, 0, 0, 0, TimeSpan.Zero));
-
-        store.Add("<http://ex.org/Country1>", "<http://ex.org/population>", "\"12M\"",
-            new DateTimeOffset(2010, 1, 1, 0, 0, 0, TimeSpan.Zero),
-            new DateTimeOffset(2020, 1, 1, 0, 0, 0, TimeSpan.Zero));
-
-        store.Add("<http://ex.org/Country1>", "<http://ex.org/population>", "\"13M\"",
-            new DateTimeOffset(2020, 1, 1, 0, 0, 0, TimeSpan.Zero),
-            DateTimeOffset.MaxValue);
-
-        store.Add("<http://ex.org/Country1>", "<http://ex.org/capital>", "<http://ex.org/CityA>",
-            new DateTimeOffset(1950, 1, 1, 0, 0, 0, TimeSpan.Zero),
-            new DateTimeOffset(2015, 1, 1, 0, 0, 0, TimeSpan.Zero));
-
-        store.Add("<http://ex.org/Country1>", "<http://ex.org/capital>", "<http://ex.org/CityB>",
-            new DateTimeOffset(2015, 1, 1, 0, 0, 0, TimeSpan.Zero),
-            DateTimeOffset.MaxValue);
-
-        // Reconstruct snapshot at 2012
-        Console.WriteLine("\nSnapshot of Country1 on 2012-01-01:");
-        var snapshot = store.TimeTravelTo(
-            new DateTimeOffset(2012, 1, 1, 0, 0, 0, TimeSpan.Zero),
-            "<http://ex.org/Country1>",
-            ReadOnlySpan<char>.Empty,
-            ReadOnlySpan<char>.Empty
-        );
-
-        while (snapshot.MoveNext())
-        {
-            var triple = snapshot.Current;
-            Console.WriteLine($"  {triple.Predicate.ToString()}: {triple.Object.ToString()}");
-        }
-
-        Console.WriteLine();
-    }
-
-    public static void Example_TemporalPersistence()
-    {
-        Console.WriteLine("Example: Temporal Database Persistence");
-        Console.WriteLine("---------------------------------------");
-
-        var dbPath = TempPath.Example("temporal-persist").FullPath;
-        if (Directory.Exists(dbPath))
-            Directory.Delete(dbPath, true);
-
-        // Phase 1: Create and populate
-        Console.WriteLine("Phase 1: Creating temporal database...");
-
-        using (var store = new QuadStore(dbPath))
-        {
-            for (int year = 2020; year <= 2024; year++)
+            for (int day = 0; day < 5; day++)
             {
-                store.Add(
-                    "<http://ex.org/metric>",
-                    "<http://ex.org/value>",
-                    $"\"{year * 100}\"",
-                    new DateTimeOffset(year, 1, 1, 0, 0, 0, TimeSpan.Zero),
-                    new DateTimeOffset(year + 1, 1, 1, 0, 0, 0, TimeSpan.Zero)
-                );
+                clock.Reading = clock.Reading.AddDays(1);
+                store.AddCurrent("<http://ex.org/metric>", "<http://ex.org/value>", $"\"{day * 100}\"");
             }
-
-            var stats = store.GetStatistics();
-            Console.WriteLine($"  Temporal triples: {stats.QuadCount:N0}");
+            Console.WriteLine($"  Memories: {store.GetStatistics().QuadCount:N0}");
         }
+        Console.WriteLine("  Store closed");
 
-        Console.WriteLine("  Database closed");
-
-        // Phase 2: Reopen and verify
-        Console.WriteLine("\nPhase 2: Reopening temporal database...");
-
-        using (var store = new QuadStore(dbPath))
+        Console.WriteLine("\nPhase 2: Reopening...");
+        using (var store = new QuadStore(dbPath, null, null, new StorageOptions { Clock = clock }))
         {
-            var stats = store.GetStatistics();
-            Console.WriteLine($"  Temporal triples recovered: {stats.QuadCount:N0}");
-
-            var results = store.QueryAsOf(
-                "<http://ex.org/metric>",
-                "<http://ex.org/value>",
-                ReadOnlySpan<char>.Empty,
-                new DateTimeOffset(2022, 6, 1, 0, 0, 0, TimeSpan.Zero)
-            );
-
-            if (results.MoveNext())
-            {
-                var triple = results.Current;
-                Console.WriteLine($"  Value in 2022: {triple.Object.ToString()}");
-            }
+            var first = store.QueryMemories("<http://ex.org/metric>", "<http://ex.org/value>", "\"0\"");
+            if (first.MoveNext())
+                Console.WriteLine($"  \"0\" was memorized {first.Current.MemorizedAt:yyyy-MM-dd}, as before");
+            first.Dispose();
         }
 
         Console.WriteLine("  Persistence verified\n");
@@ -449,35 +207,31 @@ public static class TemporalExamples
 
     public static void DemoCapabilities()
     {
-        Console.WriteLine("=== Sky Omega Temporal Capabilities ===");
+        Console.WriteLine("=== Sky Omega Memory Time ===");
         Console.WriteLine();
 
-        Console.WriteLine("Bitemporal Model:");
-        Console.WriteLine("  - Valid Time (VT): When fact is true in reality");
-        Console.WriteLine("  - Transaction Time (TT): When fact recorded in DB");
+        Console.WriteLine("Memory time (ADR-061):");
+        Console.WriteLine("  - Memorized: the store's clock reading when it took a fact in");
+        Console.WriteLine("  - Forgotten: the reading when it let the fact go; absent while it is remembered");
+        Console.WriteLine("  - When something happened in the world is content: a triple of its own");
         Console.WriteLine();
 
-        Console.WriteLine("Query Types:");
-        Console.WriteLine("  - Point-in-time: What was true at time T?");
-        Console.WriteLine("  - Range: What changed between T1 and T2?");
-        Console.WriteLine("  - Evolution: Show all versions");
-        Console.WriteLine("  - Current: What is true now?");
+        Console.WriteLine("Cognitive SPARQL:");
+        Console.WriteLine("  - ?s ?p ?o MEMORIZED ?t SINCE a BEFORE b");
+        Console.WriteLine("  - ?s ?p ?o FORGOTTEN ?t SINCE a BEFORE b");
+        Console.WriteLine("  - ... INCLUDING FORGOTTEN, after the query");
+        Console.WriteLine("  - Without the words: what is remembered");
         Console.WriteLine();
 
         Console.WriteLine("Use Cases:");
-        Console.WriteLine("  - Audit trails: Who changed what and when?");
-        Console.WriteLine("  - Historical analysis: Reconstruct past states");
-        Console.WriteLine("  - Data corrections: Fix errors without losing history");
-        Console.WriteLine("  - Trend analysis: Track changes over time");
-        Console.WriteLine("  - Compliance: Prove what was known when");
+        Console.WriteLine("  - What did we memorize last week?");
+        Console.WriteLine("  - What was remembered on a given day?");
+        Console.WriteLine("  - What was forgotten, and when?");
         Console.WriteLine();
 
         Console.WriteLine("Storage:");
-        Console.WriteLine("  - 4 indexes: SPOT, POST, OSPT, TSPO");
-        Console.WriteLine("  - 80-byte temporal entries");
-        Console.WriteLine("  - 204 entries per 16KB page");
+        Console.WriteLine("  - 4 indexes: GSPO, GPOS, GOSP, TGSP");
         Console.WriteLine("  - Memory-mapped B+Trees (persistent)");
-        Console.WriteLine("  - Scales to billions of temporal triples");
         Console.WriteLine();
     }
 }

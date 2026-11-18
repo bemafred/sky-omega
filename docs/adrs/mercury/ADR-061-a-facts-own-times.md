@@ -1133,6 +1133,57 @@ this ADR do not answer goes to Martin.
     included; the solution: 6,879 passed, 160 skipped, 0 failed.
   - **Not done here:** the documents and the `lucy` skill still describe the old clauses (P8). A release with P6 and
     not P8 would leave them describing clauses that are gone.
+- **P7: done 2026-11-18**, on omega, on Martin's word the same day ("Start and push."): one removal (D2), with
+  [ADR-062](ADR-062-what-a-read-yields.md)'s part two, and the copy of P4 that carries a time.
+  - **The writes.** `Add` and `AddBatched` with stated times, `Retract` and `RetractBatched` are gone: no writer states
+    a time, and nothing writes a Retract record or marks an entry retracted. A log written before this step is
+    replayed as it was written: its Add, End and Retract records keep their meaning, and an entry an older Mercury
+    retracted stays retracted. A rebuild carries the mark (I14).
+  - **The reads follow the words.** `QueryAsOf`, `TimeTravelTo`, `QueryChanges`, `QueryEvolution` and `Query` with a
+    `TemporalQueryType` are gone, and the enum with them. `QueryCurrent` reads what is remembered on every profile.
+    `QueryMemories` reads a Cognitive store with the bounds of `MEMORIZED`, `FORGOTTEN` and `INCLUDING FORGOTTEN`,
+    taken as the words take them. What was remembered at a time is two reads (Q10).
+  - **TGSP.** No read chooses it: the one that did was the time-range read. The store still writes and rebuilds it.
+    Its tests read it through one internal read, to check that the four indexes agree (I13).
+  - **The result types and the public names** are ADR-062 D6's: `ResolvedQuad` and `ResultEnumerator` on every
+    profile; `ResolvedTemporalQuad` and `TemporalResultEnumerator`, which wraps the other, on Cognitive. A remembered
+    memory's `ForgottenAt` is absent (I8). The legacy members and `RetractedAt` are gone. The engine binds the two times
+    from the common enumerator. Mercury has 30 public types.
+  - **The copy that carries a time** (D12), from P4. The dependency is direct: P7 needs pruning to stop stating times,
+    and D12 decides what replaces its three modes.
+    - There is one way to prune: what is remembered is copied, each memory with the time it was memorized, and nothing
+      that is forgotten.
+    - `HistoryMode` and the CLI's `--history` are gone. The CLI refuses `--history` and says why: ignoring it would
+      prune away the forgotten memories its user asked to keep.
+    - A filter no longer sees times. Today's graph and predicate filters stay as the selection until Martin decides
+      the selection query's form (P4).
+    - A prune does not yet report a disagreement between the source's copies (I19); that is P4's.
+  - **Found and fixed:** the statistics a Cognitive store collects read GPOS as of the clock's reading. They now read
+    what is remembered (D7). The two differed only for a period written by `Add` with a stated time.
+  - **Tests.**
+    - `PruneKeepsWhatIsRememberedTests`: the three tests of Step 7, and a quad remembered again, 9 cases in all. Five
+      failed before the change, each because the prune's reading stood where the memorized time should be.
+    - `QueryMemoriesTests`: 8 cases. `MemoryWordsTests` gains a test of the words in the merge of two FROM graphs.
+    - The tests that stated times or retracted were rewritten on the store's clock, and on log records an older
+      Mercury wrote, appended and replayed: `DeleteEndsValidTimeTests`, `CognitiveRebuildTests` and others.
+    - Removed: the tests of reads over stated valid times (`QuadStoreTests`, 16), `Retract`'s own (2), the history
+      modes' (5; `PruneEngineTests` has one test of the one way in their place), and `Add` with a stated time setting
+      the session flag (1).
+    - The two tests of the legacy transaction time now check the memorized time, the stamp that stays.
+    - Eight mutations, one at a time, each failed at least one test:
+      - the copy stamped with the prune's reading;
+      - a prune that copies forgotten memories;
+      - a remembered memory's stored open time given out as its forgotten time;
+      - `includingForgotten` ignored;
+      - a bound rounded down;
+      - TGSP not written, found through its one read;
+      - the scan binding the forgotten time as the memorized one;
+      - a merge giving the first graph's times.
+    - `Mercury.Tests`: 6,484 passed, 156 skipped, 0 failed, the W3C suites included. The solution, before the merge
+      test was added: 6,873 passed, 160 skipped, 0 failed.
+  - **Not tested:** the CLI's refusal of `--history`, which no test reaches; any platform but omega. The probes in
+    `tools/probes` that call the removed methods are left as they ran: each records a measurement at a named commit.
+  - **Not done here:** the documents (P8, and ADR-062 Step 8 but for the count of public types in `CLAUDE.md`).
 
 1. **Martin's review** of this text — **done 2026-11-14**, with the decision closure. The later part is reviewed on
    its own.
@@ -1170,12 +1221,15 @@ this ADR do not answer goes to Martin.
    `QueryEvolution` go or change.
    - **One change with ADR-062's part two** (ADR-062 D8): the two result types and the public names change here, so the
      public surface changes once.
+   - **Done 2026-11-18** (P7, see Progress).
 7. **Pruning** (D12): one way to prune, the remembered memories with their memorized times, a selection query, and the
    internal copy that carries a time. Tests:
    - a pruned store answers the default view and every `MEMORIZED` question about what is remembered as its source
      did;
    - a `FORGOTTEN` question on it finds nothing;
    - a source in which everything is forgotten gives an empty store.
+   - **Done 2026-11-18 but for the selection query** (P7, see Progress): the one way to prune, the internal copy and the
+     three tests. The selection query waits for Martin's decision on its form, and the report of I19 is not built.
 8. **Consumers:**
    - the `lucy` skill's recency recall uses `MEMORIZED`, and its temporal modes are rewritten;
    - the agent stops stamping `dcterms:created`;

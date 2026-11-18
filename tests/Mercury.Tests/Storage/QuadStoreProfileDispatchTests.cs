@@ -95,7 +95,7 @@ public class QuadStoreProfileDispatchTests : IDisposable
         using var store = new QuadStore(dir, null, null, new StorageOptions { Profile = StoreProfile.Reference });
 
         var ex = Assert.Throws<ProfileCapabilityException>(() =>
-            store.Add("s", "p", "o", DateTimeOffset.UtcNow, DateTimeOffset.MaxValue));
+            store.AddCurrent("s", "p", "o"));
         Assert.Contains("Reference", ex.Message);
         Assert.Contains("ADR-029", ex.Message);
     }
@@ -162,14 +162,14 @@ public class QuadStoreProfileDispatchTests : IDisposable
         using var store = new QuadStore(dir, null, null, new StorageOptions { Profile = StoreProfile.Reference });
 
         Assert.Throws<ProfileCapabilityException>(() =>
-            store.Retract("s", "p", "o", DateTimeOffset.MinValue, DateTimeOffset.MaxValue));
+            store.DeleteCurrent("s", "p", "o"));
     }
 
     [Fact]
     public void Reference_QueryCurrent_Succeeds()
     {
         // Session 6: QueryCurrent works for Reference (current state is the only state).
-        // QueryAsOf with a specific past time still throws — that's an explicit time-travel.
+        // A read of memories with their times throws: Reference keeps no times (ADR-062 D2).
         var dir = NewStoreDir("ref_query");
         Directory.CreateDirectory(dir);
         using var store = new QuadStore(dir, null, null, new StorageOptions { Profile = StoreProfile.Reference });
@@ -180,10 +180,9 @@ public class QuadStoreProfileDispatchTests : IDisposable
         Assert.False(enumerator.MoveNext());
         enumerator.Dispose();
 
-        // Explicit time-travel (QueryAsOf) still rejected — Reference has no history.
         var ex = Assert.Throws<ProfileCapabilityException>(() =>
-            store.QueryAsOf(ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty,
-                DateTimeOffset.UtcNow));
+            store.QueryMemories(ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty,
+                memorizedBefore: DateTimeOffset.UtcNow));
         Assert.Contains("temporal", ex.Message);
     }
 
@@ -195,11 +194,10 @@ public class QuadStoreProfileDispatchTests : IDisposable
         using var store = new QuadStore(dir, null, null, new StorageOptions { Profile = StoreProfile.Reference });
 
         Assert.Throws<ProfileCapabilityException>(() =>
-            store.QueryChanges(DateTimeOffset.MinValue, DateTimeOffset.MaxValue));
+            store.QueryMemories(ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty,
+                forgottenSince: DateTimeOffset.MinValue, forgottenBefore: DateTimeOffset.MaxValue));
         Assert.Throws<ProfileCapabilityException>(() =>
-            store.QueryEvolution(ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty));
-        Assert.Throws<ProfileCapabilityException>(() =>
-            store.TimeTravelTo(DateTimeOffset.UtcNow));
+            store.QueryMemories(ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty, includingForgotten: true));
     }
 
     [Fact]
@@ -234,7 +232,7 @@ public class QuadStoreProfileDispatchTests : IDisposable
         {
             Assert.Equal(StoreProfile.Reference, reopened.Schema.Profile);
             Assert.Throws<ProfileCapabilityException>(() =>
-                reopened.Add("s", "p", "o", DateTimeOffset.UtcNow, DateTimeOffset.MaxValue));
+                reopened.AddCurrent("s", "p", "o"));
         }
     }
 

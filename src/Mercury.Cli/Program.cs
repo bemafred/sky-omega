@@ -738,7 +738,6 @@ static PruneResult ExecutePrune(QuadStorePool pool, string args)
 {
     // Parse prune args
     bool dryRun = false;
-    var historyMode = HistoryMode.FlattenToCurrent;
     var excludeGraphs = new List<string>();
     var excludePredicates = new List<string>();
 
@@ -750,14 +749,12 @@ static PruneResult ExecutePrune(QuadStorePool pool, string args)
             case "--dry-run":
                 dryRun = true;
                 break;
-            case "--history" when i + 1 < parts.Length:
-                historyMode = parts[++i].ToLowerInvariant() switch
-                {
-                    "preserve" => HistoryMode.PreserveVersions,
-                    "all" => HistoryMode.PreserveAll,
-                    _ => HistoryMode.FlattenToCurrent
-                };
-                break;
+            case "--history":
+                // The history modes are gone (ADR-061 D12). Accepting the option and ignoring it would prune away the
+                // forgotten memories its user asked to keep.
+                throw new ArgumentException(
+                    "--history is gone: a prune keeps what is remembered, each memory with the time it was memorized, " +
+                    "and nothing that is forgotten (ADR-061 D12). To keep everything, copy the store.");
             case "--exclude-graph" when i + 1 < parts.Length:
                 excludeGraphs.Add(parts[++i]);
                 break;
@@ -770,7 +767,6 @@ static PruneResult ExecutePrune(QuadStorePool pool, string args)
     var options = new PruneOptions
     {
         DryRun = dryRun,
-        HistoryMode = historyMode,
         ExcludeGraphs = excludeGraphs.Count > 0 ? excludeGraphs.ToArray() : null,
         ExcludePredicates = excludePredicates.Count > 0 ? excludePredicates.ToArray() : null
     };

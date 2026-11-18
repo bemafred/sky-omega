@@ -14,11 +14,11 @@ namespace SkyOmega.Mercury.Sparql.Execution;
 /// </remarks>
 internal struct MergedGraphEnumerator
 {
-    private TemporalResultEnumerator _single;
+    private ResultEnumerator _single;
     private readonly GraphMerge? _merge;
 
     /// <summary>The matches of one graph.</summary>
-    public MergedGraphEnumerator(TemporalResultEnumerator single)
+    public MergedGraphEnumerator(ResultEnumerator single)
     {
         _single = single;
         _merge = null;
@@ -33,7 +33,13 @@ internal struct MergedGraphEnumerator
 
     public bool MoveNext() => _merge?.MoveNext() ?? _single.MoveNext();
 
-    public ResolvedTemporalQuad Current => _merge == null ? _single.Current : _merge.Current;
+    public ResolvedQuad Current => _merge == null ? _single.Current : _merge.Current;
+
+    /// <summary>When the matched period was memorized (<see cref="ResultEnumerator.MemorizedAt"/>).</summary>
+    public long? MemorizedAt => _merge == null ? _single.MemorizedAt : _merge.MemorizedAt;
+
+    /// <summary>When the matched period was forgotten (<see cref="ResultEnumerator.ForgottenAt"/>).</summary>
+    public long? ForgottenAt => _merge == null ? _single.ForgottenAt : _merge.ForgottenAt;
 
     public void Dispose()
     {
@@ -56,7 +62,7 @@ internal struct MergedGraphEnumerator
 /// </remarks>
 internal sealed class GraphMerge
 {
-    private readonly TemporalResultEnumerator[] _reads;
+    private readonly ResultEnumerator[] _reads;
     private readonly string[] _graphs;
     private readonly QuadStore _store;
     private readonly TemporalScope _scope;
@@ -66,7 +72,7 @@ internal sealed class GraphMerge
     /// <param name="graphs">The FROM graphs.</param>
     /// <param name="store">The store a match is looked up in, in the earlier graphs.</param>
     /// <param name="scope">The temporal scope of the reads and of the lookups.</param>
-    public GraphMerge(TemporalResultEnumerator[] reads, string[] graphs, QuadStore store, TemporalScope scope)
+    public GraphMerge(ResultEnumerator[] reads, string[] graphs, QuadStore store, TemporalScope scope)
     {
         _reads = reads;
         _graphs = graphs;
@@ -89,10 +95,14 @@ internal sealed class GraphMerge
         return false;
     }
 
-    public ResolvedTemporalQuad Current => _reads[_index].Current;
+    public ResolvedQuad Current => _reads[_index].Current;
+
+    public long? MemorizedAt => _reads[_index].MemorizedAt;
+
+    public long? ForgottenAt => _reads[_index].ForgottenAt;
 
     /// <summary>Whether a FROM graph before the one being read holds <paramref name="quad"/>'s triple.</summary>
-    private bool InAnEarlierGraph(ResolvedTemporalQuad quad)
+    private bool InAnEarlierGraph(ResolvedQuad quad)
     {
         for (int i = 0; i < _index; i++)
         {

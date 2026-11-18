@@ -805,40 +805,6 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
     }
 
     /// <summary>
-    /// The periods that held at <paramref name="asOfTime"/>. Goes with <c>QueryAsOf</c> (ADR-061 Step 6).
-    /// </summary>
-    public QuadIndexCursor QueryAsOf(
-        ReadOnlySpan<char> primary,
-        ReadOnlySpan<char> secondary,
-        ReadOnlySpan<char> tertiary,
-        DateTimeOffset asOfTime,
-        ReadOnlySpan<char> graph = default)
-        => Query(primary, secondary, tertiary, TemporalQuery.AsOf(asOfTime.ToUnixTimeMilliseconds()), graph);
-
-    /// <summary>
-    /// The periods that overlap <c>[rangeStart, rangeEnd)</c>. Goes with <c>QueryChanges</c> (ADR-061 Step 6).
-    /// </summary>
-    public QuadIndexCursor QueryRange(
-        ReadOnlySpan<char> primary,
-        ReadOnlySpan<char> secondary,
-        ReadOnlySpan<char> tertiary,
-        DateTimeOffset rangeStart,
-        DateTimeOffset rangeEnd,
-        ReadOnlySpan<char> graph = default)
-        => Query(primary, secondary, tertiary,
-            TemporalQuery.Overlapping(rangeStart.ToUnixTimeMilliseconds(), rangeEnd.ToUnixTimeMilliseconds()), graph);
-
-    /// <summary>
-    /// Every entry, retracted ones included. Goes with <c>QueryEvolution</c> (ADR-061 Step 6).
-    /// </summary>
-    public QuadIndexCursor QueryHistory(
-        ReadOnlySpan<char> primary,
-        ReadOnlySpan<char> secondary,
-        ReadOnlySpan<char> tertiary,
-        ReadOnlySpan<char> graph = default)
-        => Query(primary, secondary, tertiary, TemporalQuery.Everything, graph);
-
-    /// <summary>
     /// Resolve graph span to atom ID.
     /// Empty graph = 0 (default graph)
     /// Non-empty graph = atom ID, or -2 if not found (will match nothing)
@@ -999,7 +965,7 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
         // part, L1). New code does not read them.
         public long LegacyCreatedAt;       // The write's transaction time. Written, read by nothing.
         public long LegacyModifiedAt;      // Transaction time of the last End or Retract, else of the insert. Read to date
-                                           // a retraction: RetractedAt (until Step 6) and the ADR-054 repair.
+                                           // a retraction: the ADR-054 repair.
         public int LegacyVersion;          // Always 1. Written, read by nothing.
         public bool LegacyIsDeleted;       // Set by Retract (ADR-054 D2); every scan skips the entry, and the ADR-054
                                            // repair visits it. Nothing writes it once Retract goes (Step 6).
@@ -1587,8 +1553,9 @@ internal struct TemporalQuery
     public long MemorizedSince, MemorizedLatest, ForgottenSince, ForgottenLatest;
 
     /// <summary>
-    /// Legacy: whether a retracted entry (ADR-054 D2) is selected. Only <see cref="Everything"/> selects one. Goes
-    /// with Retract (ADR-061 Step 6).
+    /// Legacy: whether a retracted entry (ADR-054 D2) is selected. Only <see cref="Everything"/> selects one: the
+    /// store's own scans, which carry or repair every entry. Nothing marks an entry retracted since ADR-061 Step 6; the
+    /// mark goes with the stored layout (ADR-061 L1).
     /// </summary>
     public bool IncludesRetracted;
 
@@ -1647,11 +1614,16 @@ internal struct TemporalQuery
         }
         return times;
     }
-}
 
-public enum TemporalQueryType
-{
-    AsOf,      // Point-in-time query
-    Range,     // Time range query
-    AllTime    // All versions
+    /// <summary>
+    /// A bound at <paramref name="utcTicks"/>, as the first whole millisecond since the epoch at or after it: every
+    /// stored time is a whole millisecond, so <c>[a, b)</c> keeps the same stored times (ADR-061 D10). The words and
+    /// <see cref="QuadStore.QueryMemories"/> take their bounds by it.
+    /// </summary>
+    public static long Bound(long utcTicks)
+    {
+        long sinceEpoch = utcTicks - DateTime.UnixEpoch.Ticks;
+        long milliseconds = sinceEpoch / TimeSpan.TicksPerMillisecond;
+        return sinceEpoch % TimeSpan.TicksPerMillisecond > 0 ? milliseconds + 1 : milliseconds;
+    }
 }

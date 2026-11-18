@@ -832,7 +832,7 @@ public sealed class ReplSession : IDisposable
           :store            Show store folder path
           :attach, :a [target]  Attach to running instance (default: mcp)
           :count [pattern]  Count triples (optionally matching pattern)
-          :prune [options]  Compact the store (remove soft-deleted data)
+          :prune [options]  Compact the store: keep what is remembered, with its times
           :load, :l [--bulk] <file>  Load RDF file into store
           :convert <in> <out>        Streaming format conversion (no store)
           :rebuild-indexes           Build secondary indexes from GSPO
@@ -840,7 +840,6 @@ public sealed class ReplSession : IDisposable
 
         Prune options:
           --dry-run                    Preview without writing
-          --history preserve|all       History mode (default: flatten)
           --exclude-graph <iri>        Exclude graph from pruned store
           --exclude-predicate <iri>    Exclude predicate from pruned store
 

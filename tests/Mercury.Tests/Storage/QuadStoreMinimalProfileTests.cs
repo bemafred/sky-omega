@@ -189,14 +189,15 @@ public class QuadStoreMinimalProfileTests : IDisposable
     }
 
     [Fact]
-    public void Minimal_AsOfQuery_ThrowsProfileCapability()
+    public void Minimal_QueryMemories_ThrowsProfileCapability()
     {
-        var dir = NewStoreDir("asof_reject");
+        var dir = NewStoreDir("memories_reject");
         using var store = CreateMinimalStore(dir);
 
+        // A Minimal store keeps no times (ADR-064 D2), so it has no memories to give with them (ADR-062 D2)
         var ex = Assert.Throws<ProfileCapabilityException>(() =>
-            store.QueryAsOf("<http://ex/s>", "<http://ex/p>", "<http://ex/o>",
-                DateTimeOffset.UtcNow.AddDays(-1)));
+            store.QueryMemories("<http://ex/s>", "<http://ex/p>", "<http://ex/o>",
+                memorizedSince: DateTimeOffset.UtcNow.AddDays(-1)));
         Assert.Contains("Minimal", ex.Message);
     }
 

@@ -8,7 +8,8 @@ Accepted by Martin on 2026-11-15: "ADR-062 and ADR-063: Accepted, update the ADR
 D7 still holds: the mechanism of D3 is measured before it is fixed, and it changes if Steps 2 and 3 say so. Q3 (the
 names) was decided on 2026-11-15 for the cursor and the read operation, and on 2026-11-18 for the rest (D6). Q6 (the Graph profile's own version fields) was answered on 2026-11-16 by
 [ADR-064](ADR-064-a-facts-states.md). Steps 2 to 6 are done (2026-11-15 and 2026-11-16): part one, the cursor, is
-complete, and every read of an index goes through it.
+complete, and every read of an index goes through it. Step 7, the result types and the public names, is done
+(2026-11-18, with ADR-061 P7); Step 8, the documents, is left but for the count of public types in `CLAUDE.md`.
 
 Proposed — 2026-11-12.
 
@@ -563,7 +564,22 @@ reads through the cursor like any other; the Cognitive index's time selection is
 7. **The two result types** (D1, D2) **and the public names** (D6), in the change that removes and changes the public
    read methods (ADR-061 Step 6). The engine reads `ResolvedQuad` through `ResultEnumerator`. Pruning and the
    Cognitive tests read `ResolvedTemporalQuad` through `TemporalResultEnumerator`, which wraps it (D6). The made-up
-   values go.
+   values go. **Done 2026-11-18**, with ADR-061 P7, on Martin's word the same day:
+   - `ResultEnumerator` yields `ResolvedQuad` on every profile, and has two internal accessors for the times at its
+     position. Each is null when the store keeps no times; the forgotten time is null too while the memory is
+     remembered (ADR-061 I8). The engine binds `MEMORIZED` and `FORGOTTEN` from them, so it reads through the one
+     enumerator on every profile (D5).
+   - `TemporalResultEnumerator` holds a `ResultEnumerator` and has no loop of its own. Only `QueryMemories` returns it,
+     on Cognitive.
+   - `ResolvedTemporalQuad` is the quad, `MemorizedAt`, and `ForgottenAt`, absent while remembered. The made-up times,
+     `LegacyTransactionTime`, `LegacyIsDeleted` and `RetractedAt` are gone from every result.
+   - The cursor keeps its legacy fields: the store's own scans read them, the rebuild that carries every entry as it is
+     and the count of the entries two indexes disagree on. They go with the stored layout (ADR-061 L1).
+   - `TermOrder { SPO, POS, OSP }` replaces `TemporalIndexType`. `TemporalQueryType` is gone: no public read selects by
+     it.
+   - Public types: 30. `ResolvedQuad` and `ResultEnumerator` came, and `TemporalQueryType` went.
+   - Tests: ADR-061's P7 entry. `QueryMemoriesTests` holds the two-time type's own behaviour: the bounds, and the absent
+     forgotten time.
 8. **Documents:** ADR-003's list, the public type count in `CLAUDE.md`, `mercury-internals.md`, `api-usage.md`,
    `STATISTICS.md`.
 

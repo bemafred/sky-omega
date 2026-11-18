@@ -16,8 +16,9 @@ namespace SkyOmega.Mercury.Tests.Storage;
 /// its own (ADR-061 LQ5).
 ///
 /// The store chooses an index by the pattern of a read, so each index is read through the read it serves: the
-/// subject bound or nothing bound reads GSPO, the predicate alone GPOS, the object alone GOSP, and a time range TGSP.
-/// A range does not return a retracted period.
+/// subject bound or nothing bound reads GSPO, the predicate alone GPOS, the object alone GOSP. No read chooses TGSP,
+/// which is read through the store's one read of it. No read returns a retracted period: a rebuild that dropped the
+/// mark would make it remembered again, and the count the rebuild reports includes it.
 /// </summary>
 public class CognitiveRebuildTests : IDisposable
 {
@@ -38,8 +39,8 @@ public class CognitiveRebuildTests : IDisposable
     public void Dispose() => TempPath.SafeCleanup(_root);
 
     /// <summary>
-    /// What one index serves in one graph, one line per period, sorted: subject, object, the period in clock readings
-    /// (minutes after 2031-01-01), and when it was retracted. <paramref name="index"/> is GSPO, GPOS, GOSP or TGSP.
+    /// What one index serves in one graph, one line per period, sorted: subject, object, and the period in clock
+    /// readings (minutes after 2031-01-01). <paramref name="index"/> is GSPO, GPOS, GOSP or TGSP.
     /// </summary>
     private static List<string> PeriodsThrough(QuadStore store, string index, string graph, string[] objects)
     {
@@ -54,17 +55,16 @@ public class CognitiveRebuildTests : IDisposable
             {
                 var entries = index switch
                 {
-                    "GSPO" => store.QueryEvolution(default, default, default, graph),
-                    "GPOS" => store.QueryEvolution(default, P, default, graph),
-                    "GOSP" => store.QueryEvolution(default, default, objects[i], graph),
-                    _ => store.QueryChanges(DateTimeOffset.MinValue, DateTimeOffset.MaxValue, default, default, default, graph),
+                    "GSPO" => store.QueryMemories(default, default, default, graph, includingForgotten: true),
+                    "GPOS" => store.QueryMemories(default, P, default, graph, includingForgotten: true),
+                    "GOSP" => store.QueryMemories(default, default, objects[i], graph, includingForgotten: true),
+                    _ => store.QueryTimeFirstIndex(graph),
                 };
                 while (entries.MoveNext())
                 {
                     var e = entries.Current;
-                    var forgotten = e.ForgottenAt.Year >= 9000 ? "" : Minutes(e.ForgottenAt);
-                    var retracted = e.RetractedAt is { } r ? $" retracted {Minutes(r)}" : "";
-                    lines.Add($"{e.Subject.ToString()} {e.Object.ToString()} [{Minutes(e.MemorizedAt)}, {forgotten}){retracted}");
+                    var forgotten = e.ForgottenAt is { } f ? Minutes(f) : "";
+                    lines.Add($"{e.Subject.ToString()} {e.Object.ToString()} [{Minutes(e.MemorizedAt)}, {forgotten})");
                 }
                 entries.Dispose();
             }
@@ -84,6 +84,7 @@ public class CognitiveRebuildTests : IDisposable
 
         // In the default graph and in G alike: "one" is remembered; "two" was told, forgotten and told again; "three"
         // was told and then retracted, recorded in error.
+        var told = new List<(long Graph, long Subject, long Predicate, long Object)>();
         using (var store = new QuadStore(dir, null, null, options))
         {
             foreach (var graph in new[] { "", G })
@@ -98,13 +99,17 @@ public class CognitiveRebuildTests : IDisposable
                 store.AddCurrent("<urn:rebuild:s2>", P, "\"two\"", graph);
                 clock.Reading = Reading(5);
                 store.AddCurrent("<urn:rebuild:s3>", P, "\"three\"", graph);
-                clock.Reading = Reading(6);
-                Assert.True(store.Retract("<urn:rebuild:s3>", P, "\"three\"", Reading(5), DateTimeOffset.MaxValue, graph));
+                told.Add((graph == "" ? 0 : store.Atoms.GetAtomId(graph), store.Atoms.GetAtomId("<urn:rebuild:s3>"),
+                    store.Atoms.GetAtomId(P), store.Atoms.GetAtomId("\"three\"")));
             }
         }
+        // Nothing retracts since ADR-061 Step 6, and a store may still hold what a Mercury before it retracted. Here a
+        // log record of such a Mercury retracts "three", and the store replays it when it opens.
+        using (var wal = new WriteAheadLog(Path.Combine(dir, "wal.log")))
+            foreach (var quad in told)
+                wal.Append(LogRecord.CreateRetract(quad.Subject, quad.Predicate, quad.Object, Reading(5), DateTimeOffset.MaxValue,
+                    quad.Graph, transactionTimeTicks: Reading(6).ToUnixTimeMilliseconds()));
 
-        List<string> every = ["<urn:rebuild:s1> \"one\" [1, )", "<urn:rebuild:s2> \"two\" [2, 3)", "<urn:rebuild:s2> \"two\" [4, )",
-            "<urn:rebuild:s3> \"three\" [5, ) retracted 6"];
         List<string> notRetracted = ["<urn:rebuild:s1> \"one\" [1, )", "<urn:rebuild:s2> \"two\" [2, 3)", "<urn:rebuild:s2> \"two\" [4, )"];
 
         // The three secondary index files are lost.
@@ -118,7 +123,7 @@ public class CognitiveRebuildTests : IDisposable
         {
             foreach (var graph in new[] { "", G })
             {
-                Assert.Equal(every, PeriodsThrough(store, "GSPO", graph, objects));
+                Assert.Equal(notRetracted, PeriodsThrough(store, "GSPO", graph, objects));
                 Assert.Empty(PeriodsThrough(store, "GPOS", graph, objects));
                 Assert.Empty(PeriodsThrough(store, "GOSP", graph, objects));
                 Assert.Empty(PeriodsThrough(store, "TGSP", graph, objects));
@@ -128,11 +133,12 @@ public class CognitiveRebuildTests : IDisposable
             store.RebuildSecondaryIndexes((name, count) => rebuilt.Add((name, count)));
             Assert.Equal(new List<(string, long)> { ("GPOS", 8), ("GOSP", 8), ("TGSP", 8) }, rebuilt.GetRange(0, 3));
 
+            // The rebuilt indexes hold the eight entries, the two retracted ones too, and serve the six that are not
             foreach (var graph in new[] { "", G })
             {
-                Assert.Equal(every, PeriodsThrough(store, "GSPO", graph, objects));
-                Assert.Equal(every, PeriodsThrough(store, "GPOS", graph, objects));
-                Assert.Equal(every, PeriodsThrough(store, "GOSP", graph, objects));
+                Assert.Equal(notRetracted, PeriodsThrough(store, "GSPO", graph, objects));
+                Assert.Equal(notRetracted, PeriodsThrough(store, "GPOS", graph, objects));
+                Assert.Equal(notRetracted, PeriodsThrough(store, "GOSP", graph, objects));
                 Assert.Equal(notRetracted, PeriodsThrough(store, "TGSP", graph, objects));
             }
         }
@@ -143,8 +149,8 @@ public class CognitiveRebuildTests : IDisposable
         {
             foreach (var graph in new[] { "", G })
             {
-                Assert.Equal(every, PeriodsThrough(store, "GPOS", graph, objects));
-                Assert.Equal(every, PeriodsThrough(store, "GOSP", graph, objects));
+                Assert.Equal(notRetracted, PeriodsThrough(store, "GPOS", graph, objects));
+                Assert.Equal(notRetracted, PeriodsThrough(store, "GOSP", graph, objects));
                 Assert.Equal(notRetracted, PeriodsThrough(store, "TGSP", graph, objects));
             }
         }

@@ -33,7 +33,7 @@ public class StoreClockTests : IDisposable
     public void Dispose() => TempPath.SafeCleanup(_testDir);
 
     [Fact]
-    public void AddCurrent_StampsTheMemorizedTimeAndTheTransactionTime_WithOneReadingOfTheStoresClock()
+    public void AddCurrent_StampsTheMemorizedTime_WithAReadingOfTheStoresClock()
     {
         var reading = new DateTimeOffset(2031, 3, 4, 5, 6, 7, 890, TimeSpan.Zero);
         var clock = new SuppliedClock { Reading = reading };
@@ -44,10 +44,9 @@ public class StoreClockTests : IDisposable
         store.AcquireReadLock();
         try
         {
-            var entries = store.QueryEvolution(S, P, O);
+            var entries = store.QueryMemories(S, P, O, includingForgotten: true);
             Assert.True(entries.MoveNext());
             Assert.Equal(reading, entries.Current.MemorizedAt);
-            Assert.Equal(reading, entries.Current.LegacyTransactionTime);
             Assert.False(entries.MoveNext());
             entries.Dispose();
         }
@@ -72,7 +71,7 @@ public class StoreClockTests : IDisposable
         {
             foreach (var value in new[] { "\"first\"", "\"second\"" })
             {
-                var entries = store.QueryEvolution(S, P, value);
+                var entries = store.QueryMemories(S, P, value, includingForgotten: true);
                 Assert.True(entries.MoveNext());
                 Assert.Equal(began, entries.Current.MemorizedAt);
                 entries.Dispose();
@@ -96,7 +95,7 @@ public class StoreClockTests : IDisposable
         store.AcquireReadLock();
         try
         {
-            var entries = store.QueryEvolution(S, P, O);
+            var entries = store.QueryMemories(S, P, O, includingForgotten: true);
             Assert.True(entries.MoveNext());
             Assert.Equal(memorized, entries.Current.MemorizedAt);
             Assert.Equal(forgotten, entries.Current.ForgottenAt);

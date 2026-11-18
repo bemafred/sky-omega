@@ -44,7 +44,7 @@ public class MemoryTimeWriteRuleTests : IDisposable
 
     /// <summary>
     /// The periods of the quad (S, P, O), in time order, as each of the four indexes holds them: GSPO by the subject,
-    /// GPOS by the predicate, GOSP by the object, TGSP by a time range over all time. An absent forgotten time is
+    /// GPOS by the predicate, GOSP by the object, TGSP through the store's one read of it. An absent forgotten time is
     /// null. The four must agree (ADR-061 I13): the assertion that they do is here, so every test makes it.
     /// </summary>
     private static (DateTimeOffset MemorizedAt, DateTimeOffset? ForgottenAt)[] PeriodsInEveryIndex(QuadStore store)
@@ -57,17 +57,17 @@ public class MemoryTimeWriteRuleTests : IDisposable
             {
                 var entries = index switch
                 {
-                    0 => store.QueryEvolution(S, default, default),
-                    1 => store.QueryEvolution(default, P, default),
-                    2 => store.QueryEvolution(default, default, O),
-                    _ => store.QueryChanges(DateTimeOffset.MinValue, DateTimeOffset.MaxValue, default, default, default),
+                    0 => store.QueryMemories(S, default, default, includingForgotten: true),
+                    1 => store.QueryMemories(default, P, default, includingForgotten: true),
+                    2 => store.QueryMemories(default, default, O, includingForgotten: true),
+                    _ => store.QueryTimeFirstIndex(),
                 };
                 var periods = new List<(DateTimeOffset, DateTimeOffset?)>();
                 while (entries.MoveNext())
                 {
                     var entry = entries.Current;
                     if (entry.Subject.SequenceEqual(S) && entry.Predicate.SequenceEqual(P) && entry.Object.SequenceEqual(O))
-                        periods.Add((entry.MemorizedAt, entry.ForgottenAt.Year >= 9000 ? null : entry.ForgottenAt));
+                        periods.Add((entry.MemorizedAt, entry.ForgottenAt));
                 }
                 entries.Dispose();
                 periods.Sort();

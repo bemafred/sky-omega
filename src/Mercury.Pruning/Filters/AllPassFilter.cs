@@ -20,7 +20,5 @@ internal sealed class AllPassFilter : IPruningFilter
         ReadOnlySpan<char> graph,
         ReadOnlySpan<char> subject,
         ReadOnlySpan<char> predicate,
-        ReadOnlySpan<char> obj,
-        DateTimeOffset memorizedAt,
-        DateTimeOffset forgottenAt) => true;
+        ReadOnlySpan<char> obj) => true;
 }

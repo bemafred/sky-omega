@@ -46,15 +46,6 @@ public class SessionMutationFlagTests : IDisposable
     #region Every public mutation sets the flag
 
     [Fact]
-    public void Add_SetsFlag()
-    {
-        using var store = new QuadStore(Dir("add"));
-        Assert.False(store.SessionMutated);
-        store.Add("s", "p", "o", DateTimeOffset.UtcNow, DateTimeOffset.MaxValue);
-        Assert.True(store.SessionMutated);
-    }
-
-    [Fact]
     public void AddCurrent_SetsFlag()
     {
         using var store = new QuadStore(Dir("add_current"));

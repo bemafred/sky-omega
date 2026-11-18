@@ -59,8 +59,7 @@ public class QuadStoreGraphProfileTests : IDisposable
         var dir = NewStoreDir("add_query");
         using var store = CreateGraphStore(dir);
 
-        store.Add("<http://ex/s>", "<http://ex/p>", "<http://ex/o>",
-            DateTimeOffset.UtcNow, DateTimeOffset.MaxValue);
+        store.AddCurrent("<http://ex/s>", "<http://ex/p>", "<http://ex/o>");
 
         int count = 0;
         var e = store.QueryCurrent("<http://ex/s>", "<http://ex/p>", "<http://ex/o>");
@@ -77,10 +76,8 @@ public class QuadStoreGraphProfileTests : IDisposable
         var dir = NewStoreDir("dedup");
         using var store = CreateGraphStore(dir);
 
-        store.Add("<http://ex/s>", "<http://ex/p>", "<http://ex/o>",
-            DateTimeOffset.UtcNow, DateTimeOffset.MaxValue);
-        store.Add("<http://ex/s>", "<http://ex/p>", "<http://ex/o>",
-            DateTimeOffset.UtcNow, DateTimeOffset.MaxValue);
+        store.AddCurrent("<http://ex/s>", "<http://ex/p>", "<http://ex/o>");
+        store.AddCurrent("<http://ex/s>", "<http://ex/p>", "<http://ex/o>");
 
         int count = 0;
         var e = store.QueryCurrent("<http://ex/s>", "<http://ex/p>", "<http://ex/o>");
@@ -91,18 +88,15 @@ public class QuadStoreGraphProfileTests : IDisposable
     [Fact]
     public void Graph_BatchedAddAndCommit_PopulatesAllIndexes()
     {
-        // Session API: BeginBatch / AddBatched / CommitBatch. All three indexes
+        // Session API: BeginBatch / AddCurrentBatched / CommitBatch. All three indexes
         // (GSPO/GPOS/GOSP) take each NextVersion record of the batch at commit (ADR-064 D3, D5).
         var dir = NewStoreDir("batched");
         using var store = CreateGraphStore(dir);
 
         store.BeginBatch();
-        store.AddBatched("<http://ex/s1>", "<http://ex/p1>", "<http://ex/o1>",
-            DateTimeOffset.UtcNow, DateTimeOffset.MaxValue);
-        store.AddBatched("<http://ex/s2>", "<http://ex/p1>", "<http://ex/o2>",
-            DateTimeOffset.UtcNow, DateTimeOffset.MaxValue);
-        store.AddBatched("<http://ex/s1>", "<http://ex/p2>", "<http://ex/o3>",
-            DateTimeOffset.UtcNow, DateTimeOffset.MaxValue);
+        store.AddCurrentBatched("<http://ex/s1>", "<http://ex/p1>", "<http://ex/o1>");
+        store.AddCurrentBatched("<http://ex/s2>", "<http://ex/p1>", "<http://ex/o2>");
+        store.AddCurrentBatched("<http://ex/s1>", "<http://ex/p2>", "<http://ex/o3>");
         store.CommitBatch();
 
         // Query by subject (uses GSPO).
@@ -130,16 +124,14 @@ public class QuadStoreGraphProfileTests : IDisposable
         var dir = NewStoreDir("delete");
         using var store = CreateGraphStore(dir);
 
-        store.Add("<http://ex/s>", "<http://ex/p>", "<http://ex/o>",
-            DateTimeOffset.UtcNow, DateTimeOffset.MaxValue);
+        store.AddCurrent("<http://ex/s>", "<http://ex/p>", "<http://ex/o>");
         // Pre-delete: 1 live entry.
         int beforeCount = 0;
         var before = store.QueryCurrent("<http://ex/s>", "<http://ex/p>", "<http://ex/o>");
         while (before.MoveNext()) beforeCount++;
         Assert.Equal(1, beforeCount);
 
-        var deleted = store.Retract("<http://ex/s>", "<http://ex/p>", "<http://ex/o>",
-            DateTimeOffset.UtcNow, DateTimeOffset.MaxValue);
+        var deleted = store.DeleteCurrent("<http://ex/s>", "<http://ex/p>", "<http://ex/o>");
         Assert.True(deleted);
 
         // Post-delete: live query returns 0 (soft-deleted filtered out).
@@ -155,12 +147,9 @@ public class QuadStoreGraphProfileTests : IDisposable
         var dir = NewStoreDir("undelete");
         using var store = CreateGraphStore(dir);
 
-        store.Add("<http://ex/s>", "<http://ex/p>", "<http://ex/o>",
-            DateTimeOffset.UtcNow, DateTimeOffset.MaxValue);
-        store.Retract("<http://ex/s>", "<http://ex/p>", "<http://ex/o>",
-            DateTimeOffset.UtcNow, DateTimeOffset.MaxValue);
-        store.Add("<http://ex/s>", "<http://ex/p>", "<http://ex/o>",
-            DateTimeOffset.UtcNow, DateTimeOffset.MaxValue);
+        store.AddCurrent("<http://ex/s>", "<http://ex/p>", "<http://ex/o>");
+        store.DeleteCurrent("<http://ex/s>", "<http://ex/p>", "<http://ex/o>");
+        store.AddCurrent("<http://ex/s>", "<http://ex/p>", "<http://ex/o>");
 
         // After un-delete: 1 live entry queryable again.
         int count = 0;
@@ -175,10 +164,8 @@ public class QuadStoreGraphProfileTests : IDisposable
         var dir = NewStoreDir("persist");
         using (var store1 = CreateGraphStore(dir))
         {
-            store1.Add("<http://ex/s>", "<http://ex/p>", "<http://ex/o1>",
-                DateTimeOffset.UtcNow, DateTimeOffset.MaxValue);
-            store1.Add("<http://ex/s>", "<http://ex/p>", "<http://ex/o2>",
-                DateTimeOffset.UtcNow, DateTimeOffset.MaxValue);
+            store1.AddCurrent("<http://ex/s>", "<http://ex/p>", "<http://ex/o1>");
+            store1.AddCurrent("<http://ex/s>", "<http://ex/p>", "<http://ex/o2>");
             store1.FlushToDisk();
         }
 
@@ -192,34 +179,33 @@ public class QuadStoreGraphProfileTests : IDisposable
     }
 
     [Fact]
-    public void Graph_AsOfQuery_ThrowsProfileCapability()
+    public void Graph_QueryMemories_ThrowsProfileCapability()
     {
         // ADR-029 Decision 4: temporal queries against a non-temporal profile fail
-        // loudly at the API boundary. AsOf with explicit time + Graph profile = throw.
+        // loudly at the API boundary. A Graph store keeps no times (ADR-064 D1), so it has
+        // no memories to give with them (ADR-062 D2).
         var dir = NewStoreDir("asof_reject");
         using var store = CreateGraphStore(dir);
 
-        store.Add("<http://ex/s>", "<http://ex/p>", "<http://ex/o>",
-            DateTimeOffset.UtcNow, DateTimeOffset.MaxValue);
+        store.AddCurrent("<http://ex/s>", "<http://ex/p>", "<http://ex/o>");
 
         var ex = Assert.Throws<ProfileCapabilityException>(() =>
-            store.QueryAsOf("<http://ex/s>", "<http://ex/p>", "<http://ex/o>",
-                DateTimeOffset.UtcNow.AddDays(-1)));
+            store.QueryMemories("<http://ex/s>", "<http://ex/p>", "<http://ex/o>",
+                memorizedBefore: DateTimeOffset.UtcNow.AddDays(-1)));
         // The rejection message mentions Graph and the temporal-dimension absence.
         Assert.Contains("Graph", ex.Message);
     }
 
     [Fact]
-    public void Graph_RangeQuery_ThrowsProfileCapability()
+    public void Graph_QueryMemoriesForgottenInARange_ThrowsProfileCapability()
     {
         var dir = NewStoreDir("range_reject");
         using var store = CreateGraphStore(dir);
 
         var ex = Assert.Throws<ProfileCapabilityException>(() =>
-            store.Query("<http://ex/s>", "<http://ex/p>", "<http://ex/o>",
-                TemporalQueryType.Range,
-                rangeStart: DateTimeOffset.UtcNow.AddDays(-1),
-                rangeEnd: DateTimeOffset.UtcNow));
+            store.QueryMemories("<http://ex/s>", "<http://ex/p>", "<http://ex/o>",
+                forgottenSince: DateTimeOffset.UtcNow.AddDays(-1),
+                forgottenBefore: DateTimeOffset.UtcNow));
         Assert.Contains("Graph", ex.Message);
         Assert.Contains("temporal", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
@@ -273,10 +259,8 @@ public class QuadStoreGraphProfileTests : IDisposable
         var dir = NewStoreDir("graph_iso");
         using var store = CreateGraphStore(dir);
 
-        store.Add("<http://ex/s>", "<http://ex/p>", "<http://ex/o>",
-            DateTimeOffset.UtcNow, DateTimeOffset.MaxValue, "<http://ex/g1>");
-        store.Add("<http://ex/s>", "<http://ex/p>", "<http://ex/o>",
-            DateTimeOffset.UtcNow, DateTimeOffset.MaxValue, "<http://ex/g2>");
+        store.AddCurrent("<http://ex/s>", "<http://ex/p>", "<http://ex/o>", "<http://ex/g1>");
+        store.AddCurrent("<http://ex/s>", "<http://ex/p>", "<http://ex/o>", "<http://ex/g2>");
 
         int g1Count = 0;
         var g1 = store.QueryCurrent("<http://ex/s>", "<http://ex/p>", "<http://ex/o>", "<http://ex/g1>");

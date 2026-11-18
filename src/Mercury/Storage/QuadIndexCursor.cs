@@ -57,9 +57,10 @@ internal struct QuadIndexCursor
     public long MemorizedAt, ForgottenAt;
 
     /// <summary>
-    /// Legacy (ADR-061 D11): the Cognitive entry's transaction time, its deleted mark and when it was marked.
-    /// Carried for as long as the result type has them (ADR-061 Step 6 removes them). The Graph index writes its
-    /// own deleted mark into <see cref="LegacyIsDeleted"/>.
+    /// Legacy (ADR-061 D11): the Cognitive entry's transaction time, its deleted mark and when it was marked. No
+    /// result has them (ADR-062 D2): the store's own scans read them, the rebuild that carries every entry as it is
+    /// (ADR-061 I14) and the count of the entries two indexes disagree on (I19). They go with the stored layout
+    /// (ADR-061 L1).
     /// </summary>
     public long LegacyTransactionTime;
 
@@ -78,8 +79,8 @@ internal struct QuadIndexCursor
 
     /// <summary>
     /// Whether the index that moves this cursor writes <see cref="MemorizedAt"/> and <see cref="ForgottenAt"/>.
-    /// The index says so when it makes the cursor. Read by the one place that still gives a result made-up times
-    /// when the store keeps none (ADR-062 Step 5); it goes with those values (ADR-062 D1, D2).
+    /// The index says so when it makes the cursor. A result gives the times only when it does (ADR-062 D2): a store
+    /// that keeps none has none to give.
     /// </summary>
     public readonly bool HasMemoryTimes;
 

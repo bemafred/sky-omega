@@ -224,602 +224,6 @@ public class QuadStoreTests : IDisposable
 
     #endregion
 
-    #region Temporal Queries
-
-    [Fact]
-    public void Add_WithTemporalBounds_QueryAsOf()
-    {
-        var store = CreateStore();
-
-        var memorizedAt = DateTimeOffset.UtcNow.AddDays(-10);
-        var forgottenAt = DateTimeOffset.UtcNow.AddDays(10);
-
-        store.Add("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", memorizedAt, forgottenAt);
-
-        store.AcquireReadLock();
-        try
-        {
-            // Query as of now (should match)
-            var results = store.QueryAsOf(
-                "<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>",
-                DateTimeOffset.UtcNow);
-            try
-            {
-                Assert.True(results.MoveNext());
-            }
-            finally
-            {
-                results.Dispose();
-            }
-
-            // Query as of 20 days ago (before memorizedAt, should not match)
-            var pastResults = store.QueryAsOf(
-                "<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>",
-                DateTimeOffset.UtcNow.AddDays(-20));
-            try
-            {
-                Assert.False(pastResults.MoveNext());
-            }
-            finally
-            {
-                pastResults.Dispose();
-            }
-        }
-        finally
-        {
-            store.ReleaseReadLock();
-        }
-    }
-
-    [Fact]
-    public void QueryEvolution_ReturnsAllVersions()
-    {
-        var store = CreateStore();
-
-        // Add multiple triples with different objects (different SPO) to have distinct versions
-        store.Add("<http://ex.org/s>", "<http://ex.org/p>", "\"version1\"",
-            DateTimeOffset.UtcNow.AddDays(-30), DateTimeOffset.UtcNow.AddDays(-20));
-        store.Add("<http://ex.org/s>", "<http://ex.org/p>", "\"version2\"",
-            DateTimeOffset.UtcNow.AddDays(-10), DateTimeOffset.UtcNow.AddDays(10));
-
-        store.AcquireReadLock();
-        try
-        {
-            // Query all triples for this subject/predicate (any object)
-            var results = store.QueryEvolution("<http://ex.org/s>", "<http://ex.org/p>", ReadOnlySpan<char>.Empty);
-            try
-            {
-                var count = 0;
-                while (results.MoveNext()) count++;
-                Assert.Equal(2, count);
-            }
-            finally
-            {
-                results.Dispose();
-            }
-        }
-        finally
-        {
-            store.ReleaseReadLock();
-        }
-    }
-
-    [Fact]
-    public void TimeTravelTo_ReturnsStateAtTime()
-    {
-        var store = CreateStore();
-
-        var past = DateTimeOffset.UtcNow.AddDays(-5);
-
-        store.Add("<http://ex.org/s>", "<http://ex.org/p>", "\"old value\"",
-            DateTimeOffset.UtcNow.AddDays(-10), DateTimeOffset.UtcNow.AddDays(-3));
-        store.Add("<http://ex.org/s>", "<http://ex.org/p>", "\"new value\"",
-            DateTimeOffset.UtcNow.AddDays(-2), DateTimeOffset.MaxValue);
-
-        store.AcquireReadLock();
-        try
-        {
-            var results = store.TimeTravelTo(past, "<http://ex.org/s>", "<http://ex.org/p>", ReadOnlySpan<char>.Empty);
-            try
-            {
-                Assert.True(results.MoveNext());
-                Assert.Equal("\"old value\"", results.Current.Object.ToString());
-                Assert.False(results.MoveNext());
-            }
-            finally
-            {
-                results.Dispose();
-            }
-        }
-        finally
-        {
-            store.ReleaseReadLock();
-        }
-    }
-
-    #endregion
-
-    #region Temporal Boundary Conditions
-
-    [Fact]
-    public void QueryAsOf_ExactlyAtMemorizedAt_Matches()
-    {
-        var store = CreateStore();
-
-        var memorizedAt = new DateTimeOffset(2024, 6, 1, 0, 0, 0, TimeSpan.Zero);
-        var forgottenAt = new DateTimeOffset(2024, 12, 31, 23, 59, 59, TimeSpan.Zero);
-
-        store.Add("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", memorizedAt, forgottenAt);
-
-        store.AcquireReadLock();
-        try
-        {
-            // Query exactly at MemorizedAt - should match (closed start: MemorizedAt <= time)
-            var results = store.QueryAsOf("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", memorizedAt);
-            try
-            {
-                Assert.True(results.MoveNext(), "Should match when querying exactly at MemorizedAt");
-            }
-            finally
-            {
-                results.Dispose();
-            }
-        }
-        finally
-        {
-            store.ReleaseReadLock();
-        }
-    }
-
-    [Fact]
-    public void QueryAsOf_ExactlyAtForgottenAt_DoesNotMatch()
-    {
-        var store = CreateStore();
-
-        var memorizedAt = new DateTimeOffset(2024, 6, 1, 0, 0, 0, TimeSpan.Zero);
-        var forgottenAt = new DateTimeOffset(2024, 12, 31, 23, 59, 59, TimeSpan.Zero);
-
-        store.Add("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", memorizedAt, forgottenAt);
-
-        store.AcquireReadLock();
-        try
-        {
-            // Query exactly at ForgottenAt - should NOT match (open end: time < ForgottenAt)
-            var results = store.QueryAsOf("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", forgottenAt);
-            try
-            {
-                Assert.False(results.MoveNext(), "Should NOT match when querying exactly at ForgottenAt (exclusive)");
-            }
-            finally
-            {
-                results.Dispose();
-            }
-        }
-        finally
-        {
-            store.ReleaseReadLock();
-        }
-    }
-
-    [Fact]
-    public void QueryAsOf_OneTickBeforeForgottenAt_Matches()
-    {
-        var store = CreateStore();
-
-        var memorizedAt = new DateTimeOffset(2024, 6, 1, 0, 0, 0, TimeSpan.Zero);
-        var forgottenAt = new DateTimeOffset(2024, 12, 31, 23, 59, 59, TimeSpan.Zero);
-
-        store.Add("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", memorizedAt, forgottenAt);
-
-        store.AcquireReadLock();
-        try
-        {
-            // Query one tick before ForgottenAt - should match
-            var queryTime = new DateTimeOffset(forgottenAt.UtcTicks - 1, TimeSpan.Zero);
-            var results = store.QueryAsOf("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", queryTime);
-            try
-            {
-                Assert.True(results.MoveNext(), "Should match one tick before ForgottenAt");
-            }
-            finally
-            {
-                results.Dispose();
-            }
-        }
-        finally
-        {
-            store.ReleaseReadLock();
-        }
-    }
-
-    [Fact]
-    public void QueryAsOf_OneTickBeforeMemorizedAt_DoesNotMatch()
-    {
-        var store = CreateStore();
-
-        var memorizedAt = new DateTimeOffset(2024, 6, 1, 0, 0, 0, TimeSpan.Zero);
-        var forgottenAt = new DateTimeOffset(2024, 12, 31, 23, 59, 59, TimeSpan.Zero);
-
-        store.Add("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", memorizedAt, forgottenAt);
-
-        store.AcquireReadLock();
-        try
-        {
-            // Query one tick before MemorizedAt - should NOT match
-            var queryTime = new DateTimeOffset(memorizedAt.UtcTicks - 1, TimeSpan.Zero);
-            var results = store.QueryAsOf("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", queryTime);
-            try
-            {
-                Assert.False(results.MoveNext(), "Should NOT match one tick before MemorizedAt");
-            }
-            finally
-            {
-                results.Dispose();
-            }
-        }
-        finally
-        {
-            store.ReleaseReadLock();
-        }
-    }
-
-    [Fact]
-    public void QueryChanges_RangeEndEqualsMemorizedAt_DoesNotMatch()
-    {
-        var store = CreateStore();
-
-        var memorizedAt = new DateTimeOffset(2024, 6, 1, 0, 0, 0, TimeSpan.Zero);
-        var forgottenAt = new DateTimeOffset(2024, 12, 31, 23, 59, 59, TimeSpan.Zero);
-
-        store.Add("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", memorizedAt, forgottenAt);
-
-        store.AcquireReadLock();
-        try
-        {
-            // Query range [Jan 1, June 1) - RangeEnd equals MemorizedAt
-            // Overlap condition: MemorizedAt < RangeEnd && ForgottenAt > RangeStart
-            // Here: June 1 < June 1 is FALSE, so no match
-            var rangeStart = new DateTimeOffset(2024, 1, 1, 0, 0, 0, TimeSpan.Zero);
-            var rangeEnd = memorizedAt;  // June 1
-
-            var results = store.QueryChanges(rangeStart, rangeEnd,
-                "<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
-            try
-            {
-                Assert.False(results.MoveNext(), "Should NOT match when RangeEnd equals MemorizedAt (no overlap)");
-            }
-            finally
-            {
-                results.Dispose();
-            }
-        }
-        finally
-        {
-            store.ReleaseReadLock();
-        }
-    }
-
-    [Fact]
-    public void QueryChanges_RangeStartEqualsForgottenAt_DoesNotMatch()
-    {
-        var store = CreateStore();
-
-        var memorizedAt = new DateTimeOffset(2024, 6, 1, 0, 0, 0, TimeSpan.Zero);
-        var forgottenAt = new DateTimeOffset(2024, 12, 31, 23, 59, 59, TimeSpan.Zero);
-
-        store.Add("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", memorizedAt, forgottenAt);
-
-        store.AcquireReadLock();
-        try
-        {
-            // Query range [Dec 31, Feb 1 2025) - RangeStart equals ForgottenAt
-            // Overlap condition: MemorizedAt < RangeEnd && ForgottenAt > RangeStart
-            // Here: Dec 31 > Dec 31 is FALSE, so no match
-            var rangeStart = forgottenAt;  // Dec 31
-            var rangeEnd = new DateTimeOffset(2025, 2, 1, 0, 0, 0, TimeSpan.Zero);
-
-            var results = store.QueryChanges(rangeStart, rangeEnd,
-                "<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
-            try
-            {
-                Assert.False(results.MoveNext(), "Should NOT match when RangeStart equals ForgottenAt (no overlap)");
-            }
-            finally
-            {
-                results.Dispose();
-            }
-        }
-        finally
-        {
-            store.ReleaseReadLock();
-        }
-    }
-
-    [Fact]
-    public void QueryChanges_AdjacentPeriods_NoOverlap()
-    {
-        var store = CreateStore();
-
-        // Period A: [June 1, Sept 1)
-        var periodAStart = new DateTimeOffset(2024, 6, 1, 0, 0, 0, TimeSpan.Zero);
-        var periodAEnd = new DateTimeOffset(2024, 9, 1, 0, 0, 0, TimeSpan.Zero);
-
-        // Period B: [Sept 1, Dec 1) - adjacent to A (meets)
-        var periodBStart = periodAEnd;
-        var periodBEnd = new DateTimeOffset(2024, 12, 1, 0, 0, 0, TimeSpan.Zero);
-
-        store.Add("<http://ex.org/s>", "<http://ex.org/p>", "\"value_A\"", periodAStart, periodAEnd);
-        store.Add("<http://ex.org/s>", "<http://ex.org/p>", "\"value_B\"", periodBStart, periodBEnd);
-
-        store.AcquireReadLock();
-        try
-        {
-            // Query exactly period A - should only get value_A
-            var resultsA = store.QueryChanges(periodAStart, periodAEnd,
-                "<http://ex.org/s>", "<http://ex.org/p>", ReadOnlySpan<char>.Empty);
-            try
-            {
-                Assert.True(resultsA.MoveNext());
-                Assert.Equal("\"value_A\"", resultsA.Current.Object.ToString());
-                Assert.False(resultsA.MoveNext(), "Adjacent period B should NOT overlap with period A query");
-            }
-            finally
-            {
-                resultsA.Dispose();
-            }
-
-            // Query exactly period B - should only get value_B
-            var resultsB = store.QueryChanges(periodBStart, periodBEnd,
-                "<http://ex.org/s>", "<http://ex.org/p>", ReadOnlySpan<char>.Empty);
-            try
-            {
-                Assert.True(resultsB.MoveNext());
-                Assert.Equal("\"value_B\"", resultsB.Current.Object.ToString());
-                Assert.False(resultsB.MoveNext(), "Adjacent period A should NOT overlap with period B query");
-            }
-            finally
-            {
-                resultsB.Dispose();
-            }
-        }
-        finally
-        {
-            store.ReleaseReadLock();
-        }
-    }
-
-    [Fact]
-    public void QueryChanges_OverlappingPeriods_BothMatch()
-    {
-        var store = CreateStore();
-
-        // Period A: [June 1, Oct 1)
-        var periodAStart = new DateTimeOffset(2024, 6, 1, 0, 0, 0, TimeSpan.Zero);
-        var periodAEnd = new DateTimeOffset(2024, 10, 1, 0, 0, 0, TimeSpan.Zero);
-
-        // Period B: [Aug 1, Dec 1) - overlaps with A
-        var periodBStart = new DateTimeOffset(2024, 8, 1, 0, 0, 0, TimeSpan.Zero);
-        var periodBEnd = new DateTimeOffset(2024, 12, 1, 0, 0, 0, TimeSpan.Zero);
-
-        store.Add("<http://ex.org/s>", "<http://ex.org/p>", "\"value_A\"", periodAStart, periodAEnd);
-        store.Add("<http://ex.org/s>", "<http://ex.org/p>", "\"value_B\"", periodBStart, periodBEnd);
-
-        store.AcquireReadLock();
-        try
-        {
-            // Query [Aug 15, Sept 15) - overlaps with both A and B
-            var rangeStart = new DateTimeOffset(2024, 8, 15, 0, 0, 0, TimeSpan.Zero);
-            var rangeEnd = new DateTimeOffset(2024, 9, 15, 0, 0, 0, TimeSpan.Zero);
-
-            var results = store.QueryChanges(rangeStart, rangeEnd,
-                "<http://ex.org/s>", "<http://ex.org/p>", ReadOnlySpan<char>.Empty);
-            try
-            {
-                var count = 0;
-                while (results.MoveNext()) count++;
-                Assert.Equal(2, count);
-            }
-            finally
-            {
-                results.Dispose();
-            }
-        }
-        finally
-        {
-            store.ReleaseReadLock();
-        }
-    }
-
-    [Fact]
-    public void QueryAsOf_ZeroDurationFact_NeverMatches()
-    {
-        var store = CreateStore();
-
-        // Zero-duration fact: MemorizedAt == ForgottenAt
-        var instant = new DateTimeOffset(2024, 6, 15, 12, 0, 0, TimeSpan.Zero);
-        store.Add("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", instant, instant);
-
-        store.AcquireReadLock();
-        try
-        {
-            // Query at exact instant
-            // Condition: MemorizedAt <= time && ForgottenAt > time
-            // Here: June 15 <= June 15 is TRUE, but June 15 > June 15 is FALSE
-            var results = store.QueryAsOf("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", instant);
-            try
-            {
-                Assert.False(results.MoveNext(), "Zero-duration fact should never match AsOf query");
-            }
-            finally
-            {
-                results.Dispose();
-            }
-
-            // Query before
-            var before = new DateTimeOffset(instant.UtcTicks - 1, TimeSpan.Zero);
-            var resultsBefore = store.QueryAsOf("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", before);
-            try
-            {
-                Assert.False(resultsBefore.MoveNext());
-            }
-            finally
-            {
-                resultsBefore.Dispose();
-            }
-
-            // Query after
-            var after = new DateTimeOffset(instant.UtcTicks + 1, TimeSpan.Zero);
-            var resultsAfter = store.QueryAsOf("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", after);
-            try
-            {
-                Assert.False(resultsAfter.MoveNext());
-            }
-            finally
-            {
-                resultsAfter.Dispose();
-            }
-        }
-        finally
-        {
-            store.ReleaseReadLock();
-        }
-    }
-
-    [Fact]
-    public void QueryChanges_ZeroDurationFact_NeverMatches()
-    {
-        var store = CreateStore();
-
-        // Zero-duration fact
-        var instant = new DateTimeOffset(2024, 6, 15, 12, 0, 0, TimeSpan.Zero);
-        store.Add("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", instant, instant);
-
-        store.AcquireReadLock();
-        try
-        {
-            // Query range containing the instant
-            // Overlap condition: MemorizedAt < RangeEnd && ForgottenAt > RangeStart
-            // For zero-duration: instant < RangeEnd && instant > RangeStart
-            // But since MemorizedAt == ForgottenAt, can't satisfy both conditions simultaneously
-            // unless instant is strictly between RangeStart and RangeEnd
-            var rangeStart = new DateTimeOffset(2024, 6, 1, 0, 0, 0, TimeSpan.Zero);
-            var rangeEnd = new DateTimeOffset(2024, 7, 1, 0, 0, 0, TimeSpan.Zero);
-
-            var results = store.QueryChanges(rangeStart, rangeEnd,
-                "<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
-            try
-            {
-                // Zero duration means MemorizedAt < RangeEnd (June 15 < July 1 = true)
-                // AND ForgottenAt > RangeStart (June 15 > June 1 = true)
-                // Actually this WOULD match! Let me reconsider...
-                // The condition is: MemorizedAt < RangeEnd && ForgottenAt > RangeStart
-                // For instant June 15: June 15 < July 1 (true) && June 15 > June 1 (true)
-                // So a zero-duration fact DOES match range queries if the point is inside the range
-                Assert.True(results.MoveNext(), "Zero-duration fact inside range should match QueryChanges");
-            }
-            finally
-            {
-                results.Dispose();
-            }
-        }
-        finally
-        {
-            store.ReleaseReadLock();
-        }
-    }
-
-    [Fact]
-    public void QueryEvolution_IncludesZeroDurationFact()
-    {
-        var store = CreateStore();
-
-        // Zero-duration fact
-        var instant = new DateTimeOffset(2024, 6, 15, 12, 0, 0, TimeSpan.Zero);
-        store.Add("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", instant, instant);
-
-        store.AcquireReadLock();
-        try
-        {
-            // QueryEvolution returns all versions regardless of temporal validity
-            var results = store.QueryEvolution("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
-            try
-            {
-                Assert.True(results.MoveNext(), "QueryEvolution should include zero-duration facts");
-            }
-            finally
-            {
-                results.Dispose();
-            }
-        }
-        finally
-        {
-            store.ReleaseReadLock();
-        }
-    }
-
-    [Fact]
-    public void QueryAsOf_DateTimeMaxValue_AsForgottenAt()
-    {
-        var store = CreateStore();
-
-        // Fact valid forever (common pattern)
-        var memorizedAt = new DateTimeOffset(2024, 1, 1, 0, 0, 0, TimeSpan.Zero);
-        store.Add("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", memorizedAt, DateTimeOffset.MaxValue);
-
-        store.AcquireReadLock();
-        try
-        {
-            // Query far future - should still match
-            var farFuture = new DateTimeOffset(2100, 12, 31, 23, 59, 59, TimeSpan.Zero);
-            var results = store.QueryAsOf("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", farFuture);
-            try
-            {
-                Assert.True(results.MoveNext(), "Fact with MaxValue ForgottenAt should match far future queries");
-            }
-            finally
-            {
-                results.Dispose();
-            }
-        }
-        finally
-        {
-            store.ReleaseReadLock();
-        }
-    }
-
-    [Fact]
-    public void QueryAsOf_EarlyMemorizedAt_MatchesLaterQuery()
-    {
-        var store = CreateStore();
-
-        // Fact that started in the past and continues to present
-        var memorizedAt = DateTimeOffset.UtcNow.AddYears(-5);
-        var forgottenAt = DateTimeOffset.UtcNow.AddYears(5);
-        store.Add("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", memorizedAt, forgottenAt);
-
-        store.AcquireReadLock();
-        try
-        {
-            // Query a time between memorizedAt and now - should match
-            var queryTime = DateTimeOffset.UtcNow.AddYears(-2);
-            var results = store.QueryAsOf("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", queryTime);
-            try
-            {
-                Assert.True(results.MoveNext(), "Fact with past MemorizedAt should match queries within valid period");
-            }
-            finally
-            {
-                results.Dispose();
-            }
-        }
-        finally
-        {
-            store.ReleaseReadLock();
-        }
-    }
-
-    #endregion
-
     #region Batch Operations
 
     [Fact]
@@ -1213,39 +617,6 @@ public class QuadStoreTests : IDisposable
     }
 
     [Fact]
-    public void Retract_WithTemporalBounds_RetractsThatVersion()
-    {
-        var store = CreateStore();
-
-        var memorizedAt = DateTimeOffset.UtcNow.AddDays(-10);
-        var forgottenAt = DateTimeOffset.UtcNow.AddDays(10);
-
-        store.Add("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", memorizedAt, forgottenAt);
-
-        var deleted = store.Retract("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", memorizedAt, forgottenAt);
-
-        Assert.True(deleted);
-
-        store.AcquireReadLock();
-        try
-        {
-            var results = store.QueryCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
-            try
-            {
-                Assert.False(results.MoveNext());
-            }
-            finally
-            {
-                results.Dispose();
-            }
-        }
-        finally
-        {
-            store.ReleaseReadLock();
-        }
-    }
-
-    [Fact]
     public void DeleteBatched_InBatch_Works()
     {
         var store = CreateStore();
@@ -1356,7 +727,7 @@ public class QuadStoreTests : IDisposable
     #region QueryHistory / Audit Trail
 
     [Fact]
-    public void QueryEvolution_DeletedTriple_IsVisibleWithClosedInterval()
+    public void QueryMemoriesIncludingForgotten_ADeletedTriple_IsVisibleWithBothTimes()
     {
         // ADR-054 D1: a delete ends the version (ForgottenAt = the delete's time); it is not a retraction.
         // The fact is memorized in one clock reading and forgotten in a later one. In one reading it would leave no
@@ -1374,14 +745,12 @@ public class QuadStoreTests : IDisposable
         store.AcquireReadLock();
         try
         {
-            var results = store.QueryEvolution("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
+            var results = store.QueryMemories("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", includingForgotten: true);
             try
             {
-                Assert.True(results.MoveNext(), "Deleted triple should be visible in QueryEvolution");
-                Assert.False(results.Current.LegacyIsDeleted, "An ended version is not a retracted one");
+                Assert.True(results.MoveNext(), "Deleted triple should be visible with its forgotten memories");
                 Assert.Equal(memorized, results.Current.MemorizedAt);
                 Assert.Equal(forgotten, results.Current.ForgottenAt);
-                Assert.Null(results.Current.RetractedAt);
                 Assert.False(results.MoveNext(), "The delete ends the version; it adds none");
             }
             finally
@@ -1396,7 +765,7 @@ public class QuadStoreTests : IDisposable
     }
 
     [Fact]
-    public void QueryEvolution_MixedDeletedAndActive_ShowsAll()
+    public void QueryMemoriesIncludingForgotten_MixedDeletedAndActive_ShowsAll()
     {
         // Three facts are memorized in one clock reading, and one of them is forgotten in a later one. Forgotten in
         // the reading it was memorized in, it would leave no period (ADR-061 M2), so the test supplies the readings.
@@ -1415,24 +784,20 @@ public class QuadStoreTests : IDisposable
         try
         {
             // Query all with predicate p
-            var results = store.QueryEvolution(default, "<http://ex.org/p>", default);
+            var results = store.QueryMemories(default, "<http://ex.org/p>", default, includingForgotten: true);
             try
             {
                 var count = 0;
                 var endedCount = 0;
-                var retractedCount = 0;
                 while (results.MoveNext())
                 {
                     count++;
-                    if (results.Current.ForgottenAt < DateTimeOffset.MaxValue.AddYears(-1000))
+                    if (results.Current.ForgottenAt is not null)
                         endedCount++;
-                    if (results.Current.LegacyIsDeleted)
-                        retractedCount++;
                 }
 
-                Assert.Equal(3, count); // All three visible in evolution
-                Assert.Equal(1, endedCount); // The deleted one has a closed valid-time interval (ADR-054 D1)
-                Assert.Equal(0, retractedCount); // and is not retracted
+                Assert.Equal(3, count); // All three visible with the forgotten memories
+                Assert.Equal(1, endedCount); // The deleted one has a forgotten time (ADR-054 D1, ADR-061 D2)
             }
             finally
             {
@@ -1472,28 +837,31 @@ public class QuadStoreTests : IDisposable
     }
 
     [Fact]
-    public void QueryAsOf_DeletedTriple_NotVisible()
+    public void WhatWasRemembered_AfterTheDelete_DoesNotHoldTheDeletedTriple()
     {
-        // ADR-054 D1: the delete ends the triple's valid time at the moment of the delete, so the query is as of a
-        // time taken after it. A time taken before the add, plus a margin, assumes the add and delete fit in the
-        // margin; with a 1 s margin this test failed on the GitHub Windows x64 runner, where it took 7 s (2026-10-31).
-        var store = CreateStore();
+        // ADR-054 D1: the delete ends the triple's period at the reading of the delete. What was remembered at a time t
+        // is two reads (ADR-061 Q10): what was memorized before t + 1 ms and is remembered, and what was memorized
+        // before it and forgotten since it. The test supplies the readings.
+        var memorized = new DateTimeOffset(2031, 3, 4, 5, 6, 7, TimeSpan.Zero);
+        var clock = new SuppliedClock { Reading = memorized };
+        _store?.Dispose();
+        _store = new QuadStore(_testPath, null, null, new StorageOptions { Clock = clock });
+        var store = _store;
         store.AddCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
+        clock.Reading = memorized.AddMinutes(10);
         store.DeleteCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
-        var afterDelete = DateTimeOffset.UtcNow;
+        var justAfter = memorized.AddMinutes(10).AddMilliseconds(1);
 
         store.AcquireReadLock();
         try
         {
-            var results = store.QueryAsOf("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", afterDelete);
-            try
-            {
-                Assert.False(results.MoveNext(), "Deleted triple should not be visible in QueryAsOf");
-            }
-            finally
-            {
-                results.Dispose();
-            }
+            var remembered = store.QueryMemories("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", memorizedBefore: justAfter);
+            Assert.False(remembered.MoveNext(), "It is not remembered");
+            remembered.Dispose();
+            var forgottenSince = store.QueryMemories("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>",
+                memorizedBefore: justAfter, forgottenSince: justAfter);
+            Assert.False(forgottenSince.MoveNext(), "and it was forgotten before that time, not since it");
+            forgottenSince.Dispose();
         }
         finally
         {
@@ -1502,7 +870,7 @@ public class QuadStoreTests : IDisposable
     }
 
     [Fact]
-    public void QueryEvolution_ActiveTriple_IsDeletedFalse()
+    public void QueryMemories_ARememberedTriple_HasNoForgottenTime()
     {
         var store = CreateStore();
         store.AddCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
@@ -1510,11 +878,11 @@ public class QuadStoreTests : IDisposable
         store.AcquireReadLock();
         try
         {
-            var results = store.QueryEvolution("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
+            var results = store.QueryMemories("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", includingForgotten: true);
             try
             {
                 Assert.True(results.MoveNext());
-                Assert.False(results.Current.LegacyIsDeleted, "Active triple should have LegacyIsDeleted=false");
+                Assert.Null(results.Current.ForgottenAt); // absent, not a far-future value (ADR-061 I8)
             }
             finally
             {
@@ -1851,9 +1219,9 @@ public class QuadStoreTests : IDisposable
         store.AcquireReadLock();
         try
         {
-            var results = store.QueryEvolution(
+            var results = store.QueryMemories(
                 "<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>",
-                "<http://ex.org/graph1>");
+                "<http://ex.org/graph1>", includingForgotten: true);
             try
             {
                 Assert.True(results.MoveNext());

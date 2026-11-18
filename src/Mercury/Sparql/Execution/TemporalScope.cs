@@ -71,8 +71,8 @@ internal readonly struct TemporalScope
         IncludesForgotten ? store.GetNamedGraphsHoldingAPeriod() : store.GetNamedGraphs();
 
     /// <summary>The triples of <paramref name="graph"/> (empty: the default graph) that match, as this scope sees them.</summary>
-    public TemporalResultEnumerator Query(QuadStore store, ReadOnlySpan<char> subject, ReadOnlySpan<char> predicate,
+    public ResultEnumerator Query(QuadStore store, ReadOnlySpan<char> subject, ReadOnlySpan<char> predicate,
         ReadOnlySpan<char> @object, ReadOnlySpan<char> graph) => _selectsByTime
-        ? store.QueryMemories(subject, predicate, @object, graph, _times)
+        ? store.QueryByMemoryTimes(subject, predicate, @object, graph, _times)
         : store.QueryCurrent(subject, predicate, @object, graph);
 }

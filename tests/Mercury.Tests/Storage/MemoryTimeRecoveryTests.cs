@@ -52,17 +52,17 @@ public class MemoryTimeRecoveryTests : IDisposable
             {
                 var entries = index switch
                 {
-                    0 => store.QueryEvolution(S, default, default),
-                    1 => store.QueryEvolution(default, P, default),
-                    2 => store.QueryEvolution(default, default, o),
-                    _ => store.QueryChanges(DateTimeOffset.MinValue, DateTimeOffset.MaxValue, default, default, default),
+                    0 => store.QueryMemories(S, default, default, includingForgotten: true),
+                    1 => store.QueryMemories(default, P, default, includingForgotten: true),
+                    2 => store.QueryMemories(default, default, o, includingForgotten: true),
+                    _ => store.QueryTimeFirstIndex(),
                 };
                 var periods = new List<(DateTimeOffset, DateTimeOffset?)>();
                 while (entries.MoveNext())
                 {
                     var entry = entries.Current;
                     if (entry.Subject.SequenceEqual(S) && entry.Predicate.SequenceEqual(P) && entry.Object.SequenceEqual(o))
-                        periods.Add((entry.MemorizedAt, entry.ForgottenAt.Year >= 9000 ? null : entry.ForgottenAt));
+                        periods.Add((entry.MemorizedAt, entry.ForgottenAt));
                 }
                 entries.Dispose();
                 periods.Sort();

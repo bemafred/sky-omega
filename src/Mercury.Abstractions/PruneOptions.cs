@@ -12,11 +12,6 @@ public sealed class PruneOptions
     public bool DryRun { get; init; }
 
     /// <summary>
-    /// How to handle temporal history. Default: FlattenToCurrent.
-    /// </summary>
-    public HistoryMode HistoryMode { get; init; } = HistoryMode.FlattenToCurrent;
-
-    /// <summary>
     /// Graph IRIs to exclude from the pruned output. Null or empty means no graph filtering.
     /// </summary>
     public string[]? ExcludeGraphs { get; init; }
@@ -27,7 +22,8 @@ public sealed class PruneOptions
     public string[]? ExcludePredicates { get; init; }
 
     /// <summary>
-    /// Default options: FlattenToCurrent, no filters, not dry run.
+    /// Default options: no filters, not dry run. A prune keeps what is remembered, each memory with the time it was
+    /// memorized, and nothing that is forgotten (ADR-061 D12).
     /// </summary>
     public static PruneOptions Default { get; } = new();
 }

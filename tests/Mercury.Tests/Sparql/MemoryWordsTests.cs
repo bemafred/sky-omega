@@ -609,4 +609,31 @@ public class MemoryWordsTests : IDisposable
         Assert.True(including.Success, including.ErrorMessage);
         Assert.Equal(new[] { "<urn:Acme>", "<urn:Other>" }, including.Triples!.Select(triple => triple.Object).OrderBy(o => o, StringComparer.Ordinal));
     }
+
+    [Fact]
+    public void InTheMergeOfTwoFromGraphs_EachMatchHasTheTimesOfItsOwnGraph()
+    {
+        // The default graph of FROM <g1> FROM <g2> is the merge of the two (SPARQL 1.1 §13.2), read one graph after the
+        // other; the times a word binds are those of the period the match came from
+        var clock = new SuppliedClock { Reading = Hour0 };
+        using var store = new QuadStore(Path.Combine(_testDir, "store"), null, null, new StorageOptions { Clock = clock });
+        store.AddCurrent("<urn:s>", "<urn:p>", "\"a\"", "<urn:g1>");
+        clock.Reading = Hour1;
+        store.AddCurrent("<urn:s>", "<urn:p>", "\"b\"", "<urn:g2>");
+        clock.Reading = Hour2;
+        store.DeleteCurrent("<urn:s>", "<urn:p>", "\"b\"", "<urn:g2>");
+
+        var result = SparqlEngine.Query(store,
+            "SELECT ?o ?m ?f FROM <urn:g1> FROM <urn:g2> WHERE { <urn:s> <urn:p> ?o MEMORIZED ?m FORGOTTEN ?f } ORDER BY ?o",
+            TestContext.Current.CancellationToken);
+
+        Assert.True(result.Success, result.ErrorMessage);
+        Assert.Equal(2, result.Rows!.Count);
+        Assert.Equal("\"a\"", result.Rows[0]["o"]);
+        Assert.Equal(Bound0, result.Rows[0]["m"]);
+        Assert.False(result.Rows[0].ContainsKey("f"));
+        Assert.Equal("\"b\"", result.Rows[1]["o"]);
+        Assert.Equal(Bound1, result.Rows[1]["m"]);
+        Assert.Equal(Bound2, result.Rows[1]["f"]);
+    }
 }

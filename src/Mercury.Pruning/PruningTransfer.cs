@@ -8,7 +8,9 @@ using SkyOmega.Mercury.Storage;
 namespace SkyOmega.Mercury.Pruning;
 
 /// <summary>
-/// Orchestrates quad transfer between QuadStore instances with filtering.
+/// Orchestrates quad transfer between QuadStore instances with filtering. There is one way to prune (ADR-061 D12):
+/// what is remembered now is transferred, each quad with the time its present period was memorized (I14), and
+/// nothing that is forgotten. A graph in which nothing is remembered is not transferred.
 /// Thread-safe: acquires appropriate locks on source and target.
 /// </summary>
 internal sealed class PruningTransfer
@@ -70,16 +72,7 @@ internal sealed class PruningTransfer
             {
                 batchStarted = !_options.DryRun;
 
-                // Process based on history mode
-                if (_options.HistoryMode == HistoryMode.FlattenToCurrent)
-                {
-                    TransferCurrentOnly(ref stats, progress, hasher, auditWriter);
-                }
-                else
-                {
-                    var includeDeleted = _options.HistoryMode == HistoryMode.PreserveAll;
-                    TransferWithHistory(ref stats, progress, hasher, auditWriter, includeDeleted);
-                }
+                TransferRemembered(ref stats, progress, hasher, auditWriter);
 
                 batchCompleted = true;
             }
@@ -167,7 +160,7 @@ internal sealed class PruningTransfer
         }
     }
 
-    private void TransferCurrentOnly(
+    private void TransferRemembered(
         ref TransferStats stats,
         TransferProgressCallback? progress,
         Fnv1aHasher? hasher,
@@ -197,7 +190,7 @@ internal sealed class PruningTransfer
             {
                 ct.ThrowIfCancellationRequested();
                 var quad = defaultEnumerator.Current;
-                ProcessCurrentQuad(quad, ref stats, ref batchCount, filter, hasher,
+                ProcessRememberedQuad(quad, defaultEnumerator.MemorizedAt, ref stats, ref batchCount, filter, hasher,
                     auditWriter, batchSize, progressInterval, progress, isDryRun, stopwatch);
             }
         }
@@ -230,7 +223,7 @@ internal sealed class PruningTransfer
                 {
                     ct.ThrowIfCancellationRequested();
                     var quad = graphEnumerator.Current;
-                    ProcessCurrentQuad(quad, ref stats, ref batchCount, filter, hasher,
+                    ProcessRememberedQuad(quad, graphEnumerator.MemorizedAt, ref stats, ref batchCount, filter, hasher,
                         auditWriter, batchSize, progressInterval, progress, isDryRun, stopwatch);
                 }
             }
@@ -254,8 +247,11 @@ internal sealed class PruningTransfer
         }
     }
 
-    private void ProcessCurrentQuad(
-        in ResolvedTemporalQuad quad,
+    /// <param name="memorizedAt">When the quad's present period was memorized in the source, in milliseconds of its
+    /// clock; null when the source keeps no times. The copy carries it (ADR-061 I14).</param>
+    private void ProcessRememberedQuad(
+        in ResolvedQuad quad,
+        long? memorizedAt,
         ref TransferStats stats,
         ref int batchCount,
         IPruningFilter filter,
@@ -269,9 +265,7 @@ internal sealed class PruningTransfer
     {
         stats.Scanned++;
 
-        if (!filter.ShouldInclude(
-            quad.Graph, quad.Subject, quad.Predicate, quad.Object,
-            quad.MemorizedAt, quad.ForgottenAt))
+        if (!filter.ShouldInclude(quad.Graph, quad.Subject, quad.Predicate, quad.Object))
         {
             auditWriter?.WriteQuad(quad.Subject, quad.Predicate, quad.Object, quad.Graph);
             return;
@@ -286,171 +280,8 @@ internal sealed class PruningTransfer
 
         if (!isDryRun)
         {
-            _target.AddCurrentBatched(
-                quad.Subject, quad.Predicate, quad.Object, quad.Graph);
-
-            stats.Written++;
-            batchCount++;
-
-            if (batchCount >= batchSize)
-            {
-                _target.CommitBatch();
-                _target.BeginBatch();
-                batchCount = 0;
-            }
-        }
-        else
-        {
-            stats.Written++;
-        }
-
-        if (progressInterval > 0 && stats.Scanned % progressInterval == 0)
-        {
-            progress?.Invoke(new TransferProgress
-            {
-                QuadsScanned = stats.Scanned,
-                QuadsMatched = stats.Matched,
-                QuadsWritten = stats.Written,
-                Elapsed = stopwatch.Elapsed
-            });
-        }
-    }
-
-    private void TransferWithHistory(
-        ref TransferStats stats,
-        TransferProgressCallback? progress,
-        Fnv1aHasher? hasher,
-        NQuadsStreamWriter? auditWriter,
-        bool includeDeleted)
-    {
-        var stopwatch = Stopwatch.StartNew();
-        var filter = _options.Filter;
-        var batchSize = _options.BatchSize;
-        var progressInterval = _options.ProgressInterval;
-        var ct = _options.CancellationToken;
-        var isDryRun = _options.DryRun;
-
-        if (!isDryRun)
-            _target.BeginBatch();
-
-        int batchCount = 0;
-
-        // 1. Process default graph
-        var defaultEnumerator = _source.QueryEvolution(
-            ReadOnlySpan<char>.Empty,
-            ReadOnlySpan<char>.Empty,
-            ReadOnlySpan<char>.Empty);
-
-        try
-        {
-            while (defaultEnumerator.MoveNext())
-            {
-                ct.ThrowIfCancellationRequested();
-                var quad = defaultEnumerator.Current;
-                ProcessHistoryQuad(quad, ref stats, ref batchCount, filter, hasher,
-                    auditWriter, batchSize, progressInterval, progress, isDryRun, includeDeleted, stopwatch);
-            }
-        }
-        finally
-        {
-            defaultEnumerator.Dispose();
-        }
-
-        // 2. Process all named graphs
-        var graphNames = new List<string>();
-        var graphEnum = _source.GetNamedGraphs();
-        while (graphEnum.MoveNext())
-        {
-            graphNames.Add(graphEnum.Current.ToString());
-        }
-
-        foreach (var graphIri in graphNames)
-        {
-            ct.ThrowIfCancellationRequested();
-
-            var graphEnumerator = _source.QueryEvolution(
-                ReadOnlySpan<char>.Empty,
-                ReadOnlySpan<char>.Empty,
-                ReadOnlySpan<char>.Empty,
-                graphIri.AsSpan());
-
-            try
-            {
-                while (graphEnumerator.MoveNext())
-                {
-                    ct.ThrowIfCancellationRequested();
-                    var quad = graphEnumerator.Current;
-                    ProcessHistoryQuad(quad, ref stats, ref batchCount, filter, hasher,
-                        auditWriter, batchSize, progressInterval, progress, isDryRun, includeDeleted, stopwatch);
-                }
-            }
-            finally
-            {
-                graphEnumerator.Dispose();
-            }
-        }
-
-        // Commit final partial batch
-        if (!isDryRun)
-        {
-            if (batchCount > 0)
-            {
-                _target.CommitBatch();
-            }
-            else
-            {
-                _target.RollbackBatch();
-            }
-        }
-    }
-
-    private void ProcessHistoryQuad(
-        in ResolvedTemporalQuad quad,
-        ref TransferStats stats,
-        ref int batchCount,
-        IPruningFilter filter,
-        Fnv1aHasher? hasher,
-        NQuadsStreamWriter? auditWriter,
-        int batchSize,
-        int progressInterval,
-        TransferProgressCallback? progress,
-        bool isDryRun,
-        bool includeDeleted,
-        Stopwatch stopwatch)
-    {
-        stats.Scanned++;
-
-        // Skip deleted unless preserving all
-        if (quad.LegacyIsDeleted && !includeDeleted)
-            return;
-
-        if (!filter.ShouldInclude(
-            quad.Graph, quad.Subject, quad.Predicate, quad.Object,
-            quad.MemorizedAt, quad.ForgottenAt))
-        {
-            auditWriter?.WriteQuad(quad.Subject, quad.Predicate, quad.Object, quad.Graph);
-            return;
-        }
-
-        stats.Matched++;
-
-        if (hasher != null)
-        {
-            HashQuad(hasher, quad.Graph, quad.Subject, quad.Predicate, quad.Object);
-        }
-
-        if (!isDryRun)
-        {
-            _target.AddBatched(
-                quad.Subject, quad.Predicate, quad.Object,
-                quad.MemorizedAt, quad.ForgottenAt, quad.Graph);
-
-            // PreserveAll keeps a retracted version (recorded in error, ADR-054 D2) as a retracted version: copied as
-            // a plain Add it would hold again in the target.
-            if (quad.LegacyIsDeleted)
-                _target.RetractBatched(
-                    quad.Subject, quad.Predicate, quad.Object,
-                    quad.MemorizedAt, quad.ForgottenAt, quad.Graph);
+            _target.CopyRememberedBatched(
+                quad.Subject, quad.Predicate, quad.Object, quad.Graph, memorizedAt);
 
             stats.Written++;
             batchCount++;

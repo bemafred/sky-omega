@@ -11,11 +11,6 @@ namespace SkyOmega.Mercury.Pruning;
 internal sealed class TransferOptions
 {
     /// <summary>
-    /// How to handle temporal history. Default: FlattenToCurrent.
-    /// </summary>
-    public HistoryMode HistoryMode { get; init; } = HistoryMode.FlattenToCurrent;
-
-    /// <summary>
     /// Filter to apply during transfer. Default: AllPassFilter (include everything).
     /// </summary>
     public IPruningFilter Filter { get; init; } = AllPassFilter.Instance;
@@ -72,7 +67,7 @@ internal sealed class TransferOptions
     public string? AuditLogPath { get; init; }
 
     /// <summary>
-    /// Default options: FlattenToCurrent, no filter, 10K batch size.
+    /// Default options: no filter, 10K batch size. A prune keeps what is remembered, with its times (ADR-061 D12).
     /// </summary>
     public static TransferOptions Default { get; } = new();
 }

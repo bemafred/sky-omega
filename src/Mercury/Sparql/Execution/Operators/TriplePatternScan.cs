@@ -238,7 +238,7 @@ internal ref struct TriplePatternScan
                     if (!TryBindVariable(_pattern.Object, triple.Object, ref bindings))
                         continue;
                     // Only a pattern without a property path has words (ADR-061 D10)
-                    if (_scope.BindsTimes && !TryBindTimes(triple.MemorizedAt, triple.ForgottenAt, ref bindings))
+                    if (_scope.BindsTimes && !TryBindTimes(_enumerator.MemorizedAt, _enumerator.ForgottenAt, ref bindings))
                         continue;
                 }
 
@@ -594,15 +594,15 @@ internal ref struct TriplePatternScan
     private MergedGraphEnumerator QueryMerge(ReadOnlySpan<char> subject, ReadOnlySpan<char> predicate, ReadOnlySpan<char> obj)
     {
         var reads = _defaultGraphs!.Length == 0
-            ? Array.Empty<TemporalResultEnumerator>()
-            : new TemporalResultEnumerator[_defaultGraphs.Length];
+            ? Array.Empty<ResultEnumerator>()
+            : new ResultEnumerator[_defaultGraphs.Length];
         for (int i = 0; i < reads.Length; i++)
             reads[i] = QueryGraph(subject, predicate, obj, _defaultGraphs[i]);
         return new MergedGraphEnumerator(new GraphMerge(reads, _defaultGraphs, _store, _scope));
     }
 
     /// <summary>The matches in one graph (empty: the store's default graph).</summary>
-    private TemporalResultEnumerator QueryGraph(
+    private ResultEnumerator QueryGraph(
         ReadOnlySpan<char> subject, ReadOnlySpan<char> predicate, ReadOnlySpan<char> obj, ReadOnlySpan<char> graph)
     {
         // ADR-024 trigram pre-filter: when the object position is a text:match variable, the caller passes the
@@ -1656,18 +1656,19 @@ internal ref struct TriplePatternScan
     /// time is an <c>xsd:dateTime</c> in UTC with a millisecond fraction. False when a variable is bound already to
     /// another value.
     /// </summary>
-    private bool TryBindTimes(DateTimeOffset memorizedAt, DateTimeOffset forgottenAt, ref BindingTable bindings)
+    private bool TryBindTimes(long? memorizedAt, long? forgottenAt, ref BindingTable bindings)
     {
         Span<char> time = stackalloc char[80];
-        if (_scope.MemorizedVariableLength > 0)
+        if (_scope.MemorizedVariableLength > 0 && memorizedAt is { } memorized)
         {
-            int length = WriteTime(memorizedAt, time);
+            int length = WriteTime(DateTimeOffset.FromUnixTimeMilliseconds(memorized), time);
             if (!TryBindVariable(Term.Variable(_scope.MemorizedVariableStart, _scope.MemorizedVariableLength), time[..length], ref bindings))
                 return false;
         }
-        if (_scope.ForgottenVariableLength > 0 && !TemporalQuadIndex.IsRemembered(forgottenAt.ToUnixTimeMilliseconds()))
+        // A period that is remembered has no forgotten time (ADR-061 I8): FORGOTTEN ?t leaves ?t unbound
+        if (_scope.ForgottenVariableLength > 0 && forgottenAt is { } forgotten)
         {
-            int length = WriteTime(forgottenAt, time);
+            int length = WriteTime(DateTimeOffset.FromUnixTimeMilliseconds(forgotten), time);
             if (!TryBindVariable(Term.Variable(_scope.ForgottenVariableStart, _scope.ForgottenVariableLength), time[..length], ref bindings))
                 return false;
         }

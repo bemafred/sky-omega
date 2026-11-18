@@ -1321,9 +1321,7 @@ internal sealed class TreeJoinExecutor
             || !XsdDateTime.TryParse(value.StringValue, kind == Rdf.XsdKind.Date, out long ticksUtc))
             throw new SparqlParseException(
                 $"A bound of MEMORIZED or FORGOTTEN is an xsd:dateTime or an xsd:date (ADR-061 D10): {_source.Substring(start, length).Trim()}");
-        long sinceEpoch = ticksUtc - DateTime.UnixEpoch.Ticks;
-        long milliseconds = sinceEpoch / TimeSpan.TicksPerMillisecond;
-        return sinceEpoch % TimeSpan.TicksPerMillisecond > 0 ? milliseconds + 1 : milliseconds;
+        return TemporalQuery.Bound(ticksUtc);
     }
 
     /// <summary>

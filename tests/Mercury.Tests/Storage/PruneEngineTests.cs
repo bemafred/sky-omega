@@ -109,34 +109,42 @@ public class PruneEngineTests : IDisposable
     }
 
     [Fact]
-    public void Execute_FlattenToCurrent_IsDefault()
+    public void Execute_KeepsWhatIsRemembered_WithTheTimeItWasMemorized_AndNothingThatIsForgotten()
     {
+        // ADR-061 D12: one way to prune. The pool's stores read the system clock.
         var pool = CreatePool();
         var primary = pool.GetOrCreate("primary");
-        primary.AddCurrent("<http://ex/s>", "<http://ex/p>", "\"v1\"");
+        primary.AddCurrent("<http://ex/s>", "<http://ex/p>", "\"kept\"");
+        primary.AddCurrent("<http://ex/s>", "<http://ex/p>", "\"forgotten\"");
+        primary.DeleteCurrent("<http://ex/s>", "<http://ex/p>", "\"forgotten\"");
+        DateTimeOffset memorized;
+        primary.AcquireReadLock();
+        try
+        {
+            var before = primary.QueryMemories("<http://ex/s>", "<http://ex/p>", "\"kept\"");
+            Assert.True(before.MoveNext());
+            memorized = before.Current.MemorizedAt;
+            before.Dispose();
+        }
+        finally { primary.ReleaseReadLock(); }
 
         var result = PruneEngine.Execute(pool);
 
         Assert.True(result.Success);
         Assert.Equal(1, result.QuadsWritten);
-    }
-
-    [Fact]
-    public void Execute_PreserveVersions_TransfersHistory()
-    {
-        var pool = CreatePool();
-        var primary = pool.GetOrCreate("primary");
-        primary.AddCurrent("<http://ex/s>", "<http://ex/p>", "\"v1\"");
-
-        var options = new PruneOptions
+        var pruned = pool["primary"];
+        pruned.AcquireReadLock();
+        try
         {
-            HistoryMode = HistoryMode.PreserveVersions
-        };
-
-        var result = PruneEngine.Execute(pool, options);
-
-        Assert.True(result.Success);
-        Assert.Equal(1, result.QuadsWritten);
+            var after = pruned.QueryMemories("<http://ex/s>", "<http://ex/p>", default, includingForgotten: true);
+            Assert.True(after.MoveNext());
+            Assert.Equal("\"kept\"", after.Current.Object.ToString());
+            Assert.Equal(memorized, after.Current.MemorizedAt);
+            Assert.Null(after.Current.ForgottenAt);
+            Assert.False(after.MoveNext(), "The forgotten memory is not transferred");
+            after.Dispose();
+        }
+        finally { pruned.ReleaseReadLock(); }
     }
 
     [Fact]

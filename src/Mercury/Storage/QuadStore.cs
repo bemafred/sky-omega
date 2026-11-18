@@ -95,11 +95,9 @@ public sealed class QuadStore : IDisposable
     // plus one string allocation per atom per triple. The IDs are already in the
     // WAL record — we keep the record and let ApplyToIndexesById use it directly.
     private List<LogRecord>? _batchBuffer;
-    // Transaction time captured at BeginBatch; shared by every record in the batch.
-    // Bitemporally this is correct ("all triples in the batch were recorded at the
-    // same moment"), and it removes one UtcNow call per triple from AddBatched.
+    // The batch's one clock reading, taken at BeginBatch under the write lock (ADR-061 I12): every operation of the
+    // batch has it.
     private long _batchTransactionTimeTicks;
-    private DateTimeOffset _batchCurrentFrom;
     // The store's one clock (ADR-061 D4). Every stamp is a reading of it taken under the write lock (I12).
     private readonly TimeProvider _clock;
 
@@ -603,87 +601,6 @@ public sealed class QuadStore : IDisposable
     }
 
     /// <summary>
-    /// Add a temporal quad to all indexes with WAL durability.
-    /// Thread-safe: acquires write lock.
-    /// </summary>
-    public void Add(
-        ReadOnlySpan<char> subject,
-        ReadOnlySpan<char> predicate,
-        ReadOnlySpan<char> @object,
-        DateTimeOffset memorizedAt,
-        DateTimeOffset forgottenAt,
-        ReadOnlySpan<char> graph = default)
-    {
-        ThrowIfDisposed();
-        RequireWriteCapableProfile(nameof(Add));
-        ThrowIfDiskSpaceLow();
-        _lock.EnterWriteLock();
-        try
-        {
-            ThrowIfStoppedOverUnappliedWrite();
-            // A Graph or Minimal store keeps no time (ADR-064 D1, D2): an Add with stated times asserts the fact.
-            if (NumbersFactStates)
-            {
-                ChangeStateHoldingWriteLock(new QuadIds(graph.IsEmpty ? 0 : _atoms.Intern(graph),
-                    _atoms.Intern(subject), _atoms.Intern(predicate), _atoms.Intern(@object)), Asked.Insert);
-                return;
-            }
-            AddHoldingWriteLock(subject, predicate, @object, memorizedAt, forgottenAt, graph,
-                transactionTime: _clock.GetUtcNow().ToUnixTimeMilliseconds());
-        }
-        finally
-        {
-            _lock.ExitWriteLock();
-        }
-    }
-
-    /// <summary>
-    /// One single write, with the write lock held: log the Add, apply it, save the counts. The caller read
-    /// <paramref name="transactionTime"/> from the store's clock after it took the lock (ADR-061 I12).
-    /// </summary>
-    private void AddHoldingWriteLock(
-        ReadOnlySpan<char> subject,
-        ReadOnlySpan<char> predicate,
-        ReadOnlySpan<char> @object,
-        DateTimeOffset memorizedAt,
-        DateTimeOffset forgottenAt,
-        ReadOnlySpan<char> graph,
-        long transactionTime)
-    {
-        // 1. Intern atoms first
-        var graphId = graph.IsEmpty ? 0 : _atoms.Intern(graph);
-        var subjectId = _atoms.Intern(subject);
-        var predicateId = _atoms.Intern(predicate);
-        var objectId = _atoms.Intern(@object);
-
-        // 2. The WAL record holds only atom IDs, so the atoms must be durable first (ADR-058 D6)
-        MakeAtomsDurable();
-
-        // 3. Write to WAL (fsync ensures durability)
-        var record = LogRecord.CreateAdd(subjectId, predicateId, objectId, memorizedAt, forgottenAt, graphId,
-            transactionTimeTicks: transactionTime);
-        _wal!.Append(record);
-
-        // 4. Apply to indexes using pre-resolved IDs (no re-intern), then save their counts.
-        // The log has committed the record: a failure from here on stops the store (ADR-061 M7).
-        try
-        {
-            ApplyToIndexesById(record);
-            CommitIndexCounts(_wal.CurrentTxId, durable: false);
-        }
-        catch (Exception cause)
-        {
-            throw StopOverUnappliedWrite(cause);
-        }
-
-        // 5. Check if checkpoint needed
-        CheckpointIfNeeded();
-
-        // 6. Check disk space AFTER write (current op succeeds, next may be refused)
-        CheckDiskSpaceAfterWrite();
-    }
-
-    /// <summary>
     /// Memorize a fact — a SPARQL insert of one quad, with WAL durability. On a Cognitive store the write rule
     /// decides what changes (ADR-061 M5): a fact that is remembered stays as it is, a fact forgotten in this clock
     /// reading continues its period, and any other fact begins a period at this reading.
@@ -777,8 +694,8 @@ public sealed class QuadStore : IDisposable
         if (before.HoldingMemorizedAt is not { } held)
             return null;
 
-        // An entry that holds and has a stated end was written by Add with a stated time, which stays until ADR-061
-        // Step 6. It is ended as before that step: the End record shortens it.
+        // An entry that holds and has a stated end was written by Add with a stated time, before ADR-061 Step 6
+        // removed it. Such an entry is ended as it was then: the End record shortens it.
         if (!before.HoldingIsOpen)
             return LogRecord.CreateEnd(quad.Subject, quad.Predicate, quad.Object,
                 DateTimeOffset.FromUnixTimeMilliseconds(held), DateTimeOffset.FromUnixTimeMilliseconds(clockReadingMs),
@@ -858,64 +775,6 @@ public sealed class QuadStore : IDisposable
         if (asked == Asked.Insert ? asserted : !asserted)
             return null;
         return LogRecord.CreateNextVersion(quad.Graph, quad.Subject, quad.Predicate, quad.Object, held);
-    }
-
-    /// <summary>
-    /// Retract the version of a quad valid for exactly [memorizedAt, forgottenAt): it was recorded in error, and leaves every
-    /// AS OF and DURING view while ALL VERSIONS keeps it, flagged (ADR-054 D2). This is not what a SPARQL delete does;
-    /// that is <see cref="DeleteCurrent"/>. On a Graph store, which keeps no time, the interval is not read and the
-    /// fact is retracted, as <see cref="DeleteCurrent"/> does (ADR-064 M4). Thread-safe: acquires write lock.
-    /// Returns true if that live version was found and retracted, false otherwise.
-    /// </summary>
-    public bool Retract(
-        ReadOnlySpan<char> subject,
-        ReadOnlySpan<char> predicate,
-        ReadOnlySpan<char> @object,
-        DateTimeOffset memorizedAt,
-        DateTimeOffset forgottenAt,
-        ReadOnlySpan<char> graph = default)
-    {
-        ThrowIfDisposed();
-        RequireWriteCapableProfile(nameof(Retract));
-        ThrowIfDiskSpaceLow();
-        _lock.EnterWriteLock();
-        try
-        {
-            ThrowIfStoppedOverUnappliedWrite();
-            if (!TryResolveQuadIds(subject, predicate, @object, graph, out var graphId, out var subjectId, out var predicateId, out var objectId))
-                return false;
-
-            // A Graph or Minimal store keeps no time (ADR-064 D1, D2): the interval is not read, and the fact is retracted.
-            if (NumbersFactStates)
-                return ChangeStateHoldingWriteLock(new QuadIds(graphId, subjectId, predicateId, objectId), Asked.Delete);
-
-            // Cognitive retracts only an exact, live version, so a retract that finds nothing writes nothing.
-            if (!_gspoIndex!.HoldsLiveEntry(graphId, subjectId, predicateId, objectId,
-                    UtcTicksToUnixMs(memorizedAt.UtcTicks), UtcTicksToUnixMs(forgottenAt.UtcTicks)))
-                return false;
-
-            var record = LogRecord.CreateRetract(subjectId, predicateId, objectId, memorizedAt, forgottenAt, graphId,
-                transactionTimeTicks: _clock.GetUtcNow().ToUnixTimeMilliseconds());
-            _wal!.Append(record);
-
-            // The log has committed the record: a failure from here on stops the store (ADR-061 M7).
-            bool retracted;
-            try
-            {
-                retracted = ApplyRecordToIndexesById(record);
-            }
-            catch (Exception cause)
-            {
-                throw StopOverUnappliedWrite(cause);
-            }
-            CheckpointIfNeeded();
-            CheckDiskSpaceAfterWrite();
-            return retracted;
-        }
-        finally
-        {
-            _lock.ExitWriteLock();
-        }
     }
 
     /// <summary>
@@ -1083,7 +942,7 @@ public sealed class QuadStore : IDisposable
     ///   store.BeginBatch();
     ///   try {
     ///       foreach (var triple in triples)
-    ///           store.AddBatched(...);
+    ///           store.AddCurrentBatched(...);
     ///       store.CommitBatch();
     ///   } catch {
     ///       store.RollbackBatch();
@@ -1184,8 +1043,7 @@ public sealed class QuadStore : IDisposable
             _batchQuadPositions?.Clear();
             _batchQuads?.Clear();
             _batchVersions?.Clear();
-            _batchCurrentFrom = _clock.GetUtcNow();
-            _batchTransactionTimeTicks = _batchCurrentFrom.ToUnixTimeMilliseconds();
+            _batchTransactionTimeTicks = _clock.GetUtcNow().ToUnixTimeMilliseconds();
         }
         catch
         {
@@ -1196,54 +1054,8 @@ public sealed class QuadStore : IDisposable
     }
 
     /// <summary>
-    /// Add a temporal quad to the current batch (no fsync until CommitBatch).
-    /// Must be called between BeginBatch() and CommitBatch()/RollbackBatch().
-    /// </summary>
-    public void AddBatched(
-        ReadOnlySpan<char> subject,
-        ReadOnlySpan<char> predicate,
-        ReadOnlySpan<char> @object,
-        DateTimeOffset memorizedAt,
-        DateTimeOffset forgottenAt,
-        ReadOnlySpan<char> graph = default)
-    {
-        // Reference-profile bulk: write directly to the two indexes, no WAL buffering.
-        // Valid-time bounds are discarded — Reference has no temporal dimension.
-        if (_schema.Profile == StoreProfile.Reference)
-        {
-            AddReferenceBulkTriple(subject, predicate, @object, graph);
-            return;
-        }
-        RequireWriteCapableProfile(nameof(AddBatched));
-        if (_activeBatchTxId < 0)
-            throw new InvalidOperationException("No active batch. Call BeginBatch() first.");
-
-        // 1. Intern atoms (IAtomStore is append-only — orphans from rollback are harmless)
-        var graphId = graph.IsEmpty ? 0 : _atoms.Intern(graph);
-        var subjectId = _atoms.Intern(subject);
-        var predicateId = _atoms.Intern(predicate);
-        var objectId = _atoms.Intern(@object);
-
-        // A Graph or Minimal store keeps no time (ADR-064 D1, D2): an Add with stated times asserts the fact.
-        if (NumbersFactStates)
-        {
-            AskStateInBatch(new QuadIds(graphId, subjectId, predicateId, objectId), Asked.Insert);
-            return;
-        }
-
-        // 2. Write to WAL without fsync — transaction time captured at BeginBatch
-        var record = LogRecord.CreateAdd(subjectId, predicateId, objectId, memorizedAt, forgottenAt, graphId,
-            transactionTimeTicks: _batchTransactionTimeTicks);
-        _wal.AppendBatch(record, _activeBatchTxId);
-
-        // 3. Buffer the record itself; ApplyToIndexesById uses IDs from it at commit.
-        _batchBuffer!.Add(record);
-    }
-
-    /// <summary>
-    /// Materialize a single Reference-profile triple inside an active bulk load. Shared
-    /// by AddBatched and AddCurrentBatched because the temporal dimensions they differ on
-    /// are meaningless for Reference — both reduce to "insert (g,s,p,o)."
+    /// Materialize a single Reference-profile triple inside an active bulk load: Reference keeps no
+    /// times, so a write is "insert (g,s,p,o)."
     /// </summary>
     /// <remarks>
     /// ADR-030 Decision 5: writes only to the primary GSPO index inline. GPOS and the
@@ -1332,7 +1144,7 @@ public sealed class QuadStore : IDisposable
         if (_schema.Profile == StoreProfile.Reference)
         {
             // Reference keeps no times: the batch's reading is not stored.
-            AddBatched(subject, predicate, @object, _batchCurrentFrom, DateTimeOffset.MaxValue, graph);
+            AddReferenceBulkTriple(subject, predicate, @object, graph);
             return true;
         }
 
@@ -1388,22 +1200,6 @@ public sealed class QuadStore : IDisposable
         else
         {
             var before = _gspoIndex!.FindQuadAtReading(quad.Graph, quad.Subject, quad.Predicate, quad.Object, _batchTransactionTimeTicks);
-
-            // An Add with a stated time that this batch has buffered is not in the index yet. If it holds at the
-            // batch's reading, it is what the quad holds (until ADR-061 Step 6 removes Add with a stated time).
-            if (before.HoldingMemorizedAt is null)
-            {
-                foreach (var buffered in _batchBuffer!)
-                {
-                    if (buffered.Operation != LogOperation.Add || !IsSameQuad(buffered, quad.Graph, quad.Subject, quad.Predicate, quad.Object))
-                        continue;
-                    var from = UtcTicksToUnixMs(buffered.MemorizedAtTicks);
-                    var to = UtcTicksToUnixMs(buffered.ForgottenAtTicks);
-                    if (from <= _batchTransactionTimeTicks && to > _batchTransactionTimeTicks)
-                        before = new TemporalQuadIndex.QuadAtReading(from, to >= TemporalQuadIndex.OpenForgottenAt, before.ForgottenAtReadingMemorizedAt);
-                }
-            }
-
             remembered = before.HoldingMemorizedAt is not null;
             _batchQuadPositions[quad] = _batchQuads.Count;
             _batchQuads.Add(new BatchQuad { Quad = quad, Before = before, Last = asked });
@@ -1413,52 +1209,34 @@ public sealed class QuadStore : IDisposable
     }
 
     /// <summary>
-    /// Retract, in the current batch, the version valid for exactly [memorizedAt, forgottenAt) (ADR-054 D2; see
-    /// <see cref="Retract"/>). Must be called between BeginBatch() and CommitBatch()/RollbackBatch(); the index change
-    /// is applied at CommitBatch. Returns true if that live version exists and is not already retracted in this batch.
+    /// The copy that carries a time (ADR-061 D12, I11, I14), for a prune: memorize a fact in the current batch at the
+    /// time its present period was memorized in the store it is copied from. No writer states a time; a copy between
+    /// stores carries the source's, and only into a store that holds nothing of the fact: a prune clears its target
+    /// first. <paramref name="memorizedAt"/>, in milliseconds of the source's clock, is null when the source keeps no
+    /// times: the fact is then memorized as <see cref="AddCurrentBatched"/> memorizes it. A store that keeps no times
+    /// takes the fact as <see cref="AddCurrentBatched"/> does.
     /// </summary>
-    public bool RetractBatched(
+    internal void CopyRememberedBatched(
         ReadOnlySpan<char> subject,
         ReadOnlySpan<char> predicate,
         ReadOnlySpan<char> @object,
-        DateTimeOffset memorizedAt,
-        DateTimeOffset forgottenAt,
-        ReadOnlySpan<char> graph = default)
+        ReadOnlySpan<char> graph,
+        long? memorizedAt)
     {
-        RequireWriteCapableProfile(nameof(RetractBatched));
+        if (memorizedAt is not { } copied || _gspoIndex is null)
+        {
+            AddCurrentBatched(subject, predicate, @object, graph);
+            return;
+        }
         if (_activeBatchTxId < 0)
             throw new InvalidOperationException("No active batch. Call BeginBatch() first.");
 
-        if (!TryResolveQuadIds(subject, predicate, @object, graph, out var graphId, out var subjectId, out var predicateId, out var objectId))
-            return false;
-
-        // A Graph or Minimal store keeps no time (ADR-064 D1, D2): the interval is not read, and the fact is retracted.
-        if (NumbersFactStates)
-            return AskStateInBatch(new QuadIds(graphId, subjectId, predicateId, objectId), Asked.Delete);
-
-        // The version may be in the indexes or added earlier in this batch (a pruning copy adds a version and
-        // retracts it in one batch); a Retract of it already buffered means there is nothing left to retract.
-        var fromMs = UtcTicksToUnixMs(memorizedAt.UtcTicks);
-        var toMs = UtcTicksToUnixMs(forgottenAt.UtcTicks);
-        bool addedInBatch = false;
-        foreach (var buffered in _batchBuffer!)
-        {
-            if (!IsSameQuad(buffered, graphId, subjectId, predicateId, objectId)
-                || UtcTicksToUnixMs(buffered.MemorizedAtTicks) != fromMs || UtcTicksToUnixMs(buffered.ForgottenAtTicks) != toMs)
-                continue;
-            if (buffered.Operation == LogOperation.Retract)
-                return false;
-            if (buffered.Operation == LogOperation.Add)
-                addedInBatch = true;
-        }
-        if (!addedInBatch && !_gspoIndex!.HoldsLiveEntry(graphId, subjectId, predicateId, objectId, fromMs, toMs))
-            return false;
-
-        var record = LogRecord.CreateRetract(subjectId, predicateId, objectId, memorizedAt, forgottenAt, graphId,
-            transactionTimeTicks: _batchTransactionTimeTicks);
+        var quad = new QuadIds(graph.IsEmpty ? 0 : _atoms.Intern(graph),
+            _atoms.Intern(subject), _atoms.Intern(predicate), _atoms.Intern(@object));
+        var record = LogRecord.CreatePeriodChange(LogOperation.BeginPeriod, quad.Graph, quad.Subject, quad.Predicate,
+            quad.Object, copied, TemporalQuadIndex.OpenForgottenAt, _batchTransactionTimeTicks);
         _wal!.AppendBatch(record, _activeBatchTxId);
         _batchBuffer!.Add(record);
-        return true;
     }
 
     /// <summary>
@@ -2945,7 +2723,8 @@ public sealed class QuadStore : IDisposable
     /// <summary>
     /// Apply a Retract record (Cognitive): the version with exactly the record's interval is marked LegacyIsDeleted
     /// (ADR-054 D2); a record written before ADR-054 by DeleteCurrent carries [MinValue, MaxValue] and is replayed with
-    /// the meaning it had then (mark the first overlapping version).
+    /// the meaning it had then (mark the first overlapping version). Nothing writes a Retract record since ADR-061
+    /// Step 6; a log written before it is replayed as it was written.
     /// </summary>
     private bool ApplyRetractToIndexesById(in LogRecord record)
     {
@@ -3160,12 +2939,11 @@ public sealed class QuadStore : IDisposable
         }
         else
         {
-            // Cognitive profile: scan TemporalQuadIndex GPOS via AsOf-now.
-            var gpos = _gposIndex!.QueryAsOf(
+            // Cognitive profile: scan TemporalQuadIndex GPOS for what is remembered. It reads no clock (ADR-061 D7).
+            var gpos = _gposIndex!.QueryCurrent(
                 ReadOnlySpan<char>.Empty,  // All predicates
                 ReadOnlySpan<char>.Empty,  // All objects (Secondary in GPOS)
-                ReadOnlySpan<char>.Empty,  // All subjects (Tertiary in GPOS)
-                _clock.GetUtcNow());
+                ReadOnlySpan<char>.Empty); // All subjects (Tertiary in GPOS)
 
             while (gpos.MoveNext())
             {
@@ -3203,82 +2981,69 @@ public sealed class QuadStore : IDisposable
     }
 
     /// <summary>
-    /// Query with optimal index selection.
+    /// What is remembered (ADR-061 D7), on every profile: each matching quad and nothing else (ADR-062 D1). On a
+    /// Cognitive store, every period that has no forgotten time; it reads no clock. On a Graph or Minimal store, what is
+    /// asserted; on a Reference store, what it holds. Empty graph means default graph.
     ///
     /// Note: For thread-safety with concurrent writes, either:
     /// 1. Use AcquireReadLock/ReleaseReadLock around the query and enumeration, or
     /// 2. Ensure no writes occur during enumeration
     /// </summary>
-    public TemporalResultEnumerator Query(
+    public ResultEnumerator QueryCurrent(
         ReadOnlySpan<char> subject,
         ReadOnlySpan<char> predicate,
         ReadOnlySpan<char> @object,
-        TemporalQueryType queryType,
-        DateTimeOffset? asOfTime = null,
-        DateTimeOffset? rangeStart = null,
-        DateTimeOffset? rangeEnd = null,
         ReadOnlySpan<char> graph = default)
     {
-        // ADR-029 Phase 2d query dispatch. A Reference or Graph store has no time
-        // dimension, so only "current state" queries make sense. Range, AllTime, and
-        // asOf-at-a-specific-past-time are all temporal queries and fail loudly at the
-        // API boundary (Decision 4). QueryCurrent's pass-through lands here with
-        // queryType=AsOf and asOfTime=null, which is exactly the supported shape.
         if (_schema.Profile == StoreProfile.Reference)
-        {
-            if (queryType != TemporalQueryType.AsOf)
-                throw new ProfileCapabilityException(
-                    $"Query type {queryType} requires temporal semantics. This store's profile is Reference, " +
-                    "which has no temporal dimension — only current-state (AsOf, no explicit time) queries are supported.");
             return QueryReferenceCurrent(subject, predicate, @object, graph);
-        }
         if (_schema.Profile == StoreProfile.Graph)
-        {
-            if (queryType != TemporalQueryType.AsOf)
-                throw new ProfileCapabilityException(
-                    $"Query type {queryType} requires temporal semantics. This store's profile is Graph, " +
-                    "which has no temporal dimension (versioning is mutation-audit only, not bitemporal). " +
-                    "Only current-state (AsOf, no explicit time) queries are supported.");
-            if (asOfTime is not null)
-                throw new ProfileCapabilityException(
-                    "Explicit AsOf time-travel requires temporal semantics. This store's profile is Graph, " +
-                    "which has no temporal dimension. Use QueryCurrent (no explicit time) instead.");
             return QueryGraphCurrent(subject, predicate, @object, graph);
-        }
         if (_schema.Profile == StoreProfile.Minimal)
-        {
-            if (queryType != TemporalQueryType.AsOf)
-                throw new ProfileCapabilityException(
-                    $"Query type {queryType} requires temporal semantics. This store's profile is Minimal, " +
-                    "which has no temporal dimension. Only current-state (AsOf, no explicit time) queries are supported.");
-            if (asOfTime is not null)
-                throw new ProfileCapabilityException(
-                    "Explicit AsOf time-travel requires temporal semantics. This store's profile is Minimal, " +
-                    "which has no temporal dimension. Use QueryCurrent (no explicit time) instead.");
             return QueryMinimalCurrent(subject, predicate, @object, graph);
-        }
-
-        RequireTemporalProfile(nameof(Query));
-        // AsOf with no time is the current state: what is remembered, read with no clock (ADR-061 D7)
-        var times = queryType switch
-        {
-            TemporalQueryType.AsOf => asOfTime is null
-                ? TemporalQuery.Remembered
-                : TemporalQuery.AsOf(asOfTime.Value.ToUnixTimeMilliseconds()),
-            TemporalQueryType.Range => TemporalQuery.Overlapping(
-                (rangeStart ?? DateTimeOffset.MinValue).ToUnixTimeMilliseconds(),
-                (rangeEnd ?? DateTimeOffset.MaxValue).ToUnixTimeMilliseconds()),
-            _ => TemporalQuery.Everything
-        };
-        return QueryCognitive(subject, predicate, @object, graph, times, queryType);
+        return QueryCognitive(subject, predicate, @object, graph, TemporalQuery.Remembered);
     }
 
     /// <summary>
-    /// The read of the words of Cognitive SPARQL (ADR-061 D6, D10): the periods of the matching quads that
-    /// <paramref name="times"/> selects, each with its two times. Refused on a store that keeps no times (D9).
-    /// Empty graph means default graph. Caller must hold read lock.
+    /// The memories of the matching quads, each with the two times of its period (ADR-062 D2): the store read of the
+    /// words of Cognitive SPARQL (ADR-061 D6, D10), with the bounds a pattern's words give.
+    /// <list type="bullet">
+    /// <item>The periods memorized in <c>[memorizedSince, memorizedBefore)</c>.</item>
+    /// <item>With a bound on the forgotten time, the periods forgotten in <c>[forgottenSince, forgottenBefore)</c>, so
+    /// none that is remembered.</item>
+    /// <item>Without one, the periods that are remembered, and with <paramref name="includingForgotten"/> the forgotten
+    /// ones too: <c>FORGOTTEN</c> with no bound, or <c>INCLUDING FORGOTTEN</c>.</item>
+    /// </list>
+    /// An absent bound is null. A bound between two milliseconds is taken at the next one, as the words take it: every
+    /// stored time is a whole millisecond. Only a Cognitive store keeps times (ADR-061 D9): on any other this throws
+    /// <see cref="ProfileCapabilityException"/>. Empty graph means default graph.
     /// </summary>
-    internal TemporalResultEnumerator QueryMemories(
+    public TemporalResultEnumerator QueryMemories(
+        ReadOnlySpan<char> subject,
+        ReadOnlySpan<char> predicate,
+        ReadOnlySpan<char> @object,
+        ReadOnlySpan<char> graph = default,
+        DateTimeOffset? memorizedSince = null,
+        DateTimeOffset? memorizedBefore = null,
+        DateTimeOffset? forgottenSince = null,
+        DateTimeOffset? forgottenBefore = null,
+        bool includingForgotten = false)
+    {
+        var times = TemporalQuery.Words(
+            memorizedSince is { } a ? TemporalQuery.Bound(a.UtcTicks) : long.MinValue,
+            memorizedBefore is { } b ? TemporalQuery.Bound(b.UtcTicks) : long.MaxValue,
+            forgottenSince is { } c ? TemporalQuery.Bound(c.UtcTicks) : null,
+            forgottenBefore is { } d ? TemporalQuery.Bound(d.UtcTicks) : null,
+            forgottenToo: includingForgotten);
+        return new TemporalResultEnumerator(QueryByMemoryTimes(subject, predicate, @object, graph, times));
+    }
+
+    /// <summary>
+    /// The quads whose periods <paramref name="times"/> selects: the read under the words of Cognitive SPARQL. The two
+    /// times of each period are read from the enumerator's position (ADR-062 D2). Refused on a store that keeps no
+    /// times (ADR-061 D9). Empty graph means default graph. Caller must hold read lock.
+    /// </summary>
+    internal ResultEnumerator QueryByMemoryTimes(
         ReadOnlySpan<char> subject,
         ReadOnlySpan<char> predicate,
         ReadOnlySpan<char> @object,
@@ -3286,129 +3051,61 @@ public sealed class QuadStore : IDisposable
         TemporalQuery times)
     {
         RequireTemporalProfile(nameof(QueryMemories));
-        return QueryCognitive(subject, predicate, @object, graph, times, TemporalQueryType.AsOf);
+        return QueryCognitive(subject, predicate, @object, graph, times);
     }
 
     /// <summary>
-    /// A Cognitive read: the index chosen by the bound terms (and by <paramref name="queryType"/>, which takes TGSP
-    /// for a range), read with the time selection <paramref name="times"/>.
+    /// Every period the TGSP index holds in <paramref name="graph"/>, remembered or forgotten, with its two times. No
+    /// read of the store chooses TGSP: its key leads with the time, and on the live store it differs from GSPO
+    /// (ADR-061 LQ5). The store still writes and rebuilds it, and this read is how the store's tests check that it
+    /// holds what the other three hold (ADR-061 I13). Empty graph means default graph. Caller must hold read lock.
     /// </summary>
-    private TemporalResultEnumerator QueryCognitive(
+    internal TemporalResultEnumerator QueryTimeFirstIndex(ReadOnlySpan<char> graph = default)
+    {
+        RequireTemporalProfile(nameof(QueryTimeFirstIndex));
+        var times = TemporalQuery.Words(long.MinValue, long.MaxValue, null, null, forgottenToo: true);
+        return new TemporalResultEnumerator(new ResultEnumerator(
+            _tgspIndex!.Query(ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty, times, graph),
+            TermOrder.SPO, _atoms));
+    }
+
+    /// <summary>
+    /// A Cognitive read: the index chosen by the bound terms, read with the time selection <paramref name="times"/>.
+    /// </summary>
+    private ResultEnumerator QueryCognitive(
         ReadOnlySpan<char> subject,
         ReadOnlySpan<char> predicate,
         ReadOnlySpan<char> @object,
         ReadOnlySpan<char> graph,
-        TemporalQuery times,
-        TemporalQueryType queryType)
+        TemporalQuery times)
     {
-        var (selectedIndex, indexType) = SelectOptimalIndex(subject, predicate, @object, queryType);
+        var (selectedIndex, order) = SelectOptimalIndex(subject, predicate, @object);
 
         // Map RDF terms to index dimensions:
-        // GSPO: S→Primary, P→Secondary, O→Tertiary
-        // GPOS: P→Primary, O→Secondary, S→Tertiary
-        // GOSP: O→Primary, S→Secondary, P→Tertiary
-        // TGSP: S→Primary, P→Secondary, O→Tertiary
+        // SPO (GSPO): S→Primary, P→Secondary, O→Tertiary
+        // POS (GPOS): P→Primary, O→Secondary, S→Tertiary
+        // OSP (GOSP): O→Primary, S→Secondary, P→Tertiary
         ReadOnlySpan<char> arg1, arg2, arg3;
-        switch (indexType)
+        switch (order)
         {
-            case TemporalIndexType.GPOS:
+            case TermOrder.POS:
                 arg1 = predicate;
                 arg2 = @object;
                 arg3 = subject;
                 break;
-            case TemporalIndexType.GOSP:
+            case TermOrder.OSP:
                 arg1 = @object;
                 arg2 = subject;
                 arg3 = predicate;
                 break;
-            default: // GSPO, TGSP
+            default:
                 arg1 = subject;
                 arg2 = predicate;
                 arg3 = @object;
                 break;
         }
 
-        return new TemporalResultEnumerator(selectedIndex.Query(arg1, arg2, arg3, times, graph), indexType, _atoms);
-    }
-
-    /// <summary>
-    /// What is remembered (ADR-061 D7): every period that has no forgotten time. It reads no clock.
-    /// Empty graph means default graph.
-    /// </summary>
-    public TemporalResultEnumerator QueryCurrent(
-        ReadOnlySpan<char> subject,
-        ReadOnlySpan<char> predicate,
-        ReadOnlySpan<char> @object,
-        ReadOnlySpan<char> graph = default)
-    {
-        return Query(subject, predicate, @object, TemporalQueryType.AsOf, graph: graph);
-    }
-
-    /// <summary>
-    /// Query as of a specific point in time (time-travel query).
-    /// Empty graph means default graph.
-    /// </summary>
-    public TemporalResultEnumerator QueryAsOf(
-        ReadOnlySpan<char> subject,
-        ReadOnlySpan<char> predicate,
-        ReadOnlySpan<char> @object,
-        DateTimeOffset asOfTime,
-        ReadOnlySpan<char> graph = default)
-    {
-        // Explicit time-travel — Reference can't satisfy this even with synthesized fields,
-        // so reject here rather than silently ignoring the time in Query's dispatch.
-        RequireTemporalProfile(nameof(QueryAsOf));
-        return Query(subject, predicate, @object, TemporalQueryType.AsOf, asOfTime: asOfTime, graph: graph);
-    }
-
-    /// <summary>
-    /// Query all versions (evolution over time).
-    /// Empty graph means default graph.
-    /// </summary>
-    public TemporalResultEnumerator QueryEvolution(
-        ReadOnlySpan<char> subject,
-        ReadOnlySpan<char> predicate,
-        ReadOnlySpan<char> @object,
-        ReadOnlySpan<char> graph = default)
-    {
-        RequireTemporalProfile(nameof(QueryEvolution));
-        return Query(subject, predicate, @object, TemporalQueryType.AllTime, graph: graph);
-    }
-
-    /// <summary>
-    /// Time-travel query: What was true at specific time?
-    /// Empty graph means default graph.
-    /// </summary>
-    public TemporalResultEnumerator TimeTravelTo(
-        DateTimeOffset targetTime,
-        ReadOnlySpan<char> subject = default,
-        ReadOnlySpan<char> predicate = default,
-        ReadOnlySpan<char> @object = default,
-        ReadOnlySpan<char> graph = default)
-    {
-        RequireTemporalProfile(nameof(TimeTravelTo));
-        return Query(subject, predicate, @object, TemporalQueryType.AsOf, asOfTime: targetTime, graph: graph);
-    }
-
-    /// <summary>
-    /// Temporal range query: What changed during period?
-    /// Empty graph means default graph.
-    /// </summary>
-    public TemporalResultEnumerator QueryChanges(
-        DateTimeOffset periodStart,
-        DateTimeOffset periodEnd,
-        ReadOnlySpan<char> subject = default,
-        ReadOnlySpan<char> predicate = default,
-        ReadOnlySpan<char> @object = default,
-        ReadOnlySpan<char> graph = default)
-    {
-        RequireTemporalProfile(nameof(QueryChanges));
-        return Query(
-            subject, predicate, @object,
-            TemporalQueryType.Range,
-            rangeStart: periodStart,
-            rangeEnd: periodEnd,
-            graph: graph);
+        return new ResultEnumerator(selectedIndex.Query(arg1, arg2, arg3, times, graph), order, _atoms);
     }
 
     /// <summary>
@@ -3426,7 +3123,7 @@ public sealed class QuadStore : IDisposable
     /// avoiding string decode for non-candidates.
     /// Caller must hold read lock.
     /// </summary>
-    internal TemporalResultEnumerator QueryCurrentWithCandidates(
+    internal ResultEnumerator QueryCurrentWithCandidates(
         ReadOnlySpan<char> subject,
         ReadOnlySpan<char> predicate,
         ReadOnlySpan<char> @object,
@@ -3443,15 +3140,15 @@ public sealed class QuadStore : IDisposable
             return QueryMinimalCurrent(subject, predicate, @object, graph, candidateObjectAtomIds);
 
         RequireTemporalProfile(nameof(QueryCurrentWithCandidates));
-        var (selectedIndex, indexType) = SelectOptimalIndex(subject, predicate, @object, TemporalQueryType.AsOf);
+        var (selectedIndex, order) = SelectOptimalIndex(subject, predicate, @object);
 
         ReadOnlySpan<char> arg1, arg2, arg3;
-        switch (indexType)
+        switch (order)
         {
-            case TemporalIndexType.GPOS:
+            case TermOrder.POS:
                 arg1 = predicate; arg2 = @object; arg3 = subject;
                 break;
-            case TemporalIndexType.GOSP:
+            case TermOrder.OSP:
                 arg1 = @object; arg2 = subject; arg3 = predicate;
                 break;
             default:
@@ -3460,7 +3157,7 @@ public sealed class QuadStore : IDisposable
         }
 
         var enumerator = selectedIndex.QueryCurrent(arg1, arg2, arg3, graph);
-        return new TemporalResultEnumerator(enumerator, indexType, _atoms, candidateObjectAtomIds);
+        return new ResultEnumerator(enumerator, order, _atoms, candidateObjectAtomIds);
     }
 
     /// <summary>
@@ -3529,7 +3226,7 @@ public sealed class QuadStore : IDisposable
     /// has no GOSP or TGSP, so object-only queries still go through GSPO — correct but a
     /// full scan bound only by graph. Cost-based selection is a later ADR.
     /// </summary>
-    private (ReferenceQuadIndex Index, TemporalIndexType Type) SelectOptimalReferenceIndex(
+    private (ReferenceQuadIndex Index, TermOrder Order) SelectOptimalReferenceIndex(
         ReadOnlySpan<char> subject,
         ReadOnlySpan<char> predicate,
         ReadOnlySpan<char> @object)
@@ -3539,17 +3236,17 @@ public sealed class QuadStore : IDisposable
         var predicateBound = !predicate.IsEmpty && !VariableName.IsSigil(predicate[0]);
 
         if (predicateBound && !subjectBound)
-            return (_gposReference!, TemporalIndexType.GPOS);
-        return (_gspoReference!, TemporalIndexType.GSPO);
+            return (_gposReference!, TermOrder.POS);
+        return (_gspoReference!, TermOrder.SPO);
     }
 
     /// <summary>
     /// Query entry for Minimal profile. Resolves SPARQL-shaped spans to atom IDs,
     /// rejects any non-empty graph constraint, queries the single GSPO index, and
-    /// returns a <see cref="TemporalResultEnumerator"/> over that index's
+    /// returns a <see cref="ResultEnumerator"/> over that index's
     /// <see cref="QuadIndexCursor"/> (ADR-062). ADR-029 Minimal profile.
     /// </summary>
-    private TemporalResultEnumerator QueryMinimalCurrent(
+    private ResultEnumerator QueryMinimalCurrent(
         ReadOnlySpan<char> subject,
         ReadOnlySpan<char> predicate,
         ReadOnlySpan<char> @object,
@@ -3566,15 +3263,14 @@ public sealed class QuadStore : IDisposable
         var tertiary = ResolveQueryTerm(@object);
 
         var enumerator = _gspoMinimal!.Query(primary, secondary, tertiary);
-        return new TemporalResultEnumerator(enumerator, TemporalIndexType.GSPO, _atoms, candidateObjectAtomIds);
+        return new ResultEnumerator(enumerator, TermOrder.SPO, _atoms, candidateObjectAtomIds);
     }
 
     /// <summary>
-    /// Pick GSPO / GPOS / GOSP / TGSP for a Graph-profile query. Graph has all four
-    /// indexes available like Cognitive, so the selection logic is the same shape
-    /// minus the temporal-range branch. ADR-029 Graph profile.
+    /// Pick GSPO / GPOS / GOSP for a Graph-profile query: the same selection as Cognitive's.
+    /// ADR-029 Graph profile; Graph has no TGSP (ADR-064).
     /// </summary>
-    private (VersionedQuadIndex Index, TemporalIndexType Type) SelectOptimalGraphIndex(
+    private (VersionedQuadIndex Index, TermOrder Order) SelectOptimalGraphIndex(
         ReadOnlySpan<char> subject,
         ReadOnlySpan<char> predicate,
         ReadOnlySpan<char> @object)
@@ -3592,21 +3288,21 @@ public sealed class QuadStore : IDisposable
                 && _indexState != StoreIndexState.BuildingGOSP;
 
             if (subjectBound)
-                return (_gspoGraph!, TemporalIndexType.GSPO);
+                return (_gspoGraph!, TermOrder.SPO);
             if (predicateBound && gposAvailable)
-                return (_gposGraph!, TemporalIndexType.GPOS);
+                return (_gposGraph!, TermOrder.POS);
             if (objectBound && gospAvailable)
-                return (_gospGraph!, TemporalIndexType.GOSP);
-            return (_gspoGraph!, TemporalIndexType.GSPO);
+                return (_gospGraph!, TermOrder.OSP);
+            return (_gspoGraph!, TermOrder.SPO);
         }
 
         if (subjectBound)
-            return (_gspoGraph!, TemporalIndexType.GSPO);
+            return (_gspoGraph!, TermOrder.SPO);
         if (predicateBound)
-            return (_gposGraph!, TemporalIndexType.GPOS);
+            return (_gposGraph!, TermOrder.POS);
         if (objectBound)
-            return (_gospGraph!, TemporalIndexType.GOSP);
-        return (_gspoGraph!, TemporalIndexType.GSPO);
+            return (_gospGraph!, TermOrder.OSP);
+        return (_gspoGraph!, TermOrder.SPO);
     }
 
     /// <summary>
@@ -3614,30 +3310,30 @@ public sealed class QuadStore : IDisposable
     /// shape but routes through <see cref="VersionedQuadIndex"/>. Live-only by default
     /// (soft-deleted entries are filtered out by VersionedQuadIndex.Query).
     /// </summary>
-    private TemporalResultEnumerator QueryGraphCurrent(
+    private ResultEnumerator QueryGraphCurrent(
         ReadOnlySpan<char> subject,
         ReadOnlySpan<char> predicate,
         ReadOnlySpan<char> @object,
         ReadOnlySpan<char> graph,
         HashSet<long>? candidateObjectAtomIds = null)
     {
-        var (gIndex, indexType) = SelectOptimalGraphIndex(subject, predicate, @object);
+        var (gIndex, order) = SelectOptimalGraphIndex(subject, predicate, @object);
 
         var g = ResolveQueryGraph(graph);
         long primary, secondary, tertiary;
-        switch (indexType)
+        switch (order)
         {
-            case TemporalIndexType.GPOS:
+            case TermOrder.POS:
                 primary = ResolveQueryTerm(predicate);
                 secondary = ResolveQueryTerm(@object);
                 tertiary = ResolveQueryTerm(subject);
                 break;
-            case TemporalIndexType.GOSP:
+            case TermOrder.OSP:
                 primary = ResolveQueryTerm(@object);
                 secondary = ResolveQueryTerm(subject);
                 tertiary = ResolveQueryTerm(predicate);
                 break;
-            default: // GSPO (TGSP for Graph is also entity-first; query the same as GSPO)
+            default: // GSPO
                 primary = ResolveQueryTerm(subject);
                 secondary = ResolveQueryTerm(predicate);
                 tertiary = ResolveQueryTerm(@object);
@@ -3645,30 +3341,30 @@ public sealed class QuadStore : IDisposable
         }
 
         var enumerator = gIndex.Query(g, primary, secondary, tertiary);
-        return new TemporalResultEnumerator(enumerator, indexType, _atoms, candidateObjectAtomIds);
+        return new ResultEnumerator(enumerator, order, _atoms, candidateObjectAtomIds);
     }
 
     /// <summary>
     /// Query entry for Reference profile. Resolves SPARQL-shaped spans to atom IDs,
     /// chooses the right index (GSPO or GPOS), and returns a
-    /// <see cref="TemporalResultEnumerator"/> over that index's <see cref="QuadIndexCursor"/>
+    /// <see cref="ResultEnumerator"/> over that index's <see cref="QuadIndexCursor"/>
     /// (ADR-062), which remaps the dimensions for uniform consumption by the SPARQL
     /// executor.
     /// </summary>
-    private TemporalResultEnumerator QueryReferenceCurrent(
+    private ResultEnumerator QueryReferenceCurrent(
         ReadOnlySpan<char> subject,
         ReadOnlySpan<char> predicate,
         ReadOnlySpan<char> @object,
         ReadOnlySpan<char> graph,
         HashSet<long>? candidateObjectAtomIds = null)
     {
-        var (refIndex, indexType) = SelectOptimalReferenceIndex(subject, predicate, @object);
+        var (refIndex, order) = SelectOptimalReferenceIndex(subject, predicate, @object);
 
         var g = ResolveQueryGraph(graph);
         long primary, secondary, tertiary;
-        switch (indexType)
+        switch (order)
         {
-            case TemporalIndexType.GPOS:
+            case TermOrder.POS:
                 primary = ResolveQueryTerm(predicate);
                 secondary = ResolveQueryTerm(@object);
                 tertiary = ResolveQueryTerm(subject);
@@ -3681,14 +3377,18 @@ public sealed class QuadStore : IDisposable
         }
 
         var refEnum = refIndex.Query(g, primary, secondary, tertiary);
-        return new TemporalResultEnumerator(refEnum, indexType, _atoms, candidateObjectAtomIds);
+        return new ResultEnumerator(refEnum, order, _atoms, candidateObjectAtomIds);
     }
 
-    private (TemporalQuadIndex Index, TemporalIndexType Type) SelectOptimalIndex(
+    /// <summary>
+    /// Pick GSPO, GPOS or GOSP for a Cognitive read, by the bound terms. TGSP is not read: its key leads with the time,
+    /// and on the live store it differs from GSPO (ADR-061 LQ5). No read chooses it since the time-range read went with
+    /// ADR-061 Step 6.
+    /// </summary>
+    private (TemporalQuadIndex Index, TermOrder Order) SelectOptimalIndex(
         ReadOnlySpan<char> subject,
         ReadOnlySpan<char> predicate,
-        ReadOnlySpan<char> @object,
-        TemporalQueryType queryType)
+        ReadOnlySpan<char> @object)
     {
         var subjectBound = !subject.IsEmpty && !VariableName.IsSigil(subject[0]);
         var predicateBound = !predicate.IsEmpty && !VariableName.IsSigil(predicate[0]);
@@ -3698,52 +3398,30 @@ public sealed class QuadStore : IDisposable
         // Queries still work — just slower (full GSPO scan instead of targeted index).
         if (_indexState != StoreIndexState.Ready)
         {
-            // TGSP is only available after full rebuild
             // GPOS is available after BuildingGPOS completes
             // GOSP is available after BuildingGOSP completes
             var gposAvailable = _indexState != StoreIndexState.PrimaryOnly
                 && _indexState != StoreIndexState.BuildingGPOS;
             var gospAvailable = gposAvailable
                 && _indexState != StoreIndexState.BuildingGOSP;
-            var tgspAvailable = gospAvailable
-                && _indexState != StoreIndexState.BuildingTGSP
-                && _indexState != StoreIndexState.BuildingTrigram;
 
-            if (queryType == TemporalQueryType.Range && tgspAvailable)
-                return (_tgspIndex!, TemporalIndexType.TGSP);
             if (subjectBound)
-                return (_gspoIndex!, TemporalIndexType.GSPO);
+                return (_gspoIndex!, TermOrder.SPO);
             if (predicateBound && gposAvailable)
-                return (_gposIndex!, TemporalIndexType.GPOS);
+                return (_gposIndex!, TermOrder.POS);
             if (objectBound && gospAvailable)
-                return (_gospIndex!, TemporalIndexType.GOSP);
+                return (_gospIndex!, TermOrder.OSP);
 
-            return (_gspoIndex!, TemporalIndexType.GSPO);
+            return (_gspoIndex!, TermOrder.SPO);
         }
 
-        // For time-range queries, prefer TGSP index
-        if (queryType == TemporalQueryType.Range)
-        {
-            return (_tgspIndex!, TemporalIndexType.TGSP);
-        }
-
-        // Otherwise select based on bound variables
         if (subjectBound)
-        {
-            return (_gspoIndex!, TemporalIndexType.GSPO);
-        }
-        else if (predicateBound)
-        {
-            return (_gposIndex!, TemporalIndexType.GPOS);
-        }
-        else if (objectBound)
-        {
-            return (_gospIndex!, TemporalIndexType.GOSP);
-        }
-        else
-        {
-            return (_gspoIndex!, TemporalIndexType.GSPO);
-        }
+            return (_gspoIndex!, TermOrder.SPO);
+        if (predicateBound)
+            return (_gposIndex!, TermOrder.POS);
+        if (objectBound)
+            return (_gospIndex!, TermOrder.OSP);
+        return (_gspoIndex!, TermOrder.SPO);
     }
 
     /// <summary>
@@ -3903,8 +3581,8 @@ public sealed class QuadStore : IDisposable
 }
 
 /// <summary>
-/// The result of a read on any profile: one <see cref="QuadIndexCursor"/>, moved by the index the read uses
-/// (ADR-062 D3), and the remapping of its row to subject, predicate and object.
+/// The result of a read on any profile (ADR-062 D1, D3): one <see cref="QuadIndexCursor"/>, moved by the index the
+/// read uses, and the remapping of its row to subject, predicate and object. It yields the quad and nothing else.
 /// Uses pooled buffers to avoid allocations when decoding atom strings.
 ///
 /// IMPORTANT: The spans returned by Current are only valid until the next
@@ -3914,14 +3592,14 @@ public sealed class QuadStore : IDisposable
 /// Call Dispose() when done to return the pooled buffer.
 /// Changed from ref struct to struct to enable pooled array storage (ADR-011).
 /// </summary>
-public struct TemporalResultEnumerator
+public struct ResultEnumerator
 {
     // One cursor, moved by the index of the store's profile (ADR-062 D3). What follows is the same for every
     // profile and is written once: the candidate filter, the mapping from the index's order to subject, predicate
     // and object, and the decoding of atoms into the buffer.
     private QuadIndexCursor _cursor;
 
-    private readonly TemporalIndexType _indexType;
+    private readonly TermOrder _order;
     private readonly IAtomStore _atoms;
     private readonly HashSet<long>? _candidateObjectAtomIds;
 
@@ -3931,17 +3609,17 @@ public struct TemporalResultEnumerator
     private const int InitialBufferSize = 4096; // 4KB - typical for 3 URIs
 
     /// <param name="cursor">A cursor of the index the read uses, at its start.</param>
-    /// <param name="indexType">The order of that index, which says where subject, predicate and object are in a row.</param>
+    /// <param name="order">Where subject, predicate and object are in a row of that index.</param>
     /// <param name="atoms">The store's atoms.</param>
     /// <param name="candidateObjectAtomIds">When given, only rows whose object is one of these atoms are returned.</param>
-    internal TemporalResultEnumerator(
+    internal ResultEnumerator(
         QuadIndexCursor cursor,
-        TemporalIndexType indexType,
+        TermOrder order,
         IAtomStore atoms,
         HashSet<long>? candidateObjectAtomIds = null)
     {
         _cursor = cursor;
-        _indexType = indexType;
+        _order = order;
         _atoms = atoms;
         _candidateObjectAtomIds = candidateObjectAtomIds;
         _buffer = null;
@@ -3960,11 +3638,11 @@ public struct TemporalResultEnumerator
         // (before expensive UTF-8 → UTF-16 string decode)
         while (_cursor.MoveNext())
         {
-            long objectAtomId = _indexType switch
+            long objectAtomId = _order switch
             {
-                TemporalIndexType.GPOS => _cursor.Secondary,
-                TemporalIndexType.GOSP => _cursor.Primary,
-                _ => _cursor.Tertiary // GSPO, TGSP
+                TermOrder.POS => _cursor.Secondary,
+                TermOrder.OSP => _cursor.Primary,
+                _ => _cursor.Tertiary
             };
 
             if (_candidateObjectAtomIds.Contains(objectAtomId))
@@ -3973,37 +3651,32 @@ public struct TemporalResultEnumerator
         return false;
     }
 
-    public ResolvedTemporalQuad Current
+    public ResolvedQuad Current
     {
         get
         {
             long graph = _cursor.Graph;
             long s, p, o;
 
-            // Remap generic dimensions back to RDF terms based on index type
-            switch (_indexType)
+            // Remap generic dimensions back to RDF terms by the index's term order
+            switch (_order)
             {
-                case TemporalIndexType.GSPO:
-                case TemporalIndexType.TGSP:
-                    s = _cursor.Primary;    // Primary=subject
-                    p = _cursor.Secondary;  // Secondary=predicate
-                    o = _cursor.Tertiary;   // Tertiary=object
+                case TermOrder.POS:
+                    p = _cursor.Primary;
+                    o = _cursor.Secondary;
+                    s = _cursor.Tertiary;
                     break;
 
-                case TemporalIndexType.GPOS:
-                    p = _cursor.Primary;    // GPOS: Primary=predicate
-                    o = _cursor.Secondary;  // GPOS: Secondary=object
-                    s = _cursor.Tertiary;   // GPOS: Tertiary=subject
-                    break;
-
-                case TemporalIndexType.GOSP:
-                    o = _cursor.Primary;    // GOSP: Primary=object
-                    s = _cursor.Secondary;  // GOSP: Secondary=subject
-                    p = _cursor.Tertiary;   // GOSP: Tertiary=predicate
+                case TermOrder.OSP:
+                    o = _cursor.Primary;
+                    s = _cursor.Secondary;
+                    p = _cursor.Tertiary;
                     break;
 
                 default:
-                    s = p = o = 0;
+                    s = _cursor.Primary;
+                    p = _cursor.Secondary;
+                    o = _cursor.Tertiary;
                     break;
             }
 
@@ -4011,35 +3684,23 @@ public struct TemporalResultEnumerator
             var subjectTerm = DecodeAtomToBuffer(s);
             var predicateTerm = DecodeAtomToBuffer(p);
             var objectTerm = DecodeAtomToBuffer(o);
-
-            // The one place where a result gets times the store does not keep (ADR-062 Step 5): the Reference, Graph
-            // and Minimal profiles keep none, and the result type still has them. The values are the earliest time,
-            // the latest and the earliest. Their indexes write no deleted mark: a read on them yields only what a
-            // client sees, so the mark is false. This goes when a read on those profiles yields the quad and nothing
-            // else (ADR-062 D1).
-            if (!_cursor.HasMemoryTimes)
-            {
-                return new ResolvedTemporalQuad(
-                    graphTerm, subjectTerm, predicateTerm, objectTerm,
-                    DateTimeOffset.MinValue,
-                    DateTimeOffset.MaxValue,
-                    DateTimeOffset.MinValue,
-                    _cursor.LegacyIsDeleted);
-            }
-
-            // Clamp milliseconds to valid DateTimeOffset range
-            const long MaxValidMs = 253402300799999L; // Dec 31, 9999
-
-            return new ResolvedTemporalQuad(
-                graphTerm, subjectTerm, predicateTerm, objectTerm,
-                DateTimeOffset.FromUnixTimeMilliseconds(Math.Min(_cursor.MemorizedAt, MaxValidMs)),
-                DateTimeOffset.FromUnixTimeMilliseconds(Math.Min(_cursor.ForgottenAt, MaxValidMs)),
-                DateTimeOffset.FromUnixTimeMilliseconds(Math.Min(_cursor.LegacyTransactionTime, MaxValidMs)),
-                _cursor.LegacyIsDeleted,
-                _cursor.LegacyIsDeleted ? DateTimeOffset.FromUnixTimeMilliseconds(Math.Min(_cursor.LegacyModifiedAt, MaxValidMs)) : null
-            );
+            return new ResolvedQuad(graphTerm, subjectTerm, predicateTerm, objectTerm);
         }
     }
+
+    /// <summary>
+    /// When the period at this position was memorized, in milliseconds of the store's clock; null when the store keeps
+    /// no times (ADR-062 D2). The engine binds <c>MEMORIZED</c> from it, a prune carries it (ADR-061 D12), and
+    /// <see cref="TemporalResultEnumerator"/> gives it.
+    /// </summary>
+    internal readonly long? MemorizedAt => _cursor.HasMemoryTimes ? _cursor.MemorizedAt : null;
+
+    /// <summary>
+    /// When the period at this position was forgotten, in milliseconds of the store's clock; null while it is
+    /// remembered (ADR-061 I8), and when the store keeps no times. The stored open value never leaves the store.
+    /// </summary>
+    internal readonly long? ForgottenAt =>
+        _cursor.HasMemoryTimes && !TemporalQuadIndex.IsRemembered(_cursor.ForgottenAt) ? _cursor.ForgottenAt : null;
 
     /// <summary>
     /// Decode a UTF-8 atom into the pooled buffer and return a span to it.
@@ -4086,19 +3747,81 @@ public struct TemporalResultEnumerator
         }
     }
 
-    public TemporalResultEnumerator GetEnumerator() => this;
-}
-
-internal enum TemporalIndexType
-{
-    GSPO, // Graph-Subject-Predicate-Object (Primary=S, Secondary=P, Tertiary=O)
-    GPOS, // Graph-Predicate-Object-Subject (Primary=P, Secondary=O, Tertiary=S)
-    GOSP, // Graph-Object-Subject-Predicate (Primary=O, Secondary=S, Tertiary=P)
-    TGSP  // Time-Graph-Subject-Predicate-Object (Primary=S, Secondary=P, Tertiary=O)
+    public ResultEnumerator GetEnumerator() => this;
 }
 
 /// <summary>
-/// Resolved temporal quad with time dimensions
+/// The result of a Cognitive read (ADR-062 D2, D6): a <see cref="ResultEnumerator"/>, with the two times of each
+/// period. It has no loop of its own: it moves the enumerator it holds, and adds the times from its position. Only the
+/// reads of a store that keeps times return it, so whoever holds one knows the times are kept.
+///
+/// IMPORTANT: The spans returned by Current are only valid until the next MoveNext() call.
+/// Call Dispose() when done to return the pooled buffer.
+/// </summary>
+public struct TemporalResultEnumerator
+{
+    private ResultEnumerator _quads;
+
+    internal TemporalResultEnumerator(ResultEnumerator quads) => _quads = quads;
+
+    public bool MoveNext() => _quads.MoveNext();
+
+    public ResolvedTemporalQuad Current
+    {
+        get
+        {
+            var quad = _quads.Current;
+            var memorizedAt = DateTimeOffset.FromUnixTimeMilliseconds(_quads.MemorizedAt!.Value);
+            DateTimeOffset? forgottenAt = _quads.ForgottenAt is { } forgotten ? DateTimeOffset.FromUnixTimeMilliseconds(forgotten) : null;
+            return new ResolvedTemporalQuad(quad, memorizedAt, forgottenAt);
+        }
+    }
+
+    /// <summary>Return the pooled buffer. Call this when done iterating.</summary>
+    public void Dispose() => _quads.Dispose();
+
+    public TemporalResultEnumerator GetEnumerator() => this;
+}
+
+/// <summary>
+/// Where the subject, the predicate and the object are in a row of an index (ADR-062 D6): primary, secondary and
+/// tertiary. GSPO and the Cognitive TGSP have the order <see cref="SPO"/>, GPOS <see cref="POS"/>, GOSP
+/// <see cref="OSP"/>. A row's term order has no time in it: the time is in the TGSP index's key, which the index builds
+/// itself.
+/// </summary>
+internal enum TermOrder
+{
+    SPO, // Primary=S, Secondary=P, Tertiary=O
+    POS, // Primary=P, Secondary=O, Tertiary=S
+    OSP  // Primary=O, Secondary=S, Tertiary=P
+}
+
+/// <summary>
+/// A quad as a read on any profile yields it (ADR-062 D1): graph, subject, predicate and object, and nothing else. On
+/// a Minimal store the graph is empty: the profile has no graphs.
+/// </summary>
+public readonly ref struct ResolvedQuad
+{
+    public readonly ReadOnlySpan<char> Graph;
+    public readonly ReadOnlySpan<char> Subject;
+    public readonly ReadOnlySpan<char> Predicate;
+    public readonly ReadOnlySpan<char> Object;
+
+    internal ResolvedQuad(
+        ReadOnlySpan<char> graph,
+        ReadOnlySpan<char> subject,
+        ReadOnlySpan<char> predicate,
+        ReadOnlySpan<char> @object)
+    {
+        Graph = graph;
+        Subject = subject;
+        Predicate = predicate;
+        Object = @object;
+    }
+}
+
+/// <summary>
+/// A memory as a Cognitive read yields it (ADR-062 D2): the quad and the two times of its period (ADR-061 D1).
 /// </summary>
 public readonly ref struct ResolvedTemporalQuad
 {
@@ -4106,50 +3829,21 @@ public readonly ref struct ResolvedTemporalQuad
     public readonly ReadOnlySpan<char> Subject;
     public readonly ReadOnlySpan<char> Predicate;
     public readonly ReadOnlySpan<char> Object;
-    /// <summary>When the version was memorized (ADR-061 D1).</summary>
+
+    /// <summary>When the period was memorized: the store's clock reading at the write (ADR-061 D1).</summary>
     public readonly DateTimeOffset MemorizedAt;
-    /// <summary>When the version was forgotten; the far future while it is remembered (ADR-061 D1).</summary>
-    public readonly DateTimeOffset ForgottenAt;
 
-    /// <summary>
-    /// Legacy (ADR-061 D11): the transaction time in the Cognitive entry's key; the earliest time on the Graph and
-    /// Reference profiles. Only tests read it from a result. Leaves with the stored layout change (ADR-061, the later
-    /// part, L1).
-    /// </summary>
-    public readonly DateTimeOffset LegacyTransactionTime;
+    /// <summary>When the period was forgotten; absent while the memory is remembered (ADR-061 I8).</summary>
+    public readonly DateTimeOffset? ForgottenAt;
 
-    /// <summary>
-    /// Legacy (ADR-061 D11): the version was retracted (recorded in error, ADR-054 D2). An ended version is not
-    /// deleted: its ForgottenAt is its end. Leaves when Retract is removed (ADR-061 D2, Step 6).
-    /// </summary>
-    public readonly bool LegacyIsDeleted;
-
-    /// <summary>
-    /// When the version was retracted (Cognitive profile); null unless <see cref="LegacyIsDeleted"/>. Leaves with
-    /// Retract (ADR-061 D2, Step 6).
-    /// </summary>
-    public readonly DateTimeOffset? RetractedAt;
-
-    public ResolvedTemporalQuad(
-        ReadOnlySpan<char> graph,
-        ReadOnlySpan<char> subject,
-        ReadOnlySpan<char> predicate,
-        ReadOnlySpan<char> @object,
-        DateTimeOffset memorizedAt,
-        DateTimeOffset forgottenAt,
-        DateTimeOffset legacyTransactionTime,
-        bool legacyIsDeleted = false,
-        DateTimeOffset? retractedAt = null)
+    internal ResolvedTemporalQuad(ResolvedQuad quad, DateTimeOffset memorizedAt, DateTimeOffset? forgottenAt)
     {
-        Graph = graph;
-        Subject = subject;
-        Predicate = predicate;
-        Object = @object;
+        Graph = quad.Graph;
+        Subject = quad.Subject;
+        Predicate = quad.Predicate;
+        Object = quad.Object;
         MemorizedAt = memorizedAt;
         ForgottenAt = forgottenAt;
-        LegacyTransactionTime = legacyTransactionTime;
-        LegacyIsDeleted = legacyIsDeleted;
-        RetractedAt = retractedAt;
     }
 }
 

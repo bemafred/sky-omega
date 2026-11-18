@@ -201,10 +201,10 @@ public class TransactionalIntegrityTests : IDisposable
 
     #endregion
 
-    #region Transaction Time
+    #region The Stamp: the Memorized Time (ADR-061 D1, I12)
 
     [Fact]
-    public void TransactionTime_VariesPerWrite()
+    public void TheMemorizedTime_VariesPerWrite()
     {
         // Each write is stamped with the clock reading it was made in. The test supplies the two readings.
         var first = new DateTimeOffset(2031, 3, 4, 5, 6, 7, TimeSpan.Zero);
@@ -218,25 +218,25 @@ public class TransactionalIntegrityTests : IDisposable
         clock.Reading = second;
         store.AddCurrent("<http://ex.org/s2>", "<http://ex.org/p>", "<http://ex.org/o>");
 
-        // Query ALL VERSIONS to see transaction times
+        // Every period, to see when each was memorized
         store.AcquireReadLock();
         try
         {
-            var results1 = store.QueryEvolution("<http://ex.org/s1>", "<http://ex.org/p>", "<http://ex.org/o>");
-            var results2 = store.QueryEvolution("<http://ex.org/s2>", "<http://ex.org/p>", "<http://ex.org/o>");
+            var results1 = store.QueryMemories("<http://ex.org/s1>", "<http://ex.org/p>", "<http://ex.org/o>", includingForgotten: true);
+            var results2 = store.QueryMemories("<http://ex.org/s2>", "<http://ex.org/p>", "<http://ex.org/o>", includingForgotten: true);
 
             DateTimeOffset tt1 = default, tt2 = default;
             try
             {
                 if (results1.MoveNext())
-                    tt1 = results1.Current.LegacyTransactionTime;
+                    tt1 = results1.Current.MemorizedAt;
             }
             finally { results1.Dispose(); }
 
             try
             {
                 if (results2.MoveNext())
-                    tt2 = results2.Current.LegacyTransactionTime;
+                    tt2 = results2.Current.MemorizedAt;
             }
             finally { results2.Dispose(); }
 
@@ -250,11 +250,11 @@ public class TransactionalIntegrityTests : IDisposable
     }
 
     [Fact]
-    public void TransactionTime_PreservedThroughRecovery()
+    public void TheMemorizedTime_PreservedThroughRecovery()
     {
         DateTimeOffset originalTt;
 
-        // Session 1: add data, record transaction time, close without checkpoint
+        // Session 1: add data, record the memorized time, close without checkpoint
         using (var store1 = new QuadStore(_testPath))
         {
             store1.AddCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
@@ -262,11 +262,11 @@ public class TransactionalIntegrityTests : IDisposable
             store1.AcquireReadLock();
             try
             {
-                var results = store1.QueryEvolution("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
+                var results = store1.QueryMemories("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", includingForgotten: true);
                 try
                 {
                     Assert.True(results.MoveNext());
-                    originalTt = results.Current.LegacyTransactionTime;
+                    originalTt = results.Current.MemorizedAt;
                     Assert.NotEqual(default, originalTt);
                 }
                 finally { results.Dispose(); }
@@ -274,18 +274,18 @@ public class TransactionalIntegrityTests : IDisposable
             finally { store1.ReleaseReadLock(); }
         }
 
-        // Session 2: recovery replays — transaction time must match original
+        // Session 2: recovery replays — the memorized time must match the original
         System.Threading.Thread.Sleep(50); // Ensure recovery time differs
         var store2 = ReopenStore();
 
         store2.AcquireReadLock();
         try
         {
-            var results = store2.QueryEvolution("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
+            var results = store2.QueryMemories("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", includingForgotten: true);
             try
             {
                 Assert.True(results.MoveNext());
-                Assert.Equal(originalTt, results.Current.LegacyTransactionTime);
+                Assert.Equal(originalTt, results.Current.MemorizedAt);
             }
             finally { results.Dispose(); }
         }

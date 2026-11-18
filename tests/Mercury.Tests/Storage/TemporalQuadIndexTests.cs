@@ -93,7 +93,7 @@ public class TemporalQuadIndexTests : IDisposable
         index.AddHistorical("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", memorizedAt, forgottenAt);
 
         // Query as of now - should match
-        var results = index.QueryAsOf("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", DateTimeOffset.UtcNow);
+        var results = index.Query("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", TemporalQuery.AsOf(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()));
         Assert.True(results.MoveNext());
     }
 
@@ -108,9 +108,7 @@ public class TemporalQuadIndexTests : IDisposable
         index.AddHistorical("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", memorizedAt, forgottenAt);
 
         // Query as of yesterday - should not match
-        var results = index.QueryAsOf(
-            "<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>",
-            DateTimeOffset.UtcNow.AddDays(-1));
+        var results = index.Query("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", TemporalQuery.AsOf(DateTimeOffset.UtcNow.AddDays(-1).ToUnixTimeMilliseconds()));
         Assert.False(results.MoveNext());
     }
 
@@ -125,7 +123,7 @@ public class TemporalQuadIndexTests : IDisposable
         index.AddHistorical("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", memorizedAt, forgottenAt);
 
         // Query as of now - should not match (forgottenAt passed)
-        var results = index.QueryAsOf("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", DateTimeOffset.UtcNow);
+        var results = index.Query("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", TemporalQuery.AsOf(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()));
         Assert.False(results.MoveNext());
     }
 
@@ -141,10 +139,7 @@ public class TemporalQuadIndexTests : IDisposable
             DateTimeOffset.UtcNow.AddDays(-15), DateTimeOffset.UtcNow.AddDays(-5));
 
         // Query range that overlaps both
-        var results = index.QueryRange(
-            "<http://ex.org/s>", "<http://ex.org/p>", ReadOnlySpan<char>.Empty,
-            DateTimeOffset.UtcNow.AddDays(-25),
-            DateTimeOffset.UtcNow);
+        var results = index.Query("<http://ex.org/s>", "<http://ex.org/p>", ReadOnlySpan<char>.Empty, TemporalQuery.Overlapping(DateTimeOffset.UtcNow.AddDays(-25).ToUnixTimeMilliseconds(), DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()));
 
         var count = 0;
         while (results.MoveNext()) count++;
@@ -164,7 +159,7 @@ public class TemporalQuadIndexTests : IDisposable
         index.AddHistorical("<http://ex.org/s>", "<http://ex.org/p>", "\"v3\"",
             DateTimeOffset.UtcNow, DateTimeOffset.MaxValue);
 
-        var results = index.QueryHistory("<http://ex.org/s>", "<http://ex.org/p>", ReadOnlySpan<char>.Empty);
+        var results = index.Query("<http://ex.org/s>", "<http://ex.org/p>", ReadOnlySpan<char>.Empty, TemporalQuery.Everything);
         var count = 0;
         while (results.MoveNext()) count++;
         Assert.Equal(3, count);
@@ -417,7 +412,7 @@ public class TemporalQuadIndexTests : IDisposable
 
         index.AddHistorical("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", memorizedAt, forgottenAt);
 
-        var results = index.QueryHistory("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
+        var results = index.Query("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", TemporalQuery.Everything);
         Assert.True(results.MoveNext());
 
         Assert.True(results.MemorizedAt > 0);
@@ -487,7 +482,7 @@ public class TemporalQuadIndexTests : IDisposable
 
         Assert.False(retracted);
         // The version has a stated end, so it is not remembered (ADR-061 D7); every entry is read to see its mark
-        var results = index.QueryHistory("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
+        var results = index.Query("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", TemporalQuery.Everything);
         Assert.True(results.MoveNext(), "The version is still in the index");
         Assert.False(results.LegacyIsDeleted, "The version was not retracted");
     }
@@ -557,8 +552,7 @@ public class TemporalQuadIndexTests : IDisposable
             lowTime, lowTime.AddYears(1));
 
         // Enumerate all entries — TimeFirst should yield B (lowTime) before A (highTime)
-        var results = index.QueryHistory(
-            ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty);
+        var results = index.Query(ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty, TemporalQuery.Everything);
 
         Assert.True(results.MoveNext(), "Expected first result");
         var first = (results.Primary, results.MemorizedAt);
@@ -596,8 +590,7 @@ public class TemporalQuadIndexTests : IDisposable
             lowTime, lowTime.AddYears(1));
 
         // Enumerate — EntityFirst should yield aaa before zzz (entity order)
-        var results = index.QueryHistory(
-            ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty);
+        var results = index.Query(ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty, TemporalQuery.Everything);
 
         Assert.True(results.MoveNext());
         var firstPrimary = index.Atoms.GetAtomString(results.Primary);
@@ -647,17 +640,13 @@ public class TemporalQuadIndexTests : IDisposable
         timeIndex.ResetPageAccessCount();
 
         // Query EntityFirst index
-        var entityResults = entityIndex.QueryRange(
-            ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty,
-            rangeStart, rangeEnd);
+        var entityResults = entityIndex.Query(ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty, TemporalQuery.Overlapping(rangeStart.ToUnixTimeMilliseconds(), rangeEnd.ToUnixTimeMilliseconds()));
         var entityCount = 0;
         while (entityResults.MoveNext()) entityCount++;
         var entityPages = entityIndex.PageAccessCount;
 
         // Query TimeFirst index
-        var timeResults = timeIndex.QueryRange(
-            ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty,
-            rangeStart, rangeEnd);
+        var timeResults = timeIndex.Query(ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty, TemporalQuery.Overlapping(rangeStart.ToUnixTimeMilliseconds(), rangeEnd.ToUnixTimeMilliseconds()));
         var timeCount = 0;
         while (timeResults.MoveNext()) timeCount++;
         var timePages = timeIndex.PageAccessCount;
