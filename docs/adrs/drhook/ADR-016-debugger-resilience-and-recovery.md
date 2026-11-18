@@ -591,8 +591,8 @@ asked mid-flood under the debugger; the same target without a handler, to record
 a debugger; a Generic Host server stopped through its own lifetime; on Windows, a console process launched in its own
 group and sent CTRL+BREAK, built and reviewed before it runs.
 *Constructions recorded 2026-11-16* ([finding 112](../../../poc/drhook-engine/findings/112-cancellation.md); probe 112
-on zbook and macbook, 20 borrowed sessions per child, each child ending with an attach that must succeed; Windows is
-not built).
+on zbook and macbook, 20 borrowed sessions per child, each child ending with an attach that must succeed; Windows
+below).
 
 - **Its own shutdown code.** A target with its own SIGTERM handler, or a Generic Host stopped by SIGTERM or by itself,
   ended cleanly under the debugger mid-flood: 240 of 240 sessions, and every final attach succeeded.
@@ -604,6 +604,21 @@ not built).
 So `drhook_stop`'s detach-first order is safe for each of these targets. `drhook_kill` is not, for a program without a
 handler, since it signals while attached; nor is an owner's signal to a borrowed target. What Abandon should do is
 left to Step 6.
+*Windows recorded 2026-11-17* ([finding 112, Windows](../../../poc/drhook-engine/findings/112-cancellation.md#windows-ctrlbreak-to-the-targets-own-process-group); probe 112 at `b08b8604` on omega-windows, 20 sessions
+per child, then break-handler detached alone, 100 sessions). The target was started in its own process group and sent
+CTRL+BREAK from its console.
+
+- **Its own shutdown code.** A handler (`PosixSignal.SIGQUIT`) or a Generic Host ended cleanly while attached, 40 of
+  40, and host-self-stop 20 of 20.
+- **No handler, attached.** DrHook takes the event and the target runs on. The runtime passes CTRL+C and CTRL+BREAK
+  to an attached debugger as `ControlCTrap`, and DrHook's `S_OK` answer counts the event as handled, so the target
+  never reaches Windows' default end (read in `release/10.0`; 20 of 20). The debugger was never lost.
+- **No handler, detached.** An abrupt end: `0xC000013A`, without `ProcessExit`.
+- **After a detach.** The target stayed held twice in 120 break-handler sessions. This is Step 2's held Windows target
+  (finding 102, 2 of 80); the record cannot say what held it.
+
+What DrHook answers to `ControlCTrap`, and whether `drhook_stop` on Windows should send CTRL+BREAK after its detach
+instead of killing, are left to Step 6.
 
 **Step 4 — The failure boundary.** The failure matrix, the extraordinary ends (a kill, a stack overflow,
 `Environment.FailFast`) and, where it can be induced, a `DebuggerError`, each in a process of its own. Recorded,

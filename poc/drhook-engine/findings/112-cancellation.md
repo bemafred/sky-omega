@@ -1,9 +1,10 @@
-# Finding 112 — cancellation (ADR-016 Step 3): a program that handles SIGTERM, or a Generic Host, ends cleanly under the debugger; SIGTERM without a handler, while attached, loses the debugger in 6 of 14 sessions
+# Finding 112 — cancellation (ADR-016 Step 3): a program that handles SIGTERM, or a Generic Host, ends cleanly under the debugger; SIGTERM without a handler, while attached, loses the debugger in 6 of 14 sessions; on Windows, DrHook takes a CTRL+BREAK the target does not handle, and the target runs on
 
-**Date:** runs and record 2026-11-16
-**Status:** **RECORDED** on zbook (Linux x64) and macbook (macOS arm64). Both machines show the same result. Windows
-is not run: its construction (CTRL+BREAK to a console process in its own group) is to be built and reviewed before
-it runs. Not run on omega, omega-ubuntu or the runners.
+**Date:** runs and record 2026-11-16; Windows 2026-11-17
+**Status:** **RECORDED** on zbook (Linux x64) and macbook (macOS arm64), which show the same result, and on
+omega-windows (Windows 11 arm64), with the Windows construction: CTRL+BREAK to a console process in its own group
+(section [Windows](#windows-ctrlbreak-to-the-targets-own-process-group)). Not run on omega, omega-ubuntu or the
+runners.
 
 ## What was run
 
@@ -131,6 +132,117 @@ death between requests is noticed, which would explain why some sessions survive
 request, is the same abrupt end for any program without a handler for it. A program that handles it, itself or
 through a Generic Host, chooses its own end. So the debugger's fate depends on the target's code, not on the signal.
 
+## Windows: CTRL+BREAK to the target's own process group
+
+Windows has no SIGTERM. A console program is asked to end with a console control event. Of those, only CTRL+BREAK
+can be sent to a single process group: CTRL+C reaches every process on the console. So on Windows:
+
+- the probe starts the target in a process group of its own (`CreateNewProcessGroup`);
+- the probe's child, which shares the target's console, sends `GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, pid)`;
+- .NET maps CTRL+BREAK to `PosixSignal.SIGQUIT`, which a handler can cancel on Windows.
+
+| Target | How it ends |
+|--------|-------------|
+| break-handler | its own SIGQUIT handler (`PosixSignalRegistration`) cancels the event and the flood; `Main` returns 0 |
+| break-default | no handler: Windows' default for CTRL+BREAK |
+| host-break | a Generic Host: CTRL+BREAK reaches its console lifetime, which stops the host and its `BackgroundService` |
+| host-self-stop | as on Linux and macOS; no signal |
+
+The orders are those above. Windows has a single read path, with no transport, so each construction ran once, on the
+`dotnet` host.
+
+| Machine | OS, architecture | .NET |
+|---------|------------------|------|
+| omega-windows | Windows 11 (26200), arm64, Parallels VM on omega, 4 cores | 10.0.15, Microsoft |
+
+The probe ran at `b08b8604`, the commit that added the Windows construction, carried to the VM as a bundle. There
+were three runs:
+
+- a smoke run, 2 sessions per child;
+- 20 sessions per child;
+- break-handler detached alone, 100 sessions.
+
+Meanwhile, omega-ubuntu was running probe 106, and Mercury's tests ran on omega at times. The child shared the
+target's console every time (5 processes on it), so it never had to allocate one, and every `GenerateConsoleCtrlEvent`
+succeeded. The records are in [`112-cancellation/`](112-cancellation/): `omega-windows.json` (20 sessions) and
+`omega-windows-break-handler-detached.json` (100). The smoke run is in zbook's `~/diag/p112-omega-windows-smoke.json`
+(sha256 `2c955a91…719661`).
+
+| Target, order | Usable | Clean | How the target ended |
+|---------------|--------|-------|----------------------|
+| break-handler, attached | 20 of 20 | 20 | exit 0, 38 to 282 ms after the signal, `signal cancelled` |
+| host-break, attached | 20 of 20 | 20 | exit 0, 52 to 341 ms after the signal, `stopping service-stopped host-stopped` |
+| host-self-stop, attached | 20 of 20 | 20 | exit 0, `stopping service-stopped host-stopped` |
+| break-default, attached | 20 of 20 | 0 | not by the signal: at its 60 s cap, exit 0, `cap process-exit` |
+| break-handler, detached | 19 of 20; 99 of 100 | 0 | exit 0, `signal cancelled`; once in each run, held (below) |
+| break-default, detached | 20 of 20 | 0 | exit `0xC000013A` (`STATUS_CONTROL_C_EXIT`), no marker |
+| host-break, detached | 20 of 20 | 0 | exit 0, `stopping service-stopped host-stopped` |
+
+- No session lost the debugger.
+- Every final attach succeeded, also in the two runs with a held target, whose outcome the probe counts as not
+  usable because of that target.
+- As on Linux and macOS, every detached session reported exactly one `LateCallback`, finding 102's dropped callback,
+  so none counts as clean.
+- `Dispose` after an attached exit took 262 to 529 ms: DrHook's settle waits.
+
+**Its own shutdown code: clean, as on Linux and macOS.** A handler or a Generic Host, signalled while attached, gave
+40 of 40 clean sessions; host-self-stop gave 20 of 20.
+
+**No handler, attached: DrHook takes the CTRL+BREAK, and the target runs on.** In all 20 sessions:
+
+- the debugger received one `ControlCTrap` callback, and no exit;
+- the target went on flooding until its cap, 60 s after it started, and then returned normally, its `ProcessExit`
+  handler running;
+- the probe waited its 30 s for an exit, then disposed: an ordinary detach.
+
+Read in dotnet/runtime `release/10.0`:
+
+- At startup the runtime adds a console control handler of its own, `DbgCtrlCHandler` (`vm/ceemain.cpp`, Windows
+  only).
+- While a managed debugger is attached, that handler passes CTRL+C and CTRL+BREAK to it
+  (`Debugger::SendCtrlCToDebugger`, `debug/ee/debugger.cpp`). It stops the runtime's threads and waits for the
+  debugger's answer. If the answer was `S_OK`, it returns that the event is handled.
+- mscordbi delivers the event as `ControlCTrap` and sends the callback's own return value back as the answer
+  (`ShimProxyCallback::ControlCTrap` in `debug/di/shimcallback.cpp`, and `CordbProcess::HandleControlCTrapResult`).
+- DrHook's `ControlCTrap` returns `S_OK`, as every DrHook callback does (`ManagedCallbackHost.Fire`).
+
+So under DrHook the event counts as handled, and Windows never reaches its default handler, the one that ends the
+process.
+
+A target with a handler of its own never gets that far. Windows calls the most recently added handler first, the
+target's own was added after the runtime's, and it handles the event. That fits the `ControlCTrap` count: 20 in
+break-default attached, and none in any other construction.
+
+So where Linux and macOS lose the debugger in 6 of 14 sessions, Windows does not end the target at all.
+
+**No handler, detached: an abrupt end, as on Linux and macOS.** The exit code is `0xC000013A`, `ProcessExit` did not
+run, and the target was gone within 139 ms of the signal.
+
+**After a detach, twice in 120 sessions, the target stayed held: finding 102's Windows case.**
+
+- **Which sessions.** break-handler detached: session 11 of 20 (pid 48740), and session 32 of 100 (pid 16744).
+- **Up to the end, both looked like every other session.** `Dispose` took 96 and 77 ms, the signal followed 292 and
+  140 ms later, and each had its one late callback, a CreateThread.
+- **Then the target hung.** It ran its handler (`signal` was written), but it never wrote `cancelled` and did not end.
+  75 s after it started, the parent ended it.
+
+The target's main thread waits for the flood thread without a bound, while the flood loop itself stops at the cap.
+So either the flood thread was stuck on a thread start or join, or the process was suspended: the two possibilities
+finding 102 named. The handler's thread ran managed code after the detach, so the runtime was not held in a debugger
+stop as a whole.
+
+Rates:
+
+| Where | Held |
+|-------|------|
+| omega-windows, break-handler detached | 2 of 120, plus 0 of 2 in the smoke run |
+| omega-windows, break-default and host-break detached | 0 of 40, plus 0 of 4 in the smoke run |
+| omega-windows, finding 102 | 2 of 80 |
+| the two Windows runners, finding 102 | 0 of 160 |
+| Linux and macOS, here | 0 of 240 |
+
+No stacks were taken. Finding 102's first next step, recording a held target's state, is still open.
+
 ## What this means for DrHook
 
 - **`drhook_stop` (owned, detach first) is safe for each target here.** The detached order is its order, and it was
@@ -150,23 +262,42 @@ through a Generic Host, chooses its own end. So the debugger's fate depends on t
   for a target that does answer, a detach first, as `drhook_stop` does, would avoid the loss. So would a stop first:
   finding 104 recorded a kill while synchronized clean 30 of 30, at a Pause stop. Whether Abandon should try either,
   bounded, before it ends the target while attached is a teardown change, and the ADR leaves that to Step 6.
+- **On Windows, a CTRL+BREAK to a target with no handler does nothing while DrHook is attached.** DrHook answers
+  the runtime's `ControlCTrap` with `S_OK`, so the event counts as handled. The debugger stays usable, but the
+  program does not end, whether a person pressed Ctrl+Break in its console or an owner sent the event. It ends
+  only once DrHook has detached. With a handler or a Generic Host, the target ends cleanly, attached or not.
+  - Answering `S_FALSE` would pass the event on, so the target would end abruptly, as it does detached.
+  - Which answer DrHook should give is a choice for Step 6.
+- **On Windows, `drhook_stop` kills an owned target, since it has no exit request yet** (DRHOOK.md, ADR-016 Step 3).
+  This record shows what CTRL+BREAK after a detach would do. A program that handles it ends cleanly. One that does
+  not ends abruptly, as SIGTERM's default does on Linux and macOS. Using it would need the target launched in its
+  own process group and a sender that shares its console. Whether `drhook_stop` should do this is not decided.
+- **A borrowed detach on Windows can leave the target held**: 2 of 120 here, and 2 of 80 in finding 102, all on
+  omega-windows. DrHook itself was unaffected each time. This bears on ADR-016's Target preservation gate.
 
 ## Not established
 
 - Where the blocked attach waits, and what the lost session's event thread is doing.
 - Why a signal death loses the debugger in some sessions and not others. The signal's moment in the flood is the
   obvious variable, but 14 sessions cannot show it.
-- Windows: the CTRL+BREAK construction.
+- Windows: what holds a target after a detach. No stacks, suspend counts or dump were taken. Whether the dropped
+  callback is the cause: in both held sessions it was a CreateThread, but so it was in 83 of the 118 that ended.
+- Windows: CTRL+C, which cannot be sent to one group, and the Windows runners (x64, and arm64 on metal).
 - The owned path: a launched target, and `drhook_kill` itself.
 - A target signalled while stopped. Here every target was running, mid-flood.
 - The other machines and the runners.
 
 ## Next (proposed, not decided)
 
-1. Build the Windows construction for review: a console target launched in its own process group
-   (`CREATE_NEW_PROCESS_GROUP`), and a sender on its console that raises CTRL+BREAK (`GenerateConsoleCtrlEvent`).
+1. ~~Build the Windows construction for review: a console target launched in its own process group
+   (`CREATE_NEW_PROCESS_GROUP`), and a sender on its console that raises CTRL+BREAK (`GenerateConsoleCtrlEvent`).~~
+   Built and run on omega-windows, 2026-11-17 (section Windows).
 2. Run probe 112 on the six runners through `drhook-probe.yml`. This needs the probe on `main` and a workflow change,
    reviewed when proposed.
 3. Decide whether a macOS run may `sample` the stuck child once, to see where the attach waits. Step 0 rules out an
    outside sampler.
-4. Take the Abandon order into Step 6.
+4. Take the Abandon order into Step 6, and with it, on Windows, DrHook's answer to `ControlCTrap` and an exit
+   request for `drhook_stop`.
+5. On Windows, record a held target's state before the parent ends it: its threads' stacks and suspend counts, or a
+   dump. That is finding 102's first next step. The runtime's `createdump.exe` is on omega-windows, but nothing that
+   reads a Windows dump is. Step 0's rule is about the debugger process, not the target.

@@ -1,0 +1,3649 @@
+{
+  "probe": "112-cancellation",
+  "recordedAt": "2026-11-17T11:46:09Z",
+  "environment": {
+    "machine": "OMEGA-WINDOWS",
+    "os": "Microsoft Windows 10.0.26200",
+    "architecture": "Arm64",
+    "cores": 4,
+    "probeRuntime": ".NET 10.0.15",
+    "runtimeDirectory": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.15\\",
+    "dotnetHost": "C:\\Program Files\\dotnet\\dotnet.exe",
+    "debuggerExecutable": "C:\\Users\\bemafred\\AppData\\Local\\Temp\\dotnet\\runfile\\112-cancellation-smoke-c83d79bb61087a8b91b8ef741760ea1c727291f26e1addcc06a9d4887e19404b\\bin\\debug\\112-cancellation-smoke.exe",
+    "targetAppHost": "C:\\Users\\bemafred\\AppData\\Local\\Temp\\dotnet\\runfile\\112-cancellation-target-3fd0d2d085273715f36ce4aad427073570d9c97693ec5817a7c6a20cee329fe1\\bin\\debug\\112-cancellation-target.exe",
+    "sessionsPerChild": 100,
+    "tempDirectory": "C:\\Users\\bemafred\\AppData\\Local\\Temp\\",
+    "commit": "b08b860460ba4fef5677622aa4e94d25647aed40",
+    "ci": ""
+  },
+  "children": [
+    {
+      "kind": "break-handler",
+      "order": "detached",
+      "launcher": "dotnet",
+      "mode": "own-group",
+      "seed": 112001,
+      "console": {
+        "processesOnConsole": 5,
+        "allocated": false
+      },
+      "final": {
+        "pid": 6120,
+        "attachMs": 8,
+        "events": 37,
+        "targetEnded": true,
+        "marker": "done",
+        "anomalies": [],
+        "ok": true
+      },
+      "sessions": [
+        {
+          "session": 1,
+          "pid": 27636,
+          "attachMs": 16,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 40,
+          "signalDelayMs": 441,
+          "disposeMs": 59,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 35,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 860,
+            "ExitThread": 855,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=ExitThread)"
+          ],
+          "ownThreads": 9,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 2,
+          "pid": 49496,
+          "attachMs": 7,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 7,
+          "signalDelayMs": 497,
+          "disposeMs": 62,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 51,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 923,
+            "ExitThread": 919,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 9,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 3,
+          "pid": 31328,
+          "attachMs": 9,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 44,
+          "signalDelayMs": 60,
+          "disposeMs": 107,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 111,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 134,
+            "ExitThread": 130,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 9,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 4,
+          "pid": 45072,
+          "attachMs": 7,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 41,
+          "signalDelayMs": 189,
+          "disposeMs": 54,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 33,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 383,
+            "ExitThread": 379,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 9,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 5,
+          "pid": 19832,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 61,
+          "signalDelayMs": 30,
+          "disposeMs": 130,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 56,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 86,
+            "ExitThread": 81,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=ExitThread)"
+          ],
+          "ownThreads": 9,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 6,
+          "pid": 43436,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 47,
+          "signalDelayMs": 493,
+          "disposeMs": 171,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 59,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 964,
+            "ExitThread": 960,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 9,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 7,
+          "pid": 21600,
+          "attachMs": 9,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 44,
+          "signalDelayMs": 352,
+          "disposeMs": 133,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 55,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 680,
+            "ExitThread": 676,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 9,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 8,
+          "pid": 21956,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 35,
+          "signalDelayMs": 298,
+          "disposeMs": 99,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 38,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 592,
+            "ExitThread": 587,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=ExitThread)"
+          ],
+          "ownThreads": 9,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 9,
+          "pid": 21788,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 64,
+          "signalDelayMs": 185,
+          "disposeMs": 71,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 44,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 393,
+            "ExitThread": 388,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=ExitThread)"
+          ],
+          "ownThreads": 9,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 10,
+          "pid": 26000,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 17,
+          "signalDelayMs": 382,
+          "disposeMs": 68,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 34,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 766,
+            "ExitThread": 762,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 9,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 11,
+          "pid": 15800,
+          "attachMs": 7,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 42,
+          "signalDelayMs": 423,
+          "disposeMs": 66,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 54,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 839,
+            "ExitThread": 834,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=ExitThread)"
+          ],
+          "ownThreads": 9,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 12,
+          "pid": 23272,
+          "attachMs": 7,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 15,
+          "signalDelayMs": 132,
+          "disposeMs": 170,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 70,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 291,
+            "ExitThread": 286,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=ExitThread)"
+          ],
+          "ownThreads": 9,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 13,
+          "pid": 47020,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 25,
+          "signalDelayMs": 419,
+          "disposeMs": 63,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 42,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 819,
+            "ExitThread": 815,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 9,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 14,
+          "pid": 51016,
+          "attachMs": 9,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 20,
+          "signalDelayMs": 289,
+          "disposeMs": 59,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 35,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 598,
+            "ExitThread": 593,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=ExitThread)"
+          ],
+          "ownThreads": 9,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 15,
+          "pid": 40616,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 38,
+          "signalDelayMs": 265,
+          "disposeMs": 123,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 64,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 535,
+            "ExitThread": 530,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=ExitThread)"
+          ],
+          "ownThreads": 9,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 16,
+          "pid": 46208,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 32,
+          "signalDelayMs": 497,
+          "disposeMs": 52,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 61,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 965,
+            "ExitThread": 961,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 9,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 17,
+          "pid": 26996,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 73,
+          "signalDelayMs": 249,
+          "disposeMs": 60,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 63,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 513,
+            "ExitThread": 508,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=ExitThread)"
+          ],
+          "ownThreads": 9,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 18,
+          "pid": 45416,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 19,
+          "signalDelayMs": 269,
+          "disposeMs": 175,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 56,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 546,
+            "ExitThread": 542,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 9,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 19,
+          "pid": 29584,
+          "attachMs": 9,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 73,
+          "signalDelayMs": 293,
+          "disposeMs": 76,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 150,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 584,
+            "ExitThread": 580,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 9,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 20,
+          "pid": 42384,
+          "attachMs": 7,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 99,
+          "signalDelayMs": 324,
+          "disposeMs": 85,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 89,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 644,
+            "ExitThread": 640,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 9,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 21,
+          "pid": 36424,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 61,
+          "signalDelayMs": 225,
+          "disposeMs": 95,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 30,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 474,
+            "ExitThread": 470,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 9,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 22,
+          "pid": 31940,
+          "attachMs": 7,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 26,
+          "signalDelayMs": 401,
+          "disposeMs": 124,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 158,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 807,
+            "ExitThread": 803,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 9,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 23,
+          "pid": 15216,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 43,
+          "signalDelayMs": 361,
+          "disposeMs": 98,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 89,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 694,
+            "ExitThread": 689,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=ExitThread)"
+          ],
+          "ownThreads": 9,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 24,
+          "pid": 10444,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 37,
+          "signalDelayMs": 60,
+          "disposeMs": 75,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 42,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 149,
+            "ExitThread": 145,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 9,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 25,
+          "pid": 47936,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 21,
+          "signalDelayMs": 218,
+          "disposeMs": 72,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 32,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 461,
+            "ExitThread": 456,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=ExitThread)"
+          ],
+          "ownThreads": 9,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 26,
+          "pid": 35240,
+          "attachMs": 9,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 16,
+          "signalDelayMs": 333,
+          "disposeMs": 78,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 44,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 661,
+            "ExitThread": 657,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 9,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 27,
+          "pid": 24712,
+          "attachMs": 9,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 27,
+          "signalDelayMs": 234,
+          "disposeMs": 72,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 42,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 487,
+            "ExitThread": 483,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 9,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 28,
+          "pid": 11616,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 45,
+          "signalDelayMs": 199,
+          "disposeMs": 127,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 71,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 424,
+            "ExitThread": 420,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 9,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 29,
+          "pid": 42876,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 16,
+          "signalDelayMs": 339,
+          "disposeMs": 76,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 42,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 676,
+            "ExitThread": 672,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 9,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 30,
+          "pid": 3900,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 81,
+          "signalDelayMs": 80,
+          "disposeMs": 70,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 131,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 164,
+            "ExitThread": 160,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 9,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 31,
+          "pid": 2244,
+          "attachMs": 7,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 12,
+          "signalDelayMs": 231,
+          "disposeMs": 53,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 52,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 463,
+            "ExitThread": 458,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=ExitThread)"
+          ],
+          "ownThreads": 9,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 32,
+          "pid": 16744,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 25,
+          "signalDelayMs": 140,
+          "disposeMs": 77,
+          "signalError": 0,
+          "targetEnded": false,
+          "endWaitMs": 70051,
+          "exitCode": null,
+          "marker": "signal",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 311,
+            "ExitThread": 307,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 9,
+          "usable": false,
+          "clean": false,
+          "deviations": [
+            "the target did not end within 70 s",
+            "anomalies"
+          ]
+        },
+        {
+          "session": 33,
+          "pid": 37576,
+          "attachMs": 7,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 35,
+          "signalDelayMs": 291,
+          "disposeMs": 106,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 38,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 584,
+            "ExitThread": 580,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 10,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 34,
+          "pid": 5192,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 58,
+          "signalDelayMs": 461,
+          "disposeMs": 201,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 44,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 883,
+            "ExitThread": 879,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 10,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 35,
+          "pid": 11964,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 39,
+          "signalDelayMs": 498,
+          "disposeMs": 132,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 155,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 939,
+            "ExitThread": 935,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 10,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 36,
+          "pid": 48368,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 39,
+          "signalDelayMs": 332,
+          "disposeMs": 65,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 43,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 655,
+            "ExitThread": 651,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 10,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 37,
+          "pid": 19016,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 54,
+          "signalDelayMs": 490,
+          "disposeMs": 51,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 24,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 958,
+            "ExitThread": 953,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=ExitThread)"
+          ],
+          "ownThreads": 10,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 38,
+          "pid": 14204,
+          "attachMs": 7,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 122,
+          "signalDelayMs": 465,
+          "disposeMs": 115,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 49,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 858,
+            "ExitThread": 854,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 10,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 39,
+          "pid": 2780,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 20,
+          "signalDelayMs": 364,
+          "disposeMs": 104,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 145,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 729,
+            "ExitThread": 724,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=ExitThread)"
+          ],
+          "ownThreads": 10,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 40,
+          "pid": 23196,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 29,
+          "signalDelayMs": 235,
+          "disposeMs": 136,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 47,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 492,
+            "ExitThread": 488,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 10,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 41,
+          "pid": 44944,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 16,
+          "signalDelayMs": 109,
+          "disposeMs": 66,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 142,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 246,
+            "ExitThread": 242,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 10,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 42,
+          "pid": 16552,
+          "attachMs": 7,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 27,
+          "signalDelayMs": 131,
+          "disposeMs": 149,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 109,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 314,
+            "ExitThread": 310,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 10,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 43,
+          "pid": 36512,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 58,
+          "signalDelayMs": 60,
+          "disposeMs": 71,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 120,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 139,
+            "ExitThread": 135,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 10,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 44,
+          "pid": 30048,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 45,
+          "signalDelayMs": 377,
+          "disposeMs": 87,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 45,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 744,
+            "ExitThread": 740,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 10,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 45,
+          "pid": 46484,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 30,
+          "signalDelayMs": 431,
+          "disposeMs": 71,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 76,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 842,
+            "ExitThread": 838,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 10,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 46,
+          "pid": 46848,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 13,
+          "signalDelayMs": 174,
+          "disposeMs": 118,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 42,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 364,
+            "ExitThread": 360,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 10,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 47,
+          "pid": 19200,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 71,
+          "signalDelayMs": 233,
+          "disposeMs": 101,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 51,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 468,
+            "ExitThread": 464,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 10,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 48,
+          "pid": 29236,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 45,
+          "signalDelayMs": 26,
+          "disposeMs": 97,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 70,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 88,
+            "ExitThread": 84,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 10,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 49,
+          "pid": 22188,
+          "attachMs": 9,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 34,
+          "signalDelayMs": 469,
+          "disposeMs": 152,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 77,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 911,
+            "ExitThread": 907,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 10,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 50,
+          "pid": 9936,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 82,
+          "signalDelayMs": 161,
+          "disposeMs": 58,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 30,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 350,
+            "ExitThread": 345,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=ExitThread)"
+          ],
+          "ownThreads": 10,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 51,
+          "pid": 3224,
+          "attachMs": 9,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 25,
+          "signalDelayMs": 307,
+          "disposeMs": 82,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 78,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 618,
+            "ExitThread": 614,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 10,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 52,
+          "pid": 29556,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 16,
+          "signalDelayMs": 310,
+          "disposeMs": 61,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 123,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 633,
+            "ExitThread": 628,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=ExitThread)"
+          ],
+          "ownThreads": 10,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 53,
+          "pid": 17268,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 16,
+          "signalDelayMs": 94,
+          "disposeMs": 53,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 44,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 218,
+            "ExitThread": 214,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 10,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 54,
+          "pid": 30100,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 44,
+          "signalDelayMs": 52,
+          "disposeMs": 75,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 129,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 149,
+            "ExitThread": 145,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 10,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 55,
+          "pid": 39972,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 7,
+          "signalDelayMs": 58,
+          "disposeMs": 93,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 77,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 136,
+            "ExitThread": 132,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 10,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 56,
+          "pid": 34152,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 46,
+          "signalDelayMs": 40,
+          "disposeMs": 73,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 52,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 118,
+            "ExitThread": 114,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 10,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 57,
+          "pid": 35000,
+          "attachMs": 9,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 39,
+          "signalDelayMs": 136,
+          "disposeMs": 104,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 70,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 287,
+            "ExitThread": 283,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 10,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 58,
+          "pid": 28880,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 20,
+          "signalDelayMs": 0,
+          "disposeMs": 55,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 20,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 32,
+            "ExitThread": 27,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=ExitThread)"
+          ],
+          "ownThreads": 10,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 59,
+          "pid": 23528,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 125,
+          "signalDelayMs": 470,
+          "disposeMs": 65,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 46,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 878,
+            "ExitThread": 873,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=ExitThread)"
+          ],
+          "ownThreads": 10,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 60,
+          "pid": 24676,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 59,
+          "signalDelayMs": 196,
+          "disposeMs": 165,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 65,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 405,
+            "ExitThread": 401,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 10,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 61,
+          "pid": 27136,
+          "attachMs": 7,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 28,
+          "signalDelayMs": 258,
+          "disposeMs": 64,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 56,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 534,
+            "ExitThread": 529,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=ExitThread)"
+          ],
+          "ownThreads": 10,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 62,
+          "pid": 34700,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 11,
+          "signalDelayMs": 152,
+          "disposeMs": 81,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 66,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 329,
+            "ExitThread": 324,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=ExitThread)"
+          ],
+          "ownThreads": 10,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 63,
+          "pid": 3392,
+          "attachMs": 9,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 46,
+          "signalDelayMs": 459,
+          "disposeMs": 131,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 83,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 893,
+            "ExitThread": 888,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=ExitThread)"
+          ],
+          "ownThreads": 10,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 64,
+          "pid": 30904,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 20,
+          "signalDelayMs": 105,
+          "disposeMs": 130,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 110,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 244,
+            "ExitThread": 240,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 10,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 65,
+          "pid": 49576,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 16,
+          "signalDelayMs": 151,
+          "disposeMs": 145,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 37,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 342,
+            "ExitThread": 338,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 10,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 66,
+          "pid": 12056,
+          "attachMs": 9,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 46,
+          "signalDelayMs": 283,
+          "disposeMs": 154,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 48,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 561,
+            "ExitThread": 557,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 10,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 67,
+          "pid": 27300,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 32,
+          "signalDelayMs": 341,
+          "disposeMs": 112,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 85,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 693,
+            "ExitThread": 689,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 9,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 68,
+          "pid": 16560,
+          "attachMs": 7,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 90,
+          "signalDelayMs": 457,
+          "disposeMs": 89,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 78,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 880,
+            "ExitThread": 875,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=ExitThread)"
+          ],
+          "ownThreads": 9,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 69,
+          "pid": 37264,
+          "attachMs": 7,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 83,
+          "signalDelayMs": 291,
+          "disposeMs": 132,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 27,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 557,
+            "ExitThread": 552,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=ExitThread)"
+          ],
+          "ownThreads": 10,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 70,
+          "pid": 23952,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 40,
+          "signalDelayMs": 433,
+          "disposeMs": 96,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 155,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 861,
+            "ExitThread": 857,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 8,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 71,
+          "pid": 24780,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 31,
+          "signalDelayMs": 7,
+          "disposeMs": 153,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 104,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 62,
+            "ExitThread": 58,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 8,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 72,
+          "pid": 40860,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 65,
+          "signalDelayMs": 284,
+          "disposeMs": 100,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 53,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 546,
+            "ExitThread": 541,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=ExitThread)"
+          ],
+          "ownThreads": 8,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 73,
+          "pid": 30516,
+          "attachMs": 9,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 40,
+          "signalDelayMs": 405,
+          "disposeMs": 82,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 47,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 809,
+            "ExitThread": 805,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 7,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 74,
+          "pid": 24884,
+          "attachMs": 9,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 20,
+          "signalDelayMs": 58,
+          "disposeMs": 106,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 120,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 145,
+            "ExitThread": 141,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 7,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 75,
+          "pid": 19320,
+          "attachMs": 9,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 52,
+          "signalDelayMs": 214,
+          "disposeMs": 80,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 65,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 456,
+            "ExitThread": 452,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 7,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 76,
+          "pid": 40924,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 31,
+          "signalDelayMs": 93,
+          "disposeMs": 145,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 28,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 212,
+            "ExitThread": 208,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 8,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 77,
+          "pid": 34708,
+          "attachMs": 9,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 37,
+          "signalDelayMs": 341,
+          "disposeMs": 151,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 138,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 657,
+            "ExitThread": 653,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 8,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 78,
+          "pid": 12184,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 30,
+          "signalDelayMs": 483,
+          "disposeMs": 116,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 30,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 965,
+            "ExitThread": 961,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 8,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 79,
+          "pid": 46236,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 58,
+          "signalDelayMs": 128,
+          "disposeMs": 58,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 20,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 289,
+            "ExitThread": 285,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 8,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 80,
+          "pid": 27560,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 21,
+          "signalDelayMs": 44,
+          "disposeMs": 79,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 41,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 123,
+            "ExitThread": 119,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 8,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 81,
+          "pid": 19008,
+          "attachMs": 9,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 42,
+          "signalDelayMs": 99,
+          "disposeMs": 144,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 26,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 249,
+            "ExitThread": 245,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 8,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 82,
+          "pid": 18160,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 15,
+          "signalDelayMs": 208,
+          "disposeMs": 136,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 152,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 454,
+            "ExitThread": 450,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 8,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 83,
+          "pid": 50208,
+          "attachMs": 9,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 20,
+          "signalDelayMs": 229,
+          "disposeMs": 82,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 29,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 461,
+            "ExitThread": 457,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 8,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 84,
+          "pid": 14760,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 67,
+          "signalDelayMs": 177,
+          "disposeMs": 64,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 59,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 360,
+            "ExitThread": 356,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 8,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 85,
+          "pid": 49568,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 28,
+          "signalDelayMs": 272,
+          "disposeMs": 142,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 53,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 572,
+            "ExitThread": 567,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=ExitThread)"
+          ],
+          "ownThreads": 8,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 86,
+          "pid": 40868,
+          "attachMs": 9,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 45,
+          "signalDelayMs": 421,
+          "disposeMs": 52,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 78,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 816,
+            "ExitThread": 811,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=ExitThread)"
+          ],
+          "ownThreads": 7,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 87,
+          "pid": 48108,
+          "attachMs": 9,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 44,
+          "signalDelayMs": 45,
+          "disposeMs": 105,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 115,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 122,
+            "ExitThread": 117,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=ExitThread)"
+          ],
+          "ownThreads": 8,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 88,
+          "pid": 20792,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 89,
+          "signalDelayMs": 238,
+          "disposeMs": 140,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 58,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 468,
+            "ExitThread": 464,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 8,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 89,
+          "pid": 20512,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 36,
+          "signalDelayMs": 403,
+          "disposeMs": 80,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 35,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 785,
+            "ExitThread": 781,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 8,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 90,
+          "pid": 26260,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 48,
+          "signalDelayMs": 458,
+          "disposeMs": 73,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 86,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 895,
+            "ExitThread": 891,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 8,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 91,
+          "pid": 48348,
+          "attachMs": 9,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 40,
+          "signalDelayMs": 195,
+          "disposeMs": 111,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 31,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 431,
+            "ExitThread": 427,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 8,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 92,
+          "pid": 45016,
+          "attachMs": 9,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 80,
+          "signalDelayMs": 489,
+          "disposeMs": 74,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 94,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 940,
+            "ExitThread": 936,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 8,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 93,
+          "pid": 13656,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 27,
+          "signalDelayMs": 494,
+          "disposeMs": 59,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 46,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 950,
+            "ExitThread": 946,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 8,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 94,
+          "pid": 31676,
+          "attachMs": 7,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 35,
+          "signalDelayMs": 167,
+          "disposeMs": 92,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 76,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 368,
+            "ExitThread": 364,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 8,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 95,
+          "pid": 33044,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 7,
+          "signalDelayMs": 476,
+          "disposeMs": 70,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 69,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 914,
+            "ExitThread": 910,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 8,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 96,
+          "pid": 34108,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 48,
+          "signalDelayMs": 456,
+          "disposeMs": 51,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 33,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 881,
+            "ExitThread": 877,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 7,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 97,
+          "pid": 43648,
+          "attachMs": 9,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 37,
+          "signalDelayMs": 172,
+          "disposeMs": 73,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 68,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 369,
+            "ExitThread": 364,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: InvalidOperationException after queue completed (callbackKind=Informational, callbackName=ExitThread)"
+          ],
+          "ownThreads": 7,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 98,
+          "pid": 23136,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 28,
+          "signalDelayMs": 455,
+          "disposeMs": 66,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 153,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 885,
+            "ExitThread": 881,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 7,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 99,
+          "pid": 38828,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 83,
+          "signalDelayMs": 226,
+          "disposeMs": 70,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 28,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 455,
+            "ExitThread": 451,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 7,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 100,
+          "pid": 42828,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 28,
+          "signalDelayMs": 148,
+          "disposeMs": 103,
+          "signalError": 0,
+          "targetEnded": true,
+          "endWaitMs": 63,
+          "exitCode": 0,
+          "marker": "signal cancelled",
+          "pipesLeft": [],
+          "events": {
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 335,
+            "ExitThread": 331,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "LateCallback in OnCallback: ObjectDisposedException after queue disposed (callbackKind=Informational, callbackName=CreateThread)"
+          ],
+          "ownThreads": 8,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        }
+      ],
+      "outcome": "not-usable",
+      "parentActions": [
+        "target 16744 still alive 75 s after it started (held stopped?): ended by the parent"
+      ],
+      "stderr": []
+    }
+  ]
+}
