@@ -6,7 +6,7 @@
 
 Accepted by Martin on 2026-11-15: "ADR-062 and ADR-063: Accepted, update the ADR's." D1 to D7 are accepted with it.
 D7 still holds: the mechanism of D3 is measured before it is fixed, and it changes if Steps 2 and 3 say so. Q3 (the
-names) stays open. Q6 (the Graph profile's own version fields) was answered on 2026-11-16 by
+names) was decided on 2026-11-15 for the cursor and the read operation, and on 2026-11-18 for the rest (D6). Q6 (the Graph profile's own version fields) was answered on 2026-11-16 by
 [ADR-064](ADR-064-a-facts-states.md). Steps 2 to 6 are done (2026-11-15 and 2026-11-16): part one, the cursor, is
 complete, and every read of an index goes through it.
 
@@ -426,10 +426,34 @@ changes in a query, and they are rejected by one check before the scan.
 
 ### D6. A type that every profile uses does not say Temporal — Accepted
 
-The names are an open question (Q3). The rule is proposed: a name with "Temporal" or "Memory" in it belongs to the
-Cognitive profile only. It covers the result type, the enumerator, `TemporalIndexType` (an index order: GSPO, GPOS,
-GOSP, TGSP), and what is left of `TemporalQueryType` and `TemporalQueryMode` after ADR-061 removes `AS OF`, `DURING`
-and `ALL VERSIONS`.
+The rule: a name with "Temporal" or "Memory" in it belongs to the Cognitive profile only. It covers the result type,
+the enumerator, `TemporalIndexType` (an index order: GSPO, GPOS, GOSP, TGSP), and what is left of `TemporalQueryType`
+and `TemporalQueryMode` after ADR-061 removes `AS OF`, `DURING` and `ALL VERSIONS`.
+
+**The names (Q3) — Decided 2026-11-18.** Martin: "Why not keep ResolvedTemporalQuad for cognitive and simply drop
+Temporal for the other? E.g ResolvedQuad for the other? And apply that pattern?" A name keeps "Temporal" where the
+times are kept, and the type every profile uses has the same name without it:
+
+| Today | Every profile | Cognitive only |
+|---|---|---|
+| `ResolvedTemporalQuad` | `ResolvedQuad`: graph, subject, predicate, object (D1) | `ResolvedTemporalQuad`: the quad, `MemorizedAt`, and `ForgottenAt`, absent while the memory is remembered (D2); the legacy members go |
+| `TemporalResultEnumerator` | `ResultEnumerator`, which yields `ResolvedQuad` | `TemporalResultEnumerator`, which yields `ResolvedTemporalQuad` |
+| `TemporalIndexType` (internal) | `IndexType`; `TGSP` stays one of its members | — |
+| `TemporalQueryType` | — | keeps its name if a public read that selects by time keeps it (ADR-061 Step 6) |
+
+`TemporalQueryMode` went with ADR-061 P6 on 2026-11-17.
+
+**Two enumerators, one loop — Decided 2026-11-18** (Martin: "We go with C."). `TemporalResultEnumerator` holds a
+`ResultEnumerator` and adds the two times from its cursor. It has no loop of its own. `ResultEnumerator` has internal
+accessors for the cursor's two times, which the SPARQL engine reads when a pattern binds `MEMORIZED` or `FORGOTTEN`
+(D2). So the engine reads through the common enumerator on every profile, and stays one path (D5). Two alternatives
+were set aside:
+
+- **One enumerator with a second accessor** for the two-time row. On a profile without times, that accessor throws or
+  makes the times up, which D1 and D2 remove, and a type every profile uses gets a Temporal member.
+- **One generic enumerator over the row type** (`ResultEnumerator<TRow>`, with `allows ref struct`). It has one loop
+  too, but it needs a public interface, a static factory on each row type, and a generic type for every caller. The
+  wrapper does the same with less.
 
 ### D7. Measure before the mechanism is fixed — Accepted
 
@@ -464,8 +488,8 @@ values stay for that time, written in one place instead of three.
   measurements of D7 say otherwise.
 - **Q3. Names.** For the quad every profile yields, the two-time type, the enumerator, the cursor, the read
   operation, the index order. Decided 2026-11-15 for the cursor (`QuadIndexCursor`) and the read operation
-  (`Advance`); the others are open. The cursor and the read operation need their names before
-  Step 4; the public names can wait until Step 7.
+  (`Advance`), and on 2026-11-18 for the others: `ResolvedQuad`, `ResolvedTemporalQuad`, `ResultEnumerator`,
+  `TemporalResultEnumerator` and `IndexType` (D6).
 - **Q4. The store class.** `QuadStore`'s eleven index fields and its profile branches are the same pattern. Does this
   ADR cover them, or only the read? *Accepted with the ADR on 2026-11-15: only the read.* The write path and the store's fields are a larger
   change with its own risks, and a common read operation on the index classes (D3) is the first piece either way.
@@ -479,7 +503,8 @@ values stay for that time, written in one place instead of three.
   cursor; `CreatedAt`, `ModifiedAt` and `IsDeleted` go.
 - **Q7. The public surface.** The two public types change name and shape, and a third appears. That breaks callers of
   the storage API outside this repository, if there are any. The count of public types in `CLAUDE.md` (28 when this was written, 29 since ADR-061's log) and the list
-  in ADR-003 change.
+  in ADR-003 change. *With the names of 2026-11-18 (D6):* the two public types keep their names and change shape, and
+  two appear, `ResolvedQuad` and `ResultEnumerator`: 31, less what ADR-061 Step 6 removes.
 
 ## Steps
 
@@ -528,8 +553,9 @@ reads through the cursor like any other; the Cognitive index's time selection is
 **Part two: the result types.** One change with ADR-061 Step 6.
 
 7. **The two result types** (D1, D2) **and the public names** (D6), in the change that removes and changes the public
-   read methods (ADR-061 Step 6). The engine reads the quad type. Pruning and the Cognitive tests read the two-time
-   type. The made-up values go.
+   read methods (ADR-061 Step 6). The engine reads `ResolvedQuad` through `ResultEnumerator`. Pruning and the
+   Cognitive tests read `ResolvedTemporalQuad` through `TemporalResultEnumerator`, which wraps it (D6). The made-up
+   values go.
 8. **Documents:** ADR-003's list, the public type count in `CLAUDE.md`, `mercury-internals.md`, `api-usage.md`,
    `STATISTICS.md`.
 
