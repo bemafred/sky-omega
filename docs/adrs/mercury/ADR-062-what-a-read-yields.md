@@ -438,10 +438,18 @@ times are kept, and the type every profile uses has the same name without it:
 |---|---|---|
 | `ResolvedTemporalQuad` | `ResolvedQuad`: graph, subject, predicate, object (D1) | `ResolvedTemporalQuad`: the quad, `MemorizedAt`, and `ForgottenAt`, absent while the memory is remembered (D2); the legacy members go |
 | `TemporalResultEnumerator` | `ResultEnumerator`, which yields `ResolvedQuad` | `TemporalResultEnumerator`, which yields `ResolvedTemporalQuad` |
-| `TemporalIndexType` (internal) | `IndexType`; `TGSP` stays one of its members | — |
+| `TemporalIndexType` (internal) | `TermOrder { SPO, POS, OSP }`: where subject, predicate and object are in a row; the TGSP index reports `SPO` | — |
 | `TemporalQueryType` | — | keeps its name if a public read that selects by time keeps it (ADR-061 Step 6) |
 
 `TemporalQueryMode` went with ADR-061 P6 on 2026-11-17.
+
+**The term order — Decided 2026-11-18** (Martin: "Why rename TemporalIndexType to IndexType if it keeps TGSP? The T
+in TGSP means temporal. Or won't it keep TGSP?", and then "B"). The table first said `IndexType`, with `TGSP` kept as
+one of its members, which leaves the time in a type every profile uses. The enum says only where the subject, the
+predicate and the object are in a row (primary, secondary, tertiary). The TGSP row has them where the GSPO row has
+them, and every reader of the enum handles `TGSP` as `GSPO` (`QuadStore.cs`, read 2026-11-18). The time is in the
+TGSP index's key, which the index builds itself. So the enum is named for the order of the terms, and has three
+members.
 
 **Two enumerators, one loop — Decided 2026-11-18** (Martin: "We go with C."). `TemporalResultEnumerator` holds a
 `ResultEnumerator` and adds the two times from its cursor. It has no loop of its own. `ResultEnumerator` has internal
@@ -489,7 +497,7 @@ values stay for that time, written in one place instead of three.
 - **Q3. Names.** For the quad every profile yields, the two-time type, the enumerator, the cursor, the read
   operation, the index order. Decided 2026-11-15 for the cursor (`QuadIndexCursor`) and the read operation
   (`Advance`), and on 2026-11-18 for the others: `ResolvedQuad`, `ResolvedTemporalQuad`, `ResultEnumerator`,
-  `TemporalResultEnumerator` and `IndexType` (D6).
+  `TemporalResultEnumerator` and `TermOrder` (D6).
 - **Q4. The store class.** `QuadStore`'s eleven index fields and its profile branches are the same pattern. Does this
   ADR cover them, or only the read? *Accepted with the ADR on 2026-11-15: only the read.* The write path and the store's fields are a larger
   change with its own risks, and a common read operation on the index classes (D3) is the first piece either way.
