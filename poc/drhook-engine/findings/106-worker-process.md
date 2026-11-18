@@ -1,15 +1,16 @@
 # Finding 106 — the debugger in a worker process (ADR-016 Step 5): the supervisor recovered from every lost debugger; a target held at a stop when its worker dies stays held on Unix and dies on Windows
 
 **Date:** runs and record 2026-11-17
-**Status:** **RECORDED** on zbook (Linux x64), macbook (macOS arm64) and omega-windows (Windows 11 arm64). Probe 106
-ran at `81859423`, 20 runs per mode on each machine. Every machine gave RESULT(0): each mode's prediction held.
+**Status:** **RECORDED** on zbook (Linux x64), macbook (macOS arm64), omega-windows (Windows 11 arm64) and
+omega-ubuntu (Linux arm64). Probe 106 ran at `81859423`, 20 runs per mode on each machine. Every machine gave
+RESULT(0): each mode's prediction held.
 
 The machines are those Martin approved for Step 5 on 2026-11-17 (ADR-016 Step 0), plus zbook, where Step 4's probes
 also ran. Not run yet:
 
-- omega-ubuntu, which zbook cannot reach yet;
 - the six runners, which need a `drhook-probe.yml` option;
-- so macOS x64, Windows x64 and Linux arm64 are not covered.
+- so macOS x64 and Windows x64 are not covered, and Linux arm64 only on a VM;
+- Ubuntu's own .NET build on omega-ubuntu (finding 102 ran both builds there).
 
 ## What was run
 
@@ -29,19 +30,25 @@ operating system. The probe's header has each mode's hypothesis and construction
 | zbook | Ubuntu 26.04.1, x64, metal, 8 cores | 10.0.14, Microsoft's |
 | macbook | macOS 26.4.1, arm64 (M1 Pro), 8 cores, SIP enabled | 10.0.15, Microsoft |
 | omega-windows | Windows 11 (26200), arm64, Parallels VM on omega | 10.0.15, Microsoft |
+| omega-ubuntu | Ubuntu 26.04.1, arm64, Parallels VM on omega, 4 cores | 10.0.14, Microsoft's (`~/.dotnet`) |
 
-macbook and zbook ran at the same time. omega-windows ran alongside both, and omega itself was building and testing
-Mercury at times (sky-omega). Nothing in the probe measures speed beyond its bounds. The logs and zbook's journal are
-in [`106-worker-process/`](106-worker-process/).
+- macbook and zbook ran at the same time, and omega-windows ran alongside both.
+- omega-ubuntu ran later, 11:06 to 12:23 UTC. For most of that time, omega-windows was running probe 112.
+- omega itself was building and testing Mercury at times (sky-omega).
+
+Nothing in the probe measures speed beyond its bounds. The logs, and the journals of zbook and omega-ubuntu, are in
+[`106-worker-process/`](106-worker-process/).
 
 ## Results
 
-| Mode | zbook | macbook | omega-windows |
-|------|-------|---------|---------------|
-| induce-and-recover | lost and recovered, 20 of 20 | lost and recovered, 20 of 20 | never lost, 20 of 20; fresh session ok |
-| supervisor-detects | suspected and recovered, 20 of 20 | suspected and recovered, 16 of 20; never lost in 4 | never lost, 20 of 20; fresh session ok |
-| held-launched | **held**, reattach failed, 20 of 20 | **held**, reattach failed, 20 of 20 | **died**, 20 of 20 |
-| held-attached | **held**, reattach failed, 20 of 20 | **held**, reattach failed, 20 of 20 | **died**, 20 of 20 |
+| Mode | zbook | macbook | omega-ubuntu | omega-windows |
+|------|-------|---------|--------------|---------------|
+| induce-and-recover | lost and recovered, 20 of 20 | lost and recovered, 20 of 20 | lost and recovered, 11 of 20; never lost in 9 | never lost, 20 of 20; fresh session ok |
+| supervisor-detects | suspected and recovered, 20 of 20 | suspected and recovered, 16 of 20; never lost in 4 | suspected and recovered, 17 of 20; never lost in 3 | never lost, 20 of 20; fresh session ok |
+| held-launched | **held**, reattach failed, 20 of 20 | **held**, reattach failed, 20 of 20 | **held**, reattach failed, 20 of 20 | **died**, 20 of 20 |
+| held-attached | **held**, reattach failed, 20 of 20 | **held**, reattach failed, 20 of 20 | **held**, reattach failed, 20 of 20 | **died**, 20 of 20 |
+
+A run that was never lost made all 8 attempts, and its fresh session succeeded too.
 
 ## Recovery from a lost debugger
 
@@ -52,18 +59,20 @@ so each count below includes the attempt that was lost:
 |---------|--------------------------|--------------------------|
 | zbook | 20 of 44 attempts | 20 of 54 |
 | macbook | 20 of 64 attempts | 16 of 91 |
+| omega-ubuntu | 11 of 97 attempts | 17 of 83 |
 | omega-windows | 0 of 160 attempts | 0 of 160 |
 
-That fits findings 104 and 105: Windows has no PAL, and never hung.
+That fits findings 104 and 105: Windows has no PAL, and never hung. omega-ubuntu lost its debugger less often than
+zbook and macbook did, 11 to 20 % of attempts against 18 to 45 %. The probe does not show why.
 
 **The worker's own detection is fast and has a wide margin.** The worker calls its debugger lost when the target is
 gone and no `ProcessExited` comes within 2 s.
 
-- It reported the loss 2.0 s after it saw the target gone, every time (2,003 to 2,031 ms).
+- It reported the loss 2.0 s after it saw the target gone, every time (2,002 to 2,031 ms).
 - When the debugger was not lost, `ProcessExited` came 0 to 26 ms after the target was gone on zbook, 0 to 35 ms on
-  macbook, and 0 to 138 ms on omega-windows.
+  macbook, 0 to 25 ms on omega-ubuntu, and 0 to 138 ms on omega-windows.
 
-So finding 105's detector held in every attempt on all three machines.
+So finding 105's detector held in every attempt on all four machines.
 
 **Recovery took milliseconds to discard, and seconds to a working session.**
 
@@ -71,27 +80,30 @@ So finding 105's detector held in every attempt on all three machines.
 |---------|-----------------------------|-------------------------------------------|
 | zbook | 3 to 7 ms | 2.4 to 2.5 s |
 | macbook | 13 to 15 ms | 3.2 to 3.7 s |
+| omega-ubuntu | 1 to 6 ms | 2.3 to 2.4 s |
 
 The fresh session (a new worker, a launch, a Break stop, locals, and a natural end with `ProcessExited`) succeeded in
-all 76 recoveries. On Windows, 40 of 40 fresh sessions succeeded with no loss before them.
+all 104 recoveries. With no loss before them, 40 of 40 fresh sessions succeeded on Windows, and 12 of 12 on
+omega-ubuntu.
 
 **The supervisor detected a lost debugger from outside, without the worker's verdict.**
 
-- Every suspicion agreed with the worker's own facts (no `ProcessExited`): 20 of 20 on zbook and 16 of 16 on
-  macbook.
+- Every suspicion agreed with the worker's own facts (no `ProcessExited`): 20 of 20 on zbook, 16 of 16 on macbook,
+  and 17 of 17 on omega-ubuntu.
 - No worker was suspected that had not lost its debugger.
 - Detecting it from outside costs the bound, 30 s here, against the worker's 2 s. The fresh session then completed
-  1.4 s (zbook) and 2.2 to 2.7 s (macbook) after the discard.
+  1.4 s (zbook and omega-ubuntu) and 2.2 to 2.7 s (macbook) after the discard.
 
 ## A target held at a stop when its worker dies
 
 Step 5's open question, recorded per platform. Launched and attached targets behaved the same.
 
-**Linux and macOS: the target stays held, and no debugger can take it over.** This held in 80 of 80 runs, 40 on each
-machine:
+**Linux and macOS: the target stays held, and no debugger can take it over.** This held in 120 of 120 runs, 40 on
+each machine, on x64 and arm64:
 
 - The target was alive, and its beat did not move for 10 s.
-- A fresh worker's attach failed after about 10 s with `CORDBG_E_TIMEOUT` (`0x80131C08`).
+- A fresh worker's attach failed after about 10 s with `CORDBG_E_TIMEOUT` (`0x80131C08`) (on omega-ubuntu,
+  10,018 to 10,051 ms).
 - The target was still held 60 s later, so the probe ended it, and recorded that in the journal.
 
 This is what the omega smoke at `a7583ee4` showed on 2026-11-07. Such a target can be ended only by the operating
@@ -120,7 +132,9 @@ Before every discard, the journal recorded:
 - how certain it was.
 
 zbook's journal has 200 lines. Each of its 80 discards was journaled before the kill, and confirmed after it
-(`discarded`). The 40 held targets the probe ended are recorded as `kill-target`. The target states it recorded:
+(`discarded`). The 40 held targets the probe ended are recorded as `kill-target`. omega-ubuntu's journal has 176
+lines: 68 discards, each journaled before the kill and confirmed after it, and 40 `kill-target`. The target states
+the journals recorded:
 
 | Mode | State | Certainty |
 |------|-------|-----------|
@@ -132,15 +146,16 @@ Something observed the target in every case, so no entry needed `unknown`.
 
 ## What this establishes
 
-- **The design works on the three platforms run.**
+- **The design works on the four machines run** (Linux x64 and arm64, macOS arm64, Windows arm64).
   - The supervisor detects a lost debugger, either from the worker's 2 s check or from outside by a bound.
   - It discards the worker in milliseconds, and a fresh worker's session succeeds.
-  - It recovered 76 of 76 losses on Unix. On Windows the debugger was never lost.
+  - It recovered 104 of 104 losses on Linux and macOS. On Windows the debugger was never lost.
 - **Losing a worker costs a target held at a stop**, on every platform here, in opposite ways.
 
 ## Not established
 
-- omega-ubuntu (Linux arm64, both .NET builds) and the runners.
+- The runners, and Ubuntu's own .NET build on omega-ubuntu.
+- Why omega-ubuntu lost its debugger less often than zbook and macbook.
 - A target that is running, not stopped, when its worker dies. Probe 106 holds every target at a stop first.
 - Why a held Unix target cannot be attached again. The runtime may still consider a debugger attached; not read.
 - Whether mscordbi on Windows leaves kill-on-exit at its default.
@@ -148,7 +163,7 @@ Something observed the target in every case, so no entry needed `unknown`.
 
 ## Next (proposed, not decided)
 
-1. Run on omega-ubuntu once zbook can reach it.
+1. ~~Run on omega-ubuntu once zbook can reach it.~~ Run on 2026-11-17, Microsoft's .NET build; RESULT(0).
 2. Add probe 106 to `drhook-probe.yml` for the six runners. That is a workflow change, reviewed when proposed.
 3. Run a target that is running when its worker dies (a held-mode variant that continues the target before the
    discard).

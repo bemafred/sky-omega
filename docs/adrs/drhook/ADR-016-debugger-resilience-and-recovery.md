@@ -688,17 +688,17 @@ known state, when that was observed and how certain it is, and unknown when noth
 per platform: what happens to a target held stopped when its worker dies. What the snapshot cannot see, native frames
 and native threads, is filed in the limits register: [drhook-snapshot-native-frames](../../limits/drhook-snapshot-native-frames.md).
 *Recorded 2026-11-17* ([finding 106](../../../poc/drhook-engine/findings/106-worker-process.md); probe 106 at
-`81859423` on zbook, macbook and omega-windows, 20 runs per mode each, RESULT(0) on every machine; not yet run on
-omega-ubuntu or the runners).
+`81859423` on zbook, macbook, omega-windows and omega-ubuntu, 20 runs per mode each, RESULT(0) on every machine; not
+yet run on the runners).
 
-- **Recovery.** On Linux and macOS a native crash lost the worker's debugger in 18 to 45 % of attempts. The worker
+- **Recovery.** On Linux and macOS a native crash lost the worker's debugger in 11 to 45 % of attempts. The worker
   called it lost 2 s after the target was gone; a `ProcessExited` that did come came within 35 ms. The supervisor
-  discarded the worker in 3 to 15 ms, and a fresh worker's session succeeded 2.4 to 3.7 s later: 76 of 76.
+  discarded the worker in 1 to 15 ms, and a fresh worker's session succeeded 2.3 to 3.7 s later: 104 of 104.
 - **Detection from outside.** With the worker's verdict ignored, a 30 s bound on its next command found every loss,
-  36 of 36, and agreed with the worker's facts each time.
+  53 of 53, and agreed with the worker's facts each time.
 - **Windows.** The debugger was never lost (0 of 320 attempts), as findings 104 and 105 predict.
 - **A target held at a stop when its worker dies.** On Linux and macOS it stays held, and a new attach fails with
-  `CORDBG_E_TIMEOUT` (80 of 80). On Windows it dies with the worker (40 of 40).
+  `CORDBG_E_TIMEOUT` (120 of 120). On Windows it dies with the worker (40 of 40).
 - **The journal.** It recorded each discard before the kill, with the target's last known state, who observed it, and
   how certain that was.
 
