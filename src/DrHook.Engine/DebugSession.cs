@@ -93,17 +93,28 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
     /// overload; this is the fallback when caller doesn't specify.</summary>
     public static readonly TimeSpan DefaultNaturalExitTimeout = TimeSpan.FromMilliseconds(2000);
 
-    /// <summary>Default brief grace for <see cref="Abandon"/> (ADR-008 / finding 68 Decision 3).
-    /// 200 ms catches even handler-equipped well-behaved targets per finding 68 probes 49/50,
-    /// while keeping Abandon's total budget sub-second. Callers override via the Abandon argument
-    /// if they want even less waiting (rare) or more (use the discipline-default Dispose path
-    /// instead).</summary>
-    public static readonly TimeSpan DefaultAbandonBriefGrace = TimeSpan.FromMilliseconds(200);
+    /// <summary>How long <see cref="Abandon"/> waits for a running target to stop before it kills it (ADR-016 6.3).
+    /// A stop needs the target's runtime to answer, as a detach does; a target that does not answer within the bound is
+    /// killed while running. The value is a first bound, not a measured one: ADR-016 sets it from measurement. It
+    /// replaces the 200 ms SIGTERM grace of ADR-008's Decision 3.</summary>
+    public static readonly TimeSpan DefaultAbandonStopBound = TimeSpan.FromMilliseconds(2000);
+
+    // A target an owned Dispose detached from and asked to exit, which was still running after the bound (ADR-016 6.2):
+    // left running for the client to end (KillLeftRunningTarget). The gate orders that kill against the reap of the
+    // target's end, so the kill cannot reach a process that has taken the target's PID.
+    private volatile bool _targetLeftRunning;
+    private readonly object _leftRunningGate = new();
+    // Set when an owned Dispose detached before the target ended (finding 110): the child is then this session's to reap.
+    private bool _detachedFromOwnedTarget;
 
     /// <summary>Per-session natural-exit timeout for Owned Dispose. Defaults to
     /// <see cref="DefaultNaturalExitTimeout"/>. Configurable via the AttachAndOwn / Launch
     /// overload that accepts a TimeSpan.</summary>
     private readonly TimeSpan _naturalExitTimeout;
+
+    /// <summary>How long an owned <see cref="Dispose"/> waits for the target to exit after its exit request, before it
+    /// leaves the target running (ADR-016 6.2).</summary>
+    public TimeSpan NaturalExitTimeout => _naturalExitTimeout;
 
     // Active breakpoints: owned (module, function, breakpoint) ICorDebug pointers kept alive so
     // the breakpoint stays bound, alongside a public BreakpointInfo carrying the assigned id and
@@ -184,7 +195,22 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
     /// Calls nothing on mscordbi, so it may be read after <c>DebuggerError</c> and after <see cref="Dispose"/>.
     /// Unknown, with the reason, for a POSIX target that is not this process's child (only its parent can read how
     /// it ended).</summary>
-    public TargetExit? TargetExitWithin(TimeSpan timeout) => _targetExit.Wait(timeout) ? _targetExit.Result : null;
+    public TargetExit? TargetExitWithin(TimeSpan timeout) =>
+        _targetExit.Wait(timeout) ? _targetExit.Result.OrTheKillDrHookSent(SignalSentByDrHook) : null;
+
+    // The signal DrHook sent to end the target (KillThroughOs), 0 for none. When mscordbi's PAL collects the OS record of
+    // a target DrHook killed before DrHook's wait reads it, the end is reported as that kill (TargetExit.SentByDrHook).
+    private int _killSignalSent;
+    private int? SignalSentByDrHook => Volatile.Read(ref _killSignalSent) is int s and > 0 ? s : null;
+
+    /// <summary>Kill the target through the operating system, the one way this session does it (Abandon, a target left
+    /// running, a lost debugger), and remember the signal: Process.Kill is SIGKILL on Unix. Windows reads every end
+    /// through DrHook's own handle, so nothing is remembered there.</summary>
+    private void KillThroughOs()
+    {
+        _targetProcess!.Kill(entireProcessTree: true);
+        if (!OperatingSystem.IsWindows()) Volatile.Write(ref _killSignalSent, 9);
+    }
 
 
     /// <summary>OS process id of the attached target.</summary>
@@ -812,59 +838,86 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
         return WaitForTargetExit((int)timeout.TotalMilliseconds);
     }
 
-    /// <summary>Forcibly terminate the Owned target after a brief grace period and tear down the
-    /// substrate session. Extraordinary measure for targets that violate process lifecycle rules
-    /// — eternal loops, missing graceful-shutdown handlers, deadlocks. Internally:
-    /// (1) sends SIGTERM, (2) waits <paramref name="briefGrace"/> (default 200 ms,
-    /// <see cref="DefaultAbandonBriefGrace"/>), (3) sends SIGKILL if target still alive,
-    /// (4) runs <see cref="Dispose"/>'s teardown.
+    /// <summary>Forcibly terminate the target and tear down the session: the extraordinary end (ADR-016 6.3), for a
+    /// target that will not end otherwise, such as an eternal loop or a deadlock. It is a kill through the operating
+    /// system, the same for an owned and a borrowed target (F-010-1).
     ///
-    /// <para>The brief grace is a final courtesy — well-behaved targets exit in tens of ms on
-    /// SIGTERM per finding 68, so 200 ms catches them; misbehaving targets get the non-catchable
-    /// SIGKILL within sub-second total budget.</para>
+    /// <para>The order (ADR-016 6.3, replacing ADR-008's Decision 3):</para>
+    /// <list type="number">
+    /// <item>The target is stopped first, so that no request of the debugger's is in flight when it dies. A target held
+    /// at a stop already is stopped. A running one is paused, and Abandon waits up to <paramref name="stopBound"/>
+    /// (<see cref="DefaultAbandonStopBound"/>) for any stop.</item>
+    /// <item>It is killed: while stopped, it runs no more code; if it did not stop within the bound, while running, as
+    /// before.</item>
+    /// <item><see cref="Dispose"/>'s dead-target teardown.</item>
+    /// </list>
     ///
-    /// <para>Use <see cref="Dispose"/> for the discipline-default path — Dispose waits
-    /// <see cref="DefaultNaturalExitTimeout"/> (2 seconds) for natural exit. Use Abandon when you
-    /// know the target won't end on its own and you've chosen to terminate quickly.</para>
+    /// <para>Why: a kill while the target was synchronized was clean, 30 of 30 at a Pause stop and 30 of 30 at the
+    /// unhandled-exception stop (finding 104), because no request is in flight to the dying target (finding 105). A
+    /// kill of a running, attached target is finding 100's route. A stopped target cannot run a SIGTERM handler, and a
+    /// SIGTERM to an attached target without one lost the debugger in 6 of 14 sessions (finding 112), so the 200 ms
+    /// SIGTERM grace of ADR-008 is gone: a request the target may honour is <see cref="Dispose"/>'s path.</para>
     ///
-    /// <para>No-op on already-Disposed sessions. For Borrowed sessions (F-010-1): Abandon force-
-    /// SIGKILLs the attached target via the death-detection handle — a deliberate force-terminate
-    /// (no graceful SIGTERM, since we don't own it), then the dead-target Dispose teardown.</para>
-    ///
-    /// <para>Unlike <see cref="Dispose"/>, Abandon ends the target while the debugger is still attached (finding 110).
-    /// Detaching first would need the target's runtime to answer a synchronize request, and Abandon is for a target
-    /// that may not answer. So a target killed here can still die while mscordbi waits on a request to it, and leave
-    /// this process's debugger hung (findings 100, 105); the remedy for that is the debugger worker process
-    /// (ADR-016 Step 5), not the order of this method.</para></summary>
-    public void Abandon(TimeSpan? briefGrace = null)
+    /// <para>A target that does not stop within the bound is killed while running and may still leave this process's
+    /// debugger hung (findings 100, 105); the remedy for that is the debugger worker process (ADR-016 6.7). The
+    /// returned <see cref="AbandonOutcome"/> says which it was. No-op on a disposed session.</para></summary>
+    public AbandonOutcome Abandon(TimeSpan? stopBound = null)
     {
-        if (Volatile.Read(ref _disposed) != 0) return;
+        if (Volatile.Read(ref _disposed) != 0) return AbandonOutcome.SessionAlreadyEnded;
 
+        AbandonOutcome outcome = AbandonOutcome.TargetAlreadyEnded;
         if (!TargetHasExited)
         {
-            bool exitedNaturally = false;
-            if (_ownsTarget)
+            bool stopped = !IsDebuggerLost && StopBeforeKill(stopBound ?? DefaultAbandonStopBound);
+            if (!TargetHasExited)
             {
-                // Owned Stage 1: SIGTERM with brief grace — catches well-behaved targets.
-                TimeSpan grace = briefGrace ?? DefaultAbandonBriefGrace;
-                try { exitedNaturally = RequestExit(grace); }
-                catch { exitedNaturally = TargetHasExited; }
-            }
-
-            // Stage 2: SIGKILL. The fallback for an Owned target that ignored SIGTERM, AND the
-            // direct force-terminate for a Borrowed target (F-010-1) — drhook_kill on an attached
-            // target is a deliberate force, no graceful contract (we don't own it). The death-
-            // detection Process handle is held for both modes (finding 66); Dispose's dead-target
-            // path then tears down cleanly (settle + Detach, no active mscordbi pushes against the
-            // dying target). The TargetStuckAtDispose anomaly is reserved for Dispose's default
-            // path; Abandon's deliberate fast-escalation doesn't emit it — the caller opted in.
-            if (!exitedNaturally)
-            {
+                // The death-detection Process handle is held for both modes (finding 66); Dispose's dead-target path
+                // then tears down cleanly (settle + Detach, no active mscordbi pushes against the dead target).
                 TryKillTargetAndSettle();
+                outcome = stopped ? AbandonOutcome.KilledWhileStopped : AbandonOutcome.KilledWhileRunning;
             }
         }
 
         Dispose();
+        return outcome;
+    }
+
+    /// <summary>Bring the target to a stop before Abandon kills it: true when it is held at one. A target the pump holds
+    /// at a stop already is stopped (a pause asked for then would queue behind that stop). Otherwise a pause is
+    /// requested and any stop that comes within <paramref name="bound"/> counts: the pump holds the target at it
+    /// until it is resumed, which nothing does before the kill. The pump's own wait is used, not
+    /// <see cref="WaitForStop"/>, so no breakpoint policy resumes the stop.</summary>
+    private bool StopBeforeKill(TimeSpan bound)
+    {
+        if (_pump.IsParked) return true;
+        try { _pump.RequestPause(); }
+        catch (Exception) { return false; }
+        StopInfo? stop = _pump.WaitForStop(bound);
+        return stop is not null && stop.Reason is not (StopReason.ProcessExited or StopReason.DebuggerLost) && _pump.IsParked;
+    }
+
+    /// <summary>True when <see cref="Dispose"/> detached from an owned target, asked it to exit, and it was still running
+    /// when the natural-exit bound expired, or, on Windows, which has no exit request yet, whenever the owned target was
+    /// running at the detach (ADR-016 6.2 and 6.4). The target is left running, un-debugged; the client ends it with
+    /// <see cref="KillLeftRunningTarget"/>, or lets it finish.</summary>
+    public bool TargetLeftRunning => _targetLeftRunning;
+
+    /// <summary>End a target <see cref="Dispose"/> left running (<see cref="TargetLeftRunning"/>): a kill through the
+    /// operating system, of that process only. Its identity is checked first: on Unix its PID together with its start
+    /// time, and the reap of its end waits for this kill, so a PID the system has given to another process is never
+    /// signalled; on Windows the process handle DrHook holds. Returns false when the target had already ended, and
+    /// sends nothing then. How it ended is read with <see cref="TargetExitWithin"/>.</summary>
+    /// <exception cref="InvalidOperationException">The session did not leave its target running.</exception>
+    public bool KillLeftRunningTarget()
+    {
+        if (!_targetLeftRunning)
+            throw new InvalidOperationException("KillLeftRunningTarget is for a target this session's Dispose left running (ADR-016 6.2).");
+        lock (_leftRunningGate)
+        {
+            if (TargetHasExited) return false;
+            KillThroughOs();
+            return true;
+        }
     }
 
     /// <summary>Interrupt a RUNNING debuggee (AsyncBreak). Synchronizes the process via
@@ -2283,7 +2336,7 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
         {
             if (!TargetHasExited)
             {
-                _targetProcess.Kill(entireProcessTree: true);
+                KillThroughOs();
             }
         }
         catch (Exception ex)
@@ -2521,7 +2574,7 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
             // An owned target is ended with the OS, as documented. A borrowed one is not ours to end and is left as it is.
             if (_ownsTarget && !TargetHasExited)
             {
-                try { _targetProcess.Kill(entireProcessTree: true); }
+                try { KillThroughOs(); }
                 catch (Exception ex)
                 {
                     _sink.OnAnomaly(new EngineAnomaly(
@@ -2537,19 +2590,12 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
         {
             try
             {
-                // ADR-008 / finding 68: for OWNED sessions, two-stage discipline-aligned termination.
-                // Stage 1: SIGTERM (graceful request, catchable). Wait NaturalExitTimeout for natural
-                //          exit. Well-behaved targets exit in tens of ms; tight CPU loops in ~15 ms via
-                //          CoreCLR default disposition. Only targets that explicitly ignore SIGTERM
-                //          (Cancel=true handler) will survive to Stage 2.
-                // Stage 2: TargetStuckAtDispose anomaly + SIGKILL (non-catchable, via existing
-                //          TryKillTargetAndSettle / Process.Kill / kernel-mandated exit). The anomaly
-                //          surfaces the target's discipline violation as an actionable upstream signal.
-                //
-                // Finding 64 closed the structural dispose-then-kill race (MCH-RE-2) by making the
-                // substrate own the kill operation. Finding 68's empirical SIGTERM evidence motivates
-                // the two-stage discipline — substrate trusts well-implemented targets to exit
-                // naturally, and only forces the kernel-mandated kill against violators.
+                // ADR-016 6.2 (replacing ADR-008's Decision 1): the ordinary end of an OWNED session never signals an
+                // attached target. It detaches first (finding 110), then sends the request the target may honour:
+                // SIGTERM, on which a target with a handler cancels its work and exits 0, and one without ends at once,
+                // killed by signal 15 (finding 68); Windows has none yet (ADR-016 6.4). How it ended is read from the OS
+                // (TargetExit). A target still running when NaturalExitTimeout expires is left running and reported
+                // (TargetStuckAtDispose, TargetLeftRunning), for the client to end; Dispose never kills as cleanup.
                 bool detachedFirst = false;
                 if (_ownsTarget && !TargetHasExited)
                 {
@@ -2573,33 +2619,45 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
                     {
                         DetachSynchronized();
                         detachedFirst = true;
+                        _detachedFromOwnedTarget = true;
                     }
                     catch (DebuggerLostException)
                     {
                         // The debugger was lost during this teardown. Nothing more is called on mscordbi (the catch below
                         // roots the session), so the owned target is ended with the OS, as in the debugger-lost branch
                         // above; it would otherwise be left running with nobody to end it.
-                        try { _targetProcess.Kill(entireProcessTree: true); } catch { /* best effort: it may be gone */ }
+                        try { KillThroughOs(); } catch { /* best effort: it may be gone */ }
                         throw;
                     }
 
-                    bool exitedNaturally = false;
-                    try { exitedNaturally = RequestExit(_naturalExitTimeout); }
-                    catch { exitedNaturally = TargetHasExited; }
-
-                    if (!exitedNaturally)
+                    // ADR-016 6.2: the request the target may honour, then its answer. A target still running when the
+                    // bound expires is left running for the client to end (KillLeftRunningTarget), never killed here:
+                    // a forced end is never the fallback of an ordinary one (principle 4). ADR-008's Decision 1 killed it.
+                    // Windows has no exit request yet (ADR-016 6.4), so a running target is left running at once.
+                    bool exited;
+                    if (OperatingSystem.IsWindows()) exited = TargetHasExited;
+                    else
                     {
-                        _sink.OnAnomaly(new EngineAnomaly(
-                            DateTimeOffset.UtcNow, AnomalyKind.TargetStuckAtDispose, "mcp-request",
-                            "DebugSession.Dispose (Stage 1 SIGTERM timeout)",
-                            Observed: $"target {_targetProcess.Id} did not exit within NaturalExitTimeout={_naturalExitTimeout.TotalMilliseconds}ms after SIGTERM",
-                            Expected: "target completes its work and exits naturally on SIGTERM (well-implemented process lifecycle)",
-                            Context: new Dictionary<string, string>
-                            {
-                                ["pid"] = _targetProcess.Id.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                                ["timeoutMs"] = _naturalExitTimeout.TotalMilliseconds.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                            }));
-                        TryKillTargetAndSettle();
+                        try { exited = RequestExit(_naturalExitTimeout); }
+                        catch { exited = TargetHasExited; }
+                    }
+
+                    if (!exited)
+                    {
+                        if (!OperatingSystem.IsWindows())
+                        {
+                            _sink.OnAnomaly(new EngineAnomaly(
+                                DateTimeOffset.UtcNow, AnomalyKind.TargetStuckAtDispose, "mcp-request",
+                                "DebugSession.Dispose (exit request unanswered)",
+                                Observed: $"target {_targetProcess.Id} was still running {_naturalExitTimeout.TotalMilliseconds}ms after SIGTERM, which reached it detached; left running, not killed (ADR-016 6.2)",
+                                Expected: "target completes its work and exits on SIGTERM (well-implemented process lifecycle)",
+                                Context: new Dictionary<string, string>
+                                {
+                                    ["pid"] = _targetProcess.Id.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                                    ["timeoutMs"] = _naturalExitTimeout.TotalMilliseconds.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                                }));
+                        }
+                        _targetLeftRunning = true;
                     }
                 }
                 else if (!_ownsTarget)
@@ -2707,8 +2765,22 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
         foreach (SymbolReader? reader in _symbols.Values) reader?.Dispose();
         _symbols.Clear();
 
+        // An owned target this Dispose detached from before it ended (finding 110) is no longer reaped by mscordbi's PAL,
+        // which reaps only a child it still debugs (finding 87). Unreaped, every launched target that drhook_stop ended
+        // stayed a zombie of this process (seen on zbook, 2026-11-20). So it is reaped once its end has been read.
+        if (_detachedFromOwnedTarget) ReapDetachedChildWhenEnded();
+
+        if (_targetLeftRunning)
+        {
+            // ADR-016 6.2: the owned target runs on, un-debugged. Its console pipes stay open: it still holds their
+            // write ends, and closing the read ends would EPIPE or SIGPIPE it on its next write (as in DetachLeaveRunning).
+            // The Process handle is kept: KillLeftRunningTarget kills through it, and on Windows it is the target's
+            // identity.
+            return;
+        }
+
         // ADR-011 D2: close the console-drain pipes and join the discard threads. The Owned target is
-        // dead by now (kill-first above), so the threads have already hit EOF; closing unblocks any
+        // dead by now, so the threads have already hit EOF; closing unblocks any
         // still-pending read and the brief join lets them exit. No-op when no console drain was started.
         if (_consoleStdoutFd >= 0) { Interop.PosixSpawn.Close(_consoleStdoutFd); _consoleStdoutFd = -1; }
         if (_consoleStderrFd >= 0) { Interop.PosixSpawn.Close(_consoleStderrFd); _consoleStderrFd = -1; }
@@ -2718,9 +2790,27 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
         _consoleStderrDrain?.Join(TimeSpan.FromMilliseconds(200));
 
         // Release substrate's Process handle (finding 64). The OS process is already
-        // dead (TryKillTargetAndSettle handled it for Owned) or was never substrate's
+        // dead (it ended on its exit request, or Abandon killed it) or was never substrate's
         // to kill (Borrowed). Dispose just releases the managed handle.
         _targetProcess?.Dispose();
+    }
+
+    /// <summary>Unix: reap an owned target this session detached from, once its end has been read: whether it ended on
+    /// its exit request, or was left running (<see cref="TargetLeftRunning"/>) and ends later. Its exit status is read
+    /// first by ObserveEnd's wait, which does not reap, so <see cref="TargetExitWithin"/> still reports it; a waitpid
+    /// already waiting would race that read. The reap holds the gate <see cref="KillLeftRunningTarget"/> holds, so the
+    /// target's PID stays its own until any kill has checked it. Only a target whose end the wait read is reaped: it is
+    /// then a zombie, so the reap returns at once. One whose end is unknown (not this process's child, or the read
+    /// failed) is left alone, rather than waited for with the gate held.</summary>
+    private void ReapDetachedChildWhenEnded()
+    {
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS()) return;
+        int pid = ProcessId;
+        _targetExit.ContinueWith(ended =>
+        {
+            if (ended.Result.Kind == TargetExitKind.Unknown) return;
+            lock (_leftRunningGate) Interop.PosixSignals.ReapChild(pid);
+        }, CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
     }
 
     private static void ThrowIfFailed(int hr, string operation)
@@ -2728,6 +2818,20 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
         if (hr < 0)
             throw new DebugEngineException(operation, hr);
     }
+}
+
+/// <summary>What <see cref="DebugSession.Abandon"/> did (ADR-016 6.3).</summary>
+public enum AbandonOutcome
+{
+    /// <summary>The target was held at a stop, so no debugger request was in flight, and was then killed.</summary>
+    KilledWhileStopped,
+    /// <summary>The target did not stop within the bound and was killed while running. The debugger may be left hung
+    /// (findings 100, 105).</summary>
+    KilledWhileRunning,
+    /// <summary>The target had ended before the kill; nothing was sent.</summary>
+    TargetAlreadyEnded,
+    /// <summary>The session was already disposed; nothing was done.</summary>
+    SessionAlreadyEnded,
 }
 
 /// <summary>Raised when an ICorDebug operation returns a failure HRESULT.</summary>
