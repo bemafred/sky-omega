@@ -241,6 +241,37 @@ public class MemoryWordsTests : IDisposable
     }
 
     [Fact]
+    public void IncludingForgotten_ReachesASubqueryAndAPropertyPath()
+    {
+        // A chain a → b → c whose second link is forgotten, and a label of b that is forgotten
+        var clock = new SuppliedClock { Reading = Hour0 };
+        using var store = new QuadStore(Path.Combine(_testDir, "store"), null, null, new StorageOptions { Clock = clock });
+        store.AddCurrent("<urn:a>", "<urn:link>", "<urn:b>");
+        store.AddCurrent("<urn:b>", "<urn:link>", "<urn:c>");
+        store.AddCurrent("<urn:b>", "<urn:label>", "\"b\"");
+        clock.Reading = Hour1;
+        store.DeleteCurrent("<urn:b>", "<urn:link>", "<urn:c>");
+        store.DeleteCurrent("<urn:b>", "<urn:label>", "\"b\"");
+
+        const string path = "SELECT ?x WHERE { <urn:a> <urn:link>+ ?x } ORDER BY ?x";
+        const string subquery = "SELECT ?l WHERE { <urn:a> <urn:link> ?y { SELECT ?y ?l WHERE { ?y <urn:label> ?l } } }";
+
+        var pathRemembered = SparqlEngine.Query(store, path, TestContext.Current.CancellationToken);
+        var pathIncluding = SparqlEngine.Query(store, path + " INCLUDING FORGOTTEN", TestContext.Current.CancellationToken);
+        var subqueryRemembered = SparqlEngine.Query(store, subquery, TestContext.Current.CancellationToken);
+        var subqueryIncluding = SparqlEngine.Query(store, subquery + " INCLUDING FORGOTTEN", TestContext.Current.CancellationToken);
+
+        Assert.True(pathRemembered.Success, pathRemembered.ErrorMessage);
+        Assert.Equal(new[] { "<urn:b>" }, pathRemembered.Rows!.Select(row => row["x"]));
+        Assert.True(pathIncluding.Success, pathIncluding.ErrorMessage);
+        Assert.Equal(new[] { "<urn:b>", "<urn:c>" }, pathIncluding.Rows!.Select(row => row["x"]));
+        Assert.True(subqueryRemembered.Success, subqueryRemembered.ErrorMessage);
+        Assert.Empty(subqueryRemembered.Rows!);
+        Assert.True(subqueryIncluding.Success, subqueryIncluding.ErrorMessage);
+        Assert.Equal("\"b\"", Assert.Single(subqueryIncluding.Rows!)["l"]);
+    }
+
+    [Fact]
     public void AFactMemorizedForgottenAndMemorizedAgain_GivesOneSolutionPerPeriod_EachWithItsOwnTimes()
     {
         var clock = new SuppliedClock { Reading = Hour0 };
