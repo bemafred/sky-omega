@@ -15,7 +15,8 @@
 // At integration scale: target's RunBriefObservableWork generates CreateThread + ExitThread
 // callbacks per iteration. First OnEvent on the ThrowingSink fires the injection. Substrate's
 // outer catch fires WorkerException. Test asserts: exactly 1 WorkerException, WaitForStop
-// returns null cleanly, Dispose doesn't throw, target exits naturally.
+// returns null cleanly, Dispose doesn't throw, and the target's end as ADR-016 6.2 decides it
+// (ended by the exit request on Linux and macOS, reported as left running on Windows).
 
 using System;
 using System.Collections.Generic;
@@ -72,7 +73,8 @@ public sealed class WorkerExceptionTest
             int pid = TargetSpawn.ExtractPid(bootstrap, TimeSpan.FromSeconds(30));
             var sink = new ThrowingSink();
 
-            using (DebugSession session = DebugSession.AttachAndOwn(pid, sink))
+            DebugSession session = DebugSession.AttachAndOwn(pid, sink);
+            using (session)
             {
                 // Wait up to 5s for the throw + WorkerException anomaly surfacing.
                 // RunBriefObservableWork generates ~10 OnEvent calls over ~500 ms;
@@ -101,10 +103,20 @@ public sealed class WorkerExceptionTest
             }
             // Dispose ran at end of using; would have thrown above if broken.
 
-            // Increment 3 discipline assertion.
-            bool exitedNaturally = bootstrap.WaitForExit(5000);
-            Assert.IsTrue(exitedNaturally,
-                "MTP target did not exit naturally within 5s after Dispose — Layer 1 discipline violation.");
+            // The target's end. The sink's throw ended the pump at the target's first callback before the pump continued
+            // it (ADR-016 6.6), so the target was held there for the whole session and never got past MTP's --debug
+            // loop: it cannot exit by itself (TheWork). Linux and macOS end it with the exit request Dispose sends after
+            // the detach. Windows has none yet (6.4): Dispose leaves it running and reports that (6.2), and the finally
+            // ends it. Until 6.2 Windows killed it at Dispose, and this test asserted a natural exit it never had.
+            if (OperatingSystem.IsWindows())
+            {
+                Assert.IsTrue(session.TargetLeftRunning, "Dispose did not report the owned target as left running (ADR-016 6.2).");
+            }
+            else
+            {
+                bool ended = bootstrap.WaitForExit(5000);
+                Assert.IsTrue(ended, "MTP target did not end within 5s of Dispose's exit request — Layer 1 discipline violation.");
+            }
         }
         finally
         {
@@ -130,7 +142,8 @@ public sealed class WorkerExceptionTest
             Console.WriteLine($"{DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)}  testhost pid {testHostPid}");
             var sink = new ThrowingSink();
 
-            using (DebugSession session = DebugSession.AttachAndOwn(testHostPid, sink))
+            DebugSession session = DebugSession.AttachAndOwn(testHostPid, sink);
+            using (session)
             {
                 Console.WriteLine($"{DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)}  attached");
                 Stopwatch sw = Stopwatch.StartNew();
@@ -154,12 +167,21 @@ public sealed class WorkerExceptionTest
                 Assert.IsNull(stop);
                 Assert.IsTrue(waitSw.ElapsedMilliseconds >= 900);
             }
-            Console.WriteLine($"{DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)}  disposed");
+            Console.WriteLine($"{DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)}  disposed; left running: {session.TargetLeftRunning}");
 
-            bool exitedNaturally = dotnetTest.WaitForExit(10000);
-            Console.WriteLine($"{DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)}  dotnet test exited: {exitedNaturally}");
-            Assert.IsTrue(exitedNaturally,
-                "VSTest dotnet-test bootstrap did not exit naturally within 10s after Dispose.");
+            // The testhost's end, as in the MTP variant above: held at its first callback for the whole session, it
+            // never got past the VSTEST_HOST_DEBUG hold and cannot exit by itself. Linux and macOS end it with the exit
+            // request; on Windows Dispose leaves it running and reports that (ADR-016 6.2, 6.4), and the finally ends it.
+            if (OperatingSystem.IsWindows())
+            {
+                Assert.IsTrue(session.TargetLeftRunning, "Dispose did not report the owned testhost as left running (ADR-016 6.2).");
+            }
+            else
+            {
+                bool ended = dotnetTest.WaitForExit(10000);
+                Console.WriteLine($"{DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)}  dotnet test exited: {ended}");
+                Assert.IsTrue(ended, "VSTest dotnet-test bootstrap did not end within 10s of Dispose's exit request.");
+            }
         }
         finally
         {

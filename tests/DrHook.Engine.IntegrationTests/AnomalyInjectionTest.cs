@@ -126,16 +126,11 @@ public sealed class AnomalyInjectionTest
                 // FINDING 91 — do not wait for VSTEST_HOST_DEBUG's Break: vstest.console prints the testhost pid as
                 // soon as it LAUNCHES the testhost, so this attach can complete before the testhost reaches
                 // DebuggerBreakpoint.WaitForDebugger — which then sees Debugger.IsAttached, returns at once and never
-                // Breaks; the [Fact] runs to completion and the first stop is ProcessExited (deterministic when this
-                // test runs alone; masked inside the full suite, where the attach path is warm and usually loses the
-                // race). Force the stop instead: Pause works however early the attach landed. If the testhost WAS
-                // held, its Break may queue ahead of the Pause — either is a valid stop for the GetLocals injection.
-                session.Pause();
-                StopInfo? stop = session.WaitForStop(TimeSpan.FromSeconds(5));
-                Console.WriteLine($"{DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)}  first stop: {stop?.Reason.ToString() ?? "none"}");
-                Assert.IsNotNull(stop, "No stop within 5s of Pause.");
-                Assert.IsTrue(stop!.Reason == StopReason.Pause || stop.Reason == StopReason.Break,
-                    $"Expected Pause (or the held testhost's Break); got {stop.Reason}.");
+                // Breaks. Nor stop at the first Pause: one that lands while the hold still waits leaves the testhost
+                // waiting for ever after Dispose, which passed only while Dispose then ended it (TheWork). The
+                // [Fact]'s breakpoint is the stop for the GetLocals injection: it proves the testhost is past the hold.
+                StopInfo stop = TheWork.RunTo(session, IntegrationTargetPaths.VstestTargetSource(),
+                    m => Console.WriteLine($"{DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)}  {m}"));
 
                 _ = session.GetLocals(depth: 999);
                 Console.WriteLine($"{DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)}  GetLocals returned");

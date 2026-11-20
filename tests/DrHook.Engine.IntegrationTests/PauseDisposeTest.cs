@@ -67,9 +67,13 @@ public sealed class PauseDisposeTest
 
             using (DebugSession session = DebugSession.AttachAndOwn(pid, sink, naturalExitTimeout))
             {
-                Thread.Sleep(TimeSpan.FromMilliseconds(200));
+                // Into the [TestMethod] first (TheWork), as the VSTest variant below does: a Pause that lands while
+                // MTP's --debug loop still waits leaves the target waiting for ever after Dispose. This test slept
+                // 200 ms here, which passed only because Dispose then ended the waiting target.
+                TheWork.RunTo(session, IntegrationTargetPaths.MtpTargetSource());
 
-                // Request Pause; wait for Pause stop to arrive.
+                // The Pause this test is about, while the [TestMethod] runs.
+                session.Resume();
                 session.Pause();
                 StopInfo? stop = session.WaitForStop(TimeSpan.FromSeconds(3));
                 Assert.IsNotNull(stop, "Pause stop did not arrive within 3s.");
@@ -88,8 +92,8 @@ public sealed class PauseDisposeTest
             Assert.AreEqual(0, workerExceptions.Length,
                 $"Expected 0 WorkerException; got {workerExceptions.Length}. _pauseHandler or _resumeHandler threw — substrate bug.");
 
-            // Increment 3 discipline assertion. Target may have exited via Stage 1 SIGTERM
-            // or Stage 2 SIGKILL; either way, it must be gone shortly after Dispose.
+            // Increment 3 discipline assertion. The target ends on SIGTERM (Linux, macOS) or finishes its work by itself
+            // (Windows, which has no exit request yet: ADR-016 6.4); either way, it must be gone shortly after Dispose.
             bool exitedNaturally = bootstrap.WaitForExit(5000);
             Assert.IsTrue(exitedNaturally,
                 "MTP target did not exit within 5s after Dispose — Layer 1 discipline violation OR substrate's two-stage escalation didn't terminate target.");

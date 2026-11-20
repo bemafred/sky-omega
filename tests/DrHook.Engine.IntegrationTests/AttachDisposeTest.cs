@@ -48,26 +48,20 @@ public sealed class AttachDisposeTest
 
             using (DebugSession session = DebugSession.AttachAndOwn(pid, new NullSink()))
             {
-                // Brief observation window — substrate's CallbackPump initializes,
-                // drains setup callbacks. Target's [TestMethod] runs brief observable
-                // work (~500 ms of Thread.Start/Join × 10) per Increment 2.
-                Thread.Sleep(TimeSpan.FromMilliseconds(200));
+                // Into the [TestMethod] first (TheWork): an attach that ends while MTP's --debug loop still waits leaves
+                // the target waiting for ever. This test slept 200 ms here, which passed only because Dispose then
+                // ended the waiting target, with SIGTERM or (on Windows) the kill.
+                TheWork.RunTo(session, IntegrationTargetPaths.MtpTargetSource());
+                session.Resume();
 
-                // session.Dispose() runs at end of using:
-                //   Stage 1: SIGTERM via libc.kill → wait NaturalExitTimeout (2s default).
-                //            Target's [TestMethod] finishes its remaining iterations,
-                //            returns, MTP reports + exits. Substrate observes natural exit.
-                //   Stage 2: would fire only if target ignored SIGTERM past 2s — doesn't
-                //            happen for well-behaved targets (finding 68 evidence).
-                //   No TargetStuckAtDispose anomaly expected.
-                //   Finding 66 death-detection routes the now-dead target through
-                //   ExitWorkSettleMs + Detach cleanly.
+                // session.Dispose() runs at end of using: it detaches, then (Linux, macOS) sends SIGTERM and waits
+                // NaturalExitTimeout. Windows has no exit request yet (ADR-016 6.4): the target, mid-[TestMethod], is
+                // left running and finishes its work by itself.
             }
 
             // Increment 3 discipline assertion: bootstrap (the OS Process) MUST have
-            // exited naturally within a reasonable post-Dispose window. Substrate's
-            // SIGTERM + the [TestMethod]'s natural completion + MTP's test-reporting
-            // teardown together total well under 5 seconds.
+            // exited within a reasonable post-Dispose window. The [TestMethod]'s remaining
+            // work and MTP's test-reporting teardown total well under 5 seconds.
             bool exitedNaturally = bootstrap.WaitForExit(5000);
             Assert.IsTrue(exitedNaturally,
                 "MTP target did not exit naturally within 5s after Dispose — Layer 1 discipline violation " +
