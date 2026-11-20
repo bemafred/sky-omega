@@ -338,8 +338,11 @@ public sealed class DrHookTools
     [McpServerTool(Name = "drhook_stop"), Description(
         "End the active debugging session — the normal way to finish. " +
         "Borrowed sessions (started with drhook_attach) detach and leave the target running. " +
-        "Owned sessions (started with drhook_launch) detach the debugger, then ask the target to exit gracefully — " +
-        "SIGTERM, escalating to SIGKILL only if it does not exit within the ~2s natural-exit window (ADR-008, finding 110). " +
+        "Owned sessions (started with drhook_launch) detach the debugger, then ask the target to exit: SIGTERM, which a " +
+        "program with a handler honours (exit 0) and one without ends on abruptly (killed by signal 15); the result says " +
+        "which (finding 110, ADR-016 6.2). A target still running ~2s later is NOT killed: it is left running and " +
+        "reported (targetLeftRunning, pid) — end it with drhook_kill, or let it finish. On Windows there is no exit " +
+        "request yet, so a running owned target is left running at once (ADR-016 6.4). " +
         "Use drhook_detach to explicitly keep an attached target running, or drhook_kill to force-terminate. " +
         "Requires a hypothesis — your closing read of the session.")]
     public async Task<string> Stop(
@@ -354,8 +357,8 @@ public sealed class DrHookTools
         "Borrowed sessions (drhook_attach): the target keeps running un-debugged. " +
         "Owned sessions (drhook_launch): the launched target is detached cleanly and left running — it reparents " +
         "(to launchd/PPID=1 on macOS) and keeps executing un-debugged (F-010-2; breakpoints are deactivated before " +
-        "Detach so it does not hang). Contrast drhook_stop, which ENDS the session (graceful-terminate for an Owned " +
-        "target), and drhook_kill, which force-terminates. After a drhook_capture_visual the response carries " +
+        "Detach so it does not hang). Contrast drhook_stop, which ENDS the session (for an Owned target, an exit " +
+        "request after the detach), and drhook_kill, which force-terminates. After a drhook_capture_visual the response carries " +
         "uiLiveness (alive / unresponsive / not-checked) — whether the app's UI thread still drains a queued job once " +
         "released; detach while stopped to get a verdict. Requires a hypothesis.")]
     public async Task<string> Detach(
@@ -368,15 +371,19 @@ public sealed class DrHookTools
     [McpServerTool(Name = "drhook_kill"), Description(
         "Forcibly terminate the target — the ANOMALY escape hatch, NOT normal cleanup. Every invocation is worth " +
         "investigating: a well-behaved target ends via drhook_stop. " +
-        "Owned sessions (drhook_launch): SIGTERM with a brief (~200ms) grace, then SIGKILL (DebugSession.Abandon, ADR-008). " +
-        "Borrowed sessions (drhook_attach): SIGKILL of the attached target — a deliberate force (F-010-1); the substrate " +
-        "holds the death-detection handle and tears the session down cleanly. Prefer drhook_detach to disconnect and " +
-        "leave it running. Requires a hypothesis recording WHY force was needed.")]
+        "Owned and borrowed sessions alike (DebugSession.Abandon, ADR-016 6.3): the target is stopped first (a running " +
+        "one is paused, ~2s bound), then killed through the OS while stopped, so no debugger request is in flight when " +
+        "it dies; one that does not stop in time is killed while running, which can leave the debugger hung. The result " +
+        "says which (killedWhile: stopped | running). Borrowed: a deliberate force on a program that is not DrHook's " +
+        "(F-010-1). With no active session it ends a target drhook_stop left running (targetLeftRunning), after checking " +
+        "that its pid still names that process; pass pid when there is more than one. Prefer drhook_detach to disconnect " +
+        "and leave it running. Requires a hypothesis recording WHY force was needed.")]
     public async Task<string> Kill(
         [Description("WHY force is needed — what state the target is stuck in (e.g. 'eternal loop, ignores SIGTERM'). Every kill records its reason — the anomaly's value.")] string hypothesis,
+        [Description("Only without an active session: the pid of the target drhook_stop left running to end. Omit it when there is one such target, and during a session.")] int? pid = null,
         CancellationToken ct = default)
     {
-        return await _session.KillAsync(hypothesis, ct);
+        return await _session.KillAsync(hypothesis, pid, ct);
     }
 
     // ─── Substrate diagnostics ──────────────────────────────────────────────

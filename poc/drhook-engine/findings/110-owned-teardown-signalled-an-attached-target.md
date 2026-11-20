@@ -226,6 +226,18 @@ macbook:
 | `TeardownOrderTest` alone | 3 | All passed |
 | Integration suite, eight busy loops | 40 | All exited 0: no hang, no crash, no crash report |
 
+## Found later: the detached target was never reaped (2026-11-20)
+
+The new order left every launched target that `drhook_stop` ended as a zombie of the DrHook process:
+
+- mscordbi's PAL reaps only a child it still debugs (finding 87).
+- DrHook's own wait reads the child's end without reaping it (`ProcessLifetime.ObserveEnd`, WNOWAIT).
+
+Seen on zbook in the live `drhook-mcp`, a `[dotnet] <defunct>` child after an ordinary stop. A zombie holds a
+process-table entry until its parent ends, and a long-lived `drhook-mcp` gathers one per such session. No test had
+looked. Fixed in ADR-016 Step 7: the session reaps a child it detached from once its end has been read.
+`SessionEndTest.Stop_OfALaunchedTargetThatExits_LeavesNoZombie` checks it, and fails without the reap.
+
 ## Not tested
 
 - **Windows and macOS x64.** No machine reachable from zbook; CI runs the suite on both.

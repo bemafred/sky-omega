@@ -146,6 +146,54 @@ public sealed class CallbackPumpTests
             "worker should Continue exactly once after Resume from the Pause stop");
     }
 
+    // ADR-016 6.3: Abandon kills a target held at a stop without asking for a pause, which would queue behind that stop.
+    // It reads IsParked: true from the moment a stop is published until the command that resumes it, at every kind of
+    // stop, and false while the debuggee runs.
+    [Fact]
+    public void IsParked_HoldsFromAStopsPublicationUntilItsResume()
+    {
+        var sink = new RecordingSink();
+        using var pump = new CallbackPump(sink);
+        int continues = 0;
+        pump.Start((_, _) => { Interlocked.Increment(ref continues); return 0; }, () => { });
+
+        Assert.False(pump.IsParked); // running: nothing published
+
+        pump.OnCallback(CallbackKind.Informational, "LoadModule", 0, 0, 0);
+        Assert.True(SpinWait.SpinUntil(() => Volatile.Read(ref continues) == 1, TimeSpan.FromSeconds(2)));
+        Assert.False(pump.IsParked); // an informational callback is continued, never held
+
+        pump.OnCallback(CallbackKind.BreakpointHit, "Breakpoint", 0, 0xABCD, 0);
+        Assert.NotNull(pump.WaitForStop(TimeSpan.FromSeconds(2)));
+        Assert.True(pump.IsParked); // a caller that has taken the stop reads it held
+
+        pump.Resume();
+        Assert.True(SpinWait.SpinUntil(() => Volatile.Read(ref continues) == 2, TimeSpan.FromSeconds(2)));
+        Assert.False(pump.IsParked);
+
+        pump.RequestPause();
+        Assert.Equal(StopReason.Pause, pump.WaitForStop(TimeSpan.FromSeconds(2))?.Reason);
+        Assert.True(pump.IsParked); // a Pause stop holds it the same way
+
+        pump.Resume();
+        Assert.True(SpinWait.SpinUntil(() => Volatile.Read(ref continues) == 3, TimeSpan.FromSeconds(2)));
+        Assert.False(pump.IsParked);
+    }
+
+    [Fact]
+    public void IsParked_IsFalse_OnceDisposeReleasesAParkedWorker()
+    {
+        var sink = new RecordingSink();
+        var pump = new CallbackPump(sink);
+        pump.Start((_, _) => 0, () => { });
+        pump.OnCallback(CallbackKind.BreakpointHit, "Breakpoint", 0, 0, 0);
+        Assert.NotNull(pump.WaitForStop(TimeSpan.FromSeconds(2)));
+        Assert.True(pump.IsParked);
+
+        pump.Dispose(); // completes the resume queue: the parked Take throws, and the worker ends
+        Assert.False(pump.IsParked);
+    }
+
     [Fact]
     public void ExitProcess_WakesAWaiter_WithProcessExited()
     {

@@ -40,6 +40,28 @@ internal sealed class CallbackPump : IManagedCallbackSink, IDisposable
     private nint _lastBreakpointPointer; // ICorDebugBreakpoint at the most recent BreakpointHit (0 otherwise) — for caller-thread policy lookup
     private int _disposed;               // 0 = live, 1 = disposed; atomic via Interlocked.Exchange (ENG-CP-1)
     private StopInfo? _lostStop;         // set once, by the worker, when DebuggerError arrives; never cleared
+    private int _parked;                 // 1 while the worker holds the debuggee at a published stop (TakeResume)
+
+    /// <summary>True while the worker holds the debuggee at a stop it has published and waits for the command that
+    /// resumes it: the process is synchronized, and no callback is being dispatched. A pause requested meanwhile queues
+    /// behind the stop and is not served until the stop is resumed, so a caller that must know whether the debuggee
+    /// is stopped now (Abandon, ADR-016 6.3) reads this instead of asking for a pause.</summary>
+    public bool IsParked => Volatile.Read(ref _parked) == 1;
+
+    // Publish a stop and park at it until the caller's command arrives. The debuggee is held from the moment its callback
+    // came, so the flag is raised before the stop is visible: a caller that has taken the stop never reads the worker as
+    // not parked. Take throws InvalidOperationException once Dispose completes the queue; the callers handle that as
+    // before.
+    private ResumeKind ParkAt(StopInfo stop)
+    {
+        Volatile.Write(ref _parked, 1);
+        try
+        {
+            _stops.Add(stop);
+            return _resume.Take();
+        }
+        finally { Volatile.Write(ref _parked, 0); }
+    }
 
     public CallbackPump(IDebugEventSink userSink) => _userSink = userSink;
 
@@ -257,9 +279,8 @@ internal sealed class CallbackPump : IManagedCallbackSink, IDisposable
                         if (_moduleHoldHandler is { } hold && hold(e.Breakpoint))
                         {
                             _stopThread = 0;
-                            _stops.Add(new StopInfo(StopReason.EntryModuleLoaded));
                             ResumeKind kind;
-                            try { kind = _resume.Take(); }
+                            try { kind = ParkAt(new StopInfo(StopReason.EntryModuleLoaded)); }
                             catch (InvalidOperationException)
                             {
                                 _userSink.OnAnomaly(new EngineAnomaly(
@@ -292,9 +313,8 @@ internal sealed class CallbackPump : IManagedCallbackSink, IDisposable
                     if (Volatile.Read(ref _lostStop) is not null) break;
                     _pauseHandler!();
                     _stopThread = 0;
-                    _stops.Add(new StopInfo(StopReason.Pause));
                     ResumeKind kind;
-                    try { kind = _resume.Take(); }
+                    try { kind = ParkAt(new StopInfo(StopReason.Pause)); }
                     catch (InvalidOperationException)
                     {
                         // EA capture (WorkerSilentBreak): a Pause stop was published but the
@@ -323,9 +343,8 @@ internal sealed class CallbackPump : IManagedCallbackSink, IDisposable
                         ? new StopInfo(StopReason.Exception, (ExceptionStopKind)e.Detail)
                         : new StopInfo(MapReason(e.Kind));
 
-                    _stops.Add(toPublish);
                     ResumeKind kind;
-                    try { kind = _resume.Take(); }
+                    try { kind = ParkAt(toPublish); }
                     catch (InvalidOperationException)
                     {
                         // EA capture (WorkerSilentBreak): a STOPPING stop was published but the

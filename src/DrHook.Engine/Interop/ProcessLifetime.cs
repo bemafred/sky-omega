@@ -165,7 +165,7 @@ internal static unsafe class ProcessLifetime
             int errno = Marshal.GetLastPInvokeError();
             if (errno == EINTR) continue;
             return errno == ECHILD
-                ? TargetExit.Unknown("another reaper collected its exit status before DrHook read it")
+                ? TargetExit.Unknown(TargetExit.CollectedByAnotherReaper)
                 : TargetExit.Unknown($"waitid failed with errno {errno.ToString(CultureInfo.InvariantCulture)}");
         }
     }

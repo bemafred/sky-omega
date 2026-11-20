@@ -31,6 +31,9 @@ namespace SkyOmega.DrHook.Mcp;
 public sealed class EngineSteppingSession : IDisposable
 {
     private DebugSession? _session;
+    // Owned targets drhook_stop left running (ADR-016 6.2): their ended sessions, so drhook_kill can still end them
+    // through DebugSession.KillLeftRunningTarget, which checks each target's identity. Pruned as they end.
+    private readonly List<DebugSession> _leftRunning = new();
     private string _sessionHypothesis = "";
     private string _targetVersion = "unknown";
     private int _stepCount;
@@ -518,9 +521,10 @@ public sealed class EngineSteppingSession : IDisposable
         }
     }
 
-    // drhook_stop — the normal session end. Owned: Dispose detaches, then asks the target to exit (SIGTERM, 2 s, then a
-    // kill; finding 110). Windows has no exit request yet, so the target is killed (ADR-016 Step 3).
-    // Borrowed: Dispose detaches, target left running. Dispatches internally via DebugSession._ownsTarget.
+    // drhook_stop — the normal session end (ADR-016 6.2). Owned: Dispose detaches, then asks the target to exit
+    // (SIGTERM; Windows has no exit request yet, ADR-016 6.4). A target still running after the bound is left running,
+    // never killed as cleanup: it is kept here for drhook_kill. Borrowed: Dispose detaches, target left running.
+    // Dispatches internally via DebugSession._ownsTarget.
     public Task<string> StopAsync(string hypothesis, CancellationToken ct)
     {
         if (!IsActive) return Task.FromResult(Error("No active stepping session."));
@@ -540,8 +544,8 @@ public sealed class EngineSteppingSession : IDisposable
             ["mode"] = owned ? "owned" : "borrowed",
             ["disposition"] = owned
                 ? OperatingSystem.IsWindows()
-                    ? "Owned: detached, then the target killed (Windows has no exit request yet, ADR-016 Step 3)"
-                    : "Owned: detached, then the target asked to exit (SIGTERM; killed if it has not exited within the natural-exit window, ADR-008)"
+                    ? "Owned: detached; Windows has no exit request yet (ADR-016 6.4)"
+                    : "Owned: detached, then the target asked to exit (SIGTERM, after the detach, ADR-016 6.2)"
                 : "Borrowed: detached, target left running",
             ["totalSteps"] = steps,
             ["sessionHypothesis"] = sessionHypothesis,
@@ -550,7 +554,20 @@ public sealed class EngineSteppingSession : IDisposable
 
         CleanupSession();
         string ending = "Borrowed: target left running";
-        if (owned)
+        if (owned && session.TargetLeftRunning)
+        {
+            // ADR-016 6.2: not killed. Kept so drhook_kill can end it after this session is gone.
+            lock (_leftRunning) _leftRunning.Add(session);
+            summary["pid"] = pid;
+            summary["targetLeftRunning"] = true;
+            summary["disposition"] = OperatingSystem.IsWindows()
+                ? "Owned: detached, and left running: Windows has no exit request yet (ADR-016 6.4). End it with drhook_kill, or let it finish."
+                : $"Owned: detached, then asked to exit (SIGTERM); still running {session.NaturalExitTimeout.TotalSeconds:0.#} s later, so left running, not killed (ADR-016 6.2). End it with drhook_kill, or let it finish.";
+            ending = OperatingSystem.IsWindows()
+                ? $"Owned: target {pid} left running (no exit request on Windows yet); drhook_kill ends it"
+                : $"Owned: target {pid} did not exit on SIGTERM and is left running; drhook_kill ends it";
+        }
+        else if (owned)
         {
             TargetExit exit = session.TargetExitWithin(TargetExitWait)
                 ?? TargetExit.Unknown($"it had not ended {TargetExitWait.TotalSeconds:0} s after the session's teardown");
@@ -602,41 +619,94 @@ public sealed class EngineSteppingSession : IDisposable
         return Task.FromResult(Render(summary));
     }
 
-    // drhook_kill — forced termination (anomaly path). Owned: DebugSession.Abandon (SIGTERM brief-grace → SIGKILL
-    // → teardown, ADR-008). Borrowed: NOT YET — substrate doesn't own an attached target's lifecycle (F-010-1).
-    public Task<string> KillAsync(string hypothesis, CancellationToken ct)
+    // drhook_kill — forced termination (anomaly path, ADR-016 6.3). The active session: DebugSession.Abandon stops the
+    // target, kills it while stopped through the OS (while running if it does not stop within the bound), then tears
+    // down; owned and borrowed alike (F-010-1). Without one: a target drhook_stop left running (ADR-016 6.2), by its pid
+    // when there is more than one.
+    public Task<string> KillAsync(string hypothesis, int? leftRunningPid, CancellationToken ct)
     {
-        if (!IsActive) return Task.FromResult(Error("No active stepping session."));
+        if (!IsActive) return Task.FromResult(KillLeftRunning(hypothesis, leftRunningPid));
         EmitHypothesis(hypothesis, HypothesisLens.Navigation); // why the session is ended: the braid's last line
 
         bool owned = _session!.OwnsTarget;
         int steps = _stepCount, pid = _targetPid;
         string hyp = _sessionHypothesis, ver = _targetVersion;
         DebugSession session = _session;
-        try { _session.Abandon(); }
+        AbandonOutcome outcome;
+        try { outcome = _session.Abandon(); }
         catch (Exception ex) { return Task.FromResult(Error($"Kill (Abandon) failed: {ex.GetType().Name}: {ex.Message}")); }
         CleanupSession(); // Abandon already disposed; CleanupSession's Dispose is the idempotent no-op + state reset.
         TargetExit exit = session.TargetExitWithin(TargetExitWait)
             ?? TargetExit.Unknown($"it had not ended {TargetExitWait.TotalSeconds:0} s after the kill");
 
+        string how = outcome switch
+        {
+            AbandonOutcome.KilledWhileStopped => "was stopped first, then killed through the OS while stopped (ADR-016 6.3)",
+            AbandonOutcome.KilledWhileRunning => $"did not stop within {DebugSession.DefaultAbandonStopBound.TotalSeconds:0.#} s, so it was killed while running and attached; the debugger may be left hung (findings 100, 105)",
+            AbandonOutcome.TargetAlreadyEnded => "had already ended; nothing was sent",
+            _ => "the session had already ended; nothing was done",
+        };
         return Task.FromResult(Render(new JsonObject
         {
             ["status"] = "killed",
             ["hypothesis"] = hypothesis,
             ["mode"] = owned ? "owned" : "borrowed",
             ["pid"] = pid,
+            ["killedWhile"] = outcome switch
+            {
+                AbandonOutcome.KilledWhileStopped => "stopped",
+                AbandonOutcome.KilledWhileRunning => "running",
+                _ => "not killed",
+            },
             ["targetExit"] = TargetExitToJson(exit),
-            ["disposition"] = owned
-                ? OperatingSystem.IsWindows()
-                    ? "forcibly terminated while attached (killed, DebugSession.Abandon)"
-                    : "forcibly terminated while attached (SIGTERM brief-grace → SIGKILL, DebugSession.Abandon)"
-                : "forcibly terminated (SIGKILL — Borrowed force, F-010-1)",
+            ["disposition"] = $"{(owned ? "Owned" : "Borrowed")}: the target {how}",
             ["totalSteps"] = steps,
             ["sessionHypothesis"] = hyp,
             ["assemblyVersion"] = ver,
             ["prompt"] = $"Target {pid} killed after {steps} steps: it {exit.Description}. Reason given: \"{hypothesis}\". " +
                          $"drhook_kill is an anomaly path; a well-behaved target ends via drhook_stop."
         }));
+    }
+
+    // drhook_kill with no active session: end a target drhook_stop left running (ADR-016 6.2). Its identity is checked
+    // before the kill (DebugSession.KillLeftRunningTarget); one that has ended meanwhile is reported, not signalled.
+    private string KillLeftRunning(string hypothesis, int? pid)
+    {
+        List<DebugSession> candidates;
+        lock (_leftRunning)
+        {
+            _leftRunning.RemoveAll(s => s.TargetHasExited);
+            candidates = pid is int wanted ? _leftRunning.FindAll(s => s.ProcessId == wanted) : new List<DebugSession>(_leftRunning);
+        }
+        if (candidates.Count == 0)
+            return Error(pid is int p
+                ? $"No active stepping session, and no running target {p} that drhook_stop left running."
+                : "No active stepping session, and no target that drhook_stop left running.");
+        if (candidates.Count > 1)
+            return Error("No active stepping session, and drhook_stop left more than one target running: pass the pid of " +
+                         $"the one to end ({string.Join(", ", candidates.ConvertAll(s => s.ProcessId))}).");
+
+        DebugSession session = candidates[0];
+        bool sent;
+        try { sent = session.KillLeftRunningTarget(); }
+        catch (Exception ex) { return Error($"Kill of left-running target {session.ProcessId} failed: {ex.GetType().Name}: {ex.Message}"); }
+        lock (_leftRunning) _leftRunning.Remove(session);
+        TargetExit exit = session.TargetExitWithin(TargetExitWait)
+            ?? TargetExit.Unknown($"it had not ended {TargetExitWait.TotalSeconds:0} s after the kill");
+
+        return Render(new JsonObject
+        {
+            ["status"] = sent ? "killed" : "already ended",
+            ["hypothesis"] = hypothesis,
+            ["mode"] = "owned",
+            ["pid"] = session.ProcessId,
+            ["killedWhile"] = sent ? "detached" : "not killed",
+            ["targetExit"] = TargetExitToJson(exit),
+            ["disposition"] = sent
+                ? "Owned: a target drhook_stop had left running, killed through the OS after its identity was checked; no debugger was attached (ADR-016 6.2)"
+                : "Owned: a target drhook_stop had left running had already ended; nothing was sent",
+            ["prompt"] = $"Target {session.ProcessId}, left running by drhook_stop: it {exit.Description}. Reason given: \"{hypothesis}\"."
+        });
     }
 
     // ─── Step operations ──────────────────────────────────────────────────────────────────────
@@ -1305,6 +1375,8 @@ public sealed class EngineSteppingSession : IDisposable
             node["coreDumped"] = exit.CoreDumped;
         }
         if (exit.WhyUnknown is { } why) node["why"] = why;
+        // The OS record was collected by another reaper first; the signal is the one DrHook sent (TargetExit.SentByDrHook).
+        if (exit.SentByDrHook) node["sentByDrHook"] = true;
         node["description"] = exit.Description;
         return node;
     }

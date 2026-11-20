@@ -52,6 +52,15 @@ if (args is ["report-attached-on-sigterm", string attachedReport])
     onTerm = PosixSignalRegistration.Create(PosixSignal.SIGTERM,
         _ => File.WriteAllText(attachedReport, $"attached={System.Diagnostics.Debugger.IsAttached}\n"));
 
+// `ignore-sigterm <report>`: the left-running test (ADR-016 6.2). The same record, but the handler cancels the signal,
+// so the target refuses its exit request and runs on through the loop below until something kills it, or the loop ends.
+if (args is ["ignore-sigterm", string ignoredReport])
+    onTerm = PosixSignalRegistration.Create(PosixSignal.SIGTERM, context =>
+    {
+        context.Cancel = true;
+        File.WriteAllText(ignoredReport, $"attached={System.Diagnostics.Debugger.IsAttached}\n");
+    });
+
 var worker = new Worker();
 const string alphabet = "abcdefghij";
 for (int beat = 1; beat <= 600; beat++)
