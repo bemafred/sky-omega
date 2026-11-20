@@ -25,6 +25,18 @@ dotnet run --no-cache rebuild-keeps-retracted-mark.cs
 dotnet run --no-cache rebuild-reads-only-the-default-graph.cs
 ```
 
+`rebuild-resolves-an-open-tgsp-entry.cs` reads TGSP with `QueryChanges`, and `rebuild-keeps-retracted-mark.cs`
+retracts with `Retract`. ADR-061 P7 (`881c09f`) removed both, so the two no longer compile at `main`. They run on
+`ea70cbd`, the commit that added them, whose Mercury code is the "`e538f83` plus ADR-062 Step 5" of the results
+below. On 2026-11-20 both were run there again in a scratch clone on omega and gave the results recorded here:
+
+```bash
+git clone <repo> at-ea70cbd && cd at-ea70cbd && git checkout ea70cbd
+cd tools/probes/rebuild-indexes
+dotnet run --no-cache rebuild-keeps-retracted-mark.cs
+dotnet run --no-cache rebuild-resolves-an-open-tgsp-entry.cs
+```
+
 ## Results on omega, 2026-11-16 (`e538f83` plus ADR-062 Step 5, .NET 10.0.9, osx-arm64)
 
 `rebuild-resolves-an-open-tgsp-entry.cs`:

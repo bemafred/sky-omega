@@ -1202,6 +1202,10 @@ this ADR do not answer goes to Martin.
   - **Every query and code sample** in the rewritten documents was run on a probe store with a supplied clock: each
     parses and runs, with the results the documents state.
   - ADR-003's list of public types has a dated note with the 30 types of today.
+  - **The probes that call removed methods** (sky-zbook listed them, 2026-11-20): `graph-version-fields` already
+    named `c3b6025`. Two rebuild probes were recorded on "`e538f83` plus ADR-062 Step 5", which is no commit; their
+    README now names `ea70cbd`, where both were run again and gave their recorded results. P7's entry said each
+    records a named commit; that was true only after this.
   - **Left:** `STATISTICS.md` is updated at the next release, with its counts. The consumers, in one step: the `lucy`
     skill's recency recall and temporal modes, `MERCURY.md`'s provenance and queries, the MCP tool description, and
     the agent no longer stamping `dcterms:created`. They are what an agent runs against the installed `mercury-mcp`,
