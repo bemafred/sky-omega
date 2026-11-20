@@ -731,6 +731,45 @@ lifecycle state and supervision, and no general-purpose framework. Rewrite the t
 recovery validated as rigorously as prevention. Update ADR-007, ADR-008, DRHOOK.md's lifecycle section and the MCP
 tools' descriptions together. The hang watcher, or a permanent regression detector in its place, stays: it is not
 removed because the suite has turned green.
+*6.2 and 6.3 built 2026-11-20* (zbook, Linux x64; Windows and macOS through CI).
+- **6.2.** An owned `Dispose` no longer kills a target still running after its exit request. It leaves it running
+  (`TargetLeftRunning`, the `TargetStuckAtDispose` anomaly) with its pipes open and its process handle kept. On Unix
+  it is reaped once its end has been read, under the lock `KillLeftRunningTarget` holds, so a kill cannot reach a
+  reused PID. On Windows a running owned target is left running at once.
+- **The MCP layer.** `drhook_stop` reports `targetLeftRunning` with the pid. `drhook_kill` without a session ends such
+  a target after the identity check.
+- **6.3.** `Abandon` reads whether the pump holds the target at a stop (`CallbackPump.IsParked`, raised before the
+  stop is published). If not, it pauses the target, waiting up to 2 s, a first bound to be measured. It then kills,
+  and reports `KilledWhileStopped` or `KilledWhileRunning`, which `drhook_kill` returns as `killedWhile`.
+- **Found while building it: zombies.** Since finding 110 an owned stop detaches before the target ends. mscordbi's
+  PAL reaps only a child it still debugs (finding 87), so every launched target that `drhook_stop` ended stayed a
+  zombie of `drhook-mcp` (zbook, 2026-11-20, in the live server). Each such child is now reaped once its end has been
+  read, the same way as a target left running.
+- **Tests.** `SessionEndTest` covers five cases:
+  - a target that refuses SIGTERM, left running and then killed;
+  - no zombie after a stop;
+  - a kill at a breakpoint;
+  - a kill of a running target, followed by a launch in the same process.
+
+  Each fails under a mutation that undoes its change. The `CallbackPumpTests` cover `IsParked`.
+- **Live.** Seen through `drhook-mcp` on zbook:
+  - a target that ignores SIGTERM was left running, and `drhook_kill` then killed it (signal 9), with no zombie;
+  - a running target was paused, then killed while stopped;
+  - the next launch stopped at its breakpoint.
+- **Results on zbook.** DrHook.Engine.Tests 232, the integration suite 29, DrHook.Viz.Tests 74, DrHook.Wire.Tests 7,
+  0 failed in four further full runs of the suite.
+- **A lost exit status.** A target killed while the debugger is attached can lose its exit status to mscordbi's PAL,
+  which reaps the child as DrHook's wait wakes. It happened once in about 20 kills at a breakpoint, in a full run of
+  the suite, and in none of 30 runs of the kill tests alone; DrHook reported the end as unknown. Finding 87 had
+  assumed that a wait already in place reads first.
+  - **Decided 2026-11-20 (Martin):** DrHook reports its own SIGKILL when the OS record is lost.
+  - `TargetExit.OrTheKillDrHookSent` turns that one unknown into "killed by signal 9, which DrHook sent", marked
+    `sentByDrHook`. It applies only when this session sent the kill. An OS record always wins, and an end unknown
+    for any other reason stays unknown.
+- **Not yet.**
+  - What happens, when `drhook-mcp` exits, to an owned target it left running (6.2's open rule).
+  - The stop bound's measurement.
+  - Whether a kill of a stopped target makes that race likelier.
 
 ### Step 6: the decisions (decided 2026-11-20)
 

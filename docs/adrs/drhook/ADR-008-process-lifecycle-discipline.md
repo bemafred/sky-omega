@@ -2,6 +2,12 @@
 
 **Status:** Completed — 2026-05-26 (Increments 1–4 shipped; Phase 8 mass promotion delivers 12/12 CI-enforced integration tests on macOS-arm64 across MTP + VSTest)
 
+**Superseded in part, 2026-11-20:** Decisions 1 and 3 are replaced by [ADR-016](ADR-016-debugger-resilience-and-recovery.md)
+6.2 and 6.3 (decided by Martin, built in ADR-016 Step 7). An owned `Dispose` now detaches first (finding 110), then
+sends SIGTERM, and leaves a target still running after `NaturalExitTimeout` running and reported, not killed:
+SIGKILL is no longer the fallback of an ordinary end. `Abandon` stops the target, then kills it while stopped; the
+SIGTERM grace is gone. Decision 2's 2000 ms stays as the bound of the exit request. Decisions 4 and 5 stand.
+
 ## Context
 
 ADR-007 closes Phase 1 substrate-correctness on macOS-arm64 at the *probe level* — all substrate-correctness probes (41–47) PASS at HEAD against the substrate as of finding 66. Phase 8 (mass promotion of those probes into a CI-enforced integration test suite) was attempted in the 2026-05-25 session and surfaced what I initially mis-framed as a substrate accumulation bug ("MCH-RE-3"). Probes 48 / 48b / 48c systematically eliminated each hypothesis; the empirical chain led to the discipline insight in [finding 67](../../../poc/drhook-engine/findings/67-lifecycle-discipline.md).
@@ -38,6 +44,8 @@ This ADR scopes the substrate-evolution work that follows. It does not re-litiga
 Five accepted positions. Decisions 1–3 were revised against empirical evidence from Phase 0 (finding 68); the original Proposed-state versions are visible in git history. Decisions 4–5 unchanged from the Proposed draft.
 
 ### Decision 1 (Accepted) — Substrate API: SIGTERM-then-SIGKILL escalation; explicit `RequestExit` primitive; explicit `Abandon`
+
+*Superseded 2026-11-20 by ADR-016 6.2: no SIGKILL fallback; a target that does not exit is left running and reported.*
 
 Today's `DebugSession.AttachAndOwn` and `DebugSession.Launch` both *kill-first* on `Dispose` (finding 64) — sending SIGKILL via `Process.Kill`. Finding 68 establishes empirically that .NET CoreCLR delivers SIGTERM correctly to handler-less targets in ~12 ms and to handler-equipped targets in ~45 ms. The discipline-aligned default becomes **soft-signal first, hard kill as fallback**:
 
@@ -119,6 +127,8 @@ Finding 68's empirical observations: well-behaved targets exit within 12–45 ms
 **Cross-platform note**: 2000 ms is macOS-arm64 empirical default. Phase 9 may tune per-platform (e.g., Windows console-control-event signaling has higher overhead); API stays the same.
 
 ### Decision 3 (Accepted) — `Abandon` semantics: two-stage internally (SIGTERM-with-brief-grace then SIGKILL), single synchronous API call
+
+*Superseded 2026-11-20 by ADR-016 6.3: stop the target first, then kill it while stopped; no SIGTERM grace.*
 
 `Abandon` is synchronous and two-stage:
 1. Send SIGTERM (graceful request).

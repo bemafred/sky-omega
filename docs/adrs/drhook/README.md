@@ -11,7 +11,7 @@ Intent and rationale: [ADR-004 — DrHook: Runtime Observation Substrate](../ADR
 | [ADR-005](ADR-005-expression-evaluation-diagnosis-correction.md) | Expression Evaluation Diagnosis Correction: netcoredbg, Not CoreCLR | Superseded by ADR-006 |
 | [ADR-006](ADR-006-drhook-engine.md)                              | DrHook.Engine — Native ICorDebug Replacement for netcoredbg | Completed |
 | [ADR-007](ADR-007-teardown-concurrency-test-debug.md)            | Teardown and Concurrency Hardening; Substrate-Aligned Test-Runner Debugging; Integration-Test Mechanism Characterization | Accepted |
-| [ADR-008](ADR-008-process-lifecycle-discipline.md)               | Process Lifecycle Discipline — Natural Exit by Default; Explicit `Abandon` for Forced Termination | Completed |
+| [ADR-008](ADR-008-process-lifecycle-discipline.md)               | Process Lifecycle Discipline — Natural Exit by Default; Explicit `Abandon` for Forced Termination | Completed · Decisions 1 and 3 superseded by ADR-016 6.2–6.3 |
 | [ADR-009](ADR-009-test-debugging-mcp-surface.md)                 | Test-Debugging MCP Surface — MTP-First Launch + Universal Attach + Project-Aware Mode Selection | Superseded by ADR-010 |
 | [ADR-010](ADR-010-mcp-tool-surface-redesign.md)                  | MCP Tool Surface Redesign — Semantic Naming and Established-Debugger Alignment | Accepted |
 | [ADR-011](ADR-011-lifecycle-console-dashboard.md)                | Debug-Session Lifecycle (stop/detach/kill) and Debuggee Console I/O — Isolation, Surfacing, and the DrHook Dashboard | Completed |

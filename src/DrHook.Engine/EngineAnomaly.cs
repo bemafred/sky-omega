@@ -14,7 +14,7 @@
 //   - UnexpectedHResult        — Quiesce / Detach / Terminate / Marshal.Release non-success HR
 //   - DepthClamped             — DebugSession.GetLocals/GetArguments clamped to MaxInspectionDepth
 //   - UnexpectedCleanupException — EngineSteppingSession.CleanupSession swallowed an exception
-//   - TargetStuckAtDispose     — Owned Dispose's Stage 1 SIGTERM timed out; escalated to SIGKILL
+//   - TargetStuckAtDispose     — an owned target still ran when its exit request's bound expired; left running (ADR-016 6.2)
 //   - TargetIsHostChild        — Attach/AttachAndOwn target is a direct OS child of the debugger host (finding 87)
 //   - UiThreadUnresponsive     — after a visual capture + detach, the target's UI thread did not drain a queued job
 //   - GoneTargetAlive          — Detach said the target is gone (terminated / neutered), but it is still running
@@ -82,12 +82,12 @@ public enum AnomalyKind
     /// rather than silent loss.</summary>
     UnexpectedCleanupException,
 
-    /// <summary>The Owned-target Dispose's Stage 1 SIGTERM (graceful-exit request) did not result
-    /// in target exit within <c>NaturalExitTimeout</c>; substrate escalated to Stage 2 SIGKILL
-    /// (Process.Kill). ADR-008 / finding 68 Layer 2 guard: the target violated process lifecycle
-    /// discipline (eternal loop, missing graceful-shutdown handler, deadlocked async work).
-    /// This is an actionable upstream signal — callers can investigate the target's
-    /// implementation rather than tolerate the kill as silent default.</summary>
+    /// <summary>An owned target that Dispose had detached from and asked to exit (SIGTERM) was still running when
+    /// <c>NaturalExitTimeout</c> expired. It is left running, un-debugged, and reported
+    /// (<c>DebugSession.TargetLeftRunning</c>) for the client to end with a deliberate kill: Dispose never kills as
+    /// cleanup (ADR-016 6.2; until then ADR-008's Decision 1 escalated to SIGKILL here). The target did not honour
+    /// its exit request (an eternal loop, a handler that cancels the signal, deadlocked async work): an actionable
+    /// signal about the target, not a fault of the debugger.</summary>
     TargetStuckAtDispose,
 
     /// <summary>Attach / AttachAndOwn was handed a target whose OS parent is the debugger host itself
