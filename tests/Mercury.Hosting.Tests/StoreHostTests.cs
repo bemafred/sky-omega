@@ -112,8 +112,16 @@ public sealed class StoreHostTests : IDisposable
         using var again = StoreSession.Open(_store.Path, "mercury-test", "9.9.9", StorageOptions.ForTesting);
     }
 
-    private bool LogHasStop() =>
-        File.ReadAllLines(_store.Log!.Path).Any(l => l.EndsWith($" mercury-test stops, process {Environment.ProcessId}", StringComparison.Ordinal));
+    // Read as a reader beside the log's writer: while the store is open its logger holds the file open for writing, and
+    // Windows refuses a reader that does not share writing (File.ReadAllLines does not; CI run 44810648562).
+    private bool LogHasStop()
+    {
+        using var reader = new StreamReader(new FileStream(_store.Log!.Path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite));
+        while (reader.ReadLine() is { } line)
+            if (line.EndsWith($" mercury-test stops, process {Environment.ProcessId}", StringComparison.Ordinal))
+                return true;
+        return false;
+    }
 
     private static async Task<string> ReadUntil(StreamReader reader, string end, CancellationToken ct)
     {
