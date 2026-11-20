@@ -1,32 +1,43 @@
 # Pruning and Maintenance
 
-Mercury's temporal storage accumulates history over time. Pruning compacts the
-store by physically removing soft-deleted data and optionally flattening
-history, filtering out specific graphs or predicates, and verifying the result.
+A Cognitive store keeps what it has forgotten: a delete ends a memory's period, and the period stays in the store.
+Pruning compacts the store by copying what is remembered into a fresh store, each memory with the time it was
+memorized, and leaving out what is forgotten. It can also filter out specific graphs or predicates, and verify the
+result.
 
 > **Prerequisites:** A working Mercury installation with data in the store.
 > See [Getting Started](getting-started.md) for setup and
-> [Temporal RDF](temporal-rdf.md) for how temporal history accumulates.
+> [Memory Time](temporal-rdf.md) for how forgotten memories accumulate.
 
 ---
 
 ## Why Pruning Matters
 
-Every fact Mercury stores has a valid-time range. When a fact is deleted or
-changes, its version ends: its valid-to is set to the time of the change, and
-`AS OF` an earlier time still returns it. A version that was recorded in error
-can instead be retracted (soft-deleted), which removes it from every `AS OF`
-view ([ADR-054](../adrs/mercury/ADR-054-delete-ends-valid-time.md)). Over time,
-the store accumulates:
+When a fact is deleted it is forgotten: the store keeps the period in which it was remembered, with both times, and
+`FORGOTTEN` and `INCLUDING FORGOTTEN` still find it. Over time, the store accumulates:
 
-- Ended versions that are no longer current
-- Retracted (soft-deleted) versions
-- Multiple versions of the same fact
+- Forgotten memories you no longer need to ask about
+- Earlier periods of facts that were forgotten and memorized again
 - Temporary or debug data you no longer need
 - Graphs that have served their purpose
 
-Pruning physically removes this data by copying the live triples to a fresh
-store and swapping it in. The old store is then discarded.
+Pruning removes this data by copying what is remembered to a fresh store and swapping it in. The old store is then
+discarded.
+
+---
+
+## What a Prune Keeps
+
+There is one way to prune ([ADR-061](../adrs/mercury/ADR-061-a-facts-own-times.md) D12):
+
+- **What is remembered is kept**, each memory with the time it was memorized. "What did we memorize in January"
+  answers on the pruned store as it did on its source.
+- **Nothing forgotten is kept.** A `FORGOTTEN` question on the pruned store finds nothing, and `INCLUDING FORGOTTEN`
+  finds nothing more than the default view. A store in which everything is forgotten prunes to an empty store.
+- **A prune never changes a time.**
+- **A graph in which nothing is remembered** is not carried over.
+
+To keep every period, forgotten ones included, copy the store directory instead of pruning it.
 
 ---
 
@@ -35,7 +46,7 @@ store and swapping it in. The old store is then discarded.
 Pruning uses a **copy-and-switch** pattern:
 
 1. A fresh secondary store is created
-2. Triples from the primary store are filtered and written to the secondary
+2. What the primary store remembers is filtered and written to the secondary, with its memorized times
 3. The primary and secondary stores are swapped
 4. The old primary (now secondary) is cleared
 
@@ -73,31 +84,7 @@ Prune dry-run complete:
 ```
 
 The "quads written" count shows how many *would* be kept. The difference
-(1,234 - 1,100 = 134) is how many would be removed.
-
-### History modes
-
-By default, pruning flattens history to keep only the current version of
-each triple. Use `--history` to change this:
-
-```
-cli> :prune --history preserve
-```
-
-| Mode | Flag value | What it keeps |
-|------|-----------|---------------|
-| Flatten to current | *(default)* | Only the current version of each triple |
-| Preserve versions | `preserve` | All versions, ended ones included, but removes retracted (soft-deleted) ones |
-| Preserve all | `all` | Everything, retracted versions kept as retracted (rewrite only) |
-
-**Flatten to current** produces the most compact store. Use it when you don't
-need historical queries.
-
-**Preserve versions** keeps the version timeline intact for AS OF and ALL
-VERSIONS queries, but removes triples that have been logically deleted.
-
-**Preserve all** is a pure rewrite -- it doesn't remove anything, but
-rebuilds the store files for compaction.
+(1,234 - 1,100 = 134) is how many remembered quads the filters would remove.
 
 ### Excluding graphs
 
@@ -126,37 +113,19 @@ cli> :prune --exclude-predicate <http://example.org/debug>
 Options compose freely:
 
 ```
-cli> :prune --dry-run --history preserve --exclude-graph <http://example.org/temp> --exclude-predicate <http://example.org/debug>
+cli> :prune --dry-run --exclude-graph <http://example.org/temp> --exclude-predicate <http://example.org/debug>
 ```
+
+The `--history` option of earlier versions is gone, and `mercury` refuses it with the reason: a prune that ignored it
+would remove the forgotten memories its user asked to keep.
 
 ---
 
-## MCP Pruning
+## MCP and Pruning
 
-Claude can prune the MCP store using the `mercury_prune` tool. The parameters
-map directly to the CLI options:
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `dryRun` | bool | false | Preview without writing |
-| `historyMode` | string | "flatten" | "flatten", "preserve", or "all" |
-| `excludeGraphs` | string | null | Comma-separated graph IRIs to exclude |
-| `excludePredicates` | string | null | Comma-separated predicate IRIs to exclude |
-
-### When to prune via MCP
-
-Ask Claude to prune when:
-
-- `mercury_stats` shows the store growing beyond what you expect
-- You've loaded temporary data that is no longer needed
-- You want to flatten history after a period of heavy changes
-
-Claude can also check the store size and suggest pruning proactively:
-
-```
-"Check mercury_stats. If there are more than 10,000 quads,
-do a dry-run prune to see what can be removed."
-```
+Pruning is not exposed over MCP ([ADR-006](../adrs/ADR-006-mcp-surface-discipline.md)): an AI agent should not start
+an operation that removes memories on its own. Stop `mercury-mcp`, open its store in the CLI with
+`mercury --store mcp`, and run `:prune` there.
 
 ---
 
@@ -179,9 +148,9 @@ to track growth.
 
 ### What to watch for
 
-- **Quad count growing faster than expected:** May indicate redundant inserts
-  or excessive versioning
-- **Storage size disproportionate to quad count:** Soft-deleted data
+- **Quad count growing faster than expected:** May indicate redundant inserts,
+  or many facts forgotten and memorized again
+- **Storage size disproportionate to quad count:** Forgotten memories
   accumulating
 - **Atom count much higher than quad count:** Many unique strings; consider
   whether all are necessary
@@ -190,7 +159,7 @@ to track growth.
 
 ## Backup Before Pruning
 
-Pruning is destructive -- it permanently removes data from the store. Always
+Pruning is destructive -- it permanently removes forgotten memories from the store. Always
 back up first:
 
 ```bash
@@ -222,7 +191,7 @@ For programmatic pruning, use the `PruningTransfer` class:
 ```csharp
 using var target = new QuadStore("/path/to/new/store");
 var result = new PruningTransfer(source, target).Execute();
-// Soft-deleted quads are now physically gone
+// The target holds what the source remembers, with its memorized times, and nothing forgotten
 ```
 
 ### With filters
@@ -232,8 +201,7 @@ var options = new TransferOptions
 {
     Filter = CompositeFilter.All(
         GraphFilter.Exclude("<http://temp.data>"),
-        PredicateFilter.Exclude("<http://internal/debug>")),
-    HistoryMode = HistoryMode.FlattenToCurrent
+        PredicateFilter.Exclude("<http://internal/debug>"))
 };
 
 var result = new PruningTransfer(source, target, options).Execute();
@@ -246,6 +214,8 @@ var result = new PruningTransfer(source, target, options).Execute();
 | `GraphFilter` | `Include(...)`, `Exclude(...)`, `DefaultGraphOnly()`, `NamedGraphsOnly()` | Filter by graph IRI |
 | `PredicateFilter` | `Include(...)`, `Exclude(...)` | Filter by predicate IRI |
 | `CompositeFilter` | `All(...)` (AND), `Any(...)` (OR) | Combine multiple filters |
+
+A filter selects among the remembered memories; a forgotten one never reaches it.
 
 ### Verification options
 
@@ -260,8 +230,8 @@ var result = new PruningTransfer(source, target, options).Execute();
 
 ### Audit log
 
-Set `AuditLogPath` to write filtered-out quads to a file. This lets you
-recover pruned data if needed:
+Set `AuditLogPath` to write the remembered quads the filters excluded to a file. This lets you
+recover them if needed:
 
 ```csharp
 var options = new TransferOptions
@@ -271,7 +241,8 @@ var options = new TransferOptions
 ```
 
 The audit log is written in N-Quads format -- you can re-load it with
-`mercury-sparql --load pruned-quads.nq` if you need the data back.
+`mercury-sparql --load pruned-quads.nq` if you need the data back. Loaded again, the quads are memorized at the time
+of the load. Forgotten memories are not in the audit log.
 
 ---
 
@@ -298,22 +269,12 @@ After importing data for analysis, clean up:
 cli> :prune --exclude-graph <http://example.org/import-2025-09>
 ```
 
-### Flatten history for a fresh start
-
-If you don't need temporal queries and want the smallest possible store:
-
-```
-cli> :prune --history flatten
-```
-
-This keeps only the current version of each triple, discarding all history.
-
 ---
 
 ## See Also
 
-- [Temporal RDF](temporal-rdf.md) -- how temporal history accumulates
+- [Memory Time](temporal-rdf.md) -- memorizing, forgetting, and the words that ask about them
 - [Mercury CLI](mercury-cli.md) -- REPL commands including `:prune`
-- [Mercury MCP Server](mercury-mcp.md) -- the `mercury_prune` tool
+- [Mercury MCP Server](mercury-mcp.md) -- the MCP tools
 - [Federation and SERVICE](federation-and-service.md) -- querying across
   instances

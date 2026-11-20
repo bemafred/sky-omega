@@ -16,7 +16,7 @@ Basic file storage, multi-index queries, bulk loading, persistence and recovery.
 
 ### Temporal (`temporal`)
 
-Valid-time ranges, time-travel queries, version tracking, bitemporal corrections, snapshot reconstruction.
+Memory time: memorizing and forgetting, what was remembered at a time, what was memorized since a time, a fact remembered again, the times surviving a reopen.
 
 ### Demo (`demo`)
 

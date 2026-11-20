@@ -23,7 +23,7 @@ triple (or set of triples) with:
 
 - **Who** said it (human, LLM, tool, orchestrator)
 - **What** was said (the content, a decision, an observation)
-- **When** it happened (valid time for temporal queries)
+- **When** it happened (the time the store memorized it, which `MEMORIZED` reads)
 - **What phase** it belongs to (Emergence, Epistemics, Engineering)
 
 This makes the conversation queryable: "What decisions were made?" "What

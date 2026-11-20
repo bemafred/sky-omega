@@ -9,7 +9,8 @@ D7 still holds: the mechanism of D3 is measured before it is fixed, and it chang
 names) was decided on 2026-11-15 for the cursor and the read operation, and on 2026-11-18 for the rest (D6). Q6 (the Graph profile's own version fields) was answered on 2026-11-16 by
 [ADR-064](ADR-064-a-facts-states.md). Steps 2 to 6 are done (2026-11-15 and 2026-11-16): part one, the cursor, is
 complete, and every read of an index goes through it. Step 7, the result types and the public names, is done
-(2026-11-18, with ADR-061 P7); Step 8, the documents, is left but for the count of public types in `CLAUDE.md`.
+(2026-11-18, with ADR-061 P7). Step 8, the documents, is done (2026-11-20, with ADR-061 P8) but for `STATISTICS.md`,
+which is updated with its counts at the next release.
 
 Proposed — 2026-11-12.
 
@@ -581,7 +582,9 @@ reads through the cursor like any other; the Cognitive index's time selection is
    - Tests: ADR-061's P7 entry. `QueryMemoriesTests` holds the two-time type's own behaviour: the bounds, and the absent
      forgotten time.
 8. **Documents:** ADR-003's list, the public type count in `CLAUDE.md`, `mercury-internals.md`, `api-usage.md`,
-   `STATISTICS.md`.
+   `STATISTICS.md`. **Done 2026-11-20 but for `STATISTICS.md`**, with ADR-061 P8: ADR-003 has a dated note with the
+   30 types; `api-usage.md` shows `QueryCurrent` and `QueryMemories` with their result types; `mercury-internals.md`
+   says neither enumerator holds a lock. `STATISTICS.md` is updated with its counts at the next release.
 
 Steps 4 to 7 change Mercury code and wait for Martin's word, each.
 

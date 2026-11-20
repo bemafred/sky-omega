@@ -100,7 +100,7 @@ LLMs can translate natural language questions into SPARQL. The graph becomes que
 
 A zero-GC substrate with sub-millisecond queries makes this practical. Semantic memory at conversational pace. No waiting, no batching, no impedance mismatch.
 
-Bitemporal modeling gives memory both valid time (when things were true in the world) and transaction time (when we learned them). Knowledge evolves, and the substrate tracks that evolution.
+Memory time gives each memory the time it was learned and the time it was let go, on the store's own clock; when things were true in the world is itself knowledge, with its source. Knowledge evolves, and the substrate tracks that evolution.
 
 MCP and similar protocols let AI systems use tools. The substrate becomes not just storage but active capability—Claude Code querying Mercury, remembering context across sessions, building with accumulated knowledge.
 

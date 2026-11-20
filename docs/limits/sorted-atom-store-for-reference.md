@@ -19,7 +19,7 @@ ADR-029 already dispatches index layout on profile:
 
 | Profile | Index |
 |---|---|
-| Cognitive / Graph / Minimal | `TemporalQuadIndex` (88 B keys with valid-time) |
+| Cognitive / Graph / Minimal | `TemporalQuadIndex` (88 B entries with memory times) |
 | Reference | `ReferenceQuadIndex` (32 B keys, no temporal) |
 
 The same mechanism could extend to the atom store:

@@ -13,7 +13,7 @@ Sky Omega / Mercury is a semantic-aware cognitive assistant with zero-GC perform
 - **RDF triple store** with B+Tree indexes and WAL durability
 - **Full SPARQL engine** - parser, executor, UPDATE, EXPLAIN
 - **Multiple format parsers** - Turtle, N-Triples, N-Quads, TriG, RDF/XML, JSON-LD
-- **Bitemporal support** - AS OF, DURING, ALL VERSIONS queries
+- **Memory time** - MEMORIZED, FORGOTTEN and INCLUDING FORGOTTEN (Cognitive SPARQL)
 - **OWL/RDFS reasoning** - forward-chaining materialization
 - **HTTP protocol server** - W3C SPARQL 1.1 Protocol
 

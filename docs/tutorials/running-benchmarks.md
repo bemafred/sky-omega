@@ -56,8 +56,8 @@ dotnet run --project benchmarks/Mercury.Benchmarks -c Release -- --list
 
 | Class | Filter | What it measures |
 |-------|--------|-----------------|
-| `TemporalWriteBenchmarks` | `*.TemporalWriteBenchmarks.*` | Temporal triple write performance |
-| `TemporalQueryBenchmarks` | `*.TemporalQueryBenchmarks.*` | AS OF, DURING, ALL VERSIONS queries |
+| `TemporalWriteBenchmarks` | `*.TemporalWriteBenchmarks.*` | Memorizing on a Cognitive store, one clock reading per write |
+| `TemporalQueryBenchmarks` | `*.TemporalQueryBenchmarks.*` | Reads by memory time: what was remembered at a time, memories overlapping a range, every period |
 
 ### RDF Parsing
 
@@ -178,10 +178,6 @@ diff /tmp/before.md BenchmarkDotNet.Artifacts/results/*QueryBenchmarks*
 | Single write | ~250-300/sec | fsync per write |
 | Batch 1K | ~25,000+/sec | 1 fsync per batch |
 | Batch 10K | ~100,000+/sec | Amortized fsync |
-| Point-in-time query (cached) | ~100K queries/sec | Hot page cache |
-| Point-in-time query (cold) | ~5K queries/sec | Disk access |
-| Range scan | ~200K triples/sec | Sequential read |
-| Evolution scan | ~500K triples/sec | Full history |
 
 ---
 

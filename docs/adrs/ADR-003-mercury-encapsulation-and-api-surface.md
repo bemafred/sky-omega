@@ -372,6 +372,24 @@ Plus the DTOs already in `Mercury.Abstractions`: `QueryResult`, `UpdateResult`,
 `StoreStatistics`, `PruneResult`, `ExecutionResultKind`, `RdfFormat`,
 `HistoryMode`, `ByteFormatter`, etc.
 
+**The list as it stands, 2026-11-20.** Later ADRs changed the surface. The core library `Mercury` has 30 public
+types (`PruneEngine` is in `Mercury.Pruning`); `CLAUDE.md` keeps the count.
+
+| Area | Public Types | Count |
+|---|---|---|
+| **Facades** | `SparqlEngine`, `RdfEngine` | 2 |
+| **Facade delegates** | `RdfTripleHandler`, `RdfQuadHandler` | 2 |
+| **Protocol** | `SparqlHttpServer`, `SparqlHttpServerOptions` | 2 |
+| **Storage** | `QuadStore`, `QuadStorePool`, `PooledStoreLease`, `StorageOptions`, `QuadStorePoolOptions`, `StatisticsStore`, `PredicateStats`, `StoreIndexState`, `ResultEnumerator`, `ResolvedQuad`, `TemporalResultEnumerator`, `ResolvedTemporalQuad`, `NamedGraphEnumerator` | 13 |
+| **Diagnostics** | `ILogger`, `NullLogger`, `LogLevel`, `FileLogger`, `JsonlMetricsListener`, `LatencyHistogram`, `LoadProgress`, `MetricsScope`, `ProcessStateProducers` | 9 |
+| **Compression** | `BZip2DecompressorStream`, `ParallelBZip2DecompressorStream` | 2 |
+
+- `ResultEnumerator` and `ResolvedQuad` are what `QueryCurrent` returns on every profile;
+  `TemporalResultEnumerator` and `ResolvedTemporalQuad`, with the two memory times, are what `QueryMemories` returns
+  on Cognitive ([ADR-062](mercury/ADR-062-what-a-read-yields.md) D6).
+- `TemporalQueryType` is gone: no public read selects by it (ADR-062 D6). `HistoryMode` is gone: there is one way
+  to prune ([ADR-061](mercury/ADR-061-a-facts-own-times.md) D12).
+
 ### InternalsVisibleTo
 
 *Updated after Phase 3 implementation:* Three new `InternalsVisibleTo` entries

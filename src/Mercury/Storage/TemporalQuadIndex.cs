@@ -6,10 +6,9 @@ using SkyOmega.Mercury.Runtime;
 namespace SkyOmega.Mercury.Storage;
 
 /// <summary>
-/// B+Tree index for RDF quads (graph + triple) with bitemporal semantics.
-///
-/// Valid Time (VT): When the fact is true in the real world
-/// Transaction Time (TT): When the fact was recorded in the database
+/// B+Tree index for RDF quads (graph + triple) on memory time (ADR-061 D1): each entry is a period in which the quad
+/// is remembered, with the clock reading at which it was memorized and the one at which it was forgotten. Both are
+/// the store's own times; when something happened in the world is content (D3).
 /// </summary>
 /// <remarks>
 /// <para><strong>INTERNAL USE ONLY:</strong> This class is internal because it is an
@@ -860,8 +859,9 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
         public long Primary;         // 64-bit, first dimension (e.g., subject in GSPO)
         public long Secondary;       // 64-bit, second dimension (e.g., predicate in GSPO)
         public long Tertiary;        // 64-bit, third dimension (e.g., object in GSPO)
-        // The version's two times on the memory's own axis (ADR-061 D1, D11), in milliseconds since the epoch.
-        // Until ADR-061 D2 is done a caller can still state them, and they then hold a stated valid time.
+        // The period's two times on the memory's own axis (ADR-061 D1, D11), in milliseconds since the epoch. Every
+        // write since ADR-061 Step 6 takes them from the store's clock; an entry written before then by a caller that
+        // stated its times holds those.
         public long MemorizedAt;     // When the version was memorized
         public long ForgottenAt;     // When it was forgotten; the far future while it is remembered
         // Legacy (ADR-061 D11): the batch's clock reading, in milliseconds since the epoch. Still read as the last sort
@@ -1015,7 +1015,7 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
     // search-key values coincide (CreateSearchKey sets both to the term's value; an unbound
     // dimension spans [0, long.MaxValue], so min != max and the check is skipped). On the TGSP
     // time-leading index the key range cannot constrain these dimensions, so this is what actually
-    // applies the graph/S/P/O filter for DURING. On a spatial-leading index it changes nothing when the bound
+    // applies the graph/S/P/O filter to a read of it. On a spatial-leading index it changes nothing when the bound
     // dimensions lead the key, which is how the store chooses its index; it filters when a dimension is bound
     // behind an unbound one (QuadIndexCursorTests shows that case).
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -1240,7 +1240,7 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
     {
         ref var existing = ref page->GetEntry(existingIndex);
 
-        // Temporal update: adjust valid time of existing entry
+        // A later period of the same quad (a replayed old Add, Case C): end the open period where the new one begins
         if (newKey.MemorizedAt < existing.Key.ForgottenAt)
         {
             // Truncate existing entry

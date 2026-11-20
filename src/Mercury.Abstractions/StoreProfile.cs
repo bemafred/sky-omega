@@ -8,15 +8,16 @@ namespace SkyOmega.Mercury.Abstractions;
 public enum StoreProfile
 {
     /// <summary>
-    /// Bitemporal, versioned, graph-aware. 88-byte B+Tree entries. Default — matches
-    /// Mercury's original schema. Suited to cognitive memory, provenance-sensitive workloads.
+    /// Memory time, graph-aware: each period of a quad has the time it was memorized and the time it was forgotten
+    /// (ADR-061). 88-byte B+Tree entries. Default — matches Mercury's original schema. Suited to cognitive memory,
+    /// provenance-sensitive workloads.
     /// Indexes: GSPO, GPOS, GOSP, TGSP.
     /// </summary>
     Cognitive,
 
     /// <summary>
     /// Versioned, graph-aware, non-temporal. 64-byte entries. Suited to classic named-graph
-    /// stores with soft-delete but no valid-time semantics. Indexes: GSPO, GPOS, GOSP, TGSP.
+    /// stores with soft-delete but no times (ADR-064). Indexes: GSPO, GPOS, GOSP.
     /// </summary>
     Graph,
 

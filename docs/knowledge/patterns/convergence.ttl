@@ -67,4 +67,4 @@ pat:structured-meaning-making a sky:PatternElement ;
 
 pat:epistemic-accountability a sky:PatternElement ;
     rdfs:label "Epistemic accountability" ;
-    rdfs:comment "The ability to trace what was known, when it was known, and what it was based on. Bitemporal storage makes this queryable." .
+    rdfs:comment "The ability to trace what was known, when it was known, and what it was based on. Memory time — when the store memorized and forgot each fact — makes this queryable." .

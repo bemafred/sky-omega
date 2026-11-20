@@ -66,7 +66,7 @@ Good coverage on **operation entry/exit boundaries** and **bulk-load steady-stat
 |---|---|---|
 | Per-operator row-count attribution | Query-planner cost-model validation | Medium — needs operator-pipeline taps |
 | Filter selectivity (rows-in / rows-out per filter) | Query rewriting opportunity detection | Medium |
-| Temporal predicate pushdown effectiveness (Cognitive) | Validates bitemporal query optimizations | Medium |
+| Temporal predicate pushdown effectiveness (Cognitive) | Validates memory-time query optimizations | Medium |
 | SERVICE clause federation timing | Distributed-query observability | Medium |
 | Latency p50/p95/p99/p999 (HdrHistogram) | SLA/throughput characterization for production deployments | Medium-large — needs histogram infrastructure |
 

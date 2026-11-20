@@ -100,7 +100,7 @@ Språkmodeller kan översätta frågor på naturligt språk till SPARQL. Grafen 
 
 Ett substrat utan skräpsamling med frågetider under millisekunden gör detta praktiskt. Semantiskt minne i konversationstakt. Ingen väntan, ingen batchning, ingen impedansmatchning.
 
-Bitemporal modellering ger minnet både giltighetstid (när saker var sanna i världen) och transaktionstid (när vi lärde oss dem). Kunskap utvecklas, och substratet spårar den utvecklingen.
+Minnestid ger varje minne tiden då det lärdes in och tiden då det släpptes, enligt lagrets egen klocka; när saker var sanna i världen är i sig kunskap, med sin källa. Kunskap utvecklas, och substratet spårar den utvecklingen.
 
 MCP och liknande protokoll låter AI-system använda verktyg. Substratet blir inte bara lagring utan aktiv förmåga — Claude Code som frågar Mercury, minns kontext över sessioner, bygger med ackumulerad kunskap.
 

@@ -235,17 +235,16 @@ public static class StorageExamples
 
         Console.WriteLine("Storage Architecture:");
         Console.WriteLine("  - Memory-mapped B+Tree with 16KB pages");
-        Console.WriteLine("  - Four temporal indexes: SPOT, POST, OSPT, TSPO");
-        Console.WriteLine("  - Bitemporal data model (valid-time + transaction-time)");
+        Console.WriteLine("  - Four Cognitive indexes: GSPO, GPOS, GOSP, TGSP");
+        Console.WriteLine("  - Memory time: when each fact was memorized and when it was forgotten");
         Console.WriteLine("  - Atom storage with hash-based deduplication");
         Console.WriteLine("  - 64-bit atom IDs for TB-scale capacity");
         Console.WriteLine();
 
-        Console.WriteLine("Temporal Capabilities:");
-        Console.WriteLine("  - Time-travel queries (as-of semantics)");
-        Console.WriteLine("  - Temporal range queries");
-        Console.WriteLine("  - Evolution tracking (full history)");
-        Console.WriteLine("  - Transaction-time auditing");
+        Console.WriteLine("Memory Time (Cognitive SPARQL):");
+        Console.WriteLine("  - MEMORIZED and FORGOTTEN after a triple pattern, with SINCE and BEFORE");
+        Console.WriteLine("  - INCLUDING FORGOTTEN: every period, forgotten ones too");
+        Console.WriteLine("  - A delete forgets and keeps the period it ends");
         Console.WriteLine();
 
         // B+Tree capacity calculation

@@ -7,7 +7,7 @@ Detailed technical reference for Mercury's storage, durability, concurrency, and
 | Component      | Purpose                                                                |
 |----------------|------------------------------------------------------------------------|
 | `QuadStore`    | Multi-index quad store with named graph support                        |
-| `QuadIndex`    | B+Tree index with bitemporal + graph support (GSPO, GPOS, GOSP, TGSPO) |
+| `TemporalQuadIndex` | Cognitive B+Tree index: each entry a period of a quad, with its memorized and forgotten times (GSPO, GPOS, GOSP, TGSP) |
 | `AtomStore`    | String interning with memory-mapped storage                            |
 | `BTreeFile`    | The file a B+Tree index lives in: mapped in extents, grows by adding one ([ADR-063](../../adrs/mercury/ADR-063-an-index-file-grows-by-extents.md)) |
 | `TrigramIndex` | Full-text search via trigram inverted index (opt-in)                   |
@@ -44,7 +44,7 @@ Sky Omega uses Write-Ahead Logging (WAL) for crash safety:
 - **Batch-first design**: TxId in WAL records enables batching. Amortizing fsync across N triples is critical for performance.
 - **Transaction boundaries**: `BeginTx`/`CommitTx` markers in WAL. Recovery two-pass: collect committed TxIds, then replay only committed records.
 - **Deferred materialization**: Batched writes buffer in memory, apply to indexes only at `CommitBatch()`. `RollbackBatch()` discards buffer — indexes untouched.
-- **Transaction time per-write**: Each write generates `DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()` stored in WAL and indexes. Preserved through crash recovery. Cognitive only: a Graph or Minimal store reads no clock ([ADR-064](../../adrs/mercury/ADR-064-a-facts-states.md) D1).
+- **One clock reading per write**: A Cognitive write reads the store's clock (`StorageOptions.Clock`) once, under the write lock, in milliseconds; a batch has one reading. The write rule decides from that reading what changes, and the log holds the decided change: `BeginPeriod`, `EndPeriod`, `RemovePeriod` or `ContinuePeriod`, each naming its period by the quad and its memorized time, so a replay applies it to the same entry and applying it twice changes nothing ([ADR-061](../../adrs/mercury/ADR-061-a-facts-own-times.md) M5, M7). No caller states a time. A log written by an earlier version replays its `Add`, `End` and `Retract` records as written. A Graph or Minimal store reads no clock ([ADR-064](../../adrs/mercury/ADR-064-a-facts-states.md) D1).
 - **Hybrid checkpoint trigger**: Size-based (16MB) adapts to bursts; time-based (60s) bounds recovery during idle.
 
 ## Batch Write API
@@ -68,10 +68,11 @@ QuadStore supports RDF named graphs for domain isolation. See [api-usage.md#name
 
 ## Pruning (`SkyOmega.Mercury.Pruning`)
 
-Dual-instance pruning system using copy-and-switch pattern. Transfers quads between QuadStore instances with filtering, enabling:
-- Soft deletes → hard deletes (physical removal)
-- History flattening or preservation
-- Graph/predicate-based filtering
+Dual-instance pruning system using copy-and-switch pattern. Transfers quads between QuadStore instances with filtering. There is one way to prune ([ADR-061](../../adrs/mercury/ADR-061-a-facts-own-times.md) D12):
+- What is remembered is transferred, each memory with the time it was memorized; the target's period begins then, not at the prune. The copy that carries the time is internal to Mercury (`QuadStore.CopyRememberedBatched`): no ordinary writer states a time.
+- Nothing forgotten is transferred. A `FORGOTTEN` question on the target finds nothing, and a source in which everything is forgotten gives an empty store.
+- Graph/predicate-based filtering selects among the remembered memories.
+- A rebuild is not a prune: it carries every period, with both times.
 
 **Components:**
 
@@ -82,14 +83,13 @@ Dual-instance pruning system using copy-and-switch pattern. Transfers quads betw
 | `GraphFilter` | Filter by graph IRI(s) - include/exclude modes |
 | `PredicateFilter` | Filter by predicate IRI(s) |
 | `CompositeFilter` | AND/OR composition of filters |
-| `HistoryMode` | FlattenToCurrent, PreserveVersions, PreserveAll |
 | `TransferOptions` | Batch size, progress interval, verification flags |
 
 **Basic usage:**
 ```csharp
 using var target = new QuadStore("/path/to/new/store");
 var result = new PruningTransfer(source, target).Execute();
-// Soft-deleted quads are now physically gone
+// The target holds what the source remembers, with its memorized times, and nothing forgotten
 ```
 
 **With filtering:**
@@ -98,7 +98,6 @@ var options = new TransferOptions {
     Filter = CompositeFilter.All(
         GraphFilter.Exclude("<http://temp.data>"),
         PredicateFilter.Exclude("<http://internal/debug>")),
-    HistoryMode = HistoryMode.FlattenToCurrent,
     VerifyAfterTransfer = true
 };
 var result = new PruningTransfer(source, target, options).Execute();
@@ -116,7 +115,7 @@ QuadStore uses `ReaderWriterLockSlim` for thread-safety:
 
 1. **Single writer, multiple readers**: Write operations acquire exclusive write lock
 2. **Explicit read locking**: Callers use `AcquireReadLock()`/`ReleaseReadLock()` around query enumeration
-3. **ref struct constraint**: `TemporalResultEnumerator` cannot hold locks internally (stack-only lifetime)
+3. **No lock in the enumerator**: `ResultEnumerator` and `TemporalResultEnumerator` hold no lock; the caller holds the read lock for the whole enumeration ([ADR-062](../../adrs/mercury/ADR-062-what-a-read-yields.md) describes the two result types)
 
 **Critical pattern - always wrap queries with locks:**
 ```csharp

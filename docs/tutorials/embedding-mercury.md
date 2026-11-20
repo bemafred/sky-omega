@@ -120,18 +120,21 @@ catch
 Performance: ~25,000 writes/sec (batch of 1,000), ~100,000 writes/sec
 (batch of 10,000).
 
-### Temporal writes
+### Forgetting, and the store's clock
 
-Store facts with explicit validity periods:
+`DeleteCurrent` forgets a fact. On a Cognitive store the period in which it was remembered stays, with the time it
+was memorized and the time it was forgotten:
 
 ```csharp
-store.Add(
+store.DeleteCurrent(
     "<http://example.org/alice>",
     "<http://example.org/worksFor>",
-    "<http://example.org/Acme>",
-    memorizedAt: new DateTimeOffset(2020, 1, 1, 0, 0, 0, TimeSpan.Zero),
-    forgottenAt: new DateTimeOffset(2023, 6, 30, 0, 0, 0, TimeSpan.Zero));
+    "<http://example.org/Acme>");
 ```
+
+No write takes a time: the store reads its own clock, `StorageOptions.Clock` (the system clock unless one is given),
+once per write or batch. When something was true in the world is content: write it as triples, such as
+`<http://example.org/alice-acme> <http://example.org/start> "2020-01-01"^^xsd:date`.
 
 ---
 
@@ -166,22 +169,43 @@ finally
 Always wrap queries with `AcquireReadLock`/`ReleaseReadLock` and call
 `Dispose()` on results to return pooled buffers.
 
-### Temporal queries
+### Memories with their times
+
+On a Cognitive store, `QueryMemories` gives each matching memory with its two times. Its bounds are those of the
+words `MEMORIZED`, `FORGOTTEN` and `INCLUDING FORGOTTEN` ([Memory Time](temporal-rdf.md)):
 
 ```csharp
-// Point-in-time: what was true on a specific date?
-var asOf = store.QueryAsOf(subject, predicate, obj,
-    new DateTimeOffset(2022, 1, 1, 0, 0, 0, TimeSpan.Zero));
+store.AcquireReadLock();
+try
+{
+    // What was memorized in 2026 and is still remembered
+    var memories = store.QueryMemories(subject, predicate, obj,
+        memorizedSince: new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero),
+        memorizedBefore: new DateTimeOffset(2027, 1, 1, 0, 0, 0, TimeSpan.Zero));
+    while (memories.MoveNext())
+    {
+        var memory = memories.Current;
+        Console.WriteLine($"{memory.Object} memorized {memory.MemorizedAt:O}");
+    }
+    memories.Dispose();
 
-// Range: what changed between two dates?
-var changes = store.QueryChanges(
-    new DateTimeOffset(2022, 1, 1, 0, 0, 0, TimeSpan.Zero),
-    new DateTimeOffset(2023, 1, 1, 0, 0, 0, TimeSpan.Zero),
-    subject, predicate, obj);
-
-// Complete history
-var evolution = store.QueryEvolution(subject, predicate, obj);
+    // Every period, forgotten ones too; ForgottenAt is null while a memory is remembered
+    var everything = store.QueryMemories(subject, predicate, obj, includingForgotten: true);
+    while (everything.MoveNext())
+    {
+        var memory = everything.Current;
+        Console.WriteLine($"{memory.Object} {memory.MemorizedAt:O} to {memory.ForgottenAt?.ToString("O") ?? "now"}");
+    }
+    everything.Dispose();
+}
+finally
+{
+    store.ReleaseReadLock();
+}
 ```
+
+On a Graph, Reference or Minimal store `QueryMemories` throws `ProfileCapabilityException`: those profiles keep no
+times.
 
 ### Named graph queries
 

@@ -267,8 +267,8 @@ public sealed class QuadStore : IDisposable
 
         // ADR-029 Phase 2d: dispatch index-family and WAL creation on the store's
         // schema profile. Cognitive produces four TemporalQuadIndex instances (88 B
-        // entries, bitemporal); Graph produces four VersionedQuadIndex instances
-        // (64 B entries, versioned + soft-delete, no temporal); both carry a WAL.
+        // entries, memory time, ADR-061); Graph produces three VersionedQuadIndex instances
+        // (versioned + soft-delete, no time, ADR-064); both carry a WAL.
         // Reference produces two ReferenceQuadIndex instances (32 B entries) with
         // no WAL — bulk-load is the only write path per Decision 7. Each profile
         // gets its own concrete index implementation per the no-behavior-flags rule
@@ -830,7 +830,7 @@ public sealed class QuadStore : IDisposable
 
     /// <summary>
     /// Repair the valid-time history a pre-ADR-054 SPARQL delete erased (ADR-054 D7). Before ADR-054 every delete
-    /// flagged the entry LegacyIsDeleted and left ForgottenAt open, so the fact left every AS OF view. Each flagged entry becomes
+    /// flagged the entry LegacyIsDeleted and left ForgottenAt open, so the fact left every view of the past. Each flagged entry becomes
     /// what an End would have written (ForgottenAt = the deletion's transaction time, LegacyIsDeleted = false), except entries of a
     /// deletion event named in <paramref name="restore"/> (graph IRI, or "" for the default graph, and the deletion time
     /// as the report prints it, in milliseconds). Those are restored: the delete was the mistake and the facts never
@@ -2448,8 +2448,8 @@ public sealed class QuadStore : IDisposable
     private const long TicksPerMillisecond = 10_000L;
 
     /// <summary>
-    /// Convert DateTimeOffset.UtcTicks to Unix milliseconds. LogRecord stores valid-time
-    /// as UtcTicks (via DateTimeOffset.UtcTicks in CreateAdd/CreateDelete); TemporalQuadIndex
+    /// Convert DateTimeOffset.UtcTicks to Unix milliseconds. LogRecord stores the memory times
+    /// as UtcTicks; TemporalQuadIndex
     /// keys use Unix ms. Cheaper than round-tripping through DateTimeOffset.
     /// </summary>
     private static long UtcTicksToUnixMs(long utcTicks) =>
@@ -2474,7 +2474,7 @@ public sealed class QuadStore : IDisposable
                 $"WAL record (TxId {record.TxId}) is an Add, which a {_schema.Profile} store does not write: its log holds NextVersion records (ADR-064 D5).");
 
         // Cognitive profile path.
-        // LogRecord stores valid-time as .UtcTicks (100-ns since year 1); the B+Tree
+        // LogRecord stores the memory times as .UtcTicks (100-ns since year 1); the B+Tree
         // keys are Unix milliseconds. Convert once per record instead of per index.
         var memorizedAtMs = UtcTicksToUnixMs(record.MemorizedAtTicks);
         var forgottenAtMs = UtcTicksToUnixMs(record.ForgottenAtTicks);
@@ -2763,7 +2763,7 @@ public sealed class QuadStore : IDisposable
     private bool ApplyEndToIndexesById(in LogRecord record)
     {
         if (NumbersFactStates)
-            throw new InvalidDataException($"WAL record (TxId {record.TxId}) is an End, which a {_schema.Profile} store (no valid time) never writes.");
+            throw new InvalidDataException($"WAL record (TxId {record.TxId}) is an End, which a {_schema.Profile} store (no times) never writes.");
 
         _sessionMutated = true;
         var versionFromMs = UtcTicksToUnixMs(record.MemorizedAtTicks);

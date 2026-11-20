@@ -238,12 +238,12 @@ two terms and a pattern constant matches a language tag by case
 - **W3C Solid Protocol server** (`Mercury.Solid`) — WAC + ACP access control, N3 Patch updates, full HTTP handlers.
 - **Model Context Protocol (MCP)** — `mercury-mcp` exposes Mercury as a Claude semantic-memory tool with persistent store survival across sessions.
 
-### Bitemporal extensions (beyond W3C, **Cognitive profile only**)
+### Memory time: Cognitive SPARQL (beyond W3C, **Cognitive profile only**)
 
-- **Valid-time + transaction-time** stored as implicit dimensions on every triple
-- `AS OF`, `DURING`, `ALL VERSIONS` query forms for time-travel
-- Versioning, soft-delete, audit trails — all queryable through standard SPARQL with temporal extensions
-- *Reference profile drops temporal columns by design — sealed canonical snapshots have no time dimension. See [ADR-008](docs/adrs/ADR-008-workload-profiles-and-validation-attribution.md) for the workload-profile distinction.*
+- **Two times per memory**, set by the store's own clock: when a quad was memorized (`INSERT`) and when it was forgotten (`DELETE`). A delete keeps the period it ends, so nothing remembered is lost ([ADR-061](docs/adrs/mercury/ADR-061-a-facts-own-times.md)).
+- `MEMORIZED` and `FORGOTTEN` after a triple pattern bind and select those times, with `SINCE` and `BEFORE`; `INCLUDING FORGOTTEN` after the query makes every pattern match forgotten memories too. A standard SPARQL 1.1 query means what it meant.
+- When something happened in the world is content: a triple, with its source. See [Memory Time in Mercury](docs/architecture/technical/temporal-rdf.md).
+- *The Graph, Reference and Minimal profiles keep no times by design; the words are an error there. See [ADR-008](docs/adrs/ADR-008-workload-profiles-and-validation-attribution.md) for the workload-profile distinction.*
 
 ---
 

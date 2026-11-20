@@ -1184,6 +1184,28 @@ this ADR do not answer goes to Martin.
   - **Not tested:** the CLI's refusal of `--history`, which no test reaches; any platform but omega. The probes in
     `tools/probes` that call the removed methods are left as they ran: each records a measurement at a named commit.
   - **Not done here:** the documents (P8, and ADR-062 Step 8 but for the count of public types in `CLAUDE.md`).
+- **P8, the documents: done 2026-11-20**, on omega; the consumers follow in their own step.
+  - **What the documents say in place of "bitemporal"** (Q7): memory time, one axis, two points per period, set by the
+    store; when something happened in the world is content. The documents that describe Mercury as it is say so: the
+    READMEs, `CLAUDE.md`, `AI.md`, the concept and narrative documents, the profile's doc comment and the code
+    comments that said valid or transaction time. Records of the past keep their words: the ADRs, the validations, the
+    release notes, the articles, the retrospective, and the dated evidence in the limits register. So does the
+    cookbook's recipe on what is and is not bitemporal.
+  - **Rewritten:** `temporal-rdf.md`, both of them: the technical one is now "Memory Time in Mercury", the model, the
+    words, the store's two reads and how it is stored; the tutorial teaches the words, and world time as triples. The
+    SPARQL reference has the words' rules. `api-usage.md`, `mercury-internals.md`, the tutorials on pruning, the CLI,
+    embedding, MCP and benchmarks follow the one way to prune and the two reads.
+  - **Found and fixed on the way:** two documents described an MCP tool `mercury_prune`, and two named a
+    `mercury prune` command; neither exists. Pruning is the REPL's `:prune`, not exposed over MCP (ADR-006).
+  - **A claim the documents make, now tested:** `INCLUDING FORGOTTEN` reaches a subquery and a property path
+    (`MemoryWordsTests`). The test fails when a subquery does not receive the query's word.
+  - **Every query and code sample** in the rewritten documents was run on a probe store with a supplied clock: each
+    parses and runs, with the results the documents state.
+  - ADR-003's list of public types has a dated note with the 30 types of today.
+  - **Left:** `STATISTICS.md` is updated at the next release, with its counts. The consumers, in one step: the `lucy`
+    skill's recency recall and temporal modes, `MERCURY.md`'s provenance and queries, the MCP tool description, and
+    the agent no longer stamping `dcterms:created`. They are what an agent runs against the installed `mercury-mcp`,
+    which knows the words only from the release that carries P6.
 
 1. **Martin's review** of this text — **done 2026-11-14**, with the decision closure. The later part is reviewed on
    its own.

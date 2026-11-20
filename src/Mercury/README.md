@@ -6,7 +6,7 @@
 
 ## What Mercury Is
 
-Mercury is an embeddable triple store engine—zero-GC, bitemporal, key/value efficient at its core, with full RDF conformance available when needed.
+Mercury is an embeddable triple store engine—zero-GC, with memory time (when each fact was memorized and forgotten), key/value efficient at its core, with full RDF conformance available when needed.
 
 It’s a library, not a product. Mercury provides the storage foundation; you decide what to build on top.
 
@@ -184,7 +184,7 @@ var store = lease.Store;
 
 - [Canonical Definition](../../docs/architecture/concepts/canonical/mercury.md) — Identity and scope
 - [Architecture Decision Records](../../docs/adrs/mercury/README.md) — Design decisions
-- [Temporal RDF](../../docs/architecture/technical/temporal-rdf.md) — Bitemporal model
+- [Temporal RDF](../../docs/architecture/technical/temporal-rdf.md) — Memory time: the model, the words, how it is stored
 - [RDF Core Types](Rdf/README.md) — Data structure documentation
 
 ——

@@ -166,7 +166,7 @@ These are observations the flow makes obvious, each tied to a limits-register en
 
 - **Cognitive profile** — uses HashAtomStore, WAL-backed, mutable. Different stages, different artifacts. A sibling map would be useful when Cognitive bulk-load returns to active development.
 - **Query path** — separate flow (parsing → planning → execution → output). The store this document describes is the substrate the query path reads from.
-- **Bitemporal layer** — Reference profile is `HasTemporal: false` per ADR-029. Cognitive bulk-load adds temporal indexes that this map omits.
+- **Memory time** — Reference profile is `HasTemporal: false` per ADR-029. Cognitive bulk-load adds temporal indexes that this map omits.
 
 ## References
 

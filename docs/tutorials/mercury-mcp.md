@@ -14,7 +14,7 @@ query. The store belongs to you, not to any platform.
 ## What Mercury MCP Is
 
 Mercury MCP is a Model Context Protocol server that wraps a Mercury QuadStore.
-Claude interacts with it through five tools:
+Claude interacts with it through six tools:
 
 | Tool | Description |
 |------|-------------|
@@ -22,7 +22,11 @@ Claude interacts with it through five tools:
 | `mercury_update` | Execute SPARQL UPDATE (INSERT DATA, DELETE DATA, LOAD, CLEAR, etc.) |
 | `mercury_stats` | Get store statistics -- quad count, atom count, storage size, WAL status |
 | `mercury_graphs` | List all named graphs in the store |
-| `mercury_prune` | Compact the store with options for history, graph exclusion, and dry-run |
+| `mercury_store` | Get the filesystem path of the store folder |
+| `mercury_version` | Get the server version |
+
+The store is Cognitive: an insert memorizes, a delete forgets and keeps the period in which the fact was remembered.
+Queries can ask when, with the words of Cognitive SPARQL (see [Memory Time](temporal-rdf.md)).
 
 The server also exposes:
 
@@ -322,79 +326,15 @@ will see: `Error: Could not connect to mcp. Is it running?`
 
 ---
 
-## Pruning via Claude
+## Pruning
 
 Over time, the store accumulates session graphs, provisional assertions, and
-soft-deleted data. The `mercury_prune` tool compacts the store using a
-copy-and-switch pattern.
-
-### Dry run first
-
-Always preview before pruning:
-
-```
-mercury_prune(dryRun: true)
-```
-
-Output:
-
-```
-Prune dry-run complete:
-  Quads scanned: 5,678
-  Quads written: 5,200
-  Duration: 120ms
-```
-
-### Basic prune
-
-Remove soft-deleted data, flatten history to current versions:
-
-```
-mercury_prune()
-```
-
-### Preserve history
-
-Keep version history but still remove soft deletes:
-
-```
-mercury_prune(historyMode: "preserve")
-```
-
-### Exclude graphs
-
-Remove temporary or scratch graphs during pruning:
-
-```
-mercury_prune(excludeGraphs: "<urn:sky-omega:session:scratch>,<urn:sky-omega:data:temp>")
-```
-
-### Exclude predicates
-
-Filter out debug predicates:
-
-```
-mercury_prune(excludePredicates: "<http://example.org/debug>,<http://example.org/internal>")
-```
-
-### Combined options
-
-```
-mercury_prune(
-  dryRun: true,
-  historyMode: "preserve",
-  excludeGraphs: "<urn:sky-omega:data:temp>",
-  excludePredicates: "<http://example.org/debug>"
-)
-```
-
-### History modes
-
-| Mode | `historyMode` value | Behavior |
-|------|---------------------|----------|
-| Flatten to current | `"flatten"` (default) | Keep only the latest version of each triple |
-| Preserve versions | `"preserve"` | Keep version history, remove soft deletes |
-| Preserve all | `"all"` | Keep everything including soft deletes |
+forgotten memories. Pruning is not one of the MCP tools
+([ADR-006](../adrs/ADR-006-mcp-surface-discipline.md)): an operation that removes
+memories is started by a person, from the CLI. Stop `mercury-mcp`, open its store in the CLI with
+`mercury --store mcp`, and run `:prune` there. A prune keeps what is remembered, each memory
+with the time it was memorized, and nothing forgotten. See
+[Pruning and Maintenance](pruning-and-maintenance.md).
 
 ---
 

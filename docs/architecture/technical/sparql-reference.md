@@ -35,7 +35,7 @@ Key components:
 | Aggregation | GROUP BY, HAVING, COUNT, SUM, AVG, MIN, MAX, GROUP_CONCAT, SAMPLE |
 | Modifiers | DISTINCT, REDUCED, ORDER BY (ASC/DESC), LIMIT, OFFSET |
 | Dataset | FROM, FROM NAMED (cross-graph joins supported) |
-| Temporal queries | AS OF (point-in-time), DURING (range), ALL VERSIONS (history) |
+| Memory time (Cognitive SPARQL) | MEMORIZED and FORGOTTEN after a triple pattern, with SINCE and BEFORE; INCLUDING FORGOTTEN after the query |
 | SPARQL-star | Quoted triples (`<< s p o >>`), expanded to reification at parse time |
 | SPARQL Update | INSERT DATA, DELETE DATA, DELETE WHERE, DELETE/INSERT WHERE (WITH clause), CLEAR, DROP, CREATE, COPY, MOVE, ADD, LOAD |
 
@@ -161,24 +161,80 @@ One file per type in `Sparql/Execution/Operators/`:
 | CSV | text/csv | .csv |
 | TSV | text/tab-separated-values, text/tsv | .tsv |
 
-## Temporal SPARQL Extensions
+## Memory Time: Cognitive SPARQL ([ADR-061](../../adrs/mercury/ADR-061-a-facts-own-times.md))
 
-| Mode | Syntax | Storage Method | Description |
-|------|--------|----------------|-------------|
-| Current | (default) | `QueryCurrent()` | Data valid at `UtcNow` |
-| AS OF | `AS OF "date"^^xsd:date` | `QueryAsOf()` | Data valid at specific time |
-| DURING | `DURING ["start"^^xsd:date, "end"^^xsd:date]` | `QueryChanges()` | Data overlapping period |
-| ALL VERSIONS | `ALL VERSIONS` | `QueryEvolution()` | Complete history |
+A Cognitive store keeps, for each period in which a quad is remembered, two times on its own clock: when the quad was
+memorized (an `INSERT`) and when it was forgotten (a `DELETE`). No writer states them. Cognitive SPARQL is SPARQL 1.1
+with three words that read them:
 
-**Design notes:**
-- Temporal clauses come after LIMIT/OFFSET in solution modifiers
-- DateTime literals support both `xsd:date` and `xsd:dateTime` formats; the time is a literal, not an expression
-- Default mode is `Current` (equivalent to calling `QueryCurrent()`)
-- `AS OF t` is the store as it stood at the instant t (MemorizedAt ≤ t < ForgottenAt): it keeps what was older than t and
-  leaves out what came later.
-- `DURING [s, e]` is every version valid at some moment in the range (MemorizedAt < e and ForgottenAt > s). A triple
-  recorded before s and still valid is in it, so neither clause selects "recorded since t". Filter on a recorded time
-  instead: `FILTER(?created >= NOW() - "P7D"^^xsd:dayTimeDuration)` keeps the last week's records.
+```
+MEMORIZED [?t] [SINCE a] [BEFORE b]      after a triple pattern
+FORGOTTEN [?t] [SINCE a] [BEFORE b]      after a triple pattern
+INCLUDING FORGOTTEN                      after the query
+```
+
+| Query | Matches |
+|-------|---------|
+| (no word) | What is remembered now. Reads no clock. |
+| `?s ?p ?o MEMORIZED ?t` | What is remembered, with `?t` bound to when it was memorized |
+| `?s ?p ?o MEMORIZED SINCE a BEFORE b` | What is remembered and was memorized in `[a, b)` |
+| `?s ?p ?o FORGOTTEN ?t` | What is remembered and what is forgotten; `?t` is unbound while a memory is remembered |
+| `?s ?p ?o FORGOTTEN SINCE a` | What was forgotten at or after `a` |
+| `... } INCLUDING FORGOTTEN` | Every pattern of the query matches forgotten memories too |
+
+```sparql
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+
+# What did we memorize in the last week?
+SELECT ?g ?s ?label ?when WHERE {
+  GRAPH ?g { ?s rdfs:label ?label MEMORIZED ?when SINCE NOW() - "P7D"^^xsd:dayTimeDuration . }
+} ORDER BY DESC(?when)
+
+# What have we forgotten since the first of November, and when?
+SELECT ?g ?s ?p ?o ?when WHERE {
+  GRAPH ?g { ?s ?p ?o FORGOTTEN ?when SINCE "2026-11-01"^^xsd:date . }
+}
+```
+
+**The rules:**
+- Each matched period is its own solution with its own times. The words apply to the one pattern they follow, so a
+  join to an older memory keeps it: last week's finding about a component named in June still finds the component.
+- `SINCE` and `BEFORE` work alone, together and in either order. Every range is half-open, `[a, b)`. A range with `a`
+  at or after `b` is empty, not an error. Each bound appears at most once per word, and both words may follow one
+  pattern, each with its own bounds.
+- A bound is an expression without variables, evaluated once per query: a literal, or
+  `NOW() - "P7D"^^xsd:dayTimeDuration`. A bound that depends on a variable is a `FILTER` on the bound time:
+  `?s ?p ?o MEMORIZED ?t . FILTER(?t >= ?started)`.
+- A time is an `xsd:dateTime` in UTC with a millisecond fraction. A bound may also be an `xsd:date`: its first instant.
+  A time without a timezone is UTC; a local day carries its offset, `"2026-01-01+01:00"^^xsd:date`.
+- In the abbreviated forms the words follow an object and apply to the triple that object completes. In a `,` or `;`
+  list each object may carry its own words, and so inside `[ ]`.
+- `INCLUDING FORGOTTEN` stands after the solution modifiers of the outermost query, and applies to every pattern of
+  it, a subquery's and a property path's included. It does not reach into `SERVICE`.
+- Under `INCLUDING FORGOTTEN`, and in a pattern that carries `FORGOTTEN`, a graph variable ranges over every graph that
+  holds a period. In the default view it ranges over the graphs that hold something remembered.
+- The words work in an Update's `WHERE`: `DELETE { ?s ?p ?o } WHERE { ?s ?p ?o MEMORIZED BEFORE … }` forgets what was
+  memorized before a time.
+- **Errors:** the words on a pattern with a property-path operator or inside `SERVICE`, `INCLUDING FORGOTTEN` on a
+  subquery, and any word on a Graph, Reference or Minimal store, which keeps no times. A standard SPARQL 1.1 query
+  cannot reach the words, so its meaning is unchanged.
+
+**What was remembered at a time `t`** has no word of its own. With `b` one millisecond after `t`, two patterns give
+each quad of it once, with the bounds of the period that holds `t`:
+
+```sparql
+SELECT ?s ?p ?o ?m ?f WHERE {
+  { ?s ?p ?o MEMORIZED ?m BEFORE "2026-11-01T12:00:00.001Z"^^xsd:dateTime }
+  UNION
+  { ?s ?p ?o MEMORIZED ?m BEFORE "2026-11-01T12:00:00.001Z"^^xsd:dateTime
+             FORGOTTEN ?f SINCE "2026-11-01T12:00:00.001Z"^^xsd:dateTime }
+}
+```
+
+When something happened in the world is content, a triple named for its source. The two memory times say only when the
+store took a triple in and let it go. The words replace `AS OF`, `DURING` and `ALL VERSIONS`, which are gone (ADR-061
+D8). The store's own read of the same times is `QuadStore.QueryMemories` (see [API usage](../../api/api-usage.md)).
 
 ## OWL/RDFS Reasoning (`SkyOmega.Mercury.Owl`)
 

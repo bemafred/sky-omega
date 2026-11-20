@@ -1,477 +1,155 @@
-# Temporal RDF for Sky Omega
+# Memory Time in Mercury
 
-## Overview
+A Cognitive store remembers. For each quad it keeps the periods in which the quad was remembered, and each period has
+two times on the store's own clock: when the quad was memorized and when it was forgotten. That axis is called memory
+time ([ADR-061](../../adrs/mercury/ADR-061-a-facts-own-times.md)).
 
-Sky Omega's temporal RDF substrate implements a **bitemporal data model** supporting both valid-time and transaction-time semantics. This enables time-travel queries, version tracking, historical reconstruction, and audit trails.
+Only the Cognitive profile keeps times ([ADR-029](../../adrs/mercury/ADR-029-store-profiles.md)). Graph, Reference and
+Minimal stores keep none: a read of times on them is an error, never an empty answer.
 
-## Bitemporal Model
+## One axis, not two
 
-### Two Time Dimensions
+Earlier versions of these documents called the Cognitive profile bitemporal: valid time, when a fact is true in the
+world, and transaction time, when the database recorded it. The store mixed the two. A caller could state a valid time,
+and the store also stamped the time of the write. ADR-061 separates them:
 
-**Valid Time (VT)**: When a fact is true in the real world
-- "Alice worked at Anthropic from 2020-01-01 to 2023-06-30"
-- Represents reality, independent of database
+- **Memory time is the store's.** No writer states it. The store reads its clock under the write lock, at one
+  millisecond resolution, and every write in one reading is simultaneous.
+- **World time is content.** When something happened in the world is a triple, named for its source: a commit's time
+  from git, a measurement's time from its log. The two memory times say only when the store took a triple in and let
+  it go.
 
-**Transaction Time (TT)**: When a fact was recorded in the database
-- "This fact was recorded on 2023-07-01 at 14:30:00"
-- Database's knowledge timeline
-- Immutable audit trail
+## The model
 
-### Why Bitemporal?
+- `INSERT` memorizes. A quad that is not remembered begins a period at the write's clock reading. A quad that is
+  remembered stays as it is: memorizing it again changes nothing and records nothing.
+- `DELETE` forgets. It ends the open period at the write's clock reading. The period stays in the store, with both
+  times. Nothing erases a period; there is no second kind of removal.
+- A quad has at most one open period. A quad memorized, forgotten and memorized again at three clock readings has two
+  periods.
+- Inside one clock reading the last operation on a quad decides. A quad forgotten and memorized again in one reading
+  continues its period; a quad memorized and forgotten in one reading was remembered at no time the store can
+  represent, and leaves no period.
+- Once the clock has moved past a reading, what the store holds for that reading never changes.
+- Every range is half-open. A period is `[memorized, forgotten)`: a quad forgotten at `t` is not remembered at `t`.
+- A remembered memory has no forgotten time. It is absent, not a far-future value.
 
-```
-Scenario: Employment fact correction
+What a query sees, and what a write counts as affected, follow from this. A write counts a quad when it changes whether
+the quad is remembered.
 
-Original record (TT: 2023-01-15):
-  Alice worksFor Acme
-  VT: 2020-01-01 to 2023-01-01
-  
-Correction (TT: 2023-06-20):
-  Alice worksFor Acme  
-  VT: 2020-01-01 to 2022-12-31  // Actually left earlier
+## Reading memory time in SPARQL
 
-Bitemporal allows:
-  • Query: "What did we KNOW on 2023-03-01?" → First version
-  • Query: "What is TRUE on 2022-06-01?" → Works at Acme (both versions agree)
-  • Query: "When did our knowledge change?" → 2023-06-20
-```
-
-## Temporal Key Structure
-
-```
-TemporalKey (56 bytes):
-┌────────┬──────────┬────────────┬──────────┬───────────┬───────────┬─────────────────────┐
-│Graph(8)│Subject(8)│Predicate(8)│Object(8) │MemorizedAt│ForgottenAt│LegacyTransactionTime│
-│        │          │            │          │    (8)    │    (8)    │         (8)         │
-└────────┴──────────┴────────────┴──────────┴───────────┴───────────┴─────────────────────┘
-
-Sorted lexicographically (GSPO ordering):
-  1. Graph (0 = default graph, enables named graph isolation)
-  2. Subject, Predicate, Object (spatial)
-  3. MemorizedAt, ForgottenAt (temporal)
-  4. LegacyTransactionTime (the last tie-breaker; the field leaves with ADR-061's layout change)
-```
-
-### Named Graphs (Quads)
-
-Each triple can belong to a named graph or the default graph:
-
-```csharp
-// Add to named graph
-store.AddCurrent(subject, predicate, obj, "<http://example.org/graph1>");
-
-// Add to default graph (no graph parameter)
-store.AddCurrent(subject, predicate, obj);
-
-// Query specific named graph
-var results = store.QueryCurrent(subject, predicate, obj, "<http://example.org/graph1>");
-
-// Enumerate all named graphs
-foreach (var graphIri in store.GetNamedGraphs())
-{
-    // Process each distinct named graph
-}
-```
-
-**Graph isolation**: Default graph (atom 0) and named graphs are fully isolated. Querying without a graph parameter queries only the default graph.
-
-## Persistent Storage Architecture
-
-**Memory-Mapped B+Trees**
-- Single B+Tree index with GSPO ordering
-- Pages: 16KB (optimal for SSDs)
-- Entries per page: 185 temporal quads (with graph atom)
-- Zero-copy access via memory mapping
-
-**File Organization**
-```
-mydb/
-├── gspo.tdb           # Graph-Subject-Predicate-Object-Time index
-├── atoms.atoms        # Atom data (UTF-8 strings)
-├── atoms.atomidx      # Hash table for interning
-├── atoms.offsets      # AtomId→offset index
-└── wal.log            # Write-ahead log for crash recovery
-```
-
-**Note**: Atoms are stored once and referenced by 64-bit IDs. Graph atom 0 represents the default graph.
-
-**Persistence Guarantees**
-- All temporal data persisted to disk
-- Automatic recovery on restart
-- No data loss on process termination
-- ACID semantics (simplified)
-
-## GSPO Index
-
-The single B+Tree index uses **GSPO ordering** (Graph-Subject-Predicate-Object-Time):
+Cognitive SPARQL is SPARQL 1.1 with three words. The full rules are in the
+[SPARQL reference](sparql-reference.md#memory-time-cognitive-sparql-adr-061).
 
 ```
-Order: G → S → P → O → MemorizedAt → ForgottenAt → LegacyTransactionTime
+MEMORIZED [?t] [SINCE a] [BEFORE b]      after a triple pattern
+FORGOTTEN [?t] [SINCE a] [BEFORE b]      after a triple pattern
+INCLUDING FORGOTTEN                      after the query
 ```
 
-### Query Patterns
-
-| Pattern | Efficiency | Example |
-|---------|------------|---------|
-| Graph + Subject bound | Optimal | "All facts about Alice in graph G" |
-| Graph bound | Good | "All facts in named graph G" |
-| Subject bound (default graph) | Optimal | "All facts about Alice" |
-| No bounds | Full scan | "All facts everywhere" |
-
-### Named Graph Queries
-
-```csharp
-// Query specific named graph
-var results = store.QueryCurrent(
-    "<http://ex.org/alice>",
-    ReadOnlySpan<char>.Empty,
-    ReadOnlySpan<char>.Empty,
-    "<http://example.org/graph1>"  // Named graph
-);
-
-// Query default graph (omit graph parameter)
-var results = store.QueryCurrent(
-    "<http://ex.org/alice>",
-    ReadOnlySpan<char>.Empty,
-    ReadOnlySpan<char>.Empty
-);
-```
-
-## Query Types
-
-### 1. Point-in-Time (As-Of Query)
-
-**Query**: "What was true at time T?"
-
-```csharp
-var results = store.QueryAsOf(
-    "<http://ex.org/alice>",
-    "<http://ex.org/worksFor>",
-    ReadOnlySpan<char>.Empty,
-    new DateTimeOffset(2021, 6, 1, 0, 0, 0, TimeSpan.Zero)
-);
-```
-
-**Semantics**: Return triples where `MemorizedAt <= T < ForgottenAt`
-
-### 2. Temporal Range Query
-
-**Query**: "What changed during period [T1, T2]?"
-
-```csharp
-var results = store.QueryChanges(
-    periodStart: new DateTimeOffset(2023, 1, 1, 0, 0, 0, TimeSpan.Zero),
-    periodEnd: new DateTimeOffset(2023, 12, 31, 0, 0, 0, TimeSpan.Zero),
-    subject: "<http://ex.org/alice>",
-    predicate: ReadOnlySpan<char>.Empty,
-    obj: ReadOnlySpan<char>.Empty
-);
-```
-
-**Semantics**: Return triples where `MemorizedAt < T2 AND ForgottenAt > T1`
-
-### 3. Evolution Query
-
-**Query**: "Show all versions ever"
-
-```csharp
-var results = store.QueryEvolution(
-    "<http://ex.org/alice>",
-    "<http://ex.org/salary>",
-    ReadOnlySpan<char>.Empty
-);
-```
-
-**Semantics**: Return all versions, ordered by MemorizedAt
-
-### 4. Current State Query
-
-**Query**: "What is true now?"
-
-```csharp
-var results = store.QueryCurrent(
-    "<http://ex.org/alice>",
-    ReadOnlySpan<char>.Empty,
-    ReadOnlySpan<char>.Empty
-);
-```
-
-**Semantics**: Point-in-time query at `DateTimeOffset.UtcNow`
-
-## Usage Patterns
-
-### Pattern 1: Version Tracking
-
-```csharp
-// Track salary over time
-store.Add("<http://ex.org/employee1>", "<http://ex.org/salary>", "\"80000\"",
-    new DateTimeOffset(2020, 1, 1, 0, 0, 0, TimeSpan.Zero),
-    new DateTimeOffset(2021, 1, 1, 0, 0, 0, TimeSpan.Zero));
-
-store.Add("<http://ex.org/employee1>", "<http://ex.org/salary>", "\"90000\"",
-    new DateTimeOffset(2021, 1, 1, 0, 0, 0, TimeSpan.Zero),
-    new DateTimeOffset(2022, 1, 1, 0, 0, 0, TimeSpan.Zero));
-
-// Query: What was salary in June 2021?
-var results = store.QueryAsOf(
-    "<http://ex.org/employee1>",
-    "<http://ex.org/salary>",
-    ReadOnlySpan<char>.Empty,
-    new DateTimeOffset(2021, 6, 1, 0, 0, 0, TimeSpan.Zero)
-);
-// Returns: "90000"
-```
-
-### Pattern 2: Audit Trail
-
-```csharp
-// Every insert has transaction time
-store.Add(subject, predicate, obj, memorizedAt, forgottenAt);
-// Transaction time automatically recorded
-
-// Later: Who changed what and when?
-var evolution = store.QueryEvolution(subject, predicate, obj);
-while (evolution.MoveNext())
-{
-    var triple = evolution.Current;
-    Console.WriteLine($"Changed to {triple.Object}");
-    Console.WriteLine($"  Valid: {triple.MemorizedAt} to {triple.ForgottenAt}");
-    Console.WriteLine($"  Recorded: {triple.LegacyTransactionTime}");
-}
-```
-
-### Pattern 3: Historical Snapshot
-
-```csharp
-// Reconstruct complete state at specific time
-var snapshotTime = new DateTimeOffset(2020, 1, 1, 0, 0, 0, TimeSpan.Zero);
-
-var snapshot = store.TimeTravelTo(
-    snapshotTime,
-    "<http://ex.org/organization>",
-    ReadOnlySpan<char>.Empty,  // All predicates
-    ReadOnlySpan<char>.Empty   // All objects
-);
-
-// Build complete picture of organization as of 2020-01-01
-while (snapshot.MoveNext())
-{
-    var triple = snapshot.Current;
-    // Process all facts valid at that time
-}
-```
-
-### Pattern 4: Temporal Joins
-
-```csharp
-// Find: Who worked where at same time?
-var employees = store.QueryAsOf(
-    ReadOnlySpan<char>.Empty,
-    "<http://ex.org/worksFor>",
-    "<http://ex.org/Anthropic>",
-    targetTime
-);
-
-while (employees.MoveNext())
-{
-    var emp = employees.Current;
-    // emp.Subject = employee who worked at Anthropic at targetTime
-    // emp.MemorizedAt/ForgottenAt = their employment period
-}
-```
-
-### Pattern 5: Temporal Aggregation
-
-```csharp
-// Count employees over time
-var timeSeries = new Dictionary<DateTimeOffset, int>();
-
-// Sample every month for 5 years
-for (var date = startDate; date < endDate; date = date.AddMonths(1))
-{
-    var results = store.QueryAsOf(
-        ReadOnlySpan<char>.Empty,
-        "<http://ex.org/worksFor>",
-        "<http://ex.org/company>",
-        date
-    );
-    
-    int count = 0;
-    while (results.MoveNext()) count++;
-    
-    timeSeries[date] = count;
-}
-
-// Now have employee count time series
-```
-
-## Performance Characteristics
-
-### Storage
-
-```
-Temporal quad:     88 bytes
-  Key:             56 bytes (GSPO + VT + TT)
-  Child/Value:      8 bytes
-  Metadata:        24 bytes (flags, padding)
-
-Page capacity:     185 entries per 16KB page
-Tree height (1B):  ~5 levels
-Lookup latency:    ~5 disk seeks (or ~0 with cache)
-```
-
-### Query Performance
-
-```
-Point-in-time (cached):    ~100K queries/sec
-Point-in-time (cold):      ~5K queries/sec
-Range scan:                ~200K triples/sec
-Evolution scan:            ~500K triples/sec
-```
-
-### Index Selection Impact
-
-```
-Query Pattern                    Performance
-──────────────────────────────────────────────
-Graph + Subject + Time range     Optimal (GSPO prefix)
-Graph + Time range               Good (G prefix)
-Subject + Time range             Optimal (default graph)
-No bounds                        Full scan
-```
-
-## Comparison with Non-Temporal
-
-```
-Feature                Non-Temporal    Temporal + Graphs
-───────────────────────────────────────────────────────
-Quad size              32 bytes        56 bytes (key)
-Entry size             ~40 bytes       88 bytes (with metadata)
-Index                  1 (GSPO)        1 (GSPO + time)
-Named graphs           Yes             Yes
-History                No              Full
-Corrections            Destructive     Non-destructive
-Audit trail            No              Yes
-Time-travel            No              Yes
-Version tracking       No              Yes
-Storage overhead       1x              ~2.2x
-Query complexity       Lower           Higher
-Use cases              Static data     Evolving data
-```
-
-## Best Practices
-
-### 1. Choose Valid-Time Granularity
-
-```csharp
-// Too granular (milliseconds): Excessive versions
-store.Add(subject, predicate, obj,
-    DateTimeOffset.UtcNow,
-    DateTimeOffset.MaxValue);
-
-// Good (days): Reasonable versioning
-store.Add(subject, predicate, obj,
-    DateTimeOffset.UtcNow.Date,
-    DateTimeOffset.MaxValue);
-```
-
-### 2. Use Appropriate Time Bounds
-
-```csharp
-// Current fact: valid from now to infinity
-store.AddCurrent(subject, predicate, obj);
-// Equivalent to:
-store.Add(subject, predicate, obj, DateTimeOffset.UtcNow, DateTimeOffset.MaxValue);
-
-// Historical fact: specific period
-store.AddHistorical(subject, predicate, obj, from, to);
-```
-
-### 3. Leverage Index Selection
-
-```csharp
-// BAD: No bounds (full scan)
-var results = store.Query(
-    ReadOnlySpan<char>.Empty,
-    ReadOnlySpan<char>.Empty,
-    ReadOnlySpan<char>.Empty,
-    TemporalQueryType.AsOf
-);
-
-// GOOD: Bound at least one component
-var results = store.Query(
-    "<http://ex.org/alice>",  // Subject bound → SPOT index
-    ReadOnlySpan<char>.Empty,
-    ReadOnlySpan<char>.Empty,
-    TemporalQueryType.AsOf
-);
-```
-
-### 4. Batch Temporal Operations
-
-```csharp
-// Insert facts in chronological order for better page locality
-var facts = GetFacts().OrderBy(f => f.MemorizedAt);
-
-foreach (var fact in facts)
-{
-    store.Add(fact.Subject, fact.Predicate, fact.Object,
-        fact.MemorizedAt, fact.ForgottenAt);
-}
-```
-
-## SPARQL Extensions for Temporal Queries
-
-### Proposed Syntax
+A query without the words sees what is remembered now, and reads no clock.
 
 ```sparql
-# Point-in-time query
-SELECT ?person ?company
-WHERE {
-  ?person worksFor ?company
-} 
-AS OF "2021-06-01"^^xsd:date
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
 
-# Range query
-SELECT ?person ?company ?from ?to
-WHERE {
-  ?person worksFor ?company
+# What did we memorize in January?
+SELECT ?g ?s ?label WHERE {
+  GRAPH ?g { ?s rdfs:label ?label MEMORIZED SINCE "2026-01-01"^^xsd:date BEFORE "2026-02-01"^^xsd:date . }
 }
-DURING ["2023-01-01"^^xsd:date, "2023-12-31"^^xsd:date]
 
-# Evolution query
-SELECT ?person ?salary ?from ?to
-WHERE {
-  ?person hasSalary ?salary
-}
-ALL VERSIONS
-ORDER BY ?from
+# Every period of one fact, remembered or forgotten, with its times
+SELECT ?m ?f WHERE {
+  <http://ex.org/alice> <http://ex.org/worksFor> <http://ex.org/acme> MEMORIZED ?m FORGOTTEN ?f .
+} ORDER BY ?m
+
+# Forget what was memorized before a time
+DELETE { GRAPH ?g { ?s ?p ?o } }
+WHERE  { GRAPH ?g { ?s ?p ?o MEMORIZED BEFORE "2026-01-01"^^xsd:date } }
 ```
 
-## Sky Omega Integration
+The words bind to the pattern they follow, so each pattern of a join keeps its own times. "What was remembered at a
+time" has no word of its own: it is two patterns in a `UNION`, shown in the SPARQL reference.
 
-For Sky Omega's knowledge graph:
+## Reading and writing from code
 
-1. **Entity Evolution**: Track how entities change over time
-2. **Relationship Dynamics**: Model temporal relationships
-3. **Knowledge Provenance**: Record when facts were learned
-4. **Temporal Reasoning**: Infer facts valid at specific times
-5. **Historical Context**: Understand past states
+```csharp
+using var store = new QuadStore("./mydb");
 
-## Future Enhancements
+// Memorize and forget: each takes its time from the store's clock
+store.AddCurrent("<http://ex.org/alice>", "<http://ex.org/worksFor>", "<http://ex.org/acme>");
+store.DeleteCurrent("<http://ex.org/alice>", "<http://ex.org/worksFor>", "<http://ex.org/acme>");
 
-- [x] Named graph support (GSPO ordering)
-- [x] SPARQL GRAPH clause queries
-- [ ] Temporal property paths
-- [ ] Temporal aggregations (COUNT at time T)
-- [ ] Allen's interval algebra for temporal reasoning
-- [ ] Coalescing of adjacent periods
-- [ ] Incremental materialized views
-- [ ] Temporal CONSTRUCT queries
-- [ ] Periodic snapshots for fast historical queries
+// What is remembered now, on every profile: the quads, without times
+store.AcquireReadLock();
+try
+{
+    foreach (var quad in store.QueryCurrent("<http://ex.org/alice>", ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty))
+        Console.WriteLine($"{quad.Subject} {quad.Predicate} {quad.Object}");
+}
+finally { store.ReleaseReadLock(); }
+
+// The memories with their times, Cognitive only: the bounds the words take
+store.AcquireReadLock();
+try
+{
+    foreach (var memory in store.QueryMemories("<http://ex.org/alice>", ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty,
+                 includingForgotten: true))
+        Console.WriteLine($"{memory.Object} memorized {memory.MemorizedAt:O}, forgotten {memory.ForgottenAt?.ToString("O") ?? "-"}");
+}
+finally { store.ReleaseReadLock(); }
+```
+
+- `QueryCurrent` returns `ResultEnumerator`, which yields `ResolvedQuad`: the graph and the three terms.
+- `QueryMemories` returns `TemporalResultEnumerator`, which yields `ResolvedTemporalQuad`: the quad, `MemorizedAt`,
+  and `ForgottenAt`, null while the memory is remembered. Its parameters `memorizedSince`, `memorizedBefore`,
+  `forgottenSince`, `forgottenBefore` and `includingForgotten` are the bounds of the words. A bound between two
+  milliseconds is taken at the next one. On a store that keeps no times it throws `ProfileCapabilityException`.
+- A batch writes many quads in one clock reading: `BeginBatch`, `AddCurrentBatched` and `DeleteCurrentBatched`, then
+  `CommitBatch` or `RollbackBatch`.
+- The clock is `StorageOptions.Clock`, a `TimeProvider`: the system clock unless one is given. A test supplies its
+  readings there. `NOW()` in a query reads the same clock.
+
+More examples are in [API usage](../../api/api-usage.md) and `examples/Mercury.Examples` (`temporal`).
+
+## How it is stored
+
+A Cognitive store has four B+Tree indexes, each a file of 16 KB pages: `gspo.tdb`, `gpos.tdb`, `gosp.tdb` and
+`tgsp.tdb`. Every index holds every period; they differ in the order of the key.
+
+```
+Entry (88 bytes)
+┌──────────┬─────────────────────┬─────────────┬─────────────┬─────────────────────┬───────┬────────────────────┐
+│ Graph(8) │ three terms (3 × 8) │ Memorized(8)│ Forgotten(8)│ LegacyTransaction(8)│Child 8│ legacy fields (24) │
+└──────────┴─────────────────────┴─────────────┴─────────────┴─────────────────────┴───────┴────────────────────┘
+  GSPO, GPOS, GOSP: graph, the terms in the index's order, memorized, forgotten
+  TGSP:             memorized first, then graph, subject, predicate, object, forgotten
+```
+
+- A read chooses GSPO, GPOS or GOSP by the terms it binds. Which index answers changes no answer: every index holds
+  the same periods.
+- TGSP leads with the memorized time. No read chooses it today. The store writes and rebuilds it, and its tests check
+  that it holds what the other three hold.
+- An open period is stored with a forgotten time in the far future. That value never leaves the store: above storage
+  a remembered memory has no forgotten time.
+- The fields named `Legacy` are from the earlier model and leave with a later change of the stored layout (ADR-061,
+  "Later: the stored layout"). The entry then holds the quad, the two times and the child pointer.
+- Every write goes through the write-ahead log (`wal.log`) and is applied to the four indexes by the quad and its
+  memorized time. A log written by an earlier version still replays as written, its retractions included.
+
+See [Mercury internals](mercury-internals.md) for the log, recovery and concurrency.
+
+## Pruning
+
+A prune copies a store into a new one and keeps what is remembered, each memory with the time it was memorized
+(ADR-061 D12). Nothing forgotten is copied. A `FORGOTTEN` question on a pruned store finds nothing, and a source in
+which everything is forgotten gives an empty store. A prune never changes a time. Whoever wants every period kept
+copies the store. See [Pruning and maintenance](../../tutorials/pruning-and-maintenance.md).
 
 ## References
 
-- Snodgrass, R. T. (1999). *Developing Time-Oriented Database Applications in SQL*
-- Jensen, C. S. (1996). *Temporal Database Management*
-- Allen, J. F. (1983). *Maintaining Knowledge about Temporal Intervals*
+- [ADR-061: A fact's own times](../../adrs/mercury/ADR-061-a-facts-own-times.md): the model, the words, pruning
+- [ADR-062: What a read yields](../../adrs/mercury/ADR-062-what-a-read-yields.md): the result types
+- [ADR-029: Store profiles](../../adrs/mercury/ADR-029-store-profiles.md)
+- [Time Is Not Identity: a cookbook for temporal data modeling](time-is-not-identity-cookbook.md)

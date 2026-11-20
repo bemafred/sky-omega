@@ -5,14 +5,14 @@
 Mercury is the knowledge storage **substrate** of Sky Omega.
 
 Mercury is responsible for **persistence**, **indexing**, **versioning**, and **retrieval**.
-It stores triples with bitemporal semantics, provides O(1) atom lookup and O(log n) index access, and ensures zero-GC performance under concurrent load.
+It stores triples with memory time — when each was memorized and when forgotten — provides O(1) atom lookup and O(log n) index access, and ensures zero-GC performance under concurrent load.
 
 Mercury does not interpret meaning and does not reason over content.
 Instead, it operates over **atoms**, **indices**, **time dimensions**, and **queries**, providing concrete capabilities such as:
 
 - Triple storage and retrieval
 - Multiple index access paths (SPO, POS, OSP, TSPO)
-- Bitemporal versioning (valid-time and transaction-time)
+- Memory time: each period of a quad has the time it was memorized and the time it was forgotten, set by the store (ADR-061); when something was true in the world is a triple
 - SPARQL query execution
 
 Mercury makes knowledge **durable and queryable**, rather than transient or opaque.

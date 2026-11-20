@@ -295,12 +295,12 @@ SUGGESTION: Claim X (Doctrine) could be converted to Hypothesis with test Y
 WARNING: Cluster of Fossil Bias detected in domain Z - recommend review
 ```
 
-### Mercury: Bitemporal Foundation
+### Mercury: Memory Time
 
-Mercury’s bitemporal architecture provides the infrastructure:
+Mercury’s Cognitive store provides the infrastructure, with two kinds of time kept apart:
 
-- **Valid time:** When was this claim true in the world?
-- **Transaction time:** When did we record this claim?
+- **Memory time:** When did we memorize this claim, and when did we let it go? The store sets both, on its own clock, and a claim it lets go of stays in the record of what it once held.
+- **World time:** When was this claim true in the world? That is itself a claim, with its source, stored as a triple like any other.
 
 This enables queries like:
 
@@ -346,7 +346,7 @@ Darwin, Rosling, and Feynman understood this in their respective domains. It’s
 
 - [EEE Methodology](../process/eee-methodology.md) – Emergence, Epistemics, Engineering
 - [Lucy Architecture](../architecture/lucy.md) – Semantic memory substrate
-- [Mercury Bitemporal Design](../architecture/mercury-bitemporal.md) – Temporal data foundation
+- [Memory Time in Mercury](../technical/temporal-rdf.md) – Temporal data foundation
 
 ——
 

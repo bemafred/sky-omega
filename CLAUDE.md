@@ -323,7 +323,7 @@ Detailed subsystem documentation — read on demand when working on specific are
 - Use `[MethodImpl(MethodImplOptions.AggressiveInlining)]` for hot paths
 - Prefer `ReadOnlySpan<char>` over `string` for parsing operations
 - Use `unsafe fixed` buffers for small inline storage when needed
-- Temporal semantics are implicit - all triples have valid-time bounds
+- Memory time is implicit on a Cognitive store - every period of a quad has the time it was memorized and the time it was forgotten, set by the store's clock (ADR-061); no writer states a time
 
 ### Culture Invariance
 

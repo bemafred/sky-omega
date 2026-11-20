@@ -306,19 +306,27 @@ cli> SELECT ?g ?s ?p ?o WHERE {
       -> } LIMIT 10
 ```
 
-### Temporal queries
+### Memory time
 
-Mercury supports temporal SPARQL extensions for querying historical data:
+The CLI store is Cognitive: it keeps when each triple was memorized and when it was forgotten. The words of
+Cognitive SPARQL read those times (see [Memory Time](temporal-rdf.md)):
 
 ```
-cli> SELECT ?name WHERE {
-      ->   ex:alice foaf:name ?name .
-      -> } AS OF "2025-06-01"^^xsd:date
+cli> SELECT ?name ?when WHERE {
+      ->   ex:alice foaf:name ?name MEMORIZED ?when .
+      -> }
 
 cli> SELECT ?name WHERE {
-      ->   ex:alice foaf:name ?name .
-      -> } ALL VERSIONS
+      ->   ex:alice foaf:name ?name MEMORIZED SINCE "2025-06-01"^^xsd:date .
+      -> }
+
+cli> SELECT ?name ?forgotten WHERE {
+      ->   ex:alice foaf:name ?name FORGOTTEN ?forgotten .
+      -> }
 ```
+
+The first gives each name with the time it was memorized; the second, the names memorized since June 2025; the
+third, every name ever memorized, with the time it was forgotten, unbound for a name that is still remembered.
 
 ### Federated queries (SERVICE)
 
@@ -560,10 +568,11 @@ version-controlled (though the binary store files are typically gitignored).
 
 ## Pruning
 
-Pruning compacts the store by physically removing soft-deleted data and
-optionally flattening history. It uses a copy-and-switch pattern: data is
-transferred from the primary store to a fresh secondary store, then the stores
-are swapped.
+Pruning compacts the store: what is remembered is copied, each memory with the
+time it was memorized, and what is forgotten is left out. It uses a
+copy-and-switch pattern: data is transferred from the primary store to a fresh
+secondary store, then the stores are swapped. See
+[Pruning and Maintenance](pruning-and-maintenance.md).
 
 ### Basic prune
 
@@ -587,21 +596,6 @@ Prune dry-run complete:
   Quads written: 1,100
   Duration:      280ms
 ```
-
-### History modes
-
-By default, pruning flattens history to keep only the current version of each
-triple. Use `--history` to control this:
-
-```
-cli> :prune --history preserve
-```
-
-| Mode | Flag value | Behavior |
-|------|-----------|----------|
-| Flatten to current | *(default)* | Keep only the latest version of each triple |
-| Preserve versions | `preserve` | Keep version history but remove soft deletes |
-| Preserve all | `all` | Keep everything including soft deletes |
 
 ### Excluding graphs
 
@@ -630,8 +624,10 @@ cli> :prune --exclude-predicate <http://example.org/debug>
 Options can be combined freely:
 
 ```
-cli> :prune --dry-run --history preserve --exclude-graph <http://example.org/temp> --exclude-predicate <http://example.org/debug>
+cli> :prune --dry-run --exclude-graph <http://example.org/temp> --exclude-predicate <http://example.org/debug>
 ```
+
+The `--history` option of earlier versions is gone and is refused: there is one way to prune.
 
 ---
 

@@ -13,7 +13,7 @@ This document provides code examples for the Mercury public API. For architectur
   - [EXPLAIN](#explain)
   - [Named Graphs](#named-graphs)
   - [Store Statistics](#store-statistics)
-  - [Temporal Extensions](#temporal-extensions)
+  - [Memory Time (Cognitive SPARQL)](#memory-time-cognitive-sparql)
   - [Property Paths](#property-paths)
   - [SPARQL-star](#sparql-star)
   - [SERVICE / Federated Query](#service--federated-query)
@@ -29,13 +29,14 @@ This document provides code examples for the Mercury public API. For architectur
   - [Basic Pruning](#basic-pruning)
   - [With Filtering](#with-filtering)
   - [Dry Run](#dry-run)
-  - [History Modes](#history-modes)
+  - [What a Prune Keeps](#what-a-prune-keeps)
 - [Storage Layer](#storage-layer)
   - [Creating a Store](#creating-a-store)
   - [Batch Write API](#batch-write-api)
   - [Named Graphs (Quads)](#named-graphs-quads)
   - [Concurrent Read Pattern](#concurrent-read-pattern)
   - [Zero-GC Query Pattern](#zero-gc-query-pattern)
+  - [Memories with Their Times](#memories-with-their-times)
 - [SPARQL HTTP Server](#sparql-http-server)
   - [Basic Usage](#basic-usage)
   - [Enable Updates](#enable-updates)
@@ -222,32 +223,32 @@ Console.WriteLine($"WAL Checkpoint: {stats.WalCheckpoint}");
 Console.WriteLine($"WAL Size: {stats.WalSize}");
 ```
 
-### Temporal Extensions
+### Memory Time (Cognitive SPARQL)
 
-SPARQL syntax examples — temporal queries work through `SparqlEngine.Query()`:
+On a Cognitive store each period of a quad has the time it was memorized and the time it was forgotten, set by the
+store's clock ([ADR-061](../adrs/mercury/ADR-061-a-facts-own-times.md)). The words read them, through
+`SparqlEngine.Query()` like any query. The rules are in the
+[SPARQL reference](../architecture/technical/sparql-reference.md#memory-time-cognitive-sparql-adr-061).
 
-```sparql
--- AS OF: point-in-time query
-SELECT ?person ?company
-WHERE { ?person <http://ex.org/worksFor> ?company }
-AS OF "2021-06-15"^^xsd:date
+```csharp
+const string prefixes = "PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ";
 
--- DURING: range query (all versions overlapping the period)
-SELECT ?person ?company
-WHERE { ?person <http://ex.org/worksFor> ?company }
-DURING ["2023-01-01"^^xsd:date, "2023-12-31"^^xsd:date]
+// What was memorized in the last week, and when
+var recent = SparqlEngine.Query(store, prefixes +
+    "SELECT ?s ?o ?when WHERE { ?s <http://ex.org/worksFor> ?o MEMORIZED ?when " +
+    "SINCE NOW() - \"P7D\"^^xsd:dayTimeDuration }");
 
--- ALL VERSIONS: complete history
-SELECT ?company
-WHERE { <http://ex.org/alice> <http://ex.org/worksFor> ?company }
-ALL VERSIONS
+// Every period of one fact, with both times; ?f is unbound while the fact is remembered
+var periods = SparqlEngine.Query(store,
+    "SELECT ?m ?f WHERE { <http://ex.org/alice> <http://ex.org/worksFor> ?o MEMORIZED ?m FORGOTTEN ?f } ORDER BY ?m");
 
--- Temporal clauses combine with LIMIT/OFFSET
-SELECT ?company
-WHERE { <http://ex.org/alice> <http://ex.org/worksFor> ?company }
-LIMIT 10 OFFSET 5
-ALL VERSIONS
+// Every pattern of the query matches forgotten memories too; INCLUDING FORGOTTEN follows the solution modifiers
+var everything = SparqlEngine.Query(store,
+    "SELECT ?company WHERE { <http://ex.org/alice> <http://ex.org/worksFor> ?company } LIMIT 10 INCLUDING FORGOTTEN");
 ```
+
+On a Graph, Reference or Minimal store a query with the words fails: `result.Success` is false and the error says the
+profile keeps no times.
 
 ### Property Paths
 
@@ -404,12 +405,12 @@ RdfEngine.WriteQuads(sw, RdfFormat.TriG, quads);
 
 ## Pruning
 
-The `PruneEngine` facade performs dual-instance pruning with copy-and-switch. It physically removes soft-deleted quads and optionally filters by graph or predicate.
+The `PruneEngine` facade performs dual-instance pruning with copy-and-switch. It copies what is remembered into a new store, each memory with the time it was memorized, leaves out what is forgotten, and optionally filters by graph or predicate.
 
 ### Basic Pruning
 
 ```csharp
-// Prune the pool's active store — removes soft-deleted quads
+// Prune the pool's active store — keeps what is remembered, with its memorized times
 var result = PruneEngine.Execute(pool);
 Console.WriteLine($"Scanned: {result.QuadsScanned}, Written: {result.QuadsWritten}");
 Console.WriteLine($"Saved: {result.BytesSaved} bytes in {result.Duration}");
@@ -436,18 +437,12 @@ Console.WriteLine($"Would scan {result.QuadsScanned}, write {result.QuadsWritten
 Console.WriteLine($"DryRun: {result.DryRun}");  // true
 ```
 
-### History Modes
+### What a Prune Keeps
 
-```csharp
-// FlattenToCurrent (default) — only current facts, most compact
-var options = new PruneOptions { HistoryMode = HistoryMode.FlattenToCurrent };
-
-// PreserveVersions — all versions excluding soft-deleted
-var options = new PruneOptions { HistoryMode = HistoryMode.PreserveVersions };
-
-// PreserveAll — full audit trail including soft-deleted
-var options = new PruneOptions { HistoryMode = HistoryMode.PreserveAll };
-```
+There is one way to prune ([ADR-061](../adrs/mercury/ADR-061-a-facts-own-times.md) D12). The pruned store answers
+the default view, and every `MEMORIZED` question about what is remembered, as its source did. It holds nothing
+forgotten: a `FORGOTTEN` question on it finds nothing, and a source in which everything is forgotten gives an empty
+store. A prune never changes a time. To keep every period, copy the store instead.
 
 ---
 
@@ -555,6 +550,48 @@ finally
     store.ReleaseReadLock();
 }
 ```
+
+`QueryCurrent` works on every profile. It returns `ResultEnumerator`, which yields `ResolvedQuad`: the graph and the
+three terms, nothing else.
+
+### Memories with Their Times
+
+On a Cognitive store, `QueryMemories` reads the periods with their two times. Its bounds are those of the words:
+`memorizedSince`, `memorizedBefore`, `forgottenSince` and `forgottenBefore`, half-open, and `includingForgotten`.
+Without a forgotten bound and without `includingForgotten` it reads what is remembered.
+
+```csharp
+store.AcquireReadLock();
+try
+{
+    var memories = store.QueryMemories(
+        "<http://ex.org/alice>", ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty,
+        memorizedSince: DateTimeOffset.UtcNow.AddDays(-7),
+        includingForgotten: true);
+    try
+    {
+        while (memories.MoveNext())
+        {
+            var memory = memories.Current;              // ResolvedTemporalQuad
+            DateTimeOffset memorized = memory.MemorizedAt;
+            DateTimeOffset? forgotten = memory.ForgottenAt;   // null while the memory is remembered
+            Process(memory.Predicate, memory.Object, memorized, forgotten);
+        }
+    }
+    finally
+    {
+        memories.Dispose();
+    }
+}
+finally
+{
+    store.ReleaseReadLock();
+}
+```
+
+On a Graph, Reference or Minimal store `QueryMemories` throws `ProfileCapabilityException`: those profiles keep no
+times. No write method takes a time: `AddCurrent`, `DeleteCurrent` and their batched forms read the store's clock,
+`StorageOptions.Clock`, which a test can supply.
 
 ---
 

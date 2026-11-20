@@ -405,12 +405,17 @@ internal sealed class WriteAheadLog : IDisposable
 /// </summary>
 internal enum LogOperation : byte
 {
+    /// <summary>
+    /// A version with the record's MemorizedAt and ForgottenAt. Nothing writes it since ADR-061 P1, when a write began
+    /// to log its decided change; a log written before then is replayed as written.
+    /// </summary>
     Add = 1,
 
     /// <summary>
     /// The version with exactly [MemorizedAt, ForgottenAt) was recorded in error: it is marked LegacyIsDeleted (ADR-054 D2).
     /// Records written before ADR-054 by DeleteCurrent carry [MinValue, MaxValue] and are replayed with their old
     /// meaning (mark the first overlapping version); a Retract written since always carries the exact interval.
+    /// Nothing writes it since ADR-061 Step 6 removed Retract; a log that holds one is replayed as written.
     /// </summary>
     Retract = 2,
 
