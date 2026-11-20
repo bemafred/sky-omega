@@ -2,11 +2,11 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System.ComponentModel;
-using System.Reflection;
 using System.Text;
 using ModelContextProtocol.Server;
 using SkyOmega.Mercury;
 using SkyOmega.Mercury.Abstractions;
+using SkyOmega.Mercury.Runtime;
 using SkyOmega.Mercury.Sparql.Results;
 using SkyOmega.Mercury.Storage;
 
@@ -156,13 +156,7 @@ public sealed class MercuryTools
     }
 
     [McpServerTool(Name = "mercury_version"), Description("Get the Mercury MCP server version")]
-    public string Version()
-    {
-        var version = typeof(MercuryTools).Assembly
-            .GetCustomAttribute<System.Reflection.AssemblyInformationalVersionAttribute>()
-            ?.InformationalVersion ?? "unknown";
-        return $"mercury-mcp {version}";
-    }
+    public string Version() => ToolVersion.Line("mercury-mcp", typeof(MercuryTools).Assembly);
 
     // Pruning is intentionally NOT exposed through MCP. Per ADR-006 (MCP Surface Discipline),
     // destructive operations whose effects an AI shouldn't initiate autonomously are CLI-only.

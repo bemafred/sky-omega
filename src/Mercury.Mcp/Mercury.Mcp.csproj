@@ -16,13 +16,11 @@
 
     <ItemGroup>
         <PackageReference Include="ModelContextProtocol" Version="0.8.0-preview.1" />
-        <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.0" />
     </ItemGroup>
 
     <ItemGroup>
-        <ProjectReference Include="..\Mercury\Mercury.csproj" />
-        <ProjectReference Include="..\Mercury.Pruning\Mercury.Pruning.csproj" />
-        <ProjectReference Include="..\Mercury.Runtime\Mercury.Runtime.csproj" />
+        <!-- The store, its endpoints and the stop handling (ADR-065 D11); the Generic Host comes with it. -->
+        <ProjectReference Include="..\Mercury.Hosting\Mercury.Hosting.csproj" />
     </ItemGroup>
 
 </Project>

@@ -2,10 +2,10 @@
 // Mercury Turtle CLI - Thin shim that delegates to TurtleTool library
 
 using System;
-using System.Reflection;
 using System.Threading.Tasks;
 using SkyOmega.Mercury;
 using SkyOmega.Mercury.Abstractions;
+using SkyOmega.Mercury.Runtime;
 using SkyOmega.Mercury.Turtle.Tool;
 
 namespace SkyOmega.Mercury.Cli.Turtle;
@@ -18,10 +18,7 @@ internal static class Program
 
         if (options.ShowVersion)
         {
-            var version = typeof(Program).Assembly
-                .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
-                ?.InformationalVersion ?? "unknown";
-            Console.WriteLine($"mercury-turtle {version}");
+            Console.WriteLine(ToolVersion.Line("mercury-turtle", typeof(Program).Assembly));
             return 0;
         }
 

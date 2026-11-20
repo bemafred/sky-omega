@@ -459,14 +459,6 @@ The short form `mercury -a` defaults to `mcp`:
 mercury -a
 ```
 
-### Attach to another CLI instance
-
-```bash
-mercury -a cli
-```
-
-This connects to the named pipe `mercury-cli`.
-
 ### Custom pipe name
 
 You can pass any pipe name directly:

@@ -232,7 +232,9 @@ SkyOmega.sln
 │   │   ├── Storage/         # B+Tree indexes, atom storage, WAL
 │   │   └── Turtle/          # Streaming RDF Turtle parser
 │   ├── Mercury.Abstractions/ # Shared interfaces and types (RdfFormat, Results)
-│   ├── Mercury.Runtime/     # Runtime utilities (BTreeFile, CrossProcessStoreGate, DiskSpaceGuard, ProcessMemoryProbe, SparseFile, TempPath)
+│   ├── Mercury.Runtime/     # Runtime utilities (BTreeFile, CrossProcessStoreGate, DiskSpaceGuard, ProcessMemoryProbe, SparseFile, TempPath, ToolVersion; IO: MercuryPorts, PipeServer, PipeClient, ReplSession)
+│   ├── Mercury.Serving/     # What a process that holds one store does (ADR-065 D11), BCL only: StoreSession, StoreArguments, ReplSessions, AttachClient. Used by mercury, mercury-mcp, mercuryd
+│   ├── Mercury.Hosting/     # A store served until it is stopped, on the Generic Host (ADR-065 D11): StoreHost, the HTTP and attach-pipe hosted services, StopSignals. Used by mercury-mcp, mercuryd
 │   ├── Mercury.Cli/         # Mercury CLI tool (persistent store)
 │   ├── Mercury.Cli.Sparql/  # SPARQL engine CLI (thin shim over Mercury.Sparql.Tool)
 │   ├── Mercury.Cli.Turtle/  # Turtle parser CLI (thin shim over Mercury.Turtle.Tool)
@@ -270,9 +272,11 @@ SkyOmega.sln
 │   │   ├── Owl/             # OWL/RDFS reasoning tests
 │   │   ├── Rdf/             # RDF format parser/writer tests
 │   │   ├── Repl/            # REPL session tests
+│   │   ├── Serving/         # Mercury.Serving tests (opening a store, the shared options, the REPL session)
 │   │   ├── Sparql/          # SPARQL parser, executor, protocol tests
 │   │   ├── Storage/         # Storage layer tests (QuadStore, AtomStore, WAL)
 │   │   └── W3C/             # W3C conformance test suites
+│   ├── Mercury.Hosting.Tests/ # Mercury.Hosting tests (a store served on the Generic Host, closed when the host stops)
 │   ├── Mercury.Solid.Tests/ # Mercury Solid protocol tests
 │   ├── SkyOmega.Bcl.Tests/  # SkyOmega.Bcl xUnit tests
 │   ├── Minerva.Tests/       # (placeholder dir, no csproj yet)

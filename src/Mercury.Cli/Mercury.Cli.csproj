@@ -15,9 +15,8 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <ProjectReference Include="../Mercury/Mercury.csproj" />
-        <ProjectReference Include="..\Mercury.Pruning\Mercury.Pruning.csproj" />
-        <ProjectReference Include="..\Mercury.Runtime\Mercury.Runtime.csproj" />
+        <!-- The store, the REPL session and the attach client (ADR-065 D11). -->
+        <ProjectReference Include="..\Mercury.Serving\Mercury.Serving.csproj" />
     </ItemGroup>
 
 </Project>

@@ -1,7 +1,6 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
-using System.Reflection;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using SkyOmega.Mercury;
@@ -9,16 +8,18 @@ using SkyOmega.Mercury.Abstractions;
 using SkyOmega.Mercury.Diagnostics;
 using SkyOmega.Mercury.Runtime;
 using SkyOmega.Mercury.Runtime.IO;
+using SkyOmega.Mercury.Serving;
 using SkyOmega.Mercury.Sparql.Protocol;
 using SkyOmega.Mercury.Storage;
 
+// Opening the store, the REPL session and the attach client are in Mercury.Serving, shared with mercury-mcp and
+// mercuryd (ADR-065 D11).
+
 // Parse command line arguments
-string? storePath = null;
-string? storeName = null;
+var store = new StoreArguments(StoreOptions.Path | StoreOptions.Name | StoreOptions.Profile | StoreOptions.Port);
 bool inMemory = false;
 bool showHelp = false;
 bool showVersion = false;
-int httpPort = MercuryPorts.Cli;
 bool enableHttp = true;
 string? attachTarget = null;
 string? loadFile = null;
@@ -35,7 +36,6 @@ long? loadLimit = null;
 string? metricsOutPath = null;
 double metricsStateIntervalSeconds = 0;
 bool noRepl = false;
-StoreProfile? requestedProfile = null;
 
 for (int i = 0; i < args.Length; i++)
 {
@@ -52,20 +52,6 @@ for (int i = 0; i < args.Length; i++)
         case "-m":
         case "--memory":
             inMemory = true;
-            break;
-        case "-d":
-        case "--data":
-            if (i + 1 < args.Length)
-                storePath = args[++i];
-            break;
-        case "--store":
-            if (i + 1 < args.Length)
-                storeName = args[++i];
-            break;
-        case "-p":
-        case "--port":
-            if (i + 1 < args.Length && int.TryParse(args[++i], out var port))
-                httpPort = port;
             break;
         case "--no-http":
             enableHttp = false;
@@ -150,49 +136,34 @@ for (int i = 0; i < args.Length; i++)
         case "--no-repl":
             noRepl = true;
             break;
-        case "--profile":
-            if (i + 1 < args.Length && System.Enum.TryParse<StoreProfile>(args[++i], ignoreCase: true, out var parsedProfile))
-            {
-                requestedProfile = parsedProfile;
-            }
-            else
-            {
-                Console.Error.WriteLine($"Error: --profile requires one of: {string.Join(", ", System.Enum.GetNames<StoreProfile>())}.");
-                return 1;
-            }
-            break;
         default:
-            if (args[i].StartsWith('-'))
+            switch (store.Read(args, ref i))
             {
-                Console.Error.WriteLine($"Error: Unknown option '{args[i]}'.");
-                Console.Error.WriteLine("Use --help for usage information.");
-                return 1;
+                case ArgumentRead.Read:
+                    break;
+                case ArgumentRead.NotMine:
+                    Console.Error.WriteLine($"Error: Unknown option '{args[i]}'.");
+                    Console.Error.WriteLine("Use --help for usage information.");
+                    return 1;
+                case ArgumentRead.LooksLikeSparql:
+                    Console.Error.WriteLine($"Error: {store.Error}");
+                    Console.Error.WriteLine("The mercury CLI does not execute queries directly from arguments.");
+                    Console.Error.WriteLine("Use 'mercury-sparql --query \"...\"' for one-shot queries,");
+                    Console.Error.WriteLine("or start the REPL with 'mercury' and type queries interactively.");
+                    return 1;
+                default:
+                    Console.Error.WriteLine($"Error: {store.Error}");
+                    return 1;
             }
-            if (storePath != null)
-            {
-                Console.Error.WriteLine($"Error: Unexpected argument '{args[i]}'. Store path already set to '{storePath}'.");
-                Console.Error.WriteLine("Use --help for usage information.");
-                return 1;
-            }
-            if (LooksLikeSparql(args[i]))
-            {
-                Console.Error.WriteLine($"Error: '{args[i]}' looks like a SPARQL query, not a store path.");
-                Console.Error.WriteLine("The mercury CLI does not execute queries directly from arguments.");
-                Console.Error.WriteLine("Use 'mercury-sparql --query \"...\"' for one-shot queries,");
-                Console.Error.WriteLine("or start the REPL with 'mercury' and type queries interactively.");
-                return 1;
-            }
-            storePath = args[i];
             break;
     }
 }
 
+int httpPort = store.Port ?? MercuryPorts.Cli;
+
 if (showVersion)
 {
-    var version = Assembly.GetExecutingAssembly()
-        .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
-        ?.InformationalVersion ?? "unknown";
-    Console.WriteLine($"mercury {version}");
+    Console.WriteLine(ToolVersion.Line("mercury", typeof(Program).Assembly));
     return 0;
 }
 
@@ -254,7 +225,7 @@ if (showHelp)
 // Handle attach mode
 if (attachTarget != null)
 {
-    return await RunAttachMode(attachTarget);
+    return await AttachClient.RunToExitCodeAsync(attachTarget, Console.Out);
 }
 
 // ADR-030 Phase 1 + follow-up: the CLI's load-progress records and the
@@ -326,12 +297,9 @@ if (convertInput != null && convertOutput != null)
     return 0;
 }
 
-// Create or open pool
-QuadStorePool pool;
-string resolvedStorePath;
-// The log Mercury owns (ADR-061 M7), for a persistent store: beside the stores, not in one. What a store
-// reports is there after a failure. A temporary session has none.
-FileLogger? storeLog = null;
+// Open the store, with the log Mercury owns (ADR-061 M7) for a persistent store: what a store reports is there
+// after a failure. A temporary session has none.
+StoreSession session;
 bool isBulkLoad = bulkLoadFile != null;
 
 // Determine minimum free disk space: explicit flag > bulk default (100 GB) > normal default (1 GB)
@@ -342,12 +310,11 @@ var minFreeSpace = minFreeSpaceGB.HasValue
 
 if (inMemory)
 {
-    pool = QuadStorePool.CreateTemp("cli-session");
-    resolvedStorePath = pool.BasePath!;
+    session = StoreSession.OpenTemporary("cli-session", "mercury");
 }
 else
 {
-    resolvedStorePath = storePath ?? (storeName != null ? MercuryPaths.Store(storeName) : MercuryPaths.Store("cli"));
+    var storePath = store.ResolvePath("cli");
     try
     {
         // ADR-028 Stage 2 validation knob: when set, honor this exactly as the IAtomStore
@@ -371,19 +338,9 @@ else
             // persisted store-schema.json regardless of what the caller passed. AtomStore
             // is derived from the profile (StoreSchema.ForProfile) — Reference→Sorted,
             // others→Hash — and is not separately overridable.
-            Profile = requestedProfile ?? StoreProfile.Cognitive,
+            Profile = store.Profile ?? StoreProfile.Cognitive,
         };
-        // Nothing is written to the log before the pool holds the store, so this process leaves the log of the
-        // process that holds it alone.
-        var logPath = Path.Combine(Path.GetFullPath(resolvedStorePath), "mercury.log");
-        var toolVersion = Assembly.GetExecutingAssembly()
-            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown";
-        storeLog = new FileLogger(logPath, firstLine: $"mercury {toolVersion} starts, process {Environment.ProcessId}");
-        pool = new QuadStorePool(resolvedStorePath, new QuadStorePoolOptions { StorageOptions = storeOpts, Logger = storeLog });
-        var logOfThisRun = storeLog;
-        AppDomain.CurrentDomain.UnhandledException += (_, unhandled) =>
-            logOfThisRun.Log(SkyOmega.Mercury.Diagnostics.LogLevel.Critical,
-                $"mercury ends with an exception that nothing handled: {unhandled.ExceptionObject}");
+        session = StoreSession.Open(storePath, "mercury", ToolVersion.Of(typeof(Program).Assembly), storeOpts);
     }
     catch (StoreInUseException ex)
     {
@@ -393,13 +350,11 @@ else
     }
 }
 
-// Ensure a primary store exists so pool.Active works immediately
-// (new pools and temp pools start with no stores; persistent pools
-// may have been created by an older version without pool metadata)
-pool.EnsureActive("primary");
+var pool = session.Pool;
+var resolvedStorePath = session.Path;
 // The store is open, and it logged that. If the log could not take the line, say so now.
-if (storeLog is { LinesNotWritten: > 0 })
-    Console.Error.WriteLine($"Warning: the log at {storeLog.Path} cannot be written. This run leaves no log.");
+if (session.LogWarning is { } logWarning)
+    Console.Error.WriteLine(logWarning);
 
 // Attach the already-constructed listener to pool.Active so store events (query +
 // rebuild) use the same writer as the CLI's load-progress records. Shared lock,
@@ -452,9 +407,7 @@ if (repairDeletes)
     if (restoreEvents.Count > 0 && dryRun)
         Console.WriteLine("Dry run: the --restore events are shown with action 'restore'; nothing is changed.");
     var (ended, restored, left) = pool.Active.RepairDeletes(restoreEvents, dryRun, Console.Out);
-    pool.Dispose();
-    storeLog?.Log(SkyOmega.Mercury.Diagnostics.LogLevel.Info, $"mercury stops, process {Environment.ProcessId}");
-    storeLog?.Dispose();
+    session.Dispose();
     Console.WriteLine(dryRun
         ? $"Dry run complete: {ended} would end, {restored} would be restored, {left} left."
         : $"Repair complete: {ended} ended, {restored} restored, {left} left.");
@@ -467,18 +420,15 @@ if (enableHttp)
 {
     try
     {
-        httpServer = new SparqlHttpServer(
-            () => pool.Active,
-            $"http://localhost:{httpPort}/",
-            new SparqlHttpServerOptions { EnableUpdates = true });
+        httpServer = session.CreateHttpServer(httpPort, enableUpdates: true);
 
         httpServer.Start();
-        Console.WriteLine($"HTTP endpoint: http://localhost:{httpPort}/sparql");
+        Console.WriteLine($"HTTP endpoint: {MercuryPorts.GetEndpoint(httpPort)}");
 
         // Check if MCP is running
-        if (await IsEndpointAlive($"http://localhost:{MercuryPorts.Mcp}/sparql"))
+        if (await IsEndpointAlive(MercuryPorts.GetEndpoint(MercuryPorts.Mcp)))
         {
-            Console.WriteLine($"MCP instance detected - SERVICE <http://localhost:{MercuryPorts.Mcp}/sparql>");
+            Console.WriteLine($"MCP instance detected - SERVICE <{MercuryPorts.GetEndpoint(MercuryPorts.Mcp)}>");
         }
         Console.WriteLine();
     }
@@ -622,36 +572,13 @@ if (rebuildIndexes)
 // Flush/close metrics file before entering REPL
 jsonlListener?.Dispose();
 
-// Create ReplSession with facade calls and run REPL
+// Run the REPL, with every command the CLI offers.
+// The pool is closed on the way out, also when the REPL throws; the log is left open then, for the line about the
+// exception that nothing handled.
 using (pool)
 using (httpServer)
-using (var session = new ReplSession(
-    executeQuery: sparql => SparqlEngine.Query(pool.Active, sparql),
-    executeUpdate: sparql => SparqlEngine.Update(pool.Active, sparql),
-    getStatistics: () => SparqlEngine.GetStatistics(pool.Active),
-    getNamedGraphs: () => SparqlEngine.GetNamedGraphs(pool.Active),
-    executePrune: pruneArgs => ExecutePrune(pool, pruneArgs),
-    getStorePath: () => resolvedStorePath,
-    executeAttach: target => RunAttachSession(target),
-    executeLoad: async (path, bulk, progress) =>
-    {
-        Action<LoadProgress>? onProgress = progress != null
-            ? p => progress(p.TriplesLoaded, p.Elapsed)
-            : null;
-        return await RdfEngine.LoadFileAsync(pool.Active, path, onProgress: onProgress);
-    },
-    executeConvert: async (input, output, progress) =>
-    {
-        Action<LoadProgress>? onProgress = progress != null
-            ? p => progress(p.TriplesLoaded, p.Elapsed)
-            : null;
-        return await RdfEngine.ConvertAsync(input, output, onProgress);
-    },
-    executeRebuildIndexes: progress =>
-    {
-        pool.Active.RebuildSecondaryIndexes(progress);
-        return Task.CompletedTask;
-    }))
+using (var repl = ReplSessions.Create(session,
+    ReplCommands.Prune | ReplCommands.Attach | ReplCommands.Load | ReplCommands.Convert | ReplCommands.RebuildIndexes))
 {
     // --no-repl is the explicit opt-out for profilers, CI, and Rider run configs
     // that hold stdin open with no data (which would hang the REPL in read()).
@@ -659,13 +586,12 @@ using (var session = new ReplSession(
     // REPL reads lines until EOF and exits.
     if (!noRepl)
     {
-        session.RunInteractive();
+        repl.RunInteractive();
     }
 }
 
-// The pool is closed here, and with it the stores.
-storeLog?.Log(SkyOmega.Mercury.Diagnostics.LogLevel.Info, $"mercury stops, process {Environment.ProcessId}");
-storeLog?.Dispose();
+// The store is closed; the stop goes to its log.
+session.Dispose();
 return 0;
 
 // --- Helper functions ---
@@ -684,103 +610,3 @@ static async Task<bool> IsEndpointAlive(string url)
     }
 }
 
-static async Task RunAttachSession(string target)
-{
-    var pipeName = target.ToLowerInvariant() switch
-    {
-        "mcp" => MercuryPorts.McpPipeName,
-        "cli" => MercuryPorts.CliPipeName,
-        _ => target
-    };
-
-    Console.WriteLine($"Attaching to {target} via pipe '{pipeName}'...");
-
-    using var client = new PipeClient(pipeName);
-    await client.ConnectAsync(timeoutMs: 5000);
-    await client.RunInteractiveAsync();
-
-    Console.WriteLine($"Detached from {target}.");
-}
-
-static async Task<int> RunAttachMode(string target)
-{
-    var pipeName = target.ToLowerInvariant() switch
-    {
-        "mcp" => MercuryPorts.McpPipeName,
-        "cli" => MercuryPorts.CliPipeName,
-        _ => target // Assume it's a custom pipe name
-    };
-
-    Console.WriteLine($"Attaching to {target} via pipe '{pipeName}'...");
-
-    try
-    {
-        using var client = new PipeClient(pipeName);
-        await client.ConnectAsync(timeoutMs: 5000);
-        await client.RunInteractiveAsync();
-        return 0;
-    }
-    catch (TimeoutException)
-    {
-        Console.WriteLine($"Error: Could not connect to {target}. Is it running?");
-        return 1;
-    }
-    catch (Exception ex)
-    {
-        Console.WriteLine($"Error: {ex.Message}");
-        return 1;
-    }
-}
-
-// --- Execution helper for ReplSession ---
-
-static PruneResult ExecutePrune(QuadStorePool pool, string args)
-{
-    // Parse prune args
-    bool dryRun = false;
-    var excludeGraphs = new List<string>();
-    var excludePredicates = new List<string>();
-
-    var parts = args.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-    for (int i = 0; i < parts.Length; i++)
-    {
-        switch (parts[i])
-        {
-            case "--dry-run":
-                dryRun = true;
-                break;
-            case "--history":
-                // The history modes are gone (ADR-061 D12). Accepting the option and ignoring it would prune away the
-                // forgotten memories its user asked to keep.
-                throw new ArgumentException(
-                    "--history is gone: a prune keeps what is remembered, each memory with the time it was memorized, " +
-                    "and nothing that is forgotten (ADR-061 D12). To keep everything, copy the store.");
-            case "--exclude-graph" when i + 1 < parts.Length:
-                excludeGraphs.Add(parts[++i]);
-                break;
-            case "--exclude-predicate" when i + 1 < parts.Length:
-                excludePredicates.Add(parts[++i]);
-                break;
-        }
-    }
-
-    var options = new PruneOptions
-    {
-        DryRun = dryRun,
-        ExcludeGraphs = excludeGraphs.Count > 0 ? excludeGraphs.ToArray() : null,
-        ExcludePredicates = excludePredicates.Count > 0 ? excludePredicates.ToArray() : null
-    };
-
-    return PruneEngine.Execute(pool, options);
-}
-
-static bool LooksLikeSparql(string arg)
-{
-    // Detect SPARQL keywords and syntax that should never appear in a file path
-    var upper = arg.ToUpperInvariant();
-    return upper.Contains("SELECT ") || upper.Contains("CONSTRUCT ") ||
-           upper.Contains("DESCRIBE ") || upper.Contains("ASK ") ||
-           upper.Contains("INSERT ") || upper.Contains("DELETE ") ||
-           upper.Contains("WHERE") || arg.Contains('{') || arg.Contains('}') ||
-           arg.Contains("?s ") || arg.Contains("?p ") || arg.Contains("?o ");
-}

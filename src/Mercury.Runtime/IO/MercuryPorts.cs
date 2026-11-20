@@ -24,9 +24,11 @@ public static class MercuryPorts
     public const string McpPipeName = "mercury-mcp";
 
     /// <summary>
-    /// Named pipe for CLI instance.
+    /// The pipe a target of <c>mercury --attach</c> names: <c>mcp</c> (in any case) is mercury-mcp's pipe, and any other
+    /// target is the name of a pipe as it is. The CLI hosts no pipe, so there is no <c>cli</c> target (ADR-065 D7).
     /// </summary>
-    public const string CliPipeName = "mercury-cli";
+    public static string AttachPipeName(string target) =>
+        string.Equals(target, "mcp", StringComparison.OrdinalIgnoreCase) ? McpPipeName : target;
 
     /// <summary>
     /// Get the SPARQL endpoint URL for a port.

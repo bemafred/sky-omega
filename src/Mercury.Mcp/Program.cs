@@ -1,22 +1,19 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
-using System.Reflection;
-using System.Runtime.InteropServices;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
-using SkyOmega.Mercury;
 using SkyOmega.Mercury.Abstractions;
+using SkyOmega.Mercury.Hosting;
 using SkyOmega.Mercury.Mcp;
-using SkyOmega.Mercury.Mcp.Services;
+using SkyOmega.Mercury.Runtime;
 using SkyOmega.Mercury.Runtime.IO;
-using SkyOmega.Mercury.Storage;
+using SkyOmega.Mercury.Serving;
 
-// Parse command line arguments before building host
-string? storePath = null;
-int httpPort = MercuryPorts.Mcp;
+// The host of mercury-mcp: its options, its words, and the MCP server. Opening the store, the HTTP endpoint, the
+// attach pipe and the stop handling are in Mercury.Serving and Mercury.Hosting (ADR-065 D11).
+
+var store = new StoreArguments(StoreOptions.Path | StoreOptions.Port);
 bool enableHttpUpdates = false;
 bool showHelp = false;
 bool showVersion = false;
@@ -33,50 +30,34 @@ for (int i = 0; i < args.Length; i++)
         case "--version":
             showVersion = true;
             break;
-        case "-d":
-        case "--data":
-            if (i + 1 < args.Length)
-                storePath = args[++i];
-            break;
-        case "-p":
-        case "--port":
-            if (i + 1 < args.Length && int.TryParse(args[++i], out var port))
-                httpPort = port;
-            break;
         case "--enable-http-updates":
             enableHttpUpdates = true;
             break;
         default:
-            if (args[i].StartsWith('-'))
+            switch (store.Read(args, ref i))
             {
-                Console.Error.WriteLine($"Error: Unknown option '{args[i]}'.");
-                Console.Error.WriteLine("Use --help for usage information.");
-                return 1;
+                case ArgumentRead.Read:
+                    break;
+                case ArgumentRead.NotMine:
+                    Console.Error.WriteLine($"Error: Unknown option '{args[i]}'.");
+                    Console.Error.WriteLine("Use --help for usage information.");
+                    return 1;
+                case ArgumentRead.LooksLikeSparql:
+                    Console.Error.WriteLine($"Error: {store.Error}");
+                    Console.Error.WriteLine("mercury-mcp is an MCP server, not a query CLI.");
+                    Console.Error.WriteLine("Use 'mercury-sparql --query \"...\"' for one-shot queries.");
+                    return 1;
+                default:
+                    Console.Error.WriteLine($"Error: {store.Error}");
+                    return 1;
             }
-            if (storePath != null)
-            {
-                Console.Error.WriteLine($"Error: Unexpected argument '{args[i]}'. Store path already set to '{storePath}'.");
-                Console.Error.WriteLine("Use --help for usage information.");
-                return 1;
-            }
-            if (LooksLikeSparql(args[i]))
-            {
-                Console.Error.WriteLine($"Error: '{args[i]}' looks like a SPARQL query, not a store path.");
-                Console.Error.WriteLine("mercury-mcp is an MCP server, not a query CLI.");
-                Console.Error.WriteLine("Use 'mercury-sparql --query \"...\"' for one-shot queries.");
-                return 1;
-            }
-            storePath = args[i];
             break;
     }
 }
 
 if (showVersion)
 {
-    var version = Assembly.GetExecutingAssembly()
-        .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
-        ?.InformationalVersion ?? "unknown";
-    Console.WriteLine($"mercury-mcp {version}");
+    Console.WriteLine(ToolVersion.Line("mercury-mcp", typeof(Program).Assembly));
     return 0;
 }
 
@@ -117,26 +98,18 @@ if (showHelp)
 }
 
 // Default store path - persistent per-user location
-storePath ??= MercuryPaths.Store("mcp");
+var storePath = store.ResolvePath("mcp");
+int httpPort = store.Port ?? MercuryPorts.Mcp;
+var toolVersion = ToolVersion.Of(typeof(Program).Assembly);
 
 Console.Error.WriteLine("Mercury MCP Server starting...");
 Console.Error.WriteLine($"  Store: {Path.GetFullPath(storePath)}");
+Console.Error.WriteLine($"  Log:   {StoreSession.LogPathFor(storePath)}");
 
-// The log Mercury owns (ADR-061 M7): beside the stores, not in one. What a store reports is there after a
-// failure, when this process and its standard error are gone. Nothing is written to it before the pool holds
-// the store, so a second mercury-mcp leaves the log of the first alone.
-var logPath = Path.Combine(Path.GetFullPath(storePath), "mercury.log");
-var toolVersion = Assembly.GetExecutingAssembly()
-    .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown";
-using var storeLog = new SkyOmega.Mercury.Diagnostics.FileLogger(logPath,
-    firstLine: $"mercury-mcp {toolVersion} starts, process {Environment.ProcessId}");
-Console.Error.WriteLine($"  Log:   {logPath}");
-
-// Create pool (auto-migrates flat stores on first run)
-QuadStorePool pool;
+StoreSession session;
 try
 {
-    pool = new QuadStorePool(storePath, new QuadStorePoolOptions { Logger = storeLog });
+    session = StoreSession.Open(storePath, "mercury-mcp", toolVersion);
 }
 catch (StoreInUseException ex)
 {
@@ -145,26 +118,13 @@ catch (StoreInUseException ex)
     Console.Error.WriteLine("Close the other process first, or use -d to specify a different store path.");
     return 1;
 }
-AppDomain.CurrentDomain.UnhandledException += (_, unhandled) =>
-    storeLog.Log(SkyOmega.Mercury.Diagnostics.LogLevel.Critical,
-        $"mercury-mcp ends with an exception that nothing handled: {unhandled.ExceptionObject}");
-pool.EnsureActive("primary");
-// The store is open, and it logged that. If the log could not take the line, say so now.
-if (storeLog.LinesNotWritten > 0)
-    Console.Error.WriteLine($"Warning: the log at {logPath} cannot be written. This run leaves no log.");
+if (session.LogWarning is { } logWarning)
+    Console.Error.WriteLine(logWarning);
 
 Console.Error.WriteLine($"  Updates: {(enableHttpUpdates ? "enabled" : "disabled")}");
 
-// Build host with MCP SDK
-var builder = Host.CreateApplicationBuilder();
-builder.Logging.AddConsole(options =>
-{
-    options.LogToStandardErrorThreshold = LogLevel.Trace;
-});
-
-// Register QuadStorePool and store path as singletons
-builder.Services.AddSingleton(pool);
-builder.Services.AddSingleton(new StorePathHolder(Path.GetFullPath(storePath)));
+var builder = StoreHost.CreateBuilder(session);
+builder.Services.AddSingleton(new StorePathHolder(session.Path));
 
 // Register MCP server with stdio transport and tools
 builder.Services
@@ -194,59 +154,22 @@ builder.Services
     .WithStdioServerTransport()
     .WithTools<MercuryTools>();
 
-// Register hosted services for HTTP and pipe servers
-builder.Services.AddSingleton<HttpServerHostedService>(
-    _ => new HttpServerHostedService(pool, httpPort, enableHttpUpdates));
-builder.Services.AddHostedService(sp => sp.GetRequiredService<HttpServerHostedService>());
-
-builder.Services.AddSingleton<PipeServerHostedService>(
-    _ => new PipeServerHostedService(pool, CreateSession, storePath));
-builder.Services.AddHostedService(sp => sp.GetRequiredService<PipeServerHostedService>());
+builder.AddStoreEndpoints(new StoreEndpointOptions
+{
+    Port = httpPort,
+    EnableUpdates = enableHttpUpdates,
+    PipeName = MercuryPorts.McpPipeName,
+    PipeWelcome = $"Connected to Mercury MCP (store: {session.Path})",
+    PipePrompt = "mcp> ",
+});
 
 Console.Error.WriteLine();
 Console.Error.WriteLine("Ready. Waiting for MCP messages on stdin...");
 Console.Error.WriteLine();
 
-// Stop signals (ADR-058 Q7). Claude Code sends SIGINT, then SIGTERM 100 ms later. The host's
-// ConsoleLifetime handles both only while the host runs: RunAsync disposes the host, which removes
-// its handlers, so a signal during pool.Dispose() got the default action and ended the process
-// mid-Dispose. These registrations are disposed when Main returns, after pool.Dispose(): a signal
-// stops the host, and the process stays up until the store is closed.
-using var stopping = new CancellationTokenSource();
-using var onSigterm = PosixSignalRegistration.Create(PosixSignal.SIGTERM, OnStopSignal);
-using var onSigint = PosixSignalRegistration.Create(PosixSignal.SIGINT, OnStopSignal);
-
-await builder.Build().RunAsync(stopping.Token);
-
-Console.Error.WriteLine("MCP Server shutting down...");
-pool.Dispose();
-storeLog.Log(SkyOmega.Mercury.Diagnostics.LogLevel.Info, $"mercury-mcp stops, process {Environment.ProcessId}");
+// The MCP stdio transport stops the host when standard input ends; SIGINT and SIGTERM stop it too, and stay handled
+// until the store is closed (ADR-058 Q7).
+await StoreHost.RunAsync(builder.Build(), session, closing: () => Console.Error.WriteLine("MCP Server shutting down..."));
 Console.Error.WriteLine("MCP Server stopped.");
 
 return 0;
-
-void OnStopSignal(PosixSignalContext context)
-{
-    context.Cancel = true; // no default action: the process ends when Main returns
-    try { stopping.Cancel(); }
-    catch (ObjectDisposedException) { } // a signal racing the end of Main
-}
-
-// --- Session factory for pipe connections ---
-
-ReplSession CreateSession(QuadStorePool pool) => new ReplSession(
-    executeQuery: sparql => SparqlEngine.Query(pool.Active, sparql),
-    executeUpdate: sparql => SparqlEngine.Update(pool.Active, sparql),
-    getStatistics: () => SparqlEngine.GetStatistics(pool.Active),
-    getNamedGraphs: () => SparqlEngine.GetNamedGraphs(pool.Active),
-    getStorePath: () => Path.GetFullPath(storePath));
-
-static bool LooksLikeSparql(string arg)
-{
-    var upper = arg.ToUpperInvariant();
-    return upper.Contains("SELECT ") || upper.Contains("CONSTRUCT ") ||
-           upper.Contains("DESCRIBE ") || upper.Contains("ASK ") ||
-           upper.Contains("INSERT ") || upper.Contains("DELETE ") ||
-           upper.Contains("WHERE") || arg.Contains('{') || arg.Contains('}') ||
-           arg.Contains("?s ") || arg.Contains("?p ") || arg.Contains("?o ");
-}

@@ -2,10 +2,13 @@
 
 ## Status
 
-**Status:** Proposed — 2026-11-20
+**Status:** Accepted — 2026-11-20
 
 Drafted by zbook on 2026-11-20, which holds sky-omega's Mercury role while sky-omega is offline (Martin, the same day:
-"We will take Sky-omega's role temporarily."). Every decision below is marked **Proposed** until Martin decides it.
+"We will take Sky-omega's role temporarily.").
+
+Accepted by Martin the same day ("ADR-065 approved."): each decision as written, and each question answered as it
+proposed.
 
 Revised the same day, after Martin read the first draft: mercuryd is a minimal host, and its code is in libraries that
 mercury and mercury-mcp share (D1, D11, D12); `mercury --attach cli` is dropped (D7); code that only one tool uses stays
@@ -152,7 +155,7 @@ memory, with one writer. The profile is not this ADR's decision: mercuryd serves
 
 ## Decision
 
-### D1. mercuryd is a component of its own, and a minimal host — Proposed
+### D1. mercuryd is a component of its own, and a minimal host — Accepted
 
 - A project, `src/Mercury.Daemon`, packed as a global tool whose command is `mercuryd`, as the other Mercury tools
   are.
@@ -164,13 +167,13 @@ memory, with one writer. The profile is not this ADR's decision: mercuryd serves
   and a service has no terminal, starts when the machine does, and stops when its service manager says so. Each is
   simpler alone.
 
-### D2. One mercuryd serves one store — Proposed
+### D2. One mercuryd serves one store — Accepted
 
 - The store is named with `--store <name>` (under `<stores>`, as the CLI's) or given with `-d <path>`.
 - `--profile` applies when the store is made, and an existing store keeps its own (ADR-029).
 - A second process on the store is refused, as today.
 
-### D3. Its lifetime — Proposed
+### D3. Its lifetime — Accepted
 
 - **Start:** open the store, start the HTTP endpoint, start the attach socket. If any of them fails, mercuryd says why
   in its log and on standard error and exits with a code other than 0, so that the service manager restarts it. It
@@ -180,7 +183,7 @@ memory, with one writer. The profile is not this ADR's decision: mercuryd serves
   write the stop to the log, and exit 0. The stop signals stay handled until the store is closed (ADR-058 Q7).
 - A SIGKILL, or a power cut, ends it at once; the next open replays the log (ADR-058).
 
-### D4. It listens where it is told — Proposed
+### D4. It listens where it is told — Accepted
 
 - `--listen <host>`, which may be given more than once, and `--port <port>`. Without `--listen`, it listens on
   `localhost`.
@@ -189,14 +192,14 @@ memory, with one writer. The profile is not this ADR's decision: mercuryd serves
 - `+` and `*` are allowed, and they listen on every network the machine has, the local one included.
 - `SparqlHttpServer` and `HttpListenerLoop` take one address today; they take several.
 
-### D5. Updates over HTTP are on — Proposed
+### D5. Updates over HTTP are on — Accepted
 
 - The shared store is written by its clients, so the update endpoint, `POST /sparql/update`, is on.
 - `--read-only` turns it off.
 - No authentication: the tailnet is the boundary (Martin: "We consider this environment safe"). Listening on `+` or
   `*` gives up that boundary, and the help text says so.
 
-### D6. The attach socket — Proposed
+### D6. The attach socket — Accepted
 
 - **Linux and macOS:** a Unix socket in the store's directory, `<store>/mercuryd.sock`, named by its absolute path.
   Where it is is then the same for the daemon and for every client, whatever their temporary directory. Whoever may
@@ -207,7 +210,7 @@ memory, with one writer. The profile is not this ADR's decision: mercuryd serves
   user named in the service's install.
 - Over it runs the REPL mercury-mcp's pipe gives today (`ReplSession`).
 
-### D7. The CLI attaches to a store — Proposed
+### D7. The CLI attaches to a store — Accepted
 
 - `mercury --attach --store <name>` (or `-d <path>`) finds the socket from the store. `mercury --attach`, which is
   `--attach mcp`, and `mercury --attach <pipe name>` work as today.
@@ -216,7 +219,7 @@ memory, with one writer. The profile is not this ADR's decision: mercuryd serves
   `MercuryPorts.CliPipeName` goes with it, and so does the CLI tutorial's "Attach to another CLI instance". If a need
   for it shows, it is added and built whole: Martin, "If a need surfaces later, it can be added and implemented fully."
 
-### D8. Each platform's service manager — Proposed
+### D8. Each platform's service manager — Accepted
 
 | | Linux | macOS | Windows |
 |---|---|---|---|
@@ -229,14 +232,14 @@ memory, with one writer. The profile is not this ADR's decision: mercuryd serves
 - A tailnet address that is not up yet when the machine starts makes the start fail (D3), and the service manager
   starts it again.
 
-### D9. Its logs — Proposed
+### D9. Its logs — Accepted
 
 - `mercury.log` in the store's directory, as every Mercury process: each start and stop, each store opened, and every
   warning and error.
 - Standard output and standard error go to the service manager's log: journald, the plist's `StandardOutPath` and
   `StandardErrorPath`, or the Windows event log through the hosting package.
 
-### D10. SERVICE works from every tool — Proposed
+### D10. SERVICE works from every tool — Accepted
 
 - `SparqlEngine.Query` gives each query an `HttpSparqlServiceExecutor`. A session's own mercury-mcp then reads the
   shared store with `SERVICE <http://elite.tail7f8646.ts.net:3032/sparql> { … }`: Martin's "that's how an MCP can
@@ -246,7 +249,7 @@ memory, with one writer. The profile is not this ADR's decision: mercuryd serves
   accepted with D5.
 - This is not mercuryd's code, but without it no MCP reaches mercuryd.
 
-### D11. The layers — Proposed
+### D11. The layers — Accepted
 
 The rule is Martin's (Why): each tool is a minimal host over libraries, and no code is copied. The split:
 
@@ -264,8 +267,8 @@ Mercury.Abstractions
 
 | Project | What it holds | Used by |
 |---|---|---|
-| `Mercury.Runtime`, more in it | Where a store's attach socket or pipe is (D6), for the daemon and for the client. The listener addresses from `--listen` and `--port` (D4). Beside `MercuryPorts`, `PipeServer` and `PipeClient`. | every tool |
-| `Mercury.Serving`, new | What a process that holds one store does: open the store with its log, close it and log the stop; the REPL session over it, with the commands each tool offers, prune's options among them; the options the tools share (`--store`, `-d`, `--profile`, `--listen`, `--port`); `LooksLikeSparql`; the version line. | mercury, mercury-mcp, mercuryd |
+| `Mercury.Runtime`, more in it | Where a store's attach socket or pipe is (D6), for the daemon and for the client. The listener addresses from `--listen` and `--port` (D4). Beside `MercuryPorts`, `PipeServer` and `PipeClient`. The version line, `ToolVersion`: here, not in `Mercury.Serving`, so that mercury-sparql and mercury-turtle use it too without a reference they have no other use for (moved here while Step 2 was done). | every tool |
+| `Mercury.Serving`, new | What a process that holds one store does: open the store with its log, close it and log the stop; the REPL session over it, with the commands each tool offers, prune's options among them; the options the tools share (`--store`, `-d`, `--profile`, `--listen`, `--port`); `LooksLikeSparql`. | mercury, mercury-mcp, mercuryd |
 | `Mercury.Hosting`, new | What a process that holds one store until it is stopped does: the hosted HTTP and attach services; the stop signals held until the store is closed (ADR-058 Q7); the store host both tools run; mercuryd's options. | mercury-mcp, mercuryd |
 
 - `Mercury.Serving` cannot be in `Mercury.Runtime`, which is below the core. It is not in the core, which would then
@@ -276,7 +279,7 @@ Mercury.Abstractions
 - Tests: `Mercury.Serving` in Mercury.Tests, as `Mercury.Sparql.Tool` is; `Mercury.Hosting` and mercuryd in a new
   `tests/Mercury.Hosting.Tests`.
 
-### D12. The shared code moves first, and mercury and mercury-mcp behave as before — Proposed
+### D12. The shared code moves first, and mercury and mercury-mcp behave as before — Accepted
 
 - Before mercuryd is written, the code in Context's table moves to where D11 puts it, and mercury and mercury-mcp are
   built on it.
@@ -287,27 +290,31 @@ Mercury.Abstractions
 
 ## Questions
 
-For Martin. Each has a proposal.
+Each was answered as it proposed, when Martin accepted this ADR on 2026-11-20.
 
-- **Q1. The port.** Proposed: 3032, as `MercuryPorts.Daemon`, mercuryd's default (3030 is mercury-mcp's, 3031 the
+- **Q1. The port.** Decided: 3032, as `MercuryPorts.Daemon`, mercuryd's default (3030 is mercury-mcp's, 3031 the
   CLI's).
-- **Q2. Updates on by default (D5)?** Proposed: yes, with `--read-only`.
-- **Q3. A REPL over HTTP,** `mercury --connect <url>`, so that attaching from another machine needs no ssh? Proposed:
+- **Q2. Updates on by default (D5)?** Decided: yes, with `--read-only`.
+- **Q3. A REPL over HTTP,** `mercury --connect <url>`, so that attaching from another machine needs no ssh? Decided:
   later, in its own ADR. ssh over the tailnet does it now (D7).
-- **Q4. elite's store.** Proposed: named `shared`, Graph profile, made by mercuryd's first start.
-- **Q5. The release.** A new tool is a new version (semver). Proposed: the next minor version, cut when Martin says.
+- **Q4. elite's store.** Decided: named `shared`, Graph profile, made by mercuryd's first start.
+- **Q5. The release.** A new tool is a new version (semver). Decided: the next minor version, cut when Martin says.
 - **Q6. Should systemd know when mercuryd is ready?** A unit of `Type=notify`, through
   `Microsoft.Extensions.Hosting.Systemd`, is "started" only once the store is open and the listeners are up, so
   `systemctl start` waits for that and reports a failed open. A unit of `Type=simple` is "started" when the process is,
-  and `Restart=on-failure` still restarts it. Proposed: `Type=simple`, and no package, until a need shows.
+  and `Restart=on-failure` still restarts it. Decided: `Type=simple`, and no package, until a need shows.
 
 ## Steps
 
 The order follows the dependencies (ADR-064's rule).
 
-1. **Martin's review** of this text.
+1. **Martin's review** of this text. Done: accepted 2026-11-20.
 2. **The shared code moves** (D11, D12): `Mercury.Serving`, `Mercury.Hosting` and what `Mercury.Runtime` gains;
    mercury and mercury-mcp built on them and behaving as before; `--attach cli` dropped (D7); with tests.
+   Done on zbook, 2026-11-20: 59 tests in Mercury.Tests (`Serving/`) and 3 in `tests/Mercury.Hosting.Tests`, each
+   of seven mutations of the moved code failed by one of them; Mercury.Tests 6546 passed, 0 failed, 155 skipped (the
+   W3C syntax suites' skips). One change seen: `:store` and mercury-mcp's pipe welcome name the store by its full
+   path when a relative one is given. The stop signals are tested in Step 4, on mercuryd's own process.
 3. **Several listen addresses** in `HttpListenerLoop` and `SparqlHttpServer` (D4), with tests.
 4. **`src/Mercury.Daemon`** (D1 to D3, D5, D6, D9), with tests in `tests/Mercury.Hosting.Tests`: a start that serves
    queries and updates over HTTP, an attach over the socket, a SIGTERM that closes the store and writes the stop to

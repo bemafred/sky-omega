@@ -132,12 +132,6 @@ The short form `mercury -a` defaults to `mcp`:
 mercury -a
 ```
 
-### Attach to another CLI instance
-
-```bash
-mercury -a cli
-```
-
 ### Custom pipe name
 
 ```bash
@@ -146,13 +140,15 @@ mercury -a my-custom-pipe
 
 ### What you can do in attach mode
 
-Attach mode gives you a full REPL with all commands: queries, updates,
-`:stats`, `:graphs`, `:count`, even `:prune`. This is particularly useful for:
+Attach mode gives you a REPL over the MCP store: queries, updates (`INSERT DATA`
+among them), `:stats`, `:graphs`, `:count` and `:store`. `:prune`, `:load`,
+`:convert` and `:rebuild-indexes` are the CLI's own, on a store it holds:
+stop mercury-mcp and open the store with `mercury --store mcp`. Attach mode is
+particularly useful for:
 
 - **Inspecting what Claude has stored** via the MCP server
 - **Debugging semantic memory** issues
 - **Running ad-hoc queries** against MCP data without restarting Claude
-- **Loading data** into the MCP store manually
 
 ---
 

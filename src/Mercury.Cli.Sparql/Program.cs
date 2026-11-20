@@ -2,10 +2,10 @@
 // Mercury SPARQL CLI - Thin shim that delegates to SparqlTool library
 
 using System;
-using System.Reflection;
 using System.Threading.Tasks;
 using SkyOmega.Mercury;
 using SkyOmega.Mercury.Abstractions;
+using SkyOmega.Mercury.Runtime;
 using SkyOmega.Mercury.Sparql.Tool;
 
 namespace SkyOmega.Mercury.Cli.Sparql;
@@ -18,10 +18,7 @@ internal static class Program
 
         if (options.ShowVersion)
         {
-            var version = typeof(Program).Assembly
-                .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
-                ?.InformationalVersion ?? "unknown";
-            Console.WriteLine($"mercury-sparql {version}");
+            Console.WriteLine(ToolVersion.Line("mercury-sparql", typeof(Program).Assembly));
             return 0;
         }
 
