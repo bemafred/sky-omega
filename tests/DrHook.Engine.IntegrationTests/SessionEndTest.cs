@@ -18,6 +18,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SkyOmega.DrHook.Engine;
+using SkyOmega.DrHook.Engine.Interop;
 using SkyOmega.DrHook.Mcp;
 
 namespace DrHook.Engine.IntegrationTests;
@@ -49,6 +50,7 @@ public sealed class SessionEndTest
             string launch = await session.LaunchAsync(Dotnet(), args, cwd: null, source, markerLine,
                 hypothesis: "stops in Worker.Compute", env: null, CancellationToken.None);
             pid = LaunchedPid(launch);
+            long? start = ProcessLifetime.StartOf(pid);   // read while it runs; null on Windows
 
             string stopped = await session.StopAsync("the target refuses its exit request and is left running", CancellationToken.None);
             using (JsonDocument doc = JsonDocument.Parse(stopped))
@@ -60,7 +62,7 @@ public sealed class SessionEndTest
                 Assert.IsFalse(root.TryGetProperty("targetExit", out _), $"a target left running has no end to report yet: {stopped}");
                 StringAssert.Contains(root.GetProperty("prompt").GetString(), "drhook_kill", $"stop: {stopped}");
             }
-            Assert.IsTrue(IsRunning(pid), $"Target {pid} should still run after drhook_stop left it running.");
+            Assert.IsFalse(HasEnded(pid, start), $"Target {pid} should still run after drhook_stop left it running.");
             if (!OperatingSystem.IsWindows())
             {
                 // The request reached the target after the detach, and the target refused it.
@@ -77,7 +79,7 @@ public sealed class SessionEndTest
                 Assert.AreEqual("detached", root.GetProperty("killedWhile").GetString(), $"kill: {killed}");
                 AssertKilled(root.GetProperty("targetExit"), killed);
             }
-            Assert.IsFalse(IsRunning(pid), $"Target {pid} should be gone after drhook_kill.");
+            Assert.IsTrue(HasEnded(pid, start), $"Target {pid} should have ended after drhook_kill.");
             Assert.IsTrue(Reaped(pid), $"Target {pid} was left a zombie of this process after drhook_kill.");
 
             // Nothing is left to end, so a second kill without a session says so.
@@ -139,6 +141,7 @@ public sealed class SessionEndTest
             string launch = await session.LaunchAsync(Dotnet(), new[] { "exec", targetDll }, cwd: null, source,
                 MarkerLine(source, "SNAPSHOT_HERE"), hypothesis: "stops in Worker.Compute", env: null, CancellationToken.None);
             pid = LaunchedPid(launch);
+            long? start = ProcessLifetime.StartOf(pid);   // read while it is held at the breakpoint; null on Windows
 
             string killed = await session.KillAsync("held at a breakpoint: killed while stopped", leftRunningPid: null, CancellationToken.None);
             using JsonDocument doc = JsonDocument.Parse(killed);
@@ -146,7 +149,7 @@ public sealed class SessionEndTest
             Assert.AreEqual("killed", root.GetProperty("status").GetString(), $"kill: {killed}");
             Assert.AreEqual("stopped", root.GetProperty("killedWhile").GetString(), $"kill: {killed}");
             AssertKilled(root.GetProperty("targetExit"), killed);
-            Assert.IsFalse(IsRunning(pid), $"Target {pid} should be gone after drhook_kill.");
+            Assert.IsTrue(HasEnded(pid, start), $"Target {pid} should have ended after drhook_kill.");
         }
         finally
         {
@@ -224,19 +227,25 @@ public sealed class SessionEndTest
         }
     }
 
-    private static bool IsRunning(int pid)
+    // Whether the target has ended, read as DebugSession.TargetHasExited reads it. Linux and macOS: by its PID and its
+    // start time (ProcessLifetime), so a zombie, ended and not yet reaped, has ended, and a process that took the PID later
+    // is not the target. Process.HasExited is no reading there: for a process this one did not Process.Start it reports a
+    // zombie as running (probe 106), which failed this test on macOS (CI 44801380410), where the reap had not yet run.
+    // Windows has no zombies, and its Process reads the end.
+    private static bool HasEnded(int pid, long? start)
     {
+        if (!OperatingSystem.IsWindows())
+        {
+            if (start is not long started) throw new InvalidOperationException($"The start time of target {pid} was not read while it ran.");
+            return ProcessLifetime.HasEnded(pid, started) ?? throw new InvalidOperationException($"The state of process {pid} could not be read.");
+        }
         try
         {
             using Process p = Process.GetProcessById(pid);
-            if (p.HasExited) return false;
-            // A zombie is not running: Linux shows it as state Z.
-            if (OperatingSystem.IsLinux() && File.Exists($"/proc/{pid}/stat"))
-                return File.ReadAllText($"/proc/{pid}/stat").Split(')')[^1].Trim().Split(' ')[0] != "Z";
-            return true;
+            return p.HasExited;
         }
-        catch (ArgumentException) { return false; }
-        catch (InvalidOperationException) { return false; }
+        catch (ArgumentException) { return true; }
+        catch (InvalidOperationException) { return true; }
     }
 
     // True once no process has the PID within 2 s: the target was reaped, not left a zombie. `ps` prints the state of a

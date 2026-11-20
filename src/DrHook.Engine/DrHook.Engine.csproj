@@ -59,6 +59,8 @@
 
     <ItemGroup>
         <InternalsVisibleTo Include="SkyOmega.DrHook.Engine.Tests" />
+        <!-- SessionEndTest reads whether a target has ended as DebugSession.TargetHasExited does (ProcessLifetime). -->
+        <InternalsVisibleTo Include="DrHook.Engine.IntegrationTests" />
     </ItemGroup>
 
 </Project>
