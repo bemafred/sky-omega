@@ -1,11 +1,13 @@
 # ADR-016: Debugger Resilience and Recovery — DrHook Stays Dependable When Its Target Is Not
 
-**Status:** Proposed — 2026-10-31 (Emergence). Accepted as the experimental charter: the research direction, the
-principles and Steps 0 to 5 are approved; the production architecture is not decided, and the status stays Proposed
-until Step 6 (Martin's assessments, 2026-10-31). The worker process is decided, and designed for from the start
-(Martin, 2026-11-06; see the containment boundary below). Reframes the 2026-10-30 draft, "Deterministic Target Teardown
-Across Platforms"; titled "How a Debugged Program Ends" until 2026-10-31, when the title moved from the question it
-started from to the rule it serves.
+**Status:** Accepted — 2026-11-20 (Epistemics). Step 6 was decided by Martin: "I approve the draft, your
+recommendations are my choices as well" ([Step 6: the decisions](#step-6-the-decisions-decided-2026-11-20)). Step 7,
+the engineering, is next. Proposed 2026-10-31 (Emergence), and accepted then as the experimental charter: the research
+direction, the principles and Steps 0 to 5 were approved, and the production architecture was left to Step 6 (Martin's
+assessments, 2026-10-31). The worker process was decided, and designed for from the start, on 2026-11-06 (Martin; see
+the containment boundary below). Reframes the 2026-10-30 draft, "Deterministic Target Teardown Across Platforms";
+titled "How a Debugged Program Ends" until 2026-10-31, when the title moved from the question it started from to the
+rule it serves.
 
 ## The rule this ADR serves
 
@@ -193,7 +195,7 @@ other debuggers (Rider is the reference for correctness). It must behave well in
   `dotnet-stack`, which do not stop it at a breakpoint. DrHook's own stack snapshot uses the same mechanism as
   `dotnet-stack` (EventPipe) and should serve there as well.
 
-## Decision (proposed)
+## Decision
 
 ### Principles
 
@@ -410,7 +412,7 @@ evaluation and termination each need explicit authorization; isolating the host 
   kill to clean up. State an intervention's intended effect, and a kill's expected cost, before acting. The
   operator's guide is DRHOOK.md's lifecycle section, which gains the scenarios.
 
-### What this would change (decided in Step 6, not now)
+### What this changes (decided in Step 6)
 
 - `DebugSession.Dispose` of an owned session and `drhook_stop` stop sending SIGTERM and SIGKILL as their ordinary
   path, under the operation contracts above. ADR-008's Decision 1 is revisited: SIGTERM remains a cancellation
@@ -721,12 +723,213 @@ yet run on the runners).
 replaces ADR-008's Decision 1; the bounds, detection and anomalies for the extraordinary ends; the worker's lifetime
 (per session or per runtime version; a worker per session would also bring an engine change to the next session without
 a reconnect, see the containment boundary) and its protocol; how DrHook attributes an expired bound. This ADR moves to Accepted with that decision.
+*Decided 2026-11-20* (Martin: "I approve the draft, your recommendations are my choices as well"):
+[the decisions](#step-6-the-decisions-decided-2026-11-20).
 
 **Step 7 — Engineering.** Implement only what Step 6 decided: for the worker, the minimum protocol,
 lifecycle state and supervision, and no general-purpose framework. Rewrite the tests in the kinds above, with
 recovery validated as rigorously as prevention. Update ADR-007, ADR-008, DRHOOK.md's lifecycle section and the MCP
 tools' descriptions together. The hang watcher, or a permanent regression detector in its place, stays: it is not
 removed because the suite has turned green.
+
+### Step 6: the decisions (decided 2026-11-20)
+
+Drafted from Steps 1 to 5, and **decided by Martin on 2026-11-20**, every item as drafted: "I approve the draft, your
+recommendations are my choices as well". Each item gives the question, the evidence, the options and the decision.
+Where an item names a measurement, that measurement comes before the part it bears on is built (Step 7).
+
+**6.1 — The session end for each scenario.**
+
+| Scenario | The end | Evidence |
+|----------|--------------|----------|
+| Inspecting code being designed (launched) | it runs to its end; ended early, detach first, then the exit request (6.2) | a natural end left the debugger usable 760 of 760 (finding 102); detaching first, the integration suite hung 0 of 40 against 15 of 40 (finding 110) |
+| A failing test, under MTP or VSTest | remove the breakpoints and continue to the end of the run | not measured: Step 2's scenarios have not run |
+| Attaching to a running program | detach and leave it running | after a detach the target ran on, 759 of 760 (finding 102) and 240 of 240 (finding 112); on Windows it stayed held 4 times (6.6) |
+| Diagnosing a hang | a snapshot first, then pause and inspect, then detach; a kill only as in 6.3 | — |
+| Catching a crash | end the session at the `Exception(Unhandled)` stop by default: detach, or for an owned target a kill while stopped. Continuing is the operator's choice, with its cost stated at the stop | ending at the stop was clean: 60 of 60 for FailFast, 80 of 80 for a stack overflow on our machines, 239 of 239 runs with a stop on CI (finding 104). Continued, the debugger hung on Unix in 26 of 120 launched and 32 of 120 attached runs, and in none of 80 on Windows |
+| Hunting an intermittent failure (ADR-015) | each run ends by itself | as the first row |
+| A program with a window | detach and leave it running | not measured in this ADR |
+| A server or a service | continue it, detach, then the stop request (6.2) | a Generic Host ended cleanly under the debugger, on SIGTERM or by itself (finding 112, within 240 of 240), and on CTRL+BREAK (Windows, within 40 of 40) |
+
+Continuing past a crash's stop is how a debugger shows the program's own death (finding 104 leaves that trade-off
+here). With a worker (6.7), a continued crash that loses the debugger costs that worker and a few seconds, not the
+service: a fresh session completed 2.3 to 3.7 s after the discard (finding 106). So continuing is allowed, but it is
+not the default.
+
+**6.2 — The ordinary end of an owned target, and what replaces ADR-008's Decision 1.**
+
+- **Evidence.**
+  - Attached, a SIGTERM to a target without a handler lost the debugger in 6 of 14 sessions (finding 112).
+  - After a detach, every signalled target ended and the debugger stayed usable, 240 of 240 (finding 112).
+  - Detaching first removed the suite's cascade (finding 110).
+  - Without a handler the request is an abrupt end: exit 143 on Unix (finding 68), `0xC000013A` on Windows
+    (finding 112).
+- **Decided, in place of Decision 1.** An ordinary end never signals an attached target. It detaches (synchronized)
+  and then sends the platform's catchable request: SIGTERM on Unix, CTRL+BREAK on Windows (6.4). It reports how the
+  target ended, read from the operating system (`TargetExit`), so a handler's clean exit and a default's abrupt one
+  are not both called graceful. SIGTERM stays a cancellation request and is not counted as a natural exit.
+- **The choice: a target still alive when the bound expires** (2 s, ADR-008's Decision 2).
+  - (a) Kill it, as today, with `TargetStuckAtDispose`. The debugger has detached, so the kill cannot hurt it; the
+    cost falls on the target alone. DAP's `disconnect` also terminates a launched program by default.
+  - (b) Report it as left running, with its identity, for the client to end with `drhook_kill`. This is the Dispose
+    contract above ("never killing the target implicitly") and principle 4, both approved with the charter.
+  - Decided: (b). A target that ignores its stop request is an anomaly worth a deliberate decision. This is a
+    compatibility change, so the MCP tools' descriptions and DRHOOK.md change with it. It leaves open what happens to
+    an owned target still running when `drhook-mcp` itself exits.
+
+**6.3 — Abandon (`drhook_kill`).**
+
+- **Today.** An owned target gets SIGTERM, 200 ms, then SIGKILL; a borrowed one gets SIGKILL at once. Both happen
+  while attached, with the target possibly running (`DebugSession.Abandon`).
+- **Evidence.**
+  - A kill while the target was synchronized was clean: 30 of 30 at a Pause stop, and 30 of 30 at the
+    unhandled-exception stop (finding 104).
+  - Finding 105 explains why: no request is in flight to the target.
+  - A kill of a running, attached target is finding 100's route.
+- **Decided.**
+  - Abandon first asks the target to stop, within a short bound (a detach needs the same answer from the target's
+    runtime).
+  - If it stops, the target is killed while synchronized, and runs no more code.
+  - If the bound expires, it is killed as today, and a lost debugger is the worker's to contain (6.7).
+  - The SIGTERM grace is dropped: a stopped target cannot run its handler, and an attached SIGTERM is the case that
+    lost the debugger. A polite request is `drhook_stop`'s path (6.2).
+  - Abandon is journaled before it acts (6.9) and checks the target's identity, its ID and start time.
+  - The stop bound is set from measurement.
+- **Not measured.** Abandon itself (probe 112 did not call it); a stop-then-kill of a flooding target.
+
+**6.4 — Windows: the exit request, and the answer to `ControlCTrap`.**
+
+- **The exit request.** CTRL+BREAK to the target's own process group, after the detach.
+  - Evidence: a handler or a Generic Host ended cleanly, 40 of 40, and host-self-stop 20 of 20; without a handler, an
+    abrupt `0xC000013A` (finding 112).
+  - It needs the target launched with `CREATE_NEW_PROCESS_GROUP`, which also disables CTRL+C in that group
+    (documented for `CreateProcess`), and a sender that shares the target's console.
+  - DrHook launches with `CREATE_NO_WINDOW` (`WindowsSpawn.cs`), so the target's console is not `drhook-mcp`'s.
+    Whether a helper attached to it (`AttachConsole`) can send the event is to be built and measured. Probe 112's
+    sender shared the console by construction.
+  - Until it is built, Windows has no exit request. Under 6.2 (b), `drhook_stop` there would detach and report the
+    target left running; today it kills.
+- **`ControlCTrap`.**
+  - Today DrHook answers `S_OK`, so the runtime counts the event as handled: a target without a handler runs on (20
+    of 20), and the debugger was never lost (finding 112).
+  - `S_FALSE` would pass the event on to the target's handlers and Windows' default, so a target without a handler
+    would end abruptly while attached. No crash or abrupt end has lost the debugger on Windows in any run (findings
+    104 to 106, 112), so `S_FALSE` is probably safe there. It is not measured.
+  - Decided: `S_FALSE`, so that a program behaves under DrHook as it does without it, and the event is reported to
+    the operator. To be measured first: probe 112's no-handler child, attached, with `S_FALSE`, on omega-windows and
+    both Windows runners, with the debugger usable N of N.
+
+**6.5 — Target preservation when a worker goes.**
+
+- **Evidence.**
+  - On Linux and macOS, a target held at a stop when its worker died stayed held, alive and frozen, and a new attach
+    failed with `CORDBG_E_TIMEOUT`, 120 of 120 (finding 106).
+  - On Windows it died with the worker, 40 of 40. Windows documents that a process debugged through the Win32 API
+    ends with its debugger unless `DebugSetProcessKillOnExit(FALSE)` was called; whether mscordbi calls it was not
+    read.
+  - A target that is running when its worker dies is not measured.
+- **Decided.**
+  - A healthy worker is never discarded while a target is attached. The supervisor first ends the session by its
+    scenario's end (6.1). So the gate holds for every ordinary end: the end of a worker's life, a change of runtime
+    version, a reconnect.
+  - When a worker is lost, no native call can release its target.
+    - An owned target is ended through the operating system, as Dispose's debugger-lost branch does today.
+    - A borrowed target is left as it is, and reported. On Unix: alive but suspended, and not debuggable again until
+      it restarts. On Windows: ended with the worker.
+    - Either way, its last known state goes in the journal (6.9).
+  - The gate's "wherever the platform permits" is then recorded per platform. On Unix a lost debugger leaves a
+    stopped target frozen; on Windows it ends it. DrHook cannot guarantee either target's survival.
+- **Open, and measurable.**
+  - Whether `DebugSetProcessKillOnExit(FALSE)` in the worker would keep a borrowed Windows target alive through the
+    worker's loss, and if so, whether it then runs or stays held.
+  - A target running when its worker dies (finding 106, next 3).
+
+**6.6 — No callback is left un-continued at a detach.**
+
+- **Evidence.**
+  - A borrowed detach of a busy target drops one callback almost every time: 754 of 760, then 200 of 200 and 278 of
+    280 in the rerun (finding 102).
+  - `Dispose` closes the callback pump before it synchronizes the target, so a callback in that window is neither
+    queued nor continued. The owned detach (finding 110) also runs after the pump has closed.
+  - On omega-windows the target stayed held after a detach 4 times: 2 of 80 (finding 102) and 2 of 120 (finding
+    112). On the Windows runners it never did (0 of 160).
+  - Hypothesis, not established: the held target is held at the dropped callback. Finding 42 saw a target stay held
+    after a detach from a stop that was never continued.
+- **Decided.** The teardown leaves no callback un-continued. Either a callback that arrives once the pump has stopped
+  dispatching is continued and reported, or the target is synchronized before the pump closes.
+  - Which one is decided by measurement. Probe 102's detach constructions must show no dropped callback. Many detach
+    sessions on omega-windows give the held-target rate, before and after the change.
+  - It is a teardown change, measured before it is accepted.
+
+**6.7 — The worker: its lifetime and protocol.**
+
+- **Evidence.**
+  - A fresh worker's session (launch, a Break stop, locals, a natural end) completed 2.3 to 3.7 s after a discard
+    (finding 106).
+  - A debugger process is locked to one runtime version (finding 86).
+  - An engine change reaches the next session without a reconnect, if the worker starts from the current build
+    (2026-11-07, the containment boundary above).
+- **The options for its lifetime:** a worker per session; a worker per runtime version; one long-lived worker,
+  replaced only when lost.
+- **Decided: a worker per session.**
+  - The discard is then the normal end of every session, so recovery is the path exercised most, not least.
+  - Finding 86's lock goes away, and an engine change reaches the next session.
+  - The worker runs from its own copy of the build.
+  - Its cost is a start-up per session. That was not measured on its own, and is measured before Step 7 is accepted.
+    ADR-015's runs in a row may need a worker reused across runs; that is decided there.
+- **Decided: the protocol.** NDJSON requests and responses over the worker's stdin and stdout, as in probe 106; the end
+  of the stream means the worker is gone. DrHook.Wire's codec carries the messages where it fits.
+  - The debug-state publisher (ADR-012) moves with the engine into the worker, or the supervisor relays it. That is
+    for Step 7.
+
+**6.8 — Detection, bounds and attribution.**
+
+- **Evidence.**
+  - Once the target was gone, `ProcessExited` came within 175 ms or not within 30 s (findings 104, 105). In finding
+    106 it came within 0 to 138 ms.
+  - The worker's 2 s check reported every loss and no false one, at 2,002 to 2,031 ms (finding 106).
+  - From outside, a 30 s bound on the next command found 53 of 53 losses, and suspected no worker that had not lost
+    its debugger (finding 106).
+  - An attach took 13 to 14 ms at the median, and 7.8 s at worst, on the macOS x64 runner (finding 102).
+- **Decided.**
+  - **Lost.** The worker calls its debugger lost when the target is gone, read from the operating system, and no
+    `ProcessExited` has come within 2 s, or when a `DebuggerError` arrives. It reports the cause and makes no
+    further native call.
+  - **Bounds.** Every command to the worker has a bound on the supervisor's side. A command that waits for the
+    target, such as a continue to the next stop, is bounded by what the operator asked for, and meanwhile the worker
+    answers a health request with its current native operation and how long it has run. Attach and launch get 30
+    s, as in probe 106; the other bounds come from measurement in Step 7.
+  - **Suspected.** An expired bound marks the worker suspected. The supervisor discards it without waiting for
+    confirmation, since a fresh session costs seconds (6.7).
+  - **The cost.** A worker that was only slow is lost with its session, and on Unix a target it held stays frozen
+    (6.5). The 30 s bound is four times the slowest attach measured.
+  - **Attribution.** The cause is recorded as the evidence shows it: lost (the target gone, no `ProcessExited`),
+    `DebuggerError`, or unknown. An expired bound DrHook cannot attribute is recorded as unknown, never as the
+    target's fault (principle 12).
+  - Each of these is a typed anomaly: debugger lost, worker suspected, worker discarded, target left held.
+
+**6.9 — The journal.**
+
+- **Evidence.** Probe 106's journal recorded each discard before the kill: the intent, the worker, the reason, and
+  the target's last known state, who observed it, when, and how certain it was. That held for every discard, 80 of
+  80 on zbook and 68 of 68 on omega-ubuntu (finding 106).
+- **Decided.** That record becomes the supervisor's local journal: append-only and bounded, written before every
+  discard and every Abandon, and consolidated into Mercury afterwards. The service never waits on a Mercury write.
+  Its location, retention and redaction (principle 11) are for Step 7.
+
+**What these decisions rest on that is not measured yet** (each measured before the part it bears on is built):
+
+- Step 2's scenarios: a test run under MTP and under VSTest, and DrHook's own test host (6.1).
+- Probe 112's owned path, and `drhook_kill` itself (6.2, 6.3).
+- `S_FALSE` for `ControlCTrap`, and a CTRL+BREAK sender for a target launched with `CREATE_NO_WINDOW` (6.4).
+- A target running when its worker dies, and `DebugSetProcessKillOnExit` (6.5).
+- What holds a Windows target after a detach (6.6).
+- A worker's own start-up time (6.7).
+- A real `DebuggerError` (6.8).
+- Probes 106 and 112 on the six runners.
+
+6.2 and 6.3 replace ADR-008's Decisions 1 and 3. ADR-007, ADR-008, DRHOOK.md and the MCP tools'
+descriptions change together in Step 7.
 
 ### Development milestones
 
