@@ -42,7 +42,7 @@ public sealed class SelectResultOutputTests : IDisposable
         var tempPath = TempPath.Test("mcp-select-output");
         tempPath.MarkOwnership();
         _dir = tempPath;
-        _pool = new QuadStorePool(Path.Combine(_dir, "store"));
+        _pool = new QuadStorePool(Path.Combine(_dir, "store"), QuadStorePoolOptions.ForTesting);
         _pool.EnsureActive("primary");
         _tools = new MercuryTools(_pool, new StorePathHolder(_dir));
     }

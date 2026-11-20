@@ -38,7 +38,7 @@ public sealed class GraphResultOutputTests : IDisposable
         var tempPath = TempPath.Test("mcp-graph-output");
         tempPath.MarkOwnership();
         _dir = tempPath;
-        _pool = new QuadStorePool(Path.Combine(_dir, "store"));
+        _pool = new QuadStorePool(Path.Combine(_dir, "store"), QuadStorePoolOptions.ForTesting);
         _pool.EnsureActive("primary");
         _tools = new MercuryTools(_pool, new StorePathHolder(_dir));
     }
