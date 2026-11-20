@@ -4,7 +4,7 @@ Codebase metrics: line counts, test counts, W3C conformance and benchmark measur
 is in [CHANGELOG.md](CHANGELOG.md) and [docs/releases/](docs/releases/); scale-validation runs are in
 [docs/validations/](docs/validations/).
 
-**Last measured:** 2026-10-30, Sky Omega 1.8.37 (`a57e1f8`). Line counts are of `.cs` files with `bin/` and `obj/`
+**Last measured:** 2026-11-20, Sky Omega 1.8.44 (its release commit). Line counts are of `.cs` files with `bin/` and `obj/`
 left out; test counts are from one `dotnet test` run on omega (macOS arm64), read from its TRX reports.
 
 ## Line Counts
@@ -13,33 +13,33 @@ left out; test counts are from one `dotnet test` run on omega (macOS arm64), rea
 
 | Component | Lines | Description |
 |-----------|------:|-------------|
-| **Mercury (total)** | **66,873** | Knowledge substrate: RDF storage and SPARQL, BCL only |
-| ├─ Sparql | 24,434 | SPARQL parser, query and update execution, protocol |
-| ├─ Storage | 16,097 | B+Tree indexes, atom stores, WAL, bulk load and index rebuild, external sort, MPHF |
-| ├─ JsonLd | 6,979 | JSON-LD parser and writer |
-| ├─ Turtle | 3,962 | Turtle parser and writer |
-| ├─ Diagnostics | 3,184 | Metrics and observability events |
-| ├─ RdfXml | 3,148 | RDF/XML parser and writer |
-| ├─ TriG | 2,448 | TriG parser and writer |
+| **Mercury (total)** | **68,160** | Knowledge substrate: RDF storage and SPARQL, BCL only |
+| ├─ Sparql | 24,657 | SPARQL parser, query and update execution, protocol |
+| ├─ Storage | 16,747 | B+Tree indexes, atom stores, WAL, bulk load and index rebuild, external sort, MPHF |
+| ├─ JsonLd | 6,976 | JSON-LD parser and writer |
+| ├─ Turtle | 3,988 | Turtle parser and writer |
+| ├─ Diagnostics | 3,367 | Metrics and observability events |
+| ├─ RdfXml | 2,975 | RDF/XML parser and writer |
+| ├─ TriG | 2,301 | TriG parser and writer |
 | ├─ Compression | 2,260 | bzip2 streaming decompressor, single and parallel block |
-| ├─ NQuads | 1,454 | The N-Quads parser and writer, which N-Triples also reads and writes through |
-| ├─ Rdf | 1,145 | Core RDF types and the shared escape, IRI, numeric, literal-form and name-character rules |
+| ├─ NQuads | 1,419 | The N-Quads parser and writer, which N-Triples also reads and writes through |
+| ├─ Rdf | 1,701 | Core RDF types and the shared escape, IRI, numeric, literal-form and name-character rules |
 | ├─ Owl | 566 | OWL/RDFS reasoner |
 | ├─ NTriples | 178 | N-Triples parser and writer, over the N-Quads ones |
-| └─ (top-level files) | 1,018 | `RdfEngine` and `SparqlEngine` facades, `RdfDocumentWriter` |
-| **Mercury.Abstractions** | **1,486** | Store profiles and schema, `IAtomStore`, metric event types, exceptions |
-| **Mercury.Runtime** | **4,229** | `BTreeFile`, buffers, cross-process gate, disk-space guard, memory probe, temp paths, sparse files |
-| **Mercury.Solid** | **4,401** | W3C Solid Protocol: WAC/ACP, N3 Patch, HTTP handlers |
-| **Mercury.Pruning** | **1,238** | Copy-and-switch pruning |
-| **Mercury.Mcp** | **481** | MCP server, 6 tools (query, update, stats, graphs, store, version) |
-| **Mercury tool libraries** | **1,287** | `Mercury.Sparql.Tool` 727, `Mercury.Turtle.Tool` 560 |
-| **Mercury CLIs** | **1,187** | `mercury` 764, `mercury-sparql` 220, `mercury-turtle` 203 |
-| **DrHook.Engine** | **10,233** | Runtime observation: ICorDebug through per-RID `libdbgshim`, EventPipe, BCL + P/Invoke + source-generated COM |
-| **DrHook.Mcp** | **1,968** | MCP server, 25 tools |
-| **DrHook.Wire** | **108** | NDJSON protocol for the debug-state transport |
-| **DrHook.Viz** | **770** | BCL-only client library for debug-state views |
-| **DrHook.Viz.Console** | **71** | `drhook-viz-console`, the console view |
-| **DrHook.Viz.Tui** | **399** | `drhook-viz-tui`, the full-screen TUI view |
+| └─ (top-level files) | 1,025 | `RdfEngine` and `SparqlEngine` facades, `RdfDocumentWriter` |
+| **Mercury.Abstractions** | **1,504** | Store profiles and schema, `IAtomStore`, metric event types, exceptions |
+| **Mercury.Runtime** | **4,128** | `BTreeFile`, buffers, cross-process gate, disk-space guard, memory probe, temp paths, sparse files |
+| **Mercury.Solid** | **4,235** | W3C Solid Protocol: WAC/ACP, N3 Patch, HTTP handlers |
+| **Mercury.Pruning** | **1,021** | Copy-and-switch pruning |
+| **Mercury.Mcp** | **513** | MCP server, 6 tools (query, update, stats, graphs, store, version) |
+| **Mercury tool libraries** | **1,139** | `Mercury.Sparql.Tool` 579, `Mercury.Turtle.Tool` 560 |
+| **Mercury CLIs** | **1,196** | `mercury` 786, `mercury-sparql` 213, `mercury-turtle` 197 |
+| **DrHook.Engine** | **11,607** | Runtime observation: ICorDebug through per-RID `libdbgshim`, EventPipe, BCL + P/Invoke + source-generated COM |
+| **DrHook.Mcp** | **2,097** | MCP server, 25 tools |
+| **DrHook.Wire** | **113** | NDJSON protocol for the debug-state transport |
+| **DrHook.Viz** | **851** | BCL-only client library for debug-state views |
+| **DrHook.Viz.Console** | **88** | `drhook-viz-console`, the console view |
+| **DrHook.Viz.Tui** | **586** | `drhook-viz-tui`, the full-screen TUI view |
 | **DrHook.Capture** | **199** | Persists a debug session's state stream to Mercury |
 | **SkyOmega.Bcl** | **420** | Long-indexed collections, `BitVector`, `SplitMix64Hash` |
 | **Minerva.Core** | **33** | Inference substrate, scaffolding only |
@@ -48,57 +48,64 @@ left out; test counts are from one `dotnet test` run on omega (macOS arm64), rea
 
 | Project | Lines | Tests | Skipped on omega |
 |---------|------:|------:|-----------------:|
-| Mercury.Tests | 70,749 | 6,312 | 167 |
-| Mercury.Solid.Tests | 407 | 25 | — |
+| Mercury.Tests | 75,023 | 6,641 | 156 |
+| Mercury.CrashTarget | 224 | — | — |
+| Mercury.Mcp.Tests | 196 | 4 | — |
+| Mercury.Solid.Tests | 626 | 39 | — |
 | SkyOmega.Bcl.Tests | 140 | 12 | — |
-| DrHook.Engine.Tests | 2,468 | 187 | 1 |
-| DrHook.Engine.IntegrationTests | 2,302 | 19 | 1 |
-| DrHook.Engine.IntegrationTargets (Mtp, Snapshot, Vstest) | 251 | 2 | — |
-| DrHook.Viz.Tests | 852 | 42 | — |
-| DrHook.Wire.Tests | 107 | 5 | — |
+| DrHook.Engine.Tests | 3,635 | 230 | 3 |
+| DrHook.Engine.IntegrationTests | 2,721 | 25 | 1 |
+| DrHook.Engine.IntegrationTargets (Mtp, Snapshot, Vstest) | 277 | 2 | — |
+| DrHook.Viz.Tests | 1,210 | 74 | — |
+| DrHook.Wire.Tests | 130 | 7 | — |
 | DrHook.Capture.Tests | 85 | 1 | — |
-| **Total** | **77,361** | **6,605** | **169** |
+| **Total** | **84,267** | **7,035** | **160** |
 
-The integration targets are debuggees for the DrHook integration tests; only the Mtp target has tests of its own. On
-omega the 169 skips are 160 W3C known failures (154 RDF 1.2, 6 SPARQL 1.0), 6 JSON-LD tests that do not apply to a
-JSON-LD 1.1 processor, 2 Windows-only DrHook tests, and 1 storage test that needs a disk with less than 1 TB free.
+The integration targets are debuggees for the DrHook integration tests; only the Mtp target has tests of its own.
+`Mercury.CrashTarget` is the process the recovery tests kill. On omega the 160 skips are 149 W3C known failures (143
+RDF 1.2, 6 SPARQL 1.0), 6 JSON-LD tests that do not apply to a JSON-LD 1.1 processor, 4 Windows-only DrHook tests, and
+1 storage test that needs a disk with less than 1 TB free.
 Other platforms skip a different set: see [Test Runs by Platform](#test-runs-by-platform).
 
 ### Benchmarks
 
 | Project | Lines | Methods |
 |---------|------:|--------:|
-| Mercury.Benchmarks | 3,588 | 74 |
+| Mercury.Benchmarks | 3,990 | 83 |
 
 ### Examples and Probes
 
 | Project | Lines |
 |---------|------:|
-| Mercury.Examples | 779 |
+| Mercury.Examples | 532 |
 | examples/drhook-target.cs | 155 |
 | examples/drhook-verify.cs | 38 |
-| Probes and proofs of concept (`poc/`) | 18,775 |
+| Probes and proofs of concept (`poc/`) | 29,712 |
+| Probes (`tools/probes/`) | 998 |
 
 ### Documentation
 
 | Category | Lines |
 |----------|------:|
-| `docs/` (363 `.md` and `.ttl` files) | 55,090 |
-| Root documents (README, CLAUDE, AI, MERCURY, DRHOOK, CONTRIBUTING, CHANGELOG) | 4,277 |
+| `docs/` (385 `.md` and `.ttl` files) | 62,205 |
+| Root documents (README, CLAUDE, AI, MERCURY, DRHOOK, CONTRIBUTING, CHANGELOG) | 4,562 |
 
 ## Totals
 
 | Category | Lines |
 |----------|------:|
-| Source code | 95,383 |
-| Tests | 77,361 |
-| Benchmarks | 3,588 |
-| Examples | 972 |
-| Probes | 18,775 |
-| Documentation | 59,367 |
-| **Grand total** | **255,446** |
+| Source code | 97,890 |
+| Tests | 84,267 |
+| Benchmarks | 3,990 |
+| Examples | 725 |
+| Probes | 30,710 |
+| Documentation | 66,767 |
+| **Grand total** | **284,349** |
 
 ## Test Runs by Platform
+
+**At 1.8.44**, 2026-11-20, omega (macOS 27.0.1, arm64, .NET 10.0.9) ran the whole solution's `dotnet test`: 7,035
+tests, 0 failed, 160 skipped; Mercury.Tests took 3 m 31 s. The other machines are not measured at 1.8.44.
 
 The whole solution's `dotnet test` at 1.8.37 (`a57e1f8`), 2026-10-30, on the machines Sky Omega is tested on.
 omega-ubuntu and omega-windows are virtual machines on omega; they ran at the same time, after omega's run.
@@ -154,8 +161,8 @@ DrHook's teardown changes. The macOS runners run the sparse-file test, which ome
 
 Each row counts the tests of the W3C manifests the suite runs. See
 [ADR-010](docs/adrs/mercury/ADR-010-w3c-test-suite-integration.md) for the integration. Measured 2026-11-11 on omega,
-against rdf-tests `202a74e` and json-ld-api `5551473`, after the base-direction check; the rest of this file is
-measured at 1.8.37.
+against rdf-tests `202a74e` and json-ld-api `5551473`, after the base-direction check. At 1.8.44 the same 149 known
+failures and 6 tests that do not apply are skipped, and every other W3C test passes.
 
 ### RDF formats (the RDF 1.2 and RDF 1.1 test suites, `rdf/rdf12` and `rdf/rdf11`)
 

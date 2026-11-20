@@ -1226,6 +1226,12 @@ this ADR do not answer goes to Martin.
   - **Until a release with P6 is installed, the skill's temporal modes do not parse** on the installed `mercury-mcp`
     (1.8.41 on omega). The skill says what such an error means. A release reaches the live memory store only after it
     ran on a copy of it, and on Martin's word.
+- **Released in 1.8.44, 2026-11-20**, on Martin's word ("Cut 1.8.44 and install it"). Before the install it ran on a
+  byte-identical copy of the live memory store, opened as `mercury-mcp` opens its pool: the same 81 graphs with the
+  same counts as 1.8.41 gave, 8,430 remembered quads; `INCLUDING FORGOTTEN` 51 more than 1.8.41's `ALL VERSIONS`, the
+  eight wholly forgotten graphs of P3; the words answer (80 labels memorized in the last seven days); a write and a
+  delete survive a reopen with their times. The live log held only its checkpoint record, so the replay of old
+  records was not exercised there. Whole solution on omega: 7,035 tests, 0 failed, 160 skipped.
 
 1. **Martin's review** of this text — **done 2026-11-14**, with the decision closure. The later part is reviewed on
    its own.
