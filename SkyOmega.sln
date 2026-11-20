@@ -204,6 +204,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "ADRs", "ADRs", "{F3A4B5C6-D
 		docs\adrs\mercury\ADR-062-what-a-read-yields.md = docs\adrs\mercury\ADR-062-what-a-read-yields.md
 		docs\adrs\mercury\ADR-063-an-index-file-grows-by-extents.md = docs\adrs\mercury\ADR-063-an-index-file-grows-by-extents.md
 		docs\adrs\mercury\ADR-064-a-facts-states.md = docs\adrs\mercury\ADR-064-a-facts-states.md
+		docs\adrs\mercury\ADR-065-mercuryd.md = docs\adrs\mercury\ADR-065-mercuryd.md
 		docs\adrs\mercury\README.md = docs\adrs\mercury\README.md
 	EndProjectSection
 EndProject
