@@ -25,6 +25,7 @@ Prefixes for the queries below:
 PREFIX ck: <https://sky-omega.dev/ck/>
 PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
 PREFIX dct: <http://purl.org/dc/terms/>
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
 ```
 
 **Declare every prefix you use.** `mercury_query` returns *no results* — silently, no error — for an undeclared prefix. A surprise-empty recall is more often a missing `PREFIX` than absent memory (`ck:obs-temporal-extensions-usable`).
@@ -43,23 +44,33 @@ SELECT DISTINCT ?g ?s WHERE {
 ```
 If thin, broaden: split the topic into terms and `||` them, or match a shorter stem.
 
-### 2. Status-driven recall — what's recent / active (native bitemporal)
-Mercury is bitemporal — every triple carries valid-time, so recency is a substrate property, not just a
-`dct:date` literal. Surface labelled nodes newest-first so attention lands on current work, not stale priors:
+### 2. Status-driven recall — what's recent / active (memory time)
+Mercury keeps when each triple was memorized and, once deleted, when it was forgotten (ADR-061), so recency is a
+substrate property, not a literal someone wrote. `MEMORIZED ?when` after a triple pattern binds the time the store
+memorized it. Surface labelled nodes newest-first so attention lands on current work, not stale priors:
 ```sparql
-SELECT ?g ?s ?label ?date WHERE {
-  GRAPH ?g { ?s rdfs:label ?label . OPTIONAL { ?s dct:date ?date }
+SELECT ?g ?s ?label ?when WHERE {
+  GRAPH ?g { ?s rdfs:label ?label MEMORIZED ?when .
     FILTER(text:match(?label, "<topic>") || text:match(?s, "<topic>")) }
-} ORDER BY DESC(?date) LIMIT 25
+} ORDER BY DESC(?when) LIMIT 25
 ```
-Three **temporal-recall** modes extend this (the clause goes after `WHERE`/`LIMIT`; all verified usable):
-- **Point-in-time** — *what did we know as of a past moment* — append `AS OF "2026-06-20"^^xsd:date`.
-- **Window** — *what was valid at some moment in a period* — append `DURING ["2026-06-20"^^xsd:date, "2026-06-23"^^xsd:date]`. A record from before the window that is still valid is in it, so this is not "what changed".
-- **Epistemic history** — *how a belief evolved / what was superseded* — append `ALL VERSIONS`.
+The words of Cognitive SPARQL give the **temporal-recall** modes. `MEMORIZED` and `FORGOTTEN` go after a triple
+pattern, before its `.`, and apply to that pattern only; `INCLUDING FORGOTTEN` goes after the whole query. Ranges are
+half-open: `SINCE` is at or after, `BEFORE` is strictly before. A bound is a literal or `NOW() - "P7D"^^xsd:dayTimeDuration`.
+- **Recent** — *what did we memorize lately / in a period* — `?s rdfs:label ?label MEMORIZED ?when SINCE NOW() - "P7D"^^xsd:dayTimeDuration`
+  (`PT12H`, `P30D`, … for other spans), or `MEMORIZED SINCE "2026-11-01"^^xsd:date BEFORE "2026-12-01"^^xsd:date` for a month.
+- **Let go** — *what was forgotten, and when* — `?s ?p ?o FORGOTTEN ?gone SINCE "2026-11-01"^^xsd:date`. A pattern with
+  `FORGOTTEN` matches forgotten memories too; `?gone` is unbound for one still remembered.
+- **Epistemic history** — *how a belief evolved / what was superseded* — every period of a node's facts, each with its
+  two times: `<anchor-iri> ?p ?o MEMORIZED ?m FORGOTTEN ?f`, or `INCLUDING FORGOTTEN` after the query to let every
+  pattern see what was forgotten.
+- **What we knew at a moment t** — there is no word for it; with `b` one millisecond after `t`:
+  `{ ?s ?p ?o MEMORIZED BEFORE b } UNION { ?s ?p ?o MEMORIZED BEFORE b FORGOTTEN SINCE b }`.
 
-Default (no clause) = valid now. Neither clause selects *what was recorded since t*: `AS OF t` keeps everything older
-than t. For recency, filter on the recorded time, with the prefix `xsd:` declared:
-`FILTER(?created >= NOW() - "P7D"^^xsd:dayTimeDuration)` keeps the last week (`PT12H`, `P30D`, … for other spans).
+Default (no word) = what is remembered now. The words are an error on a property path and inside `SERVICE`.
+`dct:date`, `dcterms:created` and `sky:timestamp` values in older records are what their writers typed; the memorized
+time is the store's record of when each triple arrived. If the words come back as a syntax error, the installed
+`mercury-mcp` predates them: say so, with `mercury_version`, rather than working around it.
 
 ### 3. Connective recall — expand anchors into full nodes and neighbours
 For the most relevant anchors from steps 1–2, read the **whole node** and **one hop** of links:
@@ -72,7 +83,7 @@ Follow `ck:relatedFinding` / `ck:refines` / `ck:transfersTo` / `rdfs:seeAlso` ta
 ### 4. Present as recognition
 Synthesize — do **not** dump triples. Write what Lucy *remembers*:
 - Lead with the few most relevant + most recent findings, each in prose.
-- Attach **provenance** to each: which graph/session it came from and its `dct:date` (and `ck:maturity` when present — e.g. `validated-live`, `synthesis-for-ideation`).
+- Attach **provenance** to each: which graph/session it came from and when it was memorized (and `ck:maturity` when present — e.g. `validated-live`, `synthesis-for-ideation`).
 - Group by theme; note connections you traversed ("this refines …").
 - **Name the gaps**: if the topic returns little or nothing, say so plainly — absence is a recall result ("nothing recorded about Z"), not silence.
 

@@ -35,8 +35,8 @@ Mercury has four storage profiles per ADR-029 (Cognitive, Graph, Reference, Mini
 |---|---|---|
 | **Use case** | Per-agent, per-team, per-organization knowledge accumulation | Canonical snapshots — Wikidata, DBpedia, FHIR ontologies |
 | **Write pattern** | Per-session-graph mutation | Single bulk-load, then sealed |
-| **Bitemporal** | Yes — valid-time + transaction-time on every triple | No — sealed snapshots have no time dimension |
-| **Time-travel queries** | `AS OF`, `DURING`, `ALL VERSIONS` | N/A |
+| **Memory time** | Yes — when each triple was memorized and when it was forgotten, set by the store ([ADR-061](docs/adrs/mercury/ADR-061-a-facts-own-times.md)) | No — sealed snapshots have no time dimension |
+| **Memory-time queries** | `MEMORIZED`, `FORGOTTEN`, `INCLUDING FORGOTTEN` (Cognitive SPARQL) | N/A |
 | **Performance dimensions** | Per-query latency, Dispose/Open speed | Bulk-ingest throughput, cold-cache query latency |
 
 This document describes the **Cognitive** discipline. When `mercury-mcp` is attached to an AI agent's MCP surface, the underlying store is typically Cognitive. References to Reference profile in this document are by-name only; for Reference workload concerns see ADR-008 and `docs/limits/cognitive-profile-validation-drought.md` for the inverse (Cognitive measurement gap).
@@ -134,18 +134,20 @@ Every session that writes to Mercury must create a session graph header:
 
 ```sparql
 PREFIX sky: <urn:sky-omega:>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
 
 INSERT DATA {
   GRAPH <urn:sky-omega:session:YYYY-MM-DD-NNN> {
     <urn:sky-omega:session:YYYY-MM-DD-NNN> a sky:Session ;
       sky:agent "claude-code" ;
-      sky:timestamp "YYYY-MM-DDTHH:MM:SSZ"^^xsd:dateTime ;
       rdfs:comment "Brief description of what this session did" .
   }
 }
 ```
 
 Replace the date and sequence. Use the actual agent identifier (`claude-code`, `rider-ai`, etc.). The comment should be a sentence, not a paragraph.
+
+**Write no time of your own.** The store memorizes each triple at the moment it arrives, on its own clock, and `MEMORIZED ?when` reads that time back ([ADR-061](docs/adrs/mercury/ADR-061-a-facts-own-times.md) D3). A time you type is a guess at best. A time that describes an *event* — a commit, a push, a run's start — is content: quote it from its source (git, the run's log, a file's mtime) and name the source. The `sky:timestamp`, `dct:date` and `dcterms:created` values older records carry stay as they are: memory vocabulary is research data.
 
 This is not optional. Without provenance, assertions become untraceable noise.
 
@@ -271,31 +273,53 @@ See [docs/knowledge/README.md](docs/knowledge/README.md) for full details.
 ### Before making a decision
 ```sparql
 PREFIX sky: <urn:sky-omega:>
-SELECT ?decision ?rationale ?when WHERE {
-  ?decision a sky:Decision ;
-    sky:about ?topic ;
-    sky:rationale ?rationale .
-  OPTIONAL { ?decision sky:timestamp ?when }
-  FILTER(text:match(?topic, "search-term"))
-}
+SELECT ?g ?decision ?rationale ?when WHERE {
+  GRAPH ?g {
+    ?decision a sky:Decision MEMORIZED ?when ;
+      sky:about ?topic ;
+      sky:rationale ?rationale .
+    FILTER(text:match(?topic, "search-term"))
+  }
+} ORDER BY DESC(?when)
 ```
 
 > `text:match(?var, "term")` is Mercury's substrate-level full-text search — case-insensitive substring matching, trigram-index-accelerated. Prefer it over `CONTAINS(LCASE(STR(?var)), "term")` when querying labels, comments, or stored literals. The trigram index pre-filters candidates; `CONTAINS` forces a scan. Reserve `CONTAINS` / `REGEX` / `STRSTARTS` for patterns `text:match` doesn't cover (regex, case-sensitive, anchored, multi-pattern boolean combinations). `text:match` expects `(?var, "constant")` shape — other shapes don't trigger the index path.
 
 ### Finding what's known about a concept
 ```sparql
-SELECT ?p ?o WHERE {
-  <urn:sky-omega:data:some-concept> ?p ?o .
+SELECT ?g ?p ?o WHERE {
+  GRAPH ?g { <urn:sky-omega:data:some-concept> ?p ?o . }
 }
 ```
 
+Memory lives in named graphs: a query without `GRAPH` reads the default graph, which a memory store leaves empty. Declare every prefix you use; an undeclared prefix matches nothing, silently.
+
+### Asking about time
+```sparql
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+
+# What did we memorize in the last week?
+SELECT ?g ?s ?label ?when WHERE {
+  GRAPH ?g { ?s rdfs:label ?label MEMORIZED ?when SINCE NOW() - "P7D"^^xsd:dayTimeDuration . }
+} ORDER BY DESC(?when)
+
+# What have we let go of since the first of November, and when?
+SELECT ?g ?s ?p ?o ?when WHERE {
+  GRAPH ?g { ?s ?p ?o FORGOTTEN ?when SINCE "2026-11-01"^^xsd:date . }
+}
+```
+
+A `DELETE` forgets: the triple leaves the default view, and the store keeps the period in which it was remembered. `INCLUDING FORGOTTEN` after a query lets every pattern see forgotten memories too. The rules of the words are in the [SPARQL reference](docs/architecture/technical/sparql-reference.md#memory-time-cognitive-sparql-adr-061).
+
 ### Tracing provenance
 ```sparql
+PREFIX sky: <urn:sky-omega:>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
 SELECT ?graph ?agent ?when ?comment WHERE {
   GRAPH ?graph {
-    ?session a sky:Session ;
+    ?session a sky:Session MEMORIZED ?when ;
       sky:agent ?agent ;
-      sky:timestamp ?when ;
       rdfs:comment ?comment .
   }
 } ORDER BY DESC(?when)
@@ -333,6 +357,6 @@ See [ADR-044](docs/adrs/mercury/ADR-044-sparql-update-literal-canonicalization.m
 | `mercury_store` | Filesystem path of the active store folder |
 | `mercury_version` | MCP server version |
 
-**Pruning is not exposed.** Per [ADR-006 — MCP Surface Discipline](docs/adrs/ADR-006-mcp-surface-discipline.md), destructive operations whose effects an AI shouldn't initiate autonomously are CLI-only. To prune a store, run `mercury prune` from the shell — your shell history is the audit trail. For Reference profile stores (sealed snapshots), pruning is rejected at plan time per [ADR-007 — Sealed Substrate Immutability](docs/adrs/ADR-007-sealed-substrate-immutability.md); to produce a filtered subset, bulk-load source data into a new Reference store with `--exclude-graphs / --exclude-predicates`.
+**Pruning is not exposed.** Per [ADR-006 — MCP Surface Discipline](docs/adrs/ADR-006-mcp-surface-discipline.md), destructive operations whose effects an AI shouldn't initiate autonomously are CLI-only. To prune a store, a person stops `mercury-mcp`, opens the store with `mercury --store mcp` and runs `:prune` in the REPL. A prune keeps what is remembered, each memory with the time it was memorized, and nothing forgotten (ADR-061 D12). For Reference profile stores (sealed snapshots), pruning is rejected at plan time per [ADR-007 — Sealed Substrate Immutability](docs/adrs/ADR-007-sealed-substrate-immutability.md); to produce a filtered subset, bulk-load source data into a new Reference store with `--exclude-graphs / --exclude-predicates`.
 
 The MCP tools are configured via `.mcp.json` (dev-time) or `mercury-mcp` global tool (production). See [CLAUDE.md](CLAUDE.md) for setup.

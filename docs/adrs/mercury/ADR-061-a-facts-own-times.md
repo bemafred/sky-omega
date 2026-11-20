@@ -1206,6 +1206,22 @@ this ADR do not answer goes to Martin.
     skill's recency recall and temporal modes, `MERCURY.md`'s provenance and queries, the MCP tool description, and
     the agent no longer stamping `dcterms:created`. They are what an agent runs against the installed `mercury-mcp`,
     which knows the words only from the release that carries P6.
+- **P8, the consumers: done 2026-11-20**, on omega, on Martin's word ("go for the docs and then the skill change").
+  - **The `lucy` skill:** status-driven recall orders by `MEMORIZED ?when`, not by a `dct:date` few records carry.
+    Its temporal modes are the words: recent, let go, a node's history, and what was known at a moment (Q10). Its
+    recency recall is the first reader of Q11.
+  - **`MERCURY.md`:** the session header no longer types a `sky:timestamp`; the text says to write no time of one's
+    own, and to quote an event's time from its source (D3). Its queries read `MEMORIZED`, query the `GRAPH ?g`
+    union and declare their prefixes. A section asks about time.
+  - **The MCP tool descriptions:** `mercury_query` names the words; `mercury_update` says an insert memorizes and a
+    delete forgets, and that a write needs no timestamp of its own. They ship with the server, so they change when
+    it does.
+  - **The agent stops stamping `dcterms:created`:** Sky's own memory says so. The store keeps the time either way, so
+    a record written without a stamp loses nothing, also on a server that predates the words.
+  - Every query in the skill and in `MERCURY.md` was run on a probe store: each parses and gives what the text says.
+  - **Until a release with P6 is installed, the skill's temporal modes do not parse** on the installed `mercury-mcp`
+    (1.8.41 on omega). The skill says what such an error means. A release reaches the live memory store only after it
+    ran on a copy of it, and on Martin's word.
 
 1. **Martin's review** of this text — **done 2026-11-14**, with the decision closure. The later part is reviewed on
    its own.

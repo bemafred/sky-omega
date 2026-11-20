@@ -32,7 +32,7 @@ public sealed class MercuryTools
         _storePath = storePath;
     }
 
-    [McpServerTool(Name = "mercury_query"), Description("Execute a SPARQL SELECT, ASK, CONSTRUCT, or DESCRIBE query against the Mercury triple store. Supports text:match(?var, \"term\") in FILTER clauses for case-insensitive full-text search. SELECT returns SPARQL 1.1 TSV (literals escaped: \\\", \\\\, \\n, \\t, \\r); CONSTRUCT and DESCRIBE return N-Triples. Both end with a count line.")]
+    [McpServerTool(Name = "mercury_query"), Description("Execute a SPARQL SELECT, ASK, CONSTRUCT, or DESCRIBE query against the Mercury triple store. Supports text:match(?var, \"term\") in FILTER clauses for case-insensitive full-text search. The store keeps when each fact was memorized and forgotten (Cognitive SPARQL): after a triple pattern, MEMORIZED [?t] [SINCE a] [BEFORE b] binds and selects the memorized time and FORGOTTEN [?t] [SINCE a] [BEFORE b] the forgotten one; INCLUDING FORGOTTEN after the query makes every pattern match forgotten facts too. SELECT returns SPARQL 1.1 TSV (literals escaped: \\\", \\\\, \\n, \\t, \\r); CONSTRUCT and DESCRIBE return N-Triples. Both end with a count line.")]
     public string Query([Description("The SPARQL query to execute")] string query)
     {
         if (string.IsNullOrWhiteSpace(query))
@@ -90,7 +90,7 @@ public sealed class MercuryTools
         }
     }
 
-    [McpServerTool(Name = "mercury_update"), Description("Execute a SPARQL UPDATE (INSERT, DELETE, LOAD, CLEAR, etc.) to modify the triple store")]
+    [McpServerTool(Name = "mercury_update"), Description("Execute a SPARQL UPDATE (INSERT, DELETE, LOAD, CLEAR, etc.) to modify the triple store. INSERT memorizes and DELETE forgets; the store records when, so a write needs no timestamp of its own, and a forgotten fact stays queryable with FORGOTTEN.")]
     public string Update([Description("The SPARQL UPDATE statement to execute")] string update)
     {
         if (string.IsNullOrWhiteSpace(update))
@@ -166,8 +166,8 @@ public sealed class MercuryTools
 
     // Pruning is intentionally NOT exposed through MCP. Per ADR-006 (MCP Surface Discipline),
     // destructive operations whose effects an AI shouldn't initiate autonomously are CLI-only.
-    // To prune a Mercury store, run the `mercury prune` CLI directly — the human's shell history
-    // is the audit trail for the operation.
+    // To prune a Mercury store, a person stops mercury-mcp, opens the store with `mercury --store mcp`
+    // and runs `:prune` in the REPL.
     //
     // For Reference profile stores, see also ADR-007 (Sealed Substrate Immutability):
     // pruning a Reference store is rejected at plan time; the alternative is to bulk-load
