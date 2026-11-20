@@ -262,7 +262,10 @@ D8). The store's own read of the same times is `QuadStore.QueryMemories` (see [A
 
 ## SPARQL HTTP Server (`SkyOmega.Mercury.Sparql.Protocol`)
 
-`SparqlHttpServer` implements W3C SPARQL 1.1 Protocol using BCL HttpListener.
+`SparqlHttpServer` implements W3C SPARQL 1.1 Protocol using BCL HttpListener. It and Mercury.Solid's `SolidServer` run on
+one listener lifecycle, the internal `HttpListenerLoop`: it starts and stops the listener, accepts each request
+without waiting for the one before, answers an exception with 500 and a JSON body (`{"error": …, "message": …}`, the
+body of every error either server sends), and closes each response.
 
 **Endpoints:**
 - `GET/POST /sparql` - Query endpoint

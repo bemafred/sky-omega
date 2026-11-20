@@ -766,6 +766,26 @@ public class SparqlHttpServerTests : IDisposable
     }
 
     [Fact]
+    public async Task QueryEndpoint_AnExceptionIsAnswered500_WithItsMessage()
+    {
+        // The store factory throws while the request is answered; the loop that accepts the requests answers 500
+        // with the exception's message, and closes the response.
+        await using var server = new SparqlHttpServer(
+            () => throw new InvalidOperationException("no store \"here\""), $"http://localhost:{_port}/");
+        server.Start();
+        using var client = new HttpClient();
+
+        var query = "SELECT ?s WHERE { ?s ?p ?o }";
+        using var response = await client.GetAsync(
+            $"http://localhost:{_port}/sparql?query={WebUtility.UrlEncode(query)}", TestContext.Current.CancellationToken);
+        var body = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
+        Assert.Equal("application/json", response.Content.Headers.ContentType?.MediaType);
+        Assert.Equal("{\"error\":\"Internal Server Error\",\"message\":\"no store \\\"here\\\"\"}", body);
+    }
+
+    [Fact]
     public async Task QueryEndpoint_SelectTsv_IsTheTermInTurtleSyntax()
     {
         _store.AddCurrent("<http://example.org/q>", "<http://example.org/says>", "\"a \"b\", <c> & C:\\new\"");

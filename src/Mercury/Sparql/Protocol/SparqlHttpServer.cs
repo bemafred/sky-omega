@@ -35,13 +35,9 @@ namespace SkyOmega.Mercury.Sparql.Protocol;
 /// </remarks>
 public sealed class SparqlHttpServer : IDisposable, IAsyncDisposable
 {
-    private readonly HttpListener _listener;
+    private readonly HttpListenerLoop _loop;
     private readonly Func<QuadStore> _storeFactory;
-    private readonly string _baseUri;
     private readonly SparqlHttpServerOptions _options;
-    private CancellationTokenSource? _cts;
-    private Task? _listenTask;
-    private bool _disposed;
 
     /// <summary>
     /// Creates a new SPARQL HTTP server with a store factory.
@@ -54,14 +50,8 @@ public sealed class SparqlHttpServer : IDisposable, IAsyncDisposable
     public SparqlHttpServer(Func<QuadStore> storeFactory, string baseUri, SparqlHttpServerOptions? options = null)
     {
         _storeFactory = storeFactory ?? throw new ArgumentNullException(nameof(storeFactory));
-        _baseUri = baseUri ?? throw new ArgumentNullException(nameof(baseUri));
+        _loop = new HttpListenerLoop(baseUri, RespondAsync);
         _options = options ?? new SparqlHttpServerOptions();
-
-        if (!_baseUri.EndsWith("/"))
-            _baseUri += "/";
-
-        _listener = new HttpListener();
-        _listener.Prefixes.Add(_baseUri);
     }
 
     /// <summary>
@@ -74,135 +64,67 @@ public sealed class SparqlHttpServer : IDisposable, IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(store);
         _storeFactory = () => store;
-        _baseUri = baseUri ?? throw new ArgumentNullException(nameof(baseUri));
+        _loop = new HttpListenerLoop(baseUri, RespondAsync);
         _options = options ?? new SparqlHttpServerOptions();
-
-        if (!_baseUri.EndsWith("/"))
-            _baseUri += "/";
-
-        _listener = new HttpListener();
-        _listener.Prefixes.Add(_baseUri);
     }
 
     /// <summary>
     /// Start the HTTP server and begin accepting requests.
     /// </summary>
-    public void Start()
-    {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-
-        _cts = new CancellationTokenSource();
-        _listener.Start();
-        _listenTask = AcceptConnectionsAsync(_cts.Token);
-    }
+    public void Start() => _loop.Start();
 
     /// <summary>
     /// Stop the HTTP server gracefully.
     /// </summary>
-    public async Task StopAsync()
-    {
-        if (_cts != null)
-        {
-            await _cts.CancelAsync();
-            _listener.Stop();
-
-            if (_listenTask != null)
-            {
-                try
-                {
-                    await _listenTask.ConfigureAwait(false);
-                }
-                catch (OperationCanceledException)
-                {
-                    // Expected on shutdown
-                }
-            }
-        }
-    }
+    public Task StopAsync() => _loop.StopAsync();
 
     /// <summary>
     /// Whether the server is currently running.
     /// </summary>
-    public bool IsListening => _listener.IsListening;
+    public bool IsListening => _loop.IsListening;
 
     /// <summary>
     /// The base URI the server is listening on.
     /// </summary>
-    public string BaseUri => _baseUri;
+    public string BaseUri => _loop.BaseUri;
 
-    private async Task AcceptConnectionsAsync(CancellationToken ct)
-    {
-        while (!ct.IsCancellationRequested)
-        {
-            try
-            {
-                var context = await _listener.GetContextAsync().ConfigureAwait(false);
-
-                // Handle request in background (don't await)
-                _ = HandleRequestAsync(context, ct);
-            }
-            catch (Exception) when (ct.IsCancellationRequested)
-            {
-                // A stop reaches this wait as the listener's exception, and which one depends on when the stop
-                // came: a wait pending at Stop throws ObjectDisposedException, and a wait begun after Stop
-                // throws InvalidOperationException (Linux and macOS).
-                break;
-            }
-        }
-    }
-
-    private async Task HandleRequestAsync(HttpListenerContext context, CancellationToken ct)
+    /// <summary>
+    /// One request: the query endpoint, the update endpoint, or 404. The loop closes the response, and answers an
+    /// exception with 500.
+    /// </summary>
+    private async Task RespondAsync(HttpListenerContext context, CancellationToken ct)
     {
         var request = context.Request;
         var response = context.Response;
 
-        try
+        // Add CORS headers if enabled
+        if (_options.EnableCors)
         {
-            // Add CORS headers if enabled
-            if (_options.EnableCors)
-            {
-                response.Headers.Add("Access-Control-Allow-Origin", _options.CorsOrigin);
-                response.Headers.Add("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-                response.Headers.Add("Access-Control-Allow-Headers", "Content-Type, Accept");
-            }
-
-            // Handle preflight
-            if (request.HttpMethod == "OPTIONS")
-            {
-                response.StatusCode = 204;
-                response.Close();
-                return;
-            }
-
-            var path = request.Url?.AbsolutePath ?? "/";
-
-            if (path.EndsWith("/sparql/update", StringComparison.OrdinalIgnoreCase))
-            {
-                await HandleUpdateRequestAsync(request, response, ct).ConfigureAwait(false);
-            }
-            else if (path.EndsWith("/sparql", StringComparison.OrdinalIgnoreCase))
-            {
-                await HandleQueryRequestAsync(request, response, ct).ConfigureAwait(false);
-            }
-            else
-            {
-                await WriteErrorResponseAsync(response, 404, "Not Found", "Unknown endpoint").ConfigureAwait(false);
-            }
+            response.Headers.Add("Access-Control-Allow-Origin", _options.CorsOrigin);
+            response.Headers.Add("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+            response.Headers.Add("Access-Control-Allow-Headers", "Content-Type, Accept");
         }
-        catch (Exception ex)
+
+        // Handle preflight
+        if (request.HttpMethod == "OPTIONS")
         {
-            try
-            {
-                await WriteErrorResponseAsync(response, 500, "Internal Server Error", ex.Message).ConfigureAwait(false);
-            }
-            catch
-            {
-                // Ignore errors writing error response
-            }
+            response.StatusCode = 204;
+            return;
         }
-        finally
+
+        var path = request.Url?.AbsolutePath ?? "/";
+
+        if (path.EndsWith("/sparql/update", StringComparison.OrdinalIgnoreCase))
         {
-            response.Close();
+            await HandleUpdateRequestAsync(request, response, ct).ConfigureAwait(false);
+        }
+        else if (path.EndsWith("/sparql", StringComparison.OrdinalIgnoreCase))
+        {
+            await HandleQueryRequestAsync(request, response, ct).ConfigureAwait(false);
+        }
+        else
+        {
+            await HttpListenerLoop.WriteErrorResponseAsync(response, 404, "Not Found", "Unknown endpoint").ConfigureAwait(false);
         }
     }
 
@@ -231,14 +153,14 @@ public sealed class SparqlHttpServer : IDisposable, IAsyncDisposable
             }
             else
             {
-                await WriteErrorResponseAsync(response, 415, "Unsupported Media Type",
+                await HttpListenerLoop.WriteErrorResponseAsync(response, 415, "Unsupported Media Type",
                     "Expected application/x-www-form-urlencoded or application/sparql-query").ConfigureAwait(false);
                 return;
             }
         }
         else
         {
-            await WriteErrorResponseAsync(response, 405, "Method Not Allowed",
+            await HttpListenerLoop.WriteErrorResponseAsync(response, 405, "Method Not Allowed",
                 "Query endpoint accepts GET or POST").ConfigureAwait(false);
             return;
         }
@@ -258,7 +180,7 @@ public sealed class SparqlHttpServer : IDisposable, IAsyncDisposable
 
         if (!result.Success)
         {
-            await WriteErrorResponseAsync(response, 400, "Bad Request",
+            await HttpListenerLoop.WriteErrorResponseAsync(response, 400, "Bad Request",
                 result.ErrorMessage ?? "Query execution failed").ConfigureAwait(false);
             return;
         }
@@ -393,14 +315,14 @@ public sealed class SparqlHttpServer : IDisposable, IAsyncDisposable
     {
         if (request.HttpMethod != "POST")
         {
-            await WriteErrorResponseAsync(response, 405, "Method Not Allowed",
+            await HttpListenerLoop.WriteErrorResponseAsync(response, 405, "Method Not Allowed",
                 "Update endpoint accepts POST only").ConfigureAwait(false);
             return;
         }
 
         if (!_options.EnableUpdates)
         {
-            await WriteErrorResponseAsync(response, 403, "Forbidden",
+            await HttpListenerLoop.WriteErrorResponseAsync(response, 403, "Forbidden",
                 "Updates are disabled on this endpoint").ConfigureAwait(false);
             return;
         }
@@ -421,14 +343,14 @@ public sealed class SparqlHttpServer : IDisposable, IAsyncDisposable
         }
         else
         {
-            await WriteErrorResponseAsync(response, 415, "Unsupported Media Type",
+            await HttpListenerLoop.WriteErrorResponseAsync(response, 415, "Unsupported Media Type",
                 "Expected application/x-www-form-urlencoded or application/sparql-update").ConfigureAwait(false);
             return;
         }
 
         if (string.IsNullOrWhiteSpace(updateString))
         {
-            await WriteErrorResponseAsync(response, 400, "Bad Request",
+            await HttpListenerLoop.WriteErrorResponseAsync(response, 400, "Bad Request",
                 "Missing update parameter").ConfigureAwait(false);
             return;
         }
@@ -446,7 +368,7 @@ public sealed class SparqlHttpServer : IDisposable, IAsyncDisposable
         }
         else
         {
-            await WriteErrorResponseAsync(response, 400, "Bad Request",
+            await HttpListenerLoop.WriteErrorResponseAsync(response, 400, "Bad Request",
                 result.ErrorMessage ?? "Update failed").ConfigureAwait(false);
         }
     }
@@ -460,7 +382,7 @@ public sealed class SparqlHttpServer : IDisposable, IAsyncDisposable
         sb.AppendLine("@prefix sd: <http://www.w3.org/ns/sparql-service-description#> .");
         sb.AppendLine("@prefix void: <http://rdfs.org/ns/void#> .");
         sb.AppendLine();
-        sb.AppendLine($"<{_baseUri}sparql> a sd:Service ;");
+        sb.AppendLine($"<{_loop.BaseUri}sparql> a sd:Service ;");
         sb.AppendLine("    sd:endpoint <sparql> ;");
         sb.AppendLine("    sd:supportedLanguage sd:SPARQL11Query ;");
 
@@ -502,24 +424,6 @@ public sealed class SparqlHttpServer : IDisposable, IAsyncDisposable
         await response.OutputStream.WriteAsync(bytes, ct).ConfigureAwait(false);
     }
 
-    private static async Task WriteErrorResponseAsync(HttpListenerResponse response, int statusCode,
-        string statusDescription, string message)
-    {
-        response.StatusCode = statusCode;
-        response.StatusDescription = statusDescription;
-        response.ContentType = "application/json";
-
-        var escapedMessage = message
-            .Replace("\\", "\\\\")
-            .Replace("\"", "\\\"")
-            .Replace("\n", "\\n")
-            .Replace("\r", "\\r")
-            .Replace("\t", "\\t");
-
-        var bytes = Encoding.UTF8.GetBytes($"{{\"error\":\"{statusDescription}\",\"message\":\"{escapedMessage}\"}}");
-        await response.OutputStream.WriteAsync(bytes).ConfigureAwait(false);
-    }
-
     private static string? ParseFormParameter(string body, string name)
     {
         var pairs = body.Split('&');
@@ -534,25 +438,9 @@ public sealed class SparqlHttpServer : IDisposable, IAsyncDisposable
         return null;
     }
 
-    public void Dispose()
-    {
-        if (_disposed) return;
-        _disposed = true;
+    public void Dispose() => _loop.Dispose();
 
-        _cts?.Cancel();
-        _listener.Close();
-        _cts?.Dispose();
-    }
-
-    public async ValueTask DisposeAsync()
-    {
-        if (_disposed) return;
-        _disposed = true;
-
-        await StopAsync().ConfigureAwait(false);
-        _listener.Close();
-        _cts?.Dispose();
-    }
+    public ValueTask DisposeAsync() => _loop.DisposeAsync();
 }
 
 /// <summary>
