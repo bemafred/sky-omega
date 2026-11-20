@@ -69,14 +69,14 @@ public class SparqlHttpServerTests : IDisposable
     {
         using var server = new SparqlHttpServer(_store, "http://localhost:19999/");
         Assert.False(server.IsListening);
-        Assert.Equal("http://localhost:19999/", server.BaseUri);
+        Assert.Equal(["http://localhost:19999/"], server.BaseUris);
     }
 
     [Fact]
     public void Server_NormalizesBaseUri()
     {
         using var server = new SparqlHttpServer(_store, "http://localhost:19998");
-        Assert.Equal("http://localhost:19998/", server.BaseUri);
+        Assert.Equal(["http://localhost:19998/"], server.BaseUris);
     }
 
     [Fact]

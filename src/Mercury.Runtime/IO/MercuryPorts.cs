@@ -31,12 +31,24 @@ public static class MercuryPorts
         string.Equals(target, "mcp", StringComparison.OrdinalIgnoreCase) ? McpPipeName : target;
 
     /// <summary>
-    /// Get the SPARQL endpoint URL for a port.
+    /// Get the SPARQL endpoint URL for a port, on localhost.
     /// </summary>
-    public static string GetEndpoint(int port) => $"http://localhost:{port}/sparql";
+    public static string GetEndpoint(int port) => GetEndpoint("localhost", port);
 
     /// <summary>
-    /// Get the base URL for a port.
+    /// Get the SPARQL endpoint URL for a host and a port.
     /// </summary>
-    public static string GetBaseUrl(int port) => $"http://localhost:{port}/";
+    public static string GetEndpoint(string host, int port) => GetBaseUrl(host, port) + "sparql";
+
+    /// <summary>
+    /// Get the base URL for a port, on localhost.
+    /// </summary>
+    public static string GetBaseUrl(int port) => GetBaseUrl("localhost", port);
+
+    /// <summary>
+    /// Get the base URL a listener listens on for a host and a port (ADR-065 D4). The host is a name, an IP address,
+    /// or <c>+</c> or <c>*</c> for every network; an IPv6 address is put in brackets, as a URL has it.
+    /// </summary>
+    public static string GetBaseUrl(string host, int port) =>
+        host.Contains(':') && !host.StartsWith('[') ? $"http://[{host}]:{port}/" : $"http://{host}:{port}/";
 }

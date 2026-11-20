@@ -49,7 +49,8 @@ public sealed class SolidServer : IDisposable, IAsyncDisposable
     public SolidServer(QuadStore store, string baseUri, SolidServerOptions? options = null)
     {
         _store = store ?? throw new ArgumentNullException(nameof(store));
-        _loop = new HttpListenerLoop(baseUri, RespondAsync);
+        // One address: a resource's IRI is built from it.
+        _loop = new HttpListenerLoop([baseUri], RespondAsync);
         _options = options ?? new SolidServerOptions();
 
         // Create access policy
@@ -79,7 +80,7 @@ public sealed class SolidServer : IDisposable, IAsyncDisposable
     /// <summary>
     /// The base URI the server is listening on.
     /// </summary>
-    public string BaseUri => _loop.BaseUri;
+    public string BaseUri => _loop.BaseUris[0];
 
     /// <summary>
     /// One request, routed by its path and method. The loop closes the response, and answers an exception with 500.
@@ -122,7 +123,7 @@ public sealed class SolidServer : IDisposable, IAsyncDisposable
         }
 
         // Extract resource URI from path
-        var resourceUri = _loop.BaseUri.TrimEnd('/') + path;
+        var resourceUri = BaseUri.TrimEnd('/') + path;
 
         // Extract agent WebID from authentication (simplified - real implementation needs Solid-OIDC)
         var agentWebId = ExtractAgentWebId(request);

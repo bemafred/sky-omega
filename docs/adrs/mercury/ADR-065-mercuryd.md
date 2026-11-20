@@ -316,6 +316,22 @@ The order follows the dependencies (ADR-064's rule).
    W3C syntax suites' skips). One change seen: `:store` and mercury-mcp's pipe welcome name the store by its full
    path when a relative one is given. The stop signals are tested in Step 4, on mercuryd's own process.
 3. **Several listen addresses** in `HttpListenerLoop` and `SparqlHttpServer` (D4), with tests.
+   Done on zbook, 2026-11-20:
+   - The addresses are one listener's prefixes, one port and one accept loop. A duplicate is listened on once, and
+     `SparqlHttpServer.BaseUri` became `BaseUris`.
+   - The service description names the endpoint the request reached. A server on several addresses has no one base
+     URI, and `+` or `*` is no IRI.
+   - A start that fails on any address fails whole. The managed listener (Linux, macOS) unbinds what it had bound and
+     closes itself. The loop now makes its stop state only after a start: a stop of that closed listener bound the
+     failed address again and threw, which would have hidden the start's exception (D3). Both servers had made it
+     before the start since before `4f0e95c` (sky-omega read `4f0e95c^`), so the fix covers both.
+   - `MercuryPorts.GetBaseUrl(host, port)` and `GetEndpoint(host, port)` form an address, an IPv6 one in brackets.
+   - `SolidServer` keeps one address, since a resource's IRI is built from it.
+   - Tests: `SparqlHttpServerAddressesTests`, each failing under a mutation that undoes what it tests (five).
+     - On Windows a listener on `127.0.0.1` needs a URL reservation or an administrator; without either, those tests
+       are skipped.
+     - The failed start is tested on Linux and macOS only: Windows' http.sys registers an address that isn't the
+       machine's without binding it.
 4. **`src/Mercury.Daemon`** (D1 to D3, D5, D6, D9), with tests in `tests/Mercury.Hosting.Tests`: a start that serves
    queries and updates over HTTP, an attach over the socket, a SIGTERM that closes the store and writes the stop to
    the log, a start that fails exits with a code other than 0, and a second process on the store is refused. Each test
