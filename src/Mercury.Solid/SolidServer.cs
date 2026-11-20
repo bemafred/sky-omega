@@ -128,12 +128,11 @@ public sealed class SolidServer : IDisposable, IAsyncDisposable
                 // Handle request in background (don't await)
                 _ = HandleRequestAsync(context, ct);
             }
-            catch (HttpListenerException) when (ct.IsCancellationRequested)
+            catch (Exception) when (ct.IsCancellationRequested)
             {
-                break;
-            }
-            catch (ObjectDisposedException) when (ct.IsCancellationRequested)
-            {
+                // A stop reaches this wait as the listener's exception, and which one depends on when the stop
+                // came: a wait pending at Stop throws ObjectDisposedException, and a wait begun after Stop
+                // throws InvalidOperationException (Linux and macOS).
                 break;
             }
         }
