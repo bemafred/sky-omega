@@ -1346,6 +1346,19 @@ public sealed class EngineSteppingSession : IDisposable
                 (owned ? ", ended with the OS since DrHook owned it." : ", left as it is since DrHook only attached to it.") +
                 " Drain drhook_drain_anomalies for the DebuggerError record.";
         }
+        else if (stop.Reason == StopReason.DebuggerLost)
+        {
+            // ADR-016 6.8: the target has ended, as the OS shows it (that is the verdict's premise), and mscordbi never
+            // delivered its exit, so a request of the debugger's waits for a reply that will not come (finding 105).
+            ended["exitNotDelivered"] = new JsonObject { ["boundMs"] = (int)DebugSession.ExitDeliveryBound.TotalMilliseconds };
+            ended["target"] = new JsonObject { ["pid"] = pid, ["owned"] = owned, ["state"] = "exited" };
+            ended["prompt"] =
+                $"The debugger lost the process: the target (pid {pid}) has ended, as the operating system shows it, and mscordbi " +
+                $"delivered no ExitProcess within {DebugSession.ExitDeliveryBound.TotalSeconds:0} s, so a request of the debugger's is " +
+                "waiting for a reply that will not come (finding 105) and the session is over. No native call was made afterwards: no " +
+                "Detach, no Terminate, no Release (the debugger's references are kept for the life of this process). Drain " +
+                "drhook_drain_anomalies for the ExitNotDelivered record.";
+        }
         else
         {
             TargetExit known = exit ?? TargetExit.Unknown($"no exit record within {TargetExitWait.TotalSeconds:0} s of the exit");

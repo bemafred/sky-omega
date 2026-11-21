@@ -33,11 +33,18 @@ public enum StopReason
     EntryModuleLoaded,
     /// <summary>The debuggee exited; no further stops will occur.</summary>
     ProcessExited,
-    /// <summary>mscordbi sent <c>ICorDebugManagedCallback.DebuggerError</c>: debugging services for the process are
-    /// disabled, and the debugger is unusable for it. Documented: only <c>ICorDebugProcess::GetID</c> may be called
-    /// afterwards. The session makes no further native call (it refuses every operation that would), and its
-    /// teardown calls nothing on mscordbi's objects, not even <c>Release</c>. <see cref="StopInfo.DebuggerError"/>
-    /// carries the error. Every later <see cref="DebugSession.WaitForStop"/> returns this same stop.</summary>
+    /// <summary>The debugger is unusable for the process, for one of two causes (ADR-016 6.8):
+    /// <list type="bullet">
+    /// <item>mscordbi sent <c>ICorDebugManagedCallback.DebuggerError</c>: debugging services for the process are
+    /// disabled. Documented: only <c>ICorDebugProcess::GetID</c> may be called afterwards.
+    /// <see cref="StopInfo.DebuggerError"/> carries the error.</item>
+    /// <item>The target has ended, as the operating system shows it, and mscordbi delivered no <c>ExitProcess</c>
+    /// within <see cref="DebugSession.ExitDeliveryBound"/> (finding 105: a request in flight at the death is never
+    /// answered). <see cref="StopInfo.ExitNotDelivered"/> is true.</item>
+    /// </list>
+    /// Either way the session makes no further native call (it refuses every operation that would), and its
+    /// teardown calls nothing on mscordbi's objects, not even <c>Release</c>. Every later
+    /// <see cref="DebugSession.WaitForStop"/> returns this same stop.</summary>
     DebuggerLost,
 }
 
@@ -65,9 +72,9 @@ public enum ExceptionStopKind
 
 /// <summary>A synchronized stop surfaced to the caller. While stopped, the debuggee is frozen;
 /// call <see cref="DebugSession.Resume"/> to continue it. <see cref="ExceptionKind"/> is meaningful
-/// only when <see cref="Reason"/> is <see cref="StopReason.Exception"/>; <see cref="DebuggerError"/> only when it is
-/// <see cref="StopReason.DebuggerLost"/>.</summary>
-public sealed record StopInfo(StopReason Reason, ExceptionStopKind ExceptionKind = ExceptionStopKind.None, DebuggerErrorInfo? DebuggerError = null)
+/// only when <see cref="Reason"/> is <see cref="StopReason.Exception"/>. A <see cref="StopReason.DebuggerLost"/> stop
+/// carries its cause: <see cref="DebuggerError"/>'s codes, or <see cref="ExitNotDelivered"/>; exactly one is set.</summary>
+public sealed record StopInfo(StopReason Reason, ExceptionStopKind ExceptionKind = ExceptionStopKind.None, DebuggerErrorInfo? DebuggerError = null, bool ExitNotDelivered = false)
 {
     /// <summary>True when no further stop can come and the session is over: the debuggee exited
     /// (<see cref="StopReason.ProcessExited"/>), or the debugger lost it (<see cref="StopReason.DebuggerLost"/>).</summary>

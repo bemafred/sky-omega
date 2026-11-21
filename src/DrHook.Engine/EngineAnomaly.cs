@@ -132,6 +132,15 @@ public enum AnomalyKind
     /// Actionable: the session ended before its target ever synchronized with the debugger; if the host crashes after
     /// this anomaly, the crash is that race.</summary>
     DetachBeforeAttachEvents,
+
+    /// <summary>The target has ended, as the operating system shows it, and mscordbi delivered no <c>ExitProcess</c>
+    /// within <see cref="DebugSession.ExitDeliveryBound"/> (2 s) while the debugger was dispatching callbacks (ADR-016
+    /// 6.8). Once a target was gone, <c>ProcessExited</c> came within 175 ms or not within 30 s (findings 104, 105): a
+    /// request mscordbi made while the target was alive is never answered, and nothing notices the death. The session
+    /// calls its debugger lost (<see cref="StopReason.DebuggerLost"/>, <see cref="StopInfo.ExitNotDelivered"/>) and
+    /// makes no further native call, as after <see cref="DebuggerError"/>. Context: <c>waitedMs</c>, <c>boundMs</c>.
+    /// Actionable: the debugger process cannot debug again safely; drhook-mcp discards its worker.</summary>
+    ExitNotDelivered,
 }
 
 /// <summary>A structured record of a substrate-correctness anomaly. Surfaced through

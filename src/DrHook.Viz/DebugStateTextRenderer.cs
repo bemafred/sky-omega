@@ -92,7 +92,7 @@ public static class DebugStateTextRenderer
     /// <summary>What a view says of a target that has no position because the session's target is gone, or null
     /// while the target runs or is stopped: "target exited with code 3" or "target was killed by signal 11
     /// (SIGSEGV)" when the snapshot says how it ended, "target exited" when it does not, "debugger lost" after
-    /// mscordbi's DebuggerError.</summary>
+    /// mscordbi's DebuggerError or an exit it never delivered.</summary>
     public static string? FormatEnd(WireSession s) => s.Execution switch
     {
         "Exited" => $"target {s.Exit ?? "exited"}",

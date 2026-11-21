@@ -923,6 +923,22 @@ measurement, that measurement comes first.
   - the supervisor's own anomalies on the views;
   - a tool list that changes without a reconnect.
 
+*6.8's own verdict built 2026-11-21* (sky-omega, omega): the first part of 6.7's design.
+- **Where.** In the callback pump's wait, so that every wait in the engine has it: a stop, a step, and an evaluation's
+  end. It reads the operating system every 100 ms (`DebugSession.TargetHasExited`, through the PID and start time on
+  Unix). When the target has ended and the pump has published no `ProcessExited` for 2 s
+  (`DebugSession.ExitDeliveryBound`), the wait returns `DebuggerLost` with `ExitNotDelivered` and raises the
+  `ExitNotDelivered` anomaly.
+- **Not while the target is held at a stop.** mscordbi delivers a held target's exit only after the stop's `Continue`,
+  so a wait then proves nothing about the debugger.
+- **The same loss as `DebuggerError`.** The pump records the first loss of either kind and keeps it. From then on the
+  session refuses every native call, and its teardown makes none. The teardown would otherwise wait in the request
+  that never returns (finding 103).
+- **Tests.** Four in `CallbackPumpTests`: the verdict within the bound, and nothing continued after it; a delivered
+  exit; a held target; a running one. The held-target and delivered-exit tests each fail when their guard is removed.
+  On omega the engine's tests passed 236 of 239 (3 skipped) and the integration suite 28 of 29 (1 skipped).
+- **Not yet seen on a real stuck session.** Probe 106's constructions come with the worker's own tests.
+
 ### Step 6: the decisions (decided 2026-11-20)
 
 Drafted from Steps 1 to 5, and **decided by Martin on 2026-11-20**, every item as drafted: "I approve the draft, your

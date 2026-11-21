@@ -340,6 +340,92 @@ public sealed class CallbackPumpTests
         Assert.Single(sink.Anomalies);
     }
 
+    // The session's own verdict (ADR-016 6.8): the target has ended, as the operating system shows it, and mscordbi has
+    // delivered no ExitProcess within 2 s while the pump dispatches. targetEnded stands in for the OS read
+    // (DebugSession.TargetHasExited). The bound is the real one, so these tests wait it out.
+
+    [Fact]
+    public void ExitNotDelivered_WithinTheBound_TheWaitsCallTheDebuggerLost_AndNothingIsContinuedAfter()
+    {
+        var sink = new RecordingSink();
+        using var pump = new CallbackPump(sink);
+        int continues = 0;
+        pump.Start((_, _) => { Interlocked.Increment(ref continues); return 0; }, () => { }, targetEnded: () => true);
+
+        // Short waits, as a driver that shows the target running after 250 ms makes them: the bound runs across them.
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        StopInfo? stop = null;
+        while (stop is null && clock.Elapsed < TimeSpan.FromSeconds(5))
+            stop = pump.WaitForStop(TimeSpan.FromMilliseconds(300));
+        TimeSpan calledAt = clock.Elapsed;
+        pump.OnCallback(CallbackKind.Informational, "CreateThread", 0, 0, 0);
+        pump.OnCallback(CallbackKind.DebuggerError, "DebuggerError", 0, 0, unchecked((int)0x8013FFFF), 0, 42);
+        StopInfo? later = pump.WaitForStop(TimeSpan.Zero);
+        pump.Dispose(); // joins the worker
+
+        Assert.Equal(StopReason.DebuggerLost, stop?.Reason);
+        Assert.True(stop!.ExitNotDelivered);
+        Assert.Null(stop.DebuggerError);
+        Assert.True(stop.EndsSession);
+        Assert.InRange(calledAt, CallbackPump.ExitDeliveryBound, CallbackPump.ExitDeliveryBound + TimeSpan.FromSeconds(1));
+        Assert.Same(stop, later);                        // the first loss is the one kept: a later DebuggerError does not replace it
+        Assert.Same(stop, pump.LostStop);
+        Assert.Equal(0, Volatile.Read(ref continues));   // the later callback was not continued
+        EngineAnomaly anomaly = Assert.Single(sink.Anomalies);
+        Assert.Equal(AnomalyKind.ExitNotDelivered, anomaly.Kind);
+        Assert.Equal("2000", anomaly.Context!["boundMs"]);
+    }
+
+    [Fact]
+    public void ExitProcess_WithinTheBound_IsProcessExited_AndNoLossIsCalledAfterIt()
+    {
+        var sink = new RecordingSink();
+        using var pump = new CallbackPump(sink);
+        pump.Start((_, _) => 0, () => { }, targetEnded: () => true);
+
+        Assert.Null(pump.WaitForStop(TimeSpan.FromMilliseconds(500))); // the end is seen; the exit has not come yet
+        pump.OnCallback(CallbackKind.Informational, "ExitProcess", 0, 0, 0);
+        StopInfo? exited = pump.WaitForStop(TimeSpan.FromSeconds(2));
+        StopInfo? afterwards = pump.WaitForStop(CallbackPump.ExitDeliveryBound + TimeSpan.FromMilliseconds(500));
+
+        Assert.Equal(StopReason.ProcessExited, exited?.Reason);
+        Assert.Null(afterwards);      // the exit was delivered, so a wait after it is not a loss
+        Assert.Null(pump.LostStop);
+        Assert.Empty(sink.Anomalies);
+    }
+
+    [Fact]
+    public void ATargetHeldAtAStop_IsNotCalledLost_ThoughItHasEnded()
+    {
+        // mscordbi delivers the exit of a target held at a stop only after the stop's Continue, so a wait meanwhile
+        // proves nothing about the debugger.
+        var sink = new RecordingSink();
+        using var pump = new CallbackPump(sink);
+        bool ended = false;
+        pump.Start((_, _) => 0, () => { }, targetEnded: () => Volatile.Read(ref ended));
+        pump.OnCallback(CallbackKind.BreakpointHit, "Breakpoint", 0, 0x1234, 0);
+        Assert.Equal(StopReason.Breakpoint, pump.WaitForStop(TimeSpan.FromSeconds(2))?.Reason);
+
+        Volatile.Write(ref ended, true);
+        StopInfo? held = pump.WaitForStop(CallbackPump.ExitDeliveryBound + TimeSpan.FromMilliseconds(500));
+
+        Assert.Null(held);
+        Assert.Null(pump.LostStop);
+        Assert.Empty(sink.Anomalies);
+    }
+
+    [Fact]
+    public void ARunningTarget_IsNotCalledLost()
+    {
+        var sink = new RecordingSink();
+        using var pump = new CallbackPump(sink);
+        pump.Start((_, _) => 0, () => { }, targetEnded: () => false);
+
+        Assert.Null(pump.WaitForStop(CallbackPump.ExitDeliveryBound + TimeSpan.FromMilliseconds(500)));
+        Assert.Null(pump.LostStop);
+        Assert.Empty(sink.Anomalies);
+    }
+
     [Fact]
     public void OnCallback_AfterDispose_IsDroppedWithoutThrowing()
     {

@@ -39,7 +39,7 @@ internal sealed class CallbackPump : IManagedCallbackSink, IDisposable
     private nint _stopThread;            // ICorDebugThread at the current stop — handed to the resume handler (for stepping)
     private nint _lastBreakpointPointer; // ICorDebugBreakpoint at the most recent BreakpointHit (0 otherwise) — for caller-thread policy lookup
     private int _disposed;               // 0 = live, 1 = disposed; atomic via Interlocked.Exchange (ENG-CP-1)
-    private StopInfo? _lostStop;         // set once, by the worker, when DebuggerError arrives; never cleared
+    private StopInfo? _lostStop;         // set once, when DebuggerError arrives or the session calls its debugger lost; never cleared
     private int _parked;                 // 1 while the worker holds the debuggee at a published stop (TakeResume)
 
     /// <summary>True while the worker holds the debuggee at a stop it has published and waits for the command that
@@ -110,10 +110,9 @@ internal sealed class CallbackPump : IManagedCallbackSink, IDisposable
             // Published here, on mscordbi's thread, not by the worker: the worker may be parked at a stop (a command at
             // a stop is what times out into DebuggerError) and would not read the queue until the caller resumes, and
             // its resume is a Continue. Managed work only, O(1): no native call.
-            if (Volatile.Read(ref _lostStop) is not null) return; // only the first is kept; nothing more is done
             var error = new DebuggerErrorInfo(detail, errorCode);
-            var lost = new StopInfo(StopReason.DebuggerLost, DebuggerError: error);
-            Volatile.Write(ref _lostStop, lost);
+            if (Interlocked.CompareExchange(ref _lostStop, new StopInfo(StopReason.DebuggerLost, DebuggerError: error), null) is not null)
+                return; // only the first loss is kept; nothing more is done
             _userSink.OnEvent(name);
             _userSink.OnAnomaly(new EngineAnomaly(
                 DateTimeOffset.UtcNow, AnomalyKind.DebuggerError, "mscordbi", "OnCallback (DebuggerError)",
@@ -124,16 +123,7 @@ internal sealed class CallbackPump : IManagedCallbackSink, IDisposable
                     ["errorHR"] = $"0x{detail:X8}",
                     ["errorCode"] = errorCode.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 }));
-            try
-            {
-                _stops.Add(lost);                      // wake a caller blocked in WaitForStop
-                _resume.Add(ResumeKind.Continue);      // unpark a worker held at a stop; it sees the loss and ends without continuing
-                _events.Add(new CallbackEvent(kind, name, appDomain, thread, detail, breakpoint, errorCode)); // wake an idle worker
-            }
-            catch (Exception ex) when (ex is InvalidOperationException or ObjectDisposedException)
-            {
-                // Pump already torn down: the loss is still recorded in _lostStop, which is all a later caller reads.
-            }
+            WakeOnLoss(new CallbackEvent(kind, name, appDomain, thread, detail, breakpoint, errorCode));
             return;
         }
         try
@@ -154,19 +144,85 @@ internal sealed class CallbackPump : IManagedCallbackSink, IDisposable
         }
     }
 
+    // Once the loss is recorded in _lostStop, wake everything that could otherwise make a native call or wait for one: a
+    // caller blocked in WaitForStop, a worker parked at a stop (whose resume would be a Continue; it sees the loss and
+    // ends without continuing), and an idle worker (wake is the event that ends its wait). Managed work only, O(1).
+    private void WakeOnLoss(CallbackEvent wake)
+    {
+        try
+        {
+            _stops.Add(Volatile.Read(ref _lostStop)!);
+            _resume.Add(ResumeKind.Continue);
+            _events.Add(wake);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ObjectDisposedException)
+        {
+            // Pump already torn down: the loss is still recorded in _lostStop, which is all a later caller reads.
+        }
+    }
+
+    /// <summary>How long mscordbi is given to deliver <c>ExitProcess</c> once the target has ended, as the operating
+    /// system shows it, while the pump dispatches callbacks (ADR-016 6.8). Once the target was gone, <c>ProcessExited</c>
+    /// came within 175 ms or not within 30 s (findings 104, 105); within 0 to 138 ms in finding 106, whose worker called
+    /// every loss at 2 s and no false one.</summary>
+    internal static readonly TimeSpan ExitDeliveryBound = TimeSpan.FromSeconds(2);
+
+    // How often a wait reads the operating system for the target's end.
+    private static readonly TimeSpan EndPoll = TimeSpan.FromMilliseconds(100);
+
+    private Func<bool>? _targetEnded; // reads the operating system: has the target ended? Null: the session has no way to know
+    private int _exitPublished;       // 1 once the worker has published ProcessExited
+    private long _endSeenAt;          // Stopwatch timestamp of the first wait that saw the target ended and nothing delivered; 0 = none
+
+    // The session's own verdict, ADR-016 6.8: the target has ended, as the operating system shows it, and mscordbi has
+    // delivered no ExitProcess within ExitDeliveryBound while the pump was dispatching. Finding 105: a request mscordbi
+    // started while the target was alive waits for a reply that never comes, and nothing in its PAL notices the death.
+    // The debugger is then lost as surely as after DebuggerError, and its teardown would wait in the same request
+    // (finding 103), so the loss is recorded the same way and the session makes no further native call. A worker held at
+    // a stop is not dispatching: mscordbi waits for its Continue before it delivers the exit, so no verdict is made then.
+    // Read on the caller's thread, between waits.
+    private StopInfo? LossByUndeliveredExit()
+    {
+        if (_targetEnded is not { } ended || IsParked || Volatile.Read(ref _exitPublished) == 1 || !ended())
+        {
+            _endSeenAt = 0;
+            return null;
+        }
+        if (_endSeenAt == 0) { _endSeenAt = System.Diagnostics.Stopwatch.GetTimestamp(); return null; }
+        TimeSpan waited = System.Diagnostics.Stopwatch.GetElapsedTime(_endSeenAt);
+        if (waited < ExitDeliveryBound) return null;
+
+        if (Interlocked.CompareExchange(ref _lostStop, new StopInfo(StopReason.DebuggerLost, ExitNotDelivered: true), null) is not null)
+            return Volatile.Read(ref _lostStop); // a DebuggerError came first; it is the loss kept
+        _userSink.OnAnomaly(new EngineAnomaly(
+            DateTimeOffset.UtcNow, AnomalyKind.ExitNotDelivered, "mcp-request", "WaitForStop",
+            Observed: $"the target has ended, as the operating system shows it, and mscordbi delivered no ExitProcess within {waited.TotalMilliseconds:0} ms",
+            Expected: $"ProcessExited within {ExitDeliveryBound.TotalSeconds:0} s of the target's end (findings 104, 106: within 175 ms)",
+            Context: new Dictionary<string, string>
+            {
+                ["waitedMs"] = waited.TotalMilliseconds.ToString("0", System.Globalization.CultureInfo.InvariantCulture),
+                ["boundMs"] = ExitDeliveryBound.TotalMilliseconds.ToString("0", System.Globalization.CultureInfo.InvariantCulture),
+            }));
+        WakeOnLoss(new CallbackEvent(CallbackKind.Informational, "ExitNotDelivered", 0, 0, 0));
+        return Volatile.Read(ref _lostStop);
+    }
+
     /// <summary>Begin draining. Call once the process controller exists (after
     /// DebugActiveProcess). <paramref name="resume"/> resumes the debuggee for a given
     /// <see cref="ResumeKind"/> and stop thread — for a step it sets up the stepper, then
     /// Continues — and returns the Continue HRESULT. <paramref name="pause"/> synchronizes the
     /// running debuggee (calls <c>ICorDebugController.Stop(0)</c>) when the worker receives a
     /// <see cref="CallbackKind.PauseRequest"/>; both controller operations are owned by this
-    /// single worker thread.</summary>
-    public void Start(Func<ResumeKind, nint, int> resume, Action pause, Func<nint, bool>? moduleHold = null, Action<nint>? moduleLoad = null)
+    /// single worker thread.
+    /// <paramref name="targetEnded"/> reads the operating system for the target's end, for the session's own verdict
+    /// on a lost debugger (<see cref="ExitDeliveryBound"/>); null when the session has no way to know.</summary>
+    public void Start(Func<ResumeKind, nint, int> resume, Action pause, Func<nint, bool>? moduleHold = null, Action<nint>? moduleLoad = null, Func<bool>? targetEnded = null)
     {
         _resumeHandler = resume;
         _pauseHandler = pause;
         _moduleHoldHandler = moduleHold;
         _moduleLoadHandler = moduleLoad;
+        _targetEnded = targetEnded;
         // Explicit 1 MB maxStackSize — cross-platform substrate consistency (ENG-STK-2).
         // Defends against platform-default variance (Windows 1 MB / macOS secondary 512 KB /
         // Linux 8 MB) and future JIT/inlining variance across CoreCLR releases. Pump work is
@@ -178,18 +234,29 @@ internal sealed class CallbackPump : IManagedCallbackSink, IDisposable
     /// <summary>Block until the next stop (or process exit), up to <paramref name="timeout"/>.
     /// Returns null on timeout (the debuggee is still running). A <see cref="StopReason.ProcessExited"/>
     /// result means the session is over. Once the debugger is lost (<see cref="LostStop"/>), returns that stop at
-    /// once, every time: nothing else can come.</summary>
+    /// once, every time: nothing else can come. The debugger is lost when mscordbi sends <c>DebuggerError</c>, or when
+    /// the target has ended and mscordbi has delivered no <c>ExitProcess</c> within <see cref="ExitDeliveryBound"/>,
+    /// which the wait reads from the operating system every <see cref="EndPoll"/>.</summary>
     public StopInfo? WaitForStop(TimeSpan timeout)
     {
-        if (Volatile.Read(ref _lostStop) is { } lost) return lost;
-        try
+        long started = System.Diagnostics.Stopwatch.GetTimestamp();
+        while (true)
         {
-            if (!_stops.TryTake(out StopInfo? stop, (int)timeout.TotalMilliseconds)) return Volatile.Read(ref _lostStop);
-            return Volatile.Read(ref _lostStop) ?? stop; // a stop taken just as the loss was published yields to it
-        }
-        catch (ObjectDisposedException)
-        {
-            return Volatile.Read(ref _lostStop); // session torn down; null unless the debugger was lost
+            if (Volatile.Read(ref _lostStop) is { } lost) return lost;
+            TimeSpan remaining = timeout - System.Diagnostics.Stopwatch.GetElapsedTime(started);
+            if (remaining < TimeSpan.Zero) remaining = TimeSpan.Zero;
+            TimeSpan slice = remaining < EndPoll ? remaining : EndPoll;
+            try
+            {
+                if (_stops.TryTake(out StopInfo? stop, (int)slice.TotalMilliseconds))
+                    return Volatile.Read(ref _lostStop) ?? stop; // a stop taken just as the loss was published yields to it
+            }
+            catch (ObjectDisposedException)
+            {
+                return Volatile.Read(ref _lostStop); // session torn down; null unless the debugger was lost
+            }
+            if (LossByUndeliveredExit() is { } undelivered) return undelivered;
+            if (remaining == TimeSpan.Zero) return null;
         }
     }
 
@@ -262,6 +329,7 @@ internal sealed class CallbackPump : IManagedCallbackSink, IDisposable
                         // post-exit GetStackFrames walks it past WalkManagedFrames' (pThread == 0)
                         // guard, dereferencing a released thread → NRE (finding 77).
                         _stopThread = 0;
+                        Volatile.Write(ref _exitPublished, 1); // before the stop is visible: a waiter that reads none yet makes no verdict
                         _stops.TryAdd(new StopInfo(StopReason.ProcessExited)); // wake any waiter
                         if (Volatile.Read(ref _lostStop) is not null) break;
                         _resumeHandler!(ResumeKind.Continue, 0);

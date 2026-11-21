@@ -221,11 +221,16 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
     /// Dispose does detach-leave-running). Probe 44 design.</summary>
     public bool OwnsTarget => _ownsTarget;
 
-    /// <summary>True once mscordbi has sent <c>ICorDebugManagedCallback.DebuggerError</c>: debugging services for the
-    /// process are disabled and the debugger is unusable for it. From then on every operation that would call
+    /// <summary>True once the debugger is unusable for the process (<see cref="StopReason.DebuggerLost"/>): mscordbi has
+    /// sent <c>ICorDebugManagedCallback.DebuggerError</c>, or the target has ended and mscordbi delivered no
+    /// <c>ExitProcess</c> within <see cref="ExitDeliveryBound"/>. From then on every operation that would call
     /// ICorDebug throws <see cref="DebuggerLostException"/>, <see cref="WaitForStop"/> returns
     /// <see cref="StopReason.DebuggerLost"/>, and <see cref="Dispose"/> calls nothing on mscordbi's objects.</summary>
     public bool IsDebuggerLost => _pump.LostStop is not null;
+
+    /// <summary>How long mscordbi is given to deliver <c>ExitProcess</c> once the target has ended, as the operating
+    /// system shows it, before the session calls its debugger lost (ADR-016 6.8; findings 104 to 106).</summary>
+    public static TimeSpan ExitDeliveryBound => CallbackPump.ExitDeliveryBound;
 
     /// <summary>True once the target has exited, whether or not it has been reaped, read from the OS and not from
     /// mscordbi. A dead target that nobody has reaped is a zombie, which <see cref="Process.HasExited"/> reports as
@@ -263,13 +268,13 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
     public DebuggerErrorInfo? DebuggerError => _pump.LostStop?.DebuggerError;
 
     /// <summary>Refuse an operation that would call ICorDebug once the debugger is lost. Documented for
-    /// <c>DebuggerError</c>: only <c>ICorDebugProcess::GetID</c> may be called afterwards. A loss published after this
-    /// check, while the operation is already inside mscordbi, cannot be stopped from here (ADR-016's worker process
-    /// contains that case).</summary>
+    /// <c>DebuggerError</c>: only <c>ICorDebugProcess::GetID</c> may be called afterwards; after an undelivered exit a
+    /// request would wait as the one in flight does. A loss published after this check, while the operation is
+    /// already inside mscordbi, cannot be stopped from here (ADR-016's worker process contains that case).</summary>
     private void RefuseIfDebuggerLost(string operation)
     {
-        if (_pump.LostStop?.DebuggerError is { } error)
-            throw new DebuggerLostException(operation, error);
+        if (_pump.LostStop is { } lost)
+            throw new DebuggerLostException(operation, lost);
     }
 
     /// <summary>Attach the native ICorDebug engine to a running .NET process and register the
@@ -669,7 +674,8 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
                 },
                 () => controller.Stop(0),
                 moduleHold,
-                session.TryBindPending);
+                session.TryBindPending,
+                targetProcess is null ? null : () => session.TargetHasExited);
             // First successful attach locks this PROCESS to the target's runtime major — dbgshim has now
             // loaded that version's mscordbi/DAC, and they never unload. Finding 86.
             _processRuntimeMajor ??= targetRuntimeMajor;
@@ -2884,25 +2890,30 @@ public sealed class LaunchFailedException : Exception
         (stderr.Trim() is { Length: > 0 } written ? $" It wrote to stderr: {written}" : "");
 }
 
-/// <summary>Raised when an operation that would call ICorDebug is asked of a session whose debugger is lost:
-/// mscordbi sent <c>ICorDebugManagedCallback.DebuggerError</c>, after which only <c>ICorDebugProcess::GetID</c> may be
-/// called. The operation was not attempted.</summary>
+/// <summary>Raised when an operation that would call ICorDebug is asked of a session whose debugger is lost
+/// (<see cref="StopReason.DebuggerLost"/>): mscordbi sent <c>ICorDebugManagedCallback.DebuggerError</c>, after which only
+/// <c>ICorDebugProcess::GetID</c> may be called, or the target ended and mscordbi delivered no <c>ExitProcess</c> within
+/// <see cref="DebugSession.ExitDeliveryBound"/>. The operation was not attempted.</summary>
 public sealed class DebuggerLostException : InvalidOperationException
 {
-    public DebuggerLostException(string operation, DebuggerErrorInfo error)
-        : base($"{operation} refused: the debugger lost the process (DebuggerError errorHR 0x{error.ErrorHResult:X8}, " +
-               $"errorCode {error.ErrorCode}). Debugging services for it are disabled; only ICorDebugProcess::GetID may be called. " +
-               "End the session.")
+    public DebuggerLostException(string operation, StopInfo lost)
+        : base(lost.DebuggerError is { } error
+            ? $"{operation} refused: the debugger lost the process (DebuggerError errorHR 0x{error.ErrorHResult:X8}, " +
+              $"errorCode {error.ErrorCode}). Debugging services for it are disabled; only ICorDebugProcess::GetID may be called. " +
+              "End the session."
+            : $"{operation} refused: the debugger lost the process. It has ended, as the operating system shows it, and " +
+              $"mscordbi delivered no ExitProcess within {DebugSession.ExitDeliveryBound.TotalSeconds:0} s, so a request of " +
+              "the debugger's is waiting for a reply that will not come (finding 105). No further native call is made. End the session.")
     {
         Operation = operation;
-        Error = error;
+        Error = lost.DebuggerError;
     }
 
     /// <summary>The refused operation.</summary>
     public string Operation { get; }
 
-    /// <summary>What <c>DebuggerError</c> reported.</summary>
-    public DebuggerErrorInfo Error { get; }
+    /// <summary>What <c>DebuggerError</c> reported; null when the loss was the undelivered exit.</summary>
+    public DebuggerErrorInfo? Error { get; }
 }
 
 /// <summary>Outcome of a function evaluation.</summary>
