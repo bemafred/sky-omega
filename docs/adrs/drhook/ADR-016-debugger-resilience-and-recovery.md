@@ -784,6 +784,140 @@ that had run a session before).
   in 2 of 18 fresh workers on omega a first launch took about 500 ms more. A session's close sleeps 200 ms after its
   target has ended (`ExitWorkSettleMs`).
 
+*6.7's design, drafted 2026-11-21 for review* (sky-omega; nothing of it is built). This is the smallest worker that does
+what 6.5, 6.7, 6.8 and 6.9 decided. Where the design names a measurement, that measurement comes first.
+
+- **Where the boundary falls: at the tool.**
+  - **The worker** is a new program, `drhook-worker` (`src/DrHook.Worker`).
+    - It runs a session as `EngineSteppingSession` runs one today: the session's tools, their JSON results, the braid
+      and the debug-state publisher.
+    - `EngineSteppingSession` moves into it from DrHook.Mcp.
+  - **drhook-mcp becomes the supervisor.** It keeps what has no debugger in it, or outlives a session:
+    - the MCP surface;
+    - `drhook_processes` and `drhook_snapshot`, which read through EventPipe and load no mscordbi;
+    - the anomaly, log and console buffers that the drain tools read, which already outlive a session for its last
+      drain;
+    - the targets `drhook_stop` left running (below);
+    - the journal (6.9).
+  - **The 25 tools and their results stay as they are.**
+  - **Why not at the engine's own calls.** A boundary there would move about 1,600 lines of result rendering into the
+    supervisor, and carry the engine's types (stops, values, fields) across the pipe, one round trip per engine call.
+- **The protocol.** NDJSON on the worker's stdin and stdout, one message per line.
+  - **The streams.** The end of the worker's stdout means the worker is gone. Its stderr goes to drhook-mcp's stderr.
+  - **To the worker:**
+    - `{id, tool, args}`, for each tool that needs the session, with the tool's own name and arguments;
+    - `{id, health}`;
+    - `exit`.
+  - **Answers from the worker:**
+    - `{id, result}`: the tool's own JSON. An image goes as base64, beside its caption.
+    - `{id, health}`: the tool running, its phase, and how long it has run.
+  - **Events from the worker, as they happen:**
+    - `ready`: its PID, its runtime and its protocol version;
+    - `target`: the target's PID, its start time, and whether the session owns it, as soon as the session knows them;
+    - `state`: stopped, and where, or running. It is sent from the one place where a stop is recorded today
+      (`PublishTransportSnapshot`);
+    - `anomaly`, `log` and `console`: each record as it reaches the worker's sinks;
+    - `ended`: a target left running has ended.
+  - **One request at a time, in order.** `health` is answered at once by the thread that reads stdin, so it is answered
+    while a request runs.
+  - **DrHook.Wire's codec** does not carry these messages: they carry the tools' JSON, not Wire's types. It stays the
+    codec of the debug-state stream.
+  - **Versions.** The supervisor refuses a worker whose protocol version differs from its own, and says that drhook-mcp
+    must be restarted. The worker follows the build; the supervisor does not.
+- **The worker's life.** One worker per session, and one session at a time, as today.
+  1. **Starting.** `ready` comes within 30 s, the bound 6.8 set for attach and launch. Finding 113 measured at most
+     75 ms; the runners are not measured.
+  2. **In session.** From `drhook_launch` or `drhook_attach` to the end of the session.
+  3. **Ending.** However the session ended, the supervisor then sends `exit`, and the worker ends by itself within 5 s.
+     Finding 113 measured 5 to 19 ms.
+  4. **Holding a target left running.** After a `drhook_stop` that left an owned target running (6.2), its worker
+     stays, debugging nothing.
+     - It answers `drhook_kill` and `exit`. When the target ends it reports `ended`, then ends itself.
+     - This keeps 6.2's one way to kill such a target: `KillLeftRunningTarget`, under its lock against the reap, with
+       the target's pipes still open. The supervisor does not get a second one.
+
+  **When drhook-mcp ends** (a reconnect), each worker reads the end of its stdin.
+  - A worker in session ends the session as `drhook_stop` does, then exits.
+  - A worker holding a target exits and leaves the target running.
+  - So a reconnect ends a session by its scenario's end (6.5), even when drhook-mcp is killed. What then becomes of a
+    target left running is 6.2's open rule, unchanged.
+- **Detection and the discard** (6.8).
+  - **The worker's own verdict, built into the engine.** If the target is gone, read from the operating system, and no
+    `ProcessExited` has come within 2 s, `WaitForStop` returns `DebuggerLost` with that cause, as probe 106's worker
+    did. Today it waits out its budget, up to 2 minutes, and the tool reports a timeout. `DebuggerError` stays as built.
+  - **From outside.** While a request runs, the supervisor sends `health` every 5 s. The phase in the answer is one of
+    two:
+    - waiting for the target: a stop, or an evaluation's end, each bounded by its own timeout. The engine marks where
+      it waits.
+    - debugger work: everything else.
+  - **Suspected.** The supervisor suspects the worker in any of these cases:
+    - debugger work has run for more than 30 s (6.8's bound);
+    - `health` gets no answer within 5 s. That bound is checked against the first measured round trips before it is
+      kept;
+    - `ready`, or the worker's end after `exit`, is late.
+  - **The discard.** The worker is discarded when it is suspected, when it has called its debugger lost, or when its
+    stdout ends. The supervisor:
+    1. journals the intent: the worker, the reason, and the target's identity and last known state, with who observed
+       that state, when, and how certain it is;
+    2. kills the worker, and waits for its end;
+    3. deals with the target:
+       - an owned target still alive with the same PID and start time is ended through the operating system;
+       - a borrowed target is left as it is. On Unix, one held at a stop stays frozen (finding 106);
+    4. answers the pending tool call with three things: the session's outcome; the target's state, as the operating
+       system shows it; and the cause, as the evidence shows it (lost, `DebuggerError`, or unknown);
+    5. raises the anomalies 6.8 named: debugger lost, worker suspected, worker discarded, target left held.
+
+    The next `drhook_launch` or `drhook_attach` starts a fresh worker, as every session does.
+- **The debug-state publisher (ADR-012) runs in the worker.**
+  - It already starts at a session's launch or attach and stops at its end.
+  - Everything it publishes is made in the session: the snapshot, the event stream and the braid.
+  - Relaying it through the supervisor would serialize every snapshot twice and make the supervisor a second
+    publisher.
+  - When a worker is lost, its views lose the connection without a last message, as they do today when drhook-mcp dies.
+    They wait for the next session, whose publisher removes the stale socket file.
+  - Each record is held twice:
+    - the worker keeps its sinks' recent records, for the snapshots it publishes;
+    - the supervisor's buffers get every record the worker forwards, and the drain tools read those.
+
+    Both processes use the same sink classes.
+- **The worker's own copy of the build.**
+  - **Where it comes from.** The worker is built into its own directory, in drhook-mcp's output and in its package.
+  - **The copy.**
+    - At each start, the supervisor copies that directory into `workers/` in DrHook's directory:
+      `~/Library/SkyOmega/drhook` on macOS, `~/.local/share/sky-omega/drhook` elsewhere, as for the rendezvous socket.
+    - The worker runs from the copy, and the copy is deleted once the worker has ended.
+    - Each copy is named by its drhook-mcp's PID and start time. Copies left by a drhook-mcp that has since ended are
+      deleted when the next drhook-mcp starts.
+  - **Run from source** (`.mcp.json`): a rebuild reaches the next session without a reconnect.
+  - **Installed as a global tool:** an update removes drhook-mcp's own directory. The next session then fails and says
+    why, and a reconnect is needed, as today.
+  - **To measure first:** what the copy costs, on finding 113's three machines. If it is not small beside the start-up,
+    the copy is made once per build instead.
+- **The journal** (6.9).
+  - **Where.** `journal.ndjson` in DrHook's directory, append-only.
+  - **When.** It is written and flushed before each of these:
+    - every discard;
+    - every kill of an owned target after a discard;
+    - every `drhook_kill`: the supervisor journals an Abandon before it sends it to the worker.
+  - **Its size.** Bounded as mercury.log is: 4 MB, then one older file.
+  - **What it holds.** Identities (PIDs, start times, the program's path), reasons, states and stop locations. Never
+    values, arguments or environment: principle 11's redaction lies in what it records.
+  - **Into Mercury.** The operator consolidates it: each discard's anomaly carries its journal entry. The service
+    never waits on Mercury.
+- **Tests.**
+  - The session's logic keeps its tests in one process: the integration suite drives `EngineSteppingSession`
+    directly.
+  - The worker gets tests of its own:
+    - a session through a worker;
+    - a discard after an induced loss (probe 106's constructions), then a fresh session;
+    - drhook-mcp ending with a session open;
+    - a target left running, then killed through its worker.
+- **Not in this design:**
+  - a worker reused across runs (ADR-015 decides that);
+  - Job Objects on Windows;
+  - the supervisor's own anomalies on the views;
+  - a tool list that changes without a reconnect.
+
 ### Step 6: the decisions (decided 2026-11-20)
 
 Drafted from Steps 1 to 5, and **decided by Martin on 2026-11-20**, every item as drafted: "I approve the draft, your
@@ -978,6 +1112,7 @@ not the default.
 - What holds a Windows target after a detach (6.6).
 - A worker's own start-up time (6.7). Measured 2026-11-21 on omega, omega-ubuntu and omega-windows
   ([finding 113](../../../poc/drhook-engine/findings/113-worker-startup.md)); not on x64 or the runners.
+- What a worker's copy of the build costs (6.7's design, above).
 - A real `DebuggerError` (6.8).
 - Probes 106 and 112 on the six runners.
 
