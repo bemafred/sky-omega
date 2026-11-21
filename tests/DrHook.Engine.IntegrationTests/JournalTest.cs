@@ -26,7 +26,8 @@ public sealed class JournalTest
             JsonNode entry = JsonNode.Parse(first)!;
             Assert.AreEqual("drhook_kill", (string?)entry["entry"]);
             Assert.AreEqual(Environment.ProcessId, (int)entry["drhookMcpPid"]!);
-            Assert.IsNotNull(DateTimeOffset.Parse((string)entry["at"]!, System.Globalization.CultureInfo.InvariantCulture));
+            DateTimeOffset.Parse((string)entry["at"]!, System.Globalization.CultureInfo.InvariantCulture); // a time, as written
+            Assert.IsFalse(first.Contains("\\u002B", StringComparison.Ordinal), $"The time's + is written as itself: {first}");
 
             // At its bound the journal is moved to the older file, which it replaces, and the entry starts a new one.
             File.WriteAllText(path, new string('x', (int)Journal.Bound));

@@ -24,6 +24,13 @@ public sealed class Journal(string path)
     /// <summary>How long a write waits for another drhook-mcp's write to finish.</summary>
     private static readonly TimeSpan LockWait = TimeSpan.FromSeconds(2);
 
+    // One line per entry, escaped only where JSON requires it, as DrHook's results are (OperatorJson): the operator reads
+    // it, and the default encoder writes a time's + as \u002B (seen in the first live entry, 2026-11-21).
+    private static readonly System.Text.Json.JsonSerializerOptions OneLine = new()
+    {
+        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+    };
+
     /// <summary>The journal's file.</summary>
     public string Path { get; } = path;
 
@@ -38,7 +45,7 @@ public sealed class Journal(string path)
             ["drhookMcpPid"] = Environment.ProcessId,
         };
         foreach ((string key, JsonNode? value) in facts) record[key] = value?.DeepClone();
-        string line = record.ToJsonString();
+        string line = record.ToJsonString(OneLine);
         try
         {
             Directory.CreateDirectory(System.IO.Path.GetDirectoryName(Path)!);
