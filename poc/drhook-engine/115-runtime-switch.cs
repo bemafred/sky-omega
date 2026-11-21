@@ -55,7 +55,8 @@ bool holds = true;
 
 Console.WriteLine();
 Console.WriteLine("== through the supervisor: a worker per session");
-using (var supervisor = new Supervisor(Path.Combine(AppContext.BaseDirectory, "worker")))
+using (var supervisor = new Supervisor(Path.Combine(AppContext.BaseDirectory, "worker"),
+           Path.Combine(Path.GetTempPath(), $"probe115-journal-{Environment.ProcessId}.ndjson")))
 {
     foreach ((string dll, string expected) in new[] { (net9, ".NET 9"), (net10, ".NET 10") })
     {

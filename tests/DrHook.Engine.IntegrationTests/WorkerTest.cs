@@ -29,12 +29,22 @@ public sealed class WorkerTest
     // The worker drhook-mcp's build carries, copied beside drhook-mcp into this suite's output.
     private static readonly string WorkerDirectory = Path.Combine(AppContext.BaseDirectory, "worker");
 
+    // Each test's own journal, not the one in DrHook's directory.
+    private readonly string _journal = Path.Combine(Path.GetTempPath(), $"drhook-worker-test-journal-{Guid.NewGuid():N}.ndjson");
+
+    [TestCleanup]
+    public void DeleteTheJournal()
+    {
+        foreach (string file in new[] { _journal, _journal + ".1", _journal + ".lock" })
+            try { File.Delete(file); } catch (IOException) { /* best effort */ }
+    }
+
     [TestMethod]
     public async Task ASession_RunsInAWorkerOfItsOwn_ItsAnomaliesReachTheDrain_AndTheWorkerEndsWithIt()
     {
         string targetDll = IntegrationTargetPaths.SnapshotTargetDll();
         string source = IntegrationTargetPaths.SnapshotTargetSource();
-        using var supervisor = new Supervisor(WorkerDirectory);
+        using var supervisor = new Supervisor(WorkerDirectory, _journal);
         int pid = 0;
         try
         {
@@ -85,7 +95,7 @@ public sealed class WorkerTest
         string targetDll = IntegrationTargetPaths.SnapshotTargetDll();
         string source = IntegrationTargetPaths.SnapshotTargetSource();
         string report = Path.Combine(Path.GetTempPath(), $"drhook-worker-console-{Guid.NewGuid():N}.txt");
-        using var supervisor = new Supervisor(WorkerDirectory);
+        using var supervisor = new Supervisor(WorkerDirectory, _journal);
         try
         {
             JsonObject args = Launch(targetDll, source, "SNAPSHOT_HERE");
@@ -109,7 +119,7 @@ public sealed class WorkerTest
     {
         string targetDll = IntegrationTargetPaths.SnapshotTargetDll();
         string source = IntegrationTargetPaths.SnapshotTargetSource();
-        var supervisor = new Supervisor(WorkerDirectory);
+        var supervisor = new Supervisor(WorkerDirectory, _journal);
         int pid = 0;
         try
         {
@@ -142,7 +152,7 @@ public sealed class WorkerTest
         string targetDll = IntegrationTargetPaths.SnapshotTargetDll();
         string source = IntegrationTargetPaths.SnapshotTargetSource();
         string report = Path.Combine(Path.GetTempPath(), $"drhook-worker-left-running-{Guid.NewGuid():N}.txt");
-        using var supervisor = new Supervisor(WorkerDirectory);
+        using var supervisor = new Supervisor(WorkerDirectory, _journal);
         int pid = 0;
         try
         {
@@ -169,6 +179,17 @@ public sealed class WorkerTest
             if (start is long started) Assert.AreEqual(true, ProcessLifetime.HasEnded(pid, started), $"The target {pid} should have ended.");
             Assert.IsTrue(Ended(worker, TimeSpan.FromSeconds(10)), $"The worker {worker} should end once its target has.");
 
+            // The kill was journaled before it was sent (ADR-016 6.9): who, why, and the target's identity, nothing more.
+            string[] journal = File.ReadAllLines(_journal);
+            JsonNode kill = JsonNode.Parse(Assert.ContainsSingle(journal))!;
+            Assert.AreEqual("drhook_kill", (string?)kill["entry"], $"journal: {journal[0]}");
+            Assert.AreEqual(worker, (int)kill["workerPid"]!, $"journal: {journal[0]}");
+            Assert.AreEqual("it refused to exit; end it", (string?)kill["reason"], $"journal: {journal[0]}");
+            Assert.AreEqual(pid, (int)kill["target"]!["pid"]!, $"journal: {journal[0]}");
+            Assert.IsTrue((bool)kill["target"]!["owned"]!, $"journal: {journal[0]}");
+            StringAssert.Contains((string?)kill["target"]!["program"], "dotnet", $"journal: {journal[0]}");
+            Assert.IsFalse(journal[0].Contains(targetDll, StringComparison.Ordinal), $"The journal holds no arguments: {journal[0]}");
+
             string again = (await supervisor.CallAsync("drhook_kill", new JsonObject { ["hypothesis"] = "nothing is left" }, CancellationToken.None)).Result!;
             StringAssert.Contains(again, "no target that drhook_stop left running", $"second kill: {again}");
         }
@@ -187,7 +208,7 @@ public sealed class WorkerTest
         if (OperatingSystem.IsWindows()) Assert.Inconclusive("SIGSTOP stands in for a hung worker; Windows has none.");
         string targetDll = IntegrationTargetPaths.SnapshotTargetDll();
         string source = IntegrationTargetPaths.SnapshotTargetSource();
-        using var supervisor = new Supervisor(WorkerDirectory);
+        using var supervisor = new Supervisor(WorkerDirectory, _journal);
         int pid = 0, worker = 0, fresh = 0;
         try
         {
@@ -218,10 +239,24 @@ public sealed class WorkerTest
             }
             Assert.IsTrue(Ended(worker, TimeSpan.FromSeconds(5)), $"The discarded worker {worker} should have been killed.");
             Assert.AreEqual(true, ProcessLifetime.HasEnded(pid, start), $"The owned target {pid} should have been ended.");
+
+            // Journaled before each act (ADR-016 6.9): the discard, then the kill of its owned target.
+            string[] journal = File.ReadAllLines(_journal);
+            Assert.AreEqual(2, journal.Length, $"journal: {string.Join("\n", journal)}");
+            JsonNode discard = JsonNode.Parse(journal[0])!, killAfter = JsonNode.Parse(journal[1])!;
+            Assert.AreEqual("discard", (string?)discard["entry"], journal[0]);
+            Assert.AreEqual(worker, (int)discard["workerPid"]!, journal[0]);
+            Assert.AreEqual("drhook_continue", (string?)discard["tool"], journal[0]);
+            Assert.AreEqual(pid, (int)discard["target"]!["pid"]!, journal[0]);
+            Assert.AreEqual(start, (long)discard["target"]!["start"]!, journal[0]);
+            StringAssert.StartsWith((string?)discard["target"]!["lastKnown"], "running", journal[0]);
+            Assert.AreEqual("kill after discard", (string?)killAfter["entry"], journal[1]);
+            Assert.AreEqual(pid, (int)killAfter["pid"]!, journal[1]);
             Assert.IsNull(supervisor.SessionWorkerPid, "No worker is in session after the discard.");
             string anomalies = supervisor.DrainAnomaliesAsJson();
             StringAssert.Contains(anomalies, "\"WorkerSuspected\"", $"anomalies: {anomalies}");
             StringAssert.Contains(anomalies, "\"WorkerDiscarded\"", $"anomalies: {anomalies}");
+            StringAssert.Contains(anomalies, "\"journal\"", $"The discard's anomaly carries its journal entry: {anomalies}");
 
             // A fresh worker's session works.
             string again = (await supervisor.CallAsync("drhook_launch", Launch(targetDll, source, "SNAPSHOT_HERE"), CancellationToken.None)).Result!;

@@ -42,6 +42,7 @@ public sealed class Supervisor : IDisposable
     private static readonly TimeSpan DebuggerWorkBound = TimeSpan.FromSeconds(30);
 
     private readonly string _workerDirectory;
+    private readonly Journal _journal;
     private readonly BoundedAnomalySink _anomalies = new(BoundedAnomalySink.SessionCapacity);
     private readonly BoundedLogSink _logs = new(BoundedLogSink.SessionCapacity);
     private readonly BoundedConsoleSink _console = new(BoundedConsoleSink.SessionCapacity);
@@ -51,10 +52,12 @@ public sealed class Supervisor : IDisposable
     private readonly List<WorkerProcess> _holding = new();
 
     /// <summary>A supervisor whose workers start from <paramref name="workerDirectory"/>, where drhook-worker is built
-    /// (worker/ in drhook-mcp's own directory).</summary>
-    public Supervisor(string workerDirectory)
+    /// (worker/ in drhook-mcp's own directory), and which journals its discards and kills in
+    /// <paramref name="journalPath"/> (journal.ndjson in DrHook's directory, ADR-016 6.9).</summary>
+    public Supervisor(string workerDirectory, string journalPath)
     {
         _workerDirectory = workerDirectory;
+        _journal = new Journal(journalPath);
         _records = new CompositeEventSink(_anomalies, _logs, _console);
     }
 
@@ -77,10 +80,12 @@ public sealed class Supervisor : IDisposable
                 worker = WorkerProcess.Start(_workerDirectory, _records, out string? failure);
                 if (worker is null)
                 {
-                    RaiseWorkerDiscarded(0, tool, failure!, "unknown", (0, false, "unknown", false));
+                    RaiseWorkerDiscarded(0, tool, failure!, "unknown", (0, false, "unknown", false), journal: null);
                     return new WorkerAnswer(OperatorJson.Error(failure!), null, null, WorkerProtocol.Ended);
                 }
+                if (tool == "drhook_launch") worker.Program = (string?)args["program"];
             }
+            if (tool == "drhook_kill") JournalTheKill(worker, args);
             return Settle(worker, tool, await Supervise(worker, tool, args));
         }
         finally
@@ -108,8 +113,31 @@ public sealed class Supervisor : IDisposable
         if (choice.Refusal is { } refusal) return new WorkerAnswer(OperatorJson.Error(refusal), null, null, WorkerProtocol.Ended);
 
         WorkerProcess holder = holding.Find(h => h.TargetPid == choice.Pid)!;
+        JournalTheKill(holder, args);
         return Settle(holder, "drhook_kill", await Supervise(holder, "drhook_kill", args));
     }
+
+    // Every drhook_kill is journaled before it is sent: the session's Abandon, or the kill of a target drhook_stop left
+    // running (ADR-016 6.9). The reason is the operator's hypothesis, which drhook_kill records as the anomaly's value.
+    private void JournalTheKill(WorkerProcess worker, JsonObject args) => _journal.Write("drhook_kill", new JsonObject
+    {
+        ["workerPid"] = worker.Pid,
+        ["reason"] = (string?)args["hypothesis"],
+        ["target"] = TargetFacts(worker),
+    });
+
+    // The target as the journal records it: identity, the program's path, the last reported state. No arguments, no
+    // environment, no values.
+    private static JsonObject? TargetFacts(WorkerProcess worker) => worker.Target is { } t
+        ? new JsonObject
+        {
+            ["pid"] = t.Pid,
+            ["start"] = t.Start,
+            ["owned"] = t.Owned,
+            ["program"] = worker.Program,
+            ["lastKnown"] = worker.LastState,
+        }
+        : null;
 
     // The request, watched: every HealthEvery the worker is asked how it is. It is suspected when it does not answer
     // within HealthBound, or when its debugger work has run past DebuggerWorkBound, and then discarded at once.
@@ -164,7 +192,7 @@ public sealed class Supervisor : IDisposable
                 if (_inSession == worker) _inSession = null;
                 lock (_holding) _holding.Remove(worker);
                 if (!worker.End())
-                    RaiseWorkerDiscarded(worker.Pid, tool, $"it did not end within {WorkerProcess.ExitBound.TotalSeconds:0} s of its exit request, and was killed", "unknown", (0, false, "unknown", false));
+                    RaiseWorkerDiscarded(worker.Pid, tool, $"it did not end within {WorkerProcess.ExitBound.TotalSeconds:0} s of its exit request, and was killed", "unknown", (0, false, "unknown", false), journal: null);
                 return answer;
         }
     }
@@ -178,10 +206,35 @@ public sealed class Supervisor : IDisposable
         if (_inSession == worker) _inSession = null;
         lock (_holding) _holding.Remove(worker);
         string? lastState = worker.LastState;
+        string journaled = _journal.Write("discard", new JsonObject
+        {
+            ["workerPid"] = worker.Pid,
+            ["tool"] = tool,
+            ["reason"] = reason,
+            ["cause"] = cause,
+            ["target"] = TargetFacts(worker),
+        });
         worker.KillAndWait();
-        (int Pid, bool Owned, string State, bool EndedByDrHook) target = worker.EndOwnedTarget();
+
+        (int Pid, bool Owned, string State, bool EndedByDrHook) target = (0, false, "unknown", false);
+        if (worker.Target is { } named)
+        {
+            bool? ended = worker.TargetHasEnded();
+            bool endedByDrHook = false;
+            if (ended == false && named.Owned)
+            {
+                _journal.Write("kill after discard", new JsonObject
+                {
+                    ["workerPid"] = worker.Pid, ["pid"] = named.Pid, ["start"] = named.Start, ["program"] = worker.Program,
+                });
+                worker.KillTarget();
+                ended = worker.TargetHasEnded();
+                endedByDrHook = ended == true;
+            }
+            target = (named.Pid, named.Owned, ended switch { true => "ended", false => "running", _ => "unknown" }, endedByDrHook);
+        }
         worker.Dispose();
-        RaiseWorkerDiscarded(worker.Pid, tool, reason, cause, target);
+        RaiseWorkerDiscarded(worker.Pid, tool, reason, cause, target, journaled);
         bool leftHeld = !target.Owned && target.State == "running" && !OperatingSystem.IsWindows()
                         && lastState is not null && lastState.StartsWith("stopped", StringComparison.Ordinal);
         if (leftHeld)
@@ -220,20 +273,25 @@ public sealed class Supervisor : IDisposable
         return new WorkerAnswer(result.ToJsonString(OperatorJson.Options), null, null, WorkerProcess.Discarded);
     }
 
-    private void RaiseWorkerDiscarded(int workerPid, string tool, string reason, string cause, (int Pid, bool Owned, string State, bool EndedByDrHook) target) =>
+    // The discard's anomaly carries its journal entry, so the operator can consolidate it into Mercury (ADR-016 6.9).
+    private void RaiseWorkerDiscarded(int workerPid, string tool, string reason, string cause, (int Pid, bool Owned, string State, bool EndedByDrHook) target, string? journal)
+    {
+        var context = new Dictionary<string, string>
+        {
+            ["workerPid"] = workerPid.ToString(CultureInfo.InvariantCulture),
+            ["tool"] = tool,
+            ["reason"] = reason,
+            ["cause"] = cause,
+            ["pid"] = target.Pid.ToString(CultureInfo.InvariantCulture),
+            ["owned"] = target.Owned ? "true" : "false",
+            ["targetState"] = target.State,
+        };
+        if (journal is not null) context["journal"] = journal;
         _anomalies.OnAnomaly(new EngineAnomaly(DateTimeOffset.UtcNow, AnomalyKind.WorkerDiscarded, "drhook-mcp", "Discard",
             Observed: $"the debugger worker (pid {workerPid}) running {tool} was discarded: {reason}",
             Expected: "a worker that answers, and ends when asked (ADR-016 6.7, 6.8)",
-            Context: new Dictionary<string, string>
-            {
-                ["workerPid"] = workerPid.ToString(CultureInfo.InvariantCulture),
-                ["tool"] = tool,
-                ["reason"] = reason,
-                ["cause"] = cause,
-                ["pid"] = target.Pid.ToString(CultureInfo.InvariantCulture),
-                ["owned"] = target.Owned ? "true" : "false",
-                ["targetState"] = target.State,
-            }));
+            Context: context));
+    }
 
     private void ResetBuffers()
     {

@@ -76,7 +76,10 @@ builder.Logging.AddConsole(options =>
 // The supervisor of the debugger workers (ADR-016 6.7): every session runs in a drhook-worker of its own, built into
 // worker/ beside drhook-mcp. A factory, so that the host disposes it at its end: each worker's stdin then closes, and a
 // session still open is ended as drhook_stop ends it.
-builder.Services.AddSingleton(_ => new Supervisor(Path.Combine(AppContext.BaseDirectory, "worker")));
+// Its journal (ADR-016 6.9) is journal.ndjson in DrHook's directory, beside the rendezvous socket.
+builder.Services.AddSingleton(_ => new Supervisor(
+    Path.Combine(AppContext.BaseDirectory, "worker"),
+    Path.Combine(Path.GetDirectoryName(SkyOmega.DrHook.Wire.WireRendezvous.DefaultSocketPath())!, "journal.ndjson")));
 
 // Register MCP server with stdio transport and tools
 builder.Services

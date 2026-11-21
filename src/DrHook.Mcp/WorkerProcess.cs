@@ -70,6 +70,14 @@ internal sealed class WorkerProcess : IDisposable
     /// <summary>True once the worker's stdout has ended: the worker is gone.</summary>
     public bool IsGone => _gone;
 
+    /// <summary>The program the session launched, for the journal (its path only, never its arguments); null for an
+    /// attach.</summary>
+    public string? Program { get; set; }
+
+    /// <summary>The session's target as the worker named it: its PID, its start time (Unix), and whether the session owns
+    /// it; null before the worker named one.</summary>
+    public (int Pid, long? Start, bool Owned)? Target => _target is { } t ? (t.Pid, t.Start, t.Owned) : null;
+
     /// <summary>The target's last state as the worker reported it ("stopped at …", "running", "ended"), and when
     /// drhook-mcp received it; null before the first.</summary>
     public string? LastState => _lastState;
@@ -167,25 +175,24 @@ internal sealed class WorkerProcess : IDisposable
     }
 
     /// <summary>Kill the worker, and wait for its end (the discard, ADR-016 6.7). Only the worker: its target is dealt
-    /// with by <see cref="EndOwnedTarget"/>.</summary>
+    /// with by the supervisor (<see cref="TargetHasEnded()"/>, <see cref="KillTarget"/>).</summary>
     public void KillAndWait()
     {
         Kill();
         _process.WaitForExit(ExitBound);
     }
 
-    /// <summary>The target after its worker was discarded (ADR-016 6.7): an owned target still running under the same
-    /// identity is ended through the operating system; a borrowed one is left as it is. Returns the target's PID (0 when
-    /// the worker had none), whether it was owned, its state as the operating system shows it afterwards ("ended",
-    /// "running" or "unknown"), and whether drhook-mcp ended it. Unix reads the end by PID and start time; between that
-    /// read and the kill the PID could in principle be given to another process, which the held handle rules out on
-    /// Windows only.</summary>
-    public (int Pid, bool Owned, string State, bool EndedByDrHook) EndOwnedTarget()
+    /// <summary>Whether the target the worker named has ended, read from the operating system under its identity: the
+    /// PID and start time on Unix (ProcessLifetime), the held handle on Windows. Null when there is no target, or its end
+    /// cannot be read.</summary>
+    public bool? TargetHasEnded() => _target is { } target ? TargetHasEnded(target) : null;
+
+    /// <summary>Kill the target through the operating system, after a discard (ADR-016 6.7), and wait up to
+    /// <see cref="ExitBound"/> for its end. The caller has read that it still runs; on Unix the PID could in principle be
+    /// given to another process between that read and this kill, which the held handle rules out on Windows.</summary>
+    public void KillTarget()
     {
-        if (_target is not { } target) return (0, false, "unknown", false);
-        bool? ended = TargetHasEnded(target);
-        if (ended != false || !target.Owned)
-            return (target.Pid, target.Owned, ended switch { true => "ended", false => "running", _ => "unknown" }, false);
+        if (_target is not { } target) return;
         try
         {
             if (target.Handle is { } handle) handle.Kill();
@@ -197,12 +204,10 @@ internal sealed class WorkerProcess : IDisposable
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception)
         {
-            // Ended meanwhile, or not ours to kill: read below.
+            // Ended meanwhile, or not ours to kill: the caller reads the end.
         }
         var waited = Stopwatch.StartNew();
         while (TargetHasEnded(target) == false && waited.Elapsed < ExitBound) Thread.Sleep(20);
-        ended = TargetHasEnded(target);
-        return (target.Pid, true, ended switch { true => "ended", false => "running", _ => "unknown" }, ended == true);
     }
 
     private static bool? TargetHasEnded(TargetIdentity target)

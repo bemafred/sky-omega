@@ -1048,6 +1048,33 @@ measurement, that measurement comes first.
 - **The 5 s health bound** is not yet checked against measured round trips. That waits for omega to be quiet (a
   long run on omega-windows meanwhile).
 
+*6.9's journal built 2026-11-21* (sky-omega, omega): the last part.
+- **Where.** `journal.ndjson` in DrHook's directory, beside the rendezvous socket, one JSON object per line,
+  append-only. drhook-mcp is given its path, so the tests keep a journal of their own.
+- **When.** Each entry is written and flushed to disk (`fsync`) before the act it records:
+  - a discard;
+  - the kill of an owned target after a discard;
+  - every `drhook_kill`, sent to the session's worker or to the worker holding a target left running.
+- **What.** Each entry has the time of writing, the entry's kind and the PID of the drhook-mcp that wrote it. Then:
+  - the worker's PID;
+  - the reason: the discard's, or the kill's hypothesis, which drhook_kill already records as the anomaly's value;
+  - the cause;
+  - the target's PID, start time and ownership, the program's path, and its last reported state, with the stop's
+    top frame.
+
+  Never arguments, environment or values; a test checks that the target's arguments are absent.
+- **Its size.** At 4 MB it is moved to `journal.ndjson.1`, which it replaces, as mercury.log is.
+- **Several drhook-mcp processes,** one per client session, share it. Each write holds `journal.ndjson.lock`
+  exclusively, waiting up to 2 s.
+- **A failed write** is reported on stderr and in the anomaly, and the act goes ahead: the service never waits on it.
+- **Into Mercury.** The `WorkerDiscarded` anomaly carries its journal entry, for the operator to consolidate.
+- **Tests.** In `WorkerTest`:
+  - the discard test reads the discard's entry, then the kill of its owned target;
+  - the left-running test reads the `drhook_kill` entry.
+
+  `JournalTest` checks the appending and the bound. On omega every DrHook suite passed: DrHook.Engine.Tests 236 (3
+  skipped), the integration suite 34 (1 skipped), DrHook.Viz.Tests 74, DrHook.Wire.Tests 7, DrHook.Capture.Tests 1.
+
 ### Step 6: the decisions (decided 2026-11-20)
 
 Drafted from Steps 1 to 5, and **decided by Martin on 2026-11-20**, every item as drafted: "I approve the draft, your
