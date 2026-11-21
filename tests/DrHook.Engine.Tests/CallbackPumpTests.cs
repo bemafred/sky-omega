@@ -358,7 +358,7 @@ public sealed class CallbackPumpTests
         // Short waits, as a driver that shows the target running after 250 ms makes them: the bound runs across them.
         var clock = System.Diagnostics.Stopwatch.StartNew();
         StopInfo? stop = null;
-        while (stop is null && clock.Elapsed < TimeSpan.FromSeconds(5))
+        while (stop is null && clock.Elapsed < TimeSpan.FromSeconds(30))
             stop = pump.WaitForStop(TimeSpan.FromMilliseconds(300));
         TimeSpan calledAt = clock.Elapsed;
         pump.OnCallback(CallbackKind.Informational, "CreateThread", 0, 0, 0);
@@ -370,7 +370,10 @@ public sealed class CallbackPumpTests
         Assert.True(stop!.ExitNotDelivered);
         Assert.Null(stop.DebuggerError);
         Assert.True(stop.EndsSession);
-        Assert.InRange(calledAt, CallbackPump.ExitDeliveryBound, CallbackPump.ExitDeliveryBound + TimeSpan.FromSeconds(1));
+        // Never before the bound. How soon after it depends on the machine's load: 2.0 to 2.1 s on omega, 5.2 s on a loaded
+        // macOS x64 runner (CI 44923993832, 2026-11-21), so the test waits up to 30 s for the verdict and bounds only the
+        // early side.
+        Assert.True(calledAt >= CallbackPump.ExitDeliveryBound, $"the debugger was called lost after {calledAt}, before the bound");
         Assert.Same(stop, later);                        // the first loss is the one kept: a later DebuggerError does not replace it
         Assert.Same(stop, pump.LostStop);
         Assert.Equal(0, Volatile.Read(ref continues));   // the later callback was not continued
