@@ -24,6 +24,22 @@ public readonly record struct TempPath
     private const string LockFileName = ".mercury.lock";
 
     /// <summary>
+    /// How far apart two readings of one process's start time may be, in the units of
+    /// <see cref="DateTime.ToFileTimeUtc"/>: one second.
+    /// </summary>
+    /// <remarks>
+    /// On Linux, .NET gives a process's start time as the boot time plus the kernel's count since boot, and each process
+    /// computes the boot time itself. So another process reads the owner's start time a little off the value the owner
+    /// wrote: measured on zbook, 2026-11-21, 20 of 20 readings were 0.47 to 0.62 ms off. Compared for equality, every
+    /// owner that was alive was taken for gone, and a test run's sweep deleted another test project's directories while
+    /// they were used (CI 44891150639 and 44892395960, Linux arm64). A process ID given again to another process is told
+    /// by a start time further off than this: its first owner has ended, and the system has gone through its other IDs.
+    /// The clock's own adjustments while the owner runs move the reading too, slowly; an owner taken for alive keeps its
+    /// directory, which is the side this errs on.
+    /// </remarks>
+    private static readonly long SameStartTolerance = TimeSpan.FromSeconds(1).Ticks;
+
+    /// <summary>
     /// The full path to the temporary file or directory.
     /// </summary>
     public string FullPath { get; }
@@ -311,11 +327,13 @@ public readonly record struct TempPath
                 return LockFileOwner.Gone; // Process not found
             }
 
-            // Verify it's the same process (not PID reuse) by comparing start time
+            // The same process, not another that was given its ID since, by its start time (SameStartTolerance)
             try
             {
                 var actualStartTime = process.StartTime.ToFileTimeUtc();
-                return actualStartTime == startTimeFileTime ? LockFileOwner.Alive : LockFileOwner.Gone;
+                return Math.Abs(actualStartTime - startTimeFileTime) <= SameStartTolerance
+                    ? LockFileOwner.Alive
+                    : LockFileOwner.Gone;
             }
             catch (Exception)
             {
