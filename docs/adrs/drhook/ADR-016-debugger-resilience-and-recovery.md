@@ -261,6 +261,10 @@ unhealthy worker and the session it affects, and starts a fresh worker.
     running worker. On 2026-11-07 a build replaced the binaries under two running `drhook-mcp` processes.
   - **What it leaves.** A change to the tool surface itself still needs a new MCP process, unless the client honours
     MCP's `notifications/tools/list_changed` (untested).
+  - *Not pursued (2026-11-21, Martin).* Using code while it is being developed and fixed is a lifecycle matter, handled
+    as one: disconnect, fix and rebuild, reconnect. The terminal client, which DrHook has been used from since
+    2026-11-07, reconnects. A copy of the build that protects a running worker from a rebuild handles a case that rule
+    rules out, so it is unwarranted complexity, and it is not built (6.7, below).
 - **What it brings.** The worker is a program with its own lifecycle, held to the same rules. A launched target
   becomes the worker's child, so the worker's death affects it. Whether a target that is held stopped resumes, stays
   frozen or dies when its debugger process dies is not known on any platform. Recovering the service and
@@ -881,7 +885,12 @@ measurement, that measurement comes first.
     - the supervisor's buffers get every record the worker forwards, and the drain tools read those.
 
     Both processes use the same sink classes.
-- **The worker's own copy of the build.**
+- **The worker's own copy of the build.** *Amended 2026-11-21 (Martin), before it was built: no copy.* The worker runs
+  from its own directory beside drhook-mcp, `worker/`, in drhook-mcp's output and in its package. A change to DrHook
+  reaches it as it reaches drhook-mcp: disconnect, rebuild, reconnect. The copy below protected a running worker from a
+  rebuild under it, which that rule rules out, and its stale copies needed an owner's identity (the PID and start time
+  that broke Mercury's TempPath, and that DrHook cannot read on Windows). What follows is the design as accepted, kept
+  as the record.
   - **Where it comes from.** The worker is built into its own directory, in drhook-mcp's output and in its package.
   - **The copy.**
     - At each start, the supervisor copies that directory into `workers/` in DrHook's directory:
@@ -897,7 +906,8 @@ measurement, that measurement comes first.
     *Measured 2026-11-21* ([finding 114](../../../poc/drhook-engine/findings/114-worker-copy.md); probe 114 at
     `dbd336d1`, 20 copies of drhook-mcp's whole Debug output, 92 files and 37 MB, an upper bound on the worker's).
     - The copy took 12.8 ms at the median on omega, 3.9 on omega-ubuntu and 33.4 on omega-windows, at most 45.6 ms.
-    - That is 8 to 26 % of the start-up. So the copy is made at each worker's start, not once per build.
+    - That is 8 to 26 % of the start-up. So the copy is made at each worker's start, not once per build. (Not built:
+      see the amendment above.)
 - **The journal** (6.9).
   - **Where.** `journal.ndjson` in DrHook's directory, append-only.
   - **When.** It is written and flushed before each of these:
@@ -964,8 +974,8 @@ measurement, that measurement comes first.
     the session choose with `LeftRunningChoice`;
   - at its own end it closes every worker's stdin, and waits up to 10 s for them.
 - **Built into `worker/`** in drhook-mcp's output, in the output of a project that references it, and in its package:
-  60 files, 32 MB in Debug on omega. It is not yet copied at each start; that is the next part. drhook-mcp now
-  references neither the debugger nor DrHook.Viz.
+  60 files, 32 MB in Debug on omega. The worker runs from there; it is not copied (the amendment to 6.7, above).
+  drhook-mcp now references neither the debugger nor DrHook.Viz.
 - **Tests.** `WorkerTest` has four:
   - a session through a worker, whose anomalies reach the drain;
   - a target that ends before its breakpoint, whose console reaches the drain;
@@ -984,10 +994,12 @@ measurement, that measurement comes first.
 - **Finding 86's lock is gone between sessions.** A .NET 9 session and then a .NET 10 session both stopped at their
   breakpoints, each worker locked to its own target's version. In one process, the second launch was refused (probe
   115, [finding 115](../../../poc/drhook-engine/findings/115-runtime-switch.md)).
+- **Seen live**, after Martin's reconnect: one session through drhook-mcp on omega. The worker was drhook-mcp's child
+  and the target the worker's. `drhook_snapshot_image` returned its caption and image. The worker's two `DepthClamped`
+  anomalies reached `drhook_drain_anomalies`. After `drhook_stop` neither the worker nor the target was left.
 - **Not yet:**
-  - health, suspicion, the discard, the copy and the journal;
-  - the runners and the other platforms;
-  - the live server, which needs a reconnect.
+  - health, suspicion, the discard and the journal;
+  - the runners and the other platforms.
 
 ### Step 6: the decisions (decided 2026-11-20)
 
@@ -1125,13 +1137,18 @@ not the default.
     (finding 106).
   - A debugger process is locked to one runtime version (finding 86).
   - An engine change reaches the next session without a reconnect, if the worker starts from the current build
-    (2026-11-07, the containment boundary above).
+    (2026-11-07, the containment boundary above). *Not pursued (2026-11-21): a change reaches DrHook by disconnect,
+    rebuild, reconnect.*
 - **The options for its lifetime:** a worker per session; a worker per runtime version; one long-lived worker,
   replaced only when lost.
 - **Decided: a worker per session.**
   - The discard is then the normal end of every session, so recovery is the path exercised most, not least.
   - Finding 86's lock goes away, and an engine change reaches the next session.
   - The worker runs from its own copy of the build.
+  - *Amended 2026-11-21 (Martin), before it was built:* no copy. The worker runs from `worker/` beside drhook-mcp, and a
+    change reaches DrHook by disconnect, rebuild, reconnect, so "an engine change reaches the next session" is not a
+    reason any more. A worker per session stands on the others: the discard as the normal end, finding 86's lock gone
+    (finding 115), and a lost debugger that costs only its worker.
   - Its cost is a start-up per session. That was not measured on its own, and is measured before Step 7 is accepted.
     ADR-015's runs in a row may need a worker reused across runs; that is decided there.
 - **Decided: the protocol.** NDJSON requests and responses over the worker's stdin and stdout, as in probe 106; the end
@@ -1184,7 +1201,8 @@ not the default.
 - A worker's own start-up time (6.7). Measured 2026-11-21 on omega, omega-ubuntu and omega-windows
   ([finding 113](../../../poc/drhook-engine/findings/113-worker-startup.md)); not on x64 or the runners.
 - What a worker's copy of the build costs (6.7's design, above). Measured 2026-11-21 on omega, omega-ubuntu and
-  omega-windows ([finding 114](../../../poc/drhook-engine/findings/114-worker-copy.md)); not on x64 or the runners.
+  omega-windows ([finding 114](../../../poc/drhook-engine/findings/114-worker-copy.md)); not on x64 or the runners. The
+  copy was then dropped (2026-11-21).
 - A real `DebuggerError` (6.8).
 - Probes 106 and 112 on the six runners.
 

@@ -1,6 +1,9 @@
 # Finding 114 — what a worker's own copy of the build costs (ADR-016 6.7): 4 to 33 ms at the median, small beside the start-up on every machine
 
 **Date:** runs and record 2026-11-21
+**Amended 2026-11-21:** the copy was not built. Martin dropped it from ADR-016 6.7 the same day: using DrHook while it is
+developed is handled by disconnect, rebuild, reconnect, so a copy that protects a running worker from a rebuild is
+unwarranted. The worker runs from `worker/` beside drhook-mcp. This finding stays as the measurement.
 **Status:** **RECORDED** on omega (macOS arm64), omega-ubuntu (Linux arm64) and omega-windows (Windows 11 arm64).
 Probe 114 ran at `dbd336d1`, 20 copies on each machine. Every copy held the source's files and bytes, and was deleted
 (RESULT(0)). Not run: zbook, macbook and the six runners, so Linux x64, macOS x64 and Windows x64 are not covered.

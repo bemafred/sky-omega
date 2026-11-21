@@ -29,8 +29,9 @@ namespace SkyOmega.DrHook.Engine.Worker;
 /// same code on both sides.</summary>
 public static class WorkerProtocol
 {
-    /// <summary>This build's protocol version. drhook-mcp refuses a worker with another: the worker follows the build,
-    /// and drhook-mcp does not.</summary>
+    /// <summary>This build's protocol version. drhook-mcp refuses a worker with another. Both come from one build, in
+    /// worker/ beside drhook-mcp, so they differ only when a rebuild was done under a running drhook-mcp; a change
+    /// reaches DrHook by disconnect, rebuild, reconnect.</summary>
     public const int Version = 1;
 
     /// <summary>The worker's program, in the worker's own directory.</summary>
