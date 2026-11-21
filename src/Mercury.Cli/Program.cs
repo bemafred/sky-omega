@@ -420,7 +420,7 @@ if (enableHttp)
 {
     try
     {
-        httpServer = session.CreateHttpServer(httpPort, enableUpdates: true);
+        httpServer = session.CreateHttpServer(store.Hosts, httpPort, enableUpdates: true);
 
         httpServer.Start();
         Console.WriteLine($"HTTP endpoint: {MercuryPorts.GetEndpoint(httpPort)}");

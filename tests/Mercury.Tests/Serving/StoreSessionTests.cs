@@ -145,7 +145,7 @@ public sealed class StoreSessionTests : IDisposable
         using var session = Open();
         SparqlEngine.Update(session.Pool.Active, "INSERT DATA { <urn:s> <urn:p> \"from the session\" }", ct);
         int port = FreePort();
-        using var server = session.CreateHttpServer(port, enableUpdates);
+        using var server = session.CreateHttpServer(["localhost"], port, enableUpdates);
         server.Start();
         try
         {

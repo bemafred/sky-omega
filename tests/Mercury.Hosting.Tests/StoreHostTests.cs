@@ -46,6 +46,7 @@ public sealed class StoreHostTests : IDisposable
     private IHost Build(bool enableUpdates) => StoreHost.CreateBuilder(_store)
         .AddStoreEndpoints(new StoreEndpointOptions
         {
+            Hosts = ["localhost"],
             Port = _port,
             EnableUpdates = enableUpdates,
             PipeName = _pipe,

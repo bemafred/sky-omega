@@ -87,7 +87,8 @@ public sealed class SparqlHttpServer : IDisposable, IAsyncDisposable
     public void Start() => _loop.Start();
 
     /// <summary>
-    /// Stop the HTTP server gracefully.
+    /// Stop the HTTP server gracefully: it stops taking requests, and returns once the responses in progress are
+    /// written, so the store can be closed after it (ADR-065 D3). A request that comes meanwhile is answered 503.
     /// </summary>
     public Task StopAsync() => _loop.StopAsync();
 

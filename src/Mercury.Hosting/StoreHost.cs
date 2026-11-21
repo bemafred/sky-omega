@@ -11,6 +11,9 @@ namespace SkyOmega.Mercury.Hosting;
 /// <summary>Where a store host serves its store.</summary>
 public sealed class StoreEndpointOptions
 {
+    /// <summary>The hosts the HTTP endpoint listens on (<see cref="StoreArguments.Hosts"/>).</summary>
+    public required IReadOnlyList<string> Hosts { get; init; }
+
     /// <summary>The HTTP endpoint's port.</summary>
     public required int Port { get; init; }
 
@@ -51,7 +54,7 @@ public static class StoreHost
     public static HostApplicationBuilder AddStoreEndpoints(this HostApplicationBuilder builder, StoreEndpointOptions options)
     {
         builder.Services.AddSingleton(sp =>
-            new HttpServerHostedService(sp.GetRequiredService<StoreSession>(), options.Port, options.EnableUpdates));
+            new HttpServerHostedService(sp.GetRequiredService<StoreSession>(), options.Hosts, options.Port, options.EnableUpdates));
         builder.Services.AddHostedService(sp => sp.GetRequiredService<HttpServerHostedService>());
         builder.Services.AddSingleton(sp =>
             new PipeServerHostedService(sp.GetRequiredService<StoreSession>(), options.PipeName, options.PipeWelcome, options.PipePrompt));
@@ -63,14 +66,32 @@ public static class StoreHost
     /// Runs <paramref name="host"/> until it is stopped, by SIGTERM, SIGINT or the host itself, then closes
     /// <paramref name="store"/>. The stop signals stay handled until the store is closed (<see cref="StopSignals"/>).
     /// </summary>
+    /// <remarks>
+    /// A host that fails, most often at its start (an address it cannot listen on, a pipe it cannot make), is said on
+    /// standard error and in the store's log, and the store is closed all the same (ADR-065 D3). The endpoints have
+    /// stopped by then: the host disposes them, and the HTTP endpoint's disposal lets its responses in progress finish
+    /// (the pipe starts last, so a failed start leaves it no session).
+    /// </remarks>
     /// <param name="host">The host, which this disposes.</param>
     /// <param name="store">The store, closed once the host has stopped.</param>
     /// <param name="closing">Called after the host has stopped and before the store is closed.</param>
-    public static async Task RunAsync(IHost host, StoreSession store, Action? closing = null)
+    /// <returns>The process's exit code: 0 when the host stopped, 1 when it failed.</returns>
+    public static async Task<int> RunAsync(IHost host, StoreSession store, Action? closing = null)
     {
         using var signals = StopSignals.Register();
-        await host.RunAsync(signals.Token);
+        int exitCode = 0;
+        try
+        {
+            await host.RunAsync(signals.Token);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Error: {ex.Message}");
+            store.Log?.Log(Diagnostics.LogLevel.Error, $"The store cannot be served: {ex}");
+            exitCode = 1;
+        }
         closing?.Invoke();
         store.Dispose();
+        return exitCode;
     }
 }

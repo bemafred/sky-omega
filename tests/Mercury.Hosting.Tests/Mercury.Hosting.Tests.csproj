@@ -15,6 +15,9 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Mercury.Hosting\Mercury.Hosting.csproj" />
+    <!-- mercuryd, run by the tests as a process of its own: its stop signals, its exit code and its store's lock are a
+         process's (ADR-065 Step 4). -->
+    <ProjectReference Include="..\..\src\Mercury.Daemon\Mercury.Daemon.csproj" />
   </ItemGroup>
 
   <ItemGroup>

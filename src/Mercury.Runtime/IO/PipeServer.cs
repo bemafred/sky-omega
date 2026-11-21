@@ -1,6 +1,7 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using System.Collections.Concurrent;
 using System.IO.Pipes;
 using System.Text;
 using SkyOmega.Mercury.Abstractions;
@@ -17,6 +18,7 @@ public sealed class PipeServer : IDisposable
     private readonly Func<ReplSession> _sessionFactory;
     private readonly string _welcomeMessage;
     private readonly string _prompt;
+    private readonly ConcurrentDictionary<Task, byte> _sessions = new();
     private CancellationTokenSource? _cts;
     private Task? _acceptTask;
     private bool _disposed;
@@ -53,6 +55,8 @@ public sealed class PipeServer : IDisposable
     /// <summary>
     /// Start accepting connections.
     /// </summary>
+    /// <exception cref="IOException">The pipe cannot be made: on Linux and macOS, its socket's path is taken by a
+    /// directory, or a pipe of this process allows no more instances.</exception>
     public void Start()
     {
         if (_disposed)
@@ -61,13 +65,23 @@ public sealed class PipeServer : IDisposable
         if (_cts != null)
             throw new InvalidOperationException("Server already started");
 
+        // The first pipe is made here, so one that cannot be made fails the start (ADR-065 D3). Made in the accept
+        // loop, its error was taken for a connection's, and the loop made it again at once, for ever, inside Start:
+        // the loop does not leave Start until its first wait.
+        var first = CreatePipe();
         _cts = new CancellationTokenSource();
-        _acceptTask = AcceptConnectionsAsync(_cts.Token);
+        _acceptTask = AcceptConnectionsAsync(first, _cts.Token);
     }
 
     /// <summary>
-    /// Stop accepting connections and close all active sessions.
+    /// Stops accepting connections, and waits for the sessions to end. A session waiting for its next line ends at
+    /// once; one running a command ends when the command has run and its output is written.
     /// </summary>
+    /// <remarks>
+    /// The store the sessions use is closed after the stop, so the stop returns only when no session uses it (ADR-065
+    /// D3). The wait has no bound of its own: the bound is the service manager's, which then kills the process, and
+    /// the next open of the store replays its log (ADR-058).
+    /// </remarks>
     public async Task StopAsync()
     {
         if (_cts == null)
@@ -87,30 +101,39 @@ public sealed class PipeServer : IDisposable
             }
         }
 
+        // The accept loop has ended, so no session is added after this.
+        await Task.WhenAll(_sessions.Keys).ConfigureAwait(false);
+
         _cts.Dispose();
         _cts = null;
         _acceptTask = null;
     }
 
-    private async Task AcceptConnectionsAsync(CancellationToken ct)
+    private NamedPipeServerStream CreatePipe() => new(
+        _pipeName,
+        PipeDirection.InOut,
+        NamedPipeServerStream.MaxAllowedServerInstances,
+        PipeTransmissionMode.Byte,
+        PipeOptions.Asynchronous);
+
+    private async Task AcceptConnectionsAsync(NamedPipeServerStream first, CancellationToken ct)
     {
+        NamedPipeServerStream? next = first;
         while (!ct.IsCancellationRequested)
         {
             NamedPipeServerStream? pipe = null;
 
             try
             {
-                pipe = new NamedPipeServerStream(
-                    _pipeName,
-                    PipeDirection.InOut,
-                    NamedPipeServerStream.MaxAllowedServerInstances,
-                    PipeTransmissionMode.Byte,
-                    PipeOptions.Asynchronous);
+                pipe = next ?? CreatePipe();
+                next = null;
 
                 await pipe.WaitForConnectionAsync(ct).ConfigureAwait(false);
 
-                // Handle session in background - don't await
-                _ = HandleSessionAsync(pipe, ct);
+                // The session runs beside the loop, and the stop waits for it.
+                var session = HandleSessionAsync(pipe, ct);
+                _sessions.TryAdd(session, 0);
+                _ = session.ContinueWith(ended => _sessions.TryRemove(ended, out _), TaskScheduler.Default);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
