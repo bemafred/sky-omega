@@ -107,7 +107,10 @@ public sealed class StoreHostTests : IDisposable
 
         Assert.True(storeOpenAtClosing);
         Assert.True(LogHasStop());
-        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+        // Windows tries a refused connection again before it gives up: about 2.2 s for each of localhost's two addresses,
+        // 4.4 to 4.7 s on an idle machine (measured on omega-windows, 2026-11-21). A timeout of 5 s ended the request
+        // before the refusal on a loaded Windows runner (CI 44918126706); this one leaves the refusal time to come.
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
         await Assert.ThrowsAnyAsync<HttpRequestException>(() => http.GetAsync($"http://localhost:{_port}/sparql", ct));
         // The store is closed: it can be opened again.
         using var again = StoreSession.Open(_store.Path, "mercury-test", "9.9.9", StorageOptions.ForTesting);
