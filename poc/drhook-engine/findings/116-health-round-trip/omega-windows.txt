@@ -1,0 +1,26 @@
+## main...origin/main [behind 83]
+05a2d8ef
+e0dfa5cb
+## HEAD (no branch)
+10.0.404
+
+Microsoft.AspNetCore.App 10.0.10 [C:\Program Files\dotnet\shared\Microsoft.AspNetCore.App]
+Microsoft.AspNetCore.App 10.0.15 [C:\Program Files\dotnet\shared\Microsoft.AspNetCore.App]
+Microsoft.NETCore.App 10.0.10 [C:\Program Files\dotnet\shared\Microsoft.NETCore.App]
+Microsoft.NETCore.App 10.0.15 [C:\Program Files\dotnet\shared\Microsoft.NETCore.App]
+
+2026-11-21T19:44:04.9680401+01:00
+platform: Microsoft Windows 10.0.26200 Arm64, .NET 10.0.15
+worker: pid 14292, .NET 10.0.15, protocol 1
+drhook-worker: the request running did not let the session end within 30 s; exiting
+
+health round trips, 150 per phase or more, median [minΓÇômax] ms, and the phases the worker named:
+  idle     n= 150  0.15 [0.06ΓÇô3.32]  unanswered 0  phases: idle 150
+  launch   n= 150  0.09 [0.04ΓÇô0.54]  unanswered 0  phases: debugger work 78, waiting for the target 37, idle 35
+  waiting  n= 150  0.13 [0.05ΓÇô1.19]  unanswered 0  phases: waiting for the target 150
+  launches: 36, each stopped at its breakpoint, 96 ms median [89ΓÇô290] from the request to its answer
+  the worker exited 30122 ms after its exit request, sent 150 health requests into the continue's wait
+
+RESULT(0): every health request was answered, every round trip under 500 ms
+exit 0
+2026-11-21T19:45:19.2755770+01:00

@@ -1045,8 +1045,14 @@ measurement, that measurement comes first.
   - the lost path through a worker, which needs probe 106's induced loss, which is not deterministic;
   - the 30 s debugger-work bound, which no construction yet holds a native call for;
   - Windows, where the SIGSTOP construction has no equivalent.
-- **The 5 s health bound** is not yet checked against measured round trips. That waits for omega to be quiet (a
-  long run on omega-windows meanwhile).
+- **The 5 s health bound is kept** (probe 116, [finding 116](../../../poc/drhook-engine/findings/116-health-round-trip.md)).
+  A health request every 20 ms, 150 or more per phase, idle, during launches and while a continue waited: every one
+  answered, the longest round trip 3.32 ms, on omega-windows. omega and omega-ubuntu agree.
+- **The worker's end waits for a request that waits** (finding 116). The worker runs its end after the request
+  running, and a `drhook_continue` that waits returns only at a stop, at the target's end, or after 2 minutes. So a
+  reconnect during such a continue ends the session as `drhook_stop` does only if the target stops or ends within
+  `EndBound` (30 s); otherwise the worker exits with its session not ended. On omega-windows it did, at 30.1 s.
+  Recorded for a decision.
 
 *6.9's journal built 2026-11-21* (sky-omega, omega): the last part.
 - **Where.** `journal.ndjson` in DrHook's directory, beside the rendezvous socket, one JSON object per line,
