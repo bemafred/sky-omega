@@ -1,5 +1,5 @@
 // HttpListenerLoop.cs
-// An HttpListener on one base URI and the loop that accepts its requests: the one lifecycle of
+// An HttpListener on one or more base URIs and the loop that accepts its requests: the one lifecycle of
 // SparqlHttpServer and Mercury.Solid's SolidServer.
 // No external dependencies, only BCL
 // .NET 10 / C# 14
@@ -10,34 +10,54 @@ using System.Text;
 namespace SkyOmega.Mercury.Sparql.Protocol;
 
 /// <summary>
-/// An <see cref="HttpListener"/> on one base URI and the loop that accepts its requests. Each request goes to the
-/// server's respond function, which the loop does not wait for before it accepts the next. An exception the function
-/// lets out is answered with 500, and the response is closed after the function either way.
+/// An <see cref="HttpListener"/> on one or more base URIs and the loop that accepts their requests. Each request goes
+/// to the server's respond function, which the loop does not wait for before it accepts the next. An exception the
+/// function lets out is answered with 500, and the response is closed after the function either way.
 /// </summary>
+/// <remarks>
+/// <para>
+/// The URIs are one listener's prefixes: one port each, one accept loop for all (ADR-065 D4). A request is answered
+/// when its Host is one of them. A start that fails on any of them fails whole, and leaves none listening.
+/// </para>
+/// <para>
+/// A stop lets the responses in progress finish before the listener stops (ADR-065 D3): what they read is closed
+/// after the stop, mercuryd's store among it.
+/// </para>
+/// </remarks>
 internal sealed class HttpListenerLoop : IDisposable, IAsyncDisposable
 {
     private readonly HttpListener _listener;
     private readonly Func<HttpListenerContext, CancellationToken, Task> _respond;
-    private CancellationTokenSource? _cts;
+    private readonly HashSet<Task> _responding = [];
+    private readonly CancellationTokenSource _disposing = new();
     private Task? _acceptTask;
+    private volatile bool _stopping;
     private bool _disposed;
 
-    /// <param name="baseUri">The URI to listen on (e.g., "http://localhost:8080/"); a trailing slash is added when it
-    /// has none.</param>
-    /// <param name="respond">Writes the response to one request. The loop closes the response after it.</param>
-    public HttpListenerLoop(string baseUri, Func<HttpListenerContext, CancellationToken, Task> respond)
+    /// <param name="baseUris">The URIs to listen on, at least one (e.g., "http://localhost:8080/"). A trailing slash
+    /// is added to one that has none, and a URI given twice is listened on once.</param>
+    /// <param name="respond">Writes the response to one request. The loop closes the response after it. Its token is
+    /// cancelled when the loop is disposed, not when it stops.</param>
+    public HttpListenerLoop(IEnumerable<string> baseUris, Func<HttpListenerContext, CancellationToken, Task> respond)
     {
-        ArgumentNullException.ThrowIfNull(baseUri);
-        BaseUri = baseUri.EndsWith('/') ? baseUri : baseUri + "/";
+        ArgumentNullException.ThrowIfNull(baseUris);
+        BaseUris = baseUris
+            .Select(uri => uri is null ? throw new ArgumentNullException(nameof(baseUris), "A URI to listen on is null.")
+                : uri.EndsWith('/') ? uri : uri + "/")
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (BaseUris.Count == 0)
+            throw new ArgumentException("A listener needs a URI to listen on.", nameof(baseUris));
         _respond = respond;
         _listener = new HttpListener();
-        _listener.Prefixes.Add(BaseUri);
+        foreach (var uri in BaseUris)
+            _listener.Prefixes.Add(uri);
     }
 
     /// <summary>
-    /// The URI the listener listens on, with its trailing slash.
+    /// The URIs the listener listens on, each with its trailing slash, in the order given.
     /// </summary>
-    public string BaseUri { get; }
+    public IReadOnlyList<string> BaseUris { get; }
 
     /// <summary>
     /// Whether the listener is listening.
@@ -51,53 +71,80 @@ internal sealed class HttpListenerLoop : IDisposable, IAsyncDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        _cts = new CancellationTokenSource();
+        // A start that fails on any address unbinds the ones bound before it, and the listener closes itself (the
+        // managed listener of Linux and macOS). The loop then has nothing to stop: a Stop of that listener would look
+        // each prefix up again, bind the failed address to do so, and throw, and the start's exception would be lost
+        // to it (measured on zbook, 2026-11-20). So the loop is made only once the listener has started.
         _listener.Start();
-        _acceptTask = AcceptAsync(_cts.Token);
+        _stopping = false;
+        _acceptTask = AcceptAsync();
     }
 
     /// <summary>
-    /// Stops the listener and waits for the loop to end. The token is cancelled before the listener stops, so the
-    /// loop sees the stop when the listener's wait ends.
+    /// Stops taking requests, waits for the responses in progress, then stops the listener and waits for the loop to
+    /// end. A request that comes while the responses finish is answered 503.
     /// </summary>
+    /// <remarks>
+    /// The listener's stop ends the responses it has not finished: a write after it throws ObjectDisposedException,
+    /// and the client gets an empty response (measured on zbook, 2026-11-21). So they finish first. The wait has no
+    /// bound of its own: the bound is the service manager's, which then kills the process (ADR-065 D3).
+    /// </remarks>
     public async Task StopAsync()
     {
-        if (_cts == null)
+        if (_acceptTask == null)
             return;
 
-        await _cts.CancelAsync().ConfigureAwait(false);
-        _listener.Stop();
+        Task[] inProgress;
+        lock (_responding)
+        {
+            _stopping = true;
+            inProgress = [.. _responding];
+        }
+        await Task.WhenAll(inProgress).ConfigureAwait(false);
 
-        if (_acceptTask != null)
-            await _acceptTask.ConfigureAwait(false);
+        _listener.Stop();
+        await _acceptTask.ConfigureAwait(false);
     }
 
-    private async Task AcceptAsync(CancellationToken ct)
+    private async Task AcceptAsync()
     {
-        while (!ct.IsCancellationRequested)
+        while (true)
         {
+            HttpListenerContext context;
             try
             {
-                var context = await _listener.GetContextAsync().ConfigureAwait(false);
-
-                // Respond in the background (not awaited), so the next request is accepted meanwhile
-                _ = RespondAsync(context, ct);
+                context = await _listener.GetContextAsync().ConfigureAwait(false);
             }
-            catch (Exception) when (ct.IsCancellationRequested)
+            catch (Exception) when (_stopping)
             {
                 // A stop reaches this wait as the listener's exception, and which one depends on when the stop
                 // came: a wait pending at Stop throws ObjectDisposedException, and a wait begun after Stop
                 // throws InvalidOperationException (Linux and macOS).
                 break;
             }
+
+            // A response begins under the lock that the stop takes its list under, so the stop waits for each one
+            // that began before it, and none begins after it.
+            lock (_responding)
+            {
+                if (!_stopping)
+                {
+                    var responding = Task.Run(() => RespondAsync(context));
+                    _responding.Add(responding);
+                    _ = responding.ContinueWith(ended => { lock (_responding) _responding.Remove(ended); },
+                        TaskScheduler.Default);
+                    continue;
+                }
+            }
+            _ = RefuseAsync(context);
         }
     }
 
-    private async Task RespondAsync(HttpListenerContext context, CancellationToken ct)
+    private async Task RespondAsync(HttpListenerContext context)
     {
         try
         {
-            await _respond(context, ct).ConfigureAwait(false);
+            await _respond(context, _disposing.Token).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -113,6 +160,20 @@ internal sealed class HttpListenerLoop : IDisposable, IAsyncDisposable
         finally
         {
             context.Response.Close();
+        }
+    }
+
+    // A request that came while the stop waits for the responses in progress.
+    private static async Task RefuseAsync(HttpListenerContext context)
+    {
+        try
+        {
+            await WriteErrorResponseAsync(context.Response, 503, "Service Unavailable", "The server is stopping.").ConfigureAwait(false);
+            context.Response.Close();
+        }
+        catch
+        {
+            // The listener stopped, and ended the response
         }
     }
 
@@ -142,9 +203,10 @@ internal sealed class HttpListenerLoop : IDisposable, IAsyncDisposable
         if (_disposed) return;
         _disposed = true;
 
-        _cts?.Cancel();
+        _stopping = true;
+        _disposing.Cancel();
         _listener.Close();
-        _cts?.Dispose();
+        _disposing.Dispose();
     }
 
     public async ValueTask DisposeAsync()
@@ -153,7 +215,9 @@ internal sealed class HttpListenerLoop : IDisposable, IAsyncDisposable
         _disposed = true;
 
         await StopAsync().ConfigureAwait(false);
+        _stopping = true;
+        _disposing.Cancel();
         _listener.Close();
-        _cts?.Dispose();
+        _disposing.Dispose();
     }
 }

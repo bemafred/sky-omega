@@ -11,7 +11,8 @@ namespace SkyOmega.Mercury.Tests.Serving;
 /// <summary>The store options the Mercury tools share (ADR-065 D11), read as mercury and mercury-mcp read them before.</summary>
 public sealed class StoreArgumentsTests
 {
-    private const StoreOptions All = StoreOptions.Path | StoreOptions.Name | StoreOptions.Profile | StoreOptions.Port;
+    private const StoreOptions All =
+        StoreOptions.Path | StoreOptions.Name | StoreOptions.Profile | StoreOptions.Port | StoreOptions.Listen;
 
     /// <summary>Reads every argument as a tool would, stopping at the first not read.</summary>
     private static (StoreArguments Store, ArgumentRead Last, int Index) ReadAll(StoreOptions takes, params string[] args)
@@ -55,6 +56,29 @@ public sealed class StoreArgumentsTests
         Assert.Equal(MercuryPaths.Store("mcp"), new StoreArguments(All).ResolvePath("mcp"));
     }
 
+    [Fact]
+    public void ResolvePath_WithNoDefault_IsNullWhenNoStoreIsGiven()
+    {
+        Assert.Null(new StoreArguments(All).ResolvePath());
+        Assert.Equal(MercuryPaths.Store("shared"), ReadAll(All, "--store", "shared").Store.ResolvePath());
+        Assert.Equal("/x", ReadAll(All, "-d", "/x").Store.ResolvePath());
+    }
+
+    [Fact]
+    public void Listen_EachIsAHost_InTheOrderGiven()
+    {
+        var (store, last, _) = ReadAll(All, "--listen", "100.67.254.98", "--listen", "elite.tail7f8646.ts.net");
+
+        Assert.Equal(ArgumentRead.Read, last);
+        Assert.Equal(["100.67.254.98", "elite.tail7f8646.ts.net"], store.Hosts);
+    }
+
+    [Fact]
+    public void Listen_NoneGiven_IsLocalhost()
+    {
+        Assert.Equal(["localhost"], new StoreArguments(All).Hosts);
+    }
+
     [Theory]
     [InlineData("-p")]
     [InlineData("--port")]
@@ -80,6 +104,7 @@ public sealed class StoreArgumentsTests
     [InlineData("-d")]
     [InlineData("--store")]
     [InlineData("-p")]
+    [InlineData("--listen")]
     public void AValueMissingAtTheEnd_IsIgnored(string option)
     {
         var (store, last, _) = ReadAll(All, option);
@@ -88,6 +113,7 @@ public sealed class StoreArgumentsTests
         Assert.Null(store.Path);
         Assert.Null(store.Name);
         Assert.Null(store.Port);
+        Assert.Equal(["localhost"], store.Hosts);
     }
 
     [Theory]
@@ -141,6 +167,7 @@ public sealed class StoreArgumentsTests
     [InlineData("--store", "n")]
     [InlineData("--profile", "graph")]
     [InlineData("--enable-http-updates")]
+    [InlineData("--listen", "+")]
     [InlineData("-x")]
     public void AnOptionNotTaken_IsLeftToTheTool(params string[] args)
     {

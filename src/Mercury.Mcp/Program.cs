@@ -156,6 +156,7 @@ builder.Services
 
 builder.AddStoreEndpoints(new StoreEndpointOptions
 {
+    Hosts = store.Hosts,
     Port = httpPort,
     EnableUpdates = enableHttpUpdates,
     PipeName = MercuryPorts.McpPipeName,
@@ -169,7 +170,7 @@ Console.Error.WriteLine();
 
 // The MCP stdio transport stops the host when standard input ends; SIGINT and SIGTERM stop it too, and stay handled
 // until the store is closed (ADR-058 Q7).
-await StoreHost.RunAsync(builder.Build(), session, closing: () => Console.Error.WriteLine("MCP Server shutting down..."));
+var exitCode = await StoreHost.RunAsync(builder.Build(), session, closing: () => Console.Error.WriteLine("MCP Server shutting down..."));
 Console.Error.WriteLine("MCP Server stopped.");
 
-return 0;
+return exitCode;

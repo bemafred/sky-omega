@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <!-- mercuryd: one store, served by one process that runs as a service (ADR-065). A minimal host: its options are
+         read and its store served by Mercury.Hosting (D1, D11). -->
+
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <AssemblyName>mercuryd</AssemblyName>
+        <RootNamespace>SkyOmega.Mercury.Daemon</RootNamespace>
+        <PackAsTool>true</PackAsTool>
+        <ToolCommandName>mercuryd</ToolCommandName>
+        <PackageId>SkyOmega.Mercury.Daemon</PackageId>
+        <Authors>Sky Omega Team</Authors>
+        <Description>mercuryd - one Mercury store served over HTTP and an attach socket, as a service on Linux, macOS and Windows.</Description>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <!-- Run as a Windows service by the service manager (D8); on Linux and macOS it does nothing. -->
+        <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.0" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <!-- The store, its endpoints, the stop handling and mercuryd's options (D11). -->
+        <ProjectReference Include="..\Mercury.Hosting\Mercury.Hosting.csproj" />
+    </ItemGroup>
+
+</Project>

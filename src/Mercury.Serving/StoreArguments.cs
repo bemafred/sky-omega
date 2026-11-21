@@ -24,6 +24,9 @@ public enum StoreOptions
 
     /// <summary><c>-p</c> or <c>--port</c> with the HTTP endpoint's port.</summary>
     Port = 8,
+
+    /// <summary><c>--listen</c> with a host the HTTP endpoint listens on, as often as there are hosts (ADR-065 D4).</summary>
+    Listen = 16,
 }
 
 /// <summary>What <see cref="StoreArguments.Read"/> did with an argument.</summary>
@@ -52,6 +55,8 @@ public enum ArgumentRead
 /// </remarks>
 public sealed class StoreArguments(StoreOptions takes)
 {
+    private readonly List<string> _hosts = [];
+
     /// <summary>The store's directory, from <c>-d</c>, <c>--data</c> or the argument given with no option.</summary>
     public string? Path { get; private set; }
 
@@ -63,6 +68,12 @@ public sealed class StoreArguments(StoreOptions takes)
 
     /// <summary>The HTTP endpoint's port, from <c>-p</c> or <c>--port</c>.</summary>
     public int? Port { get; private set; }
+
+    /// <summary>
+    /// The hosts the HTTP endpoint listens on, from <c>--listen</c>, in the order given; <c>localhost</c> when none is
+    /// given. Each is a name, an IP address, or <c>+</c> or <c>*</c> for every network (ADR-065 D4).
+    /// </summary>
+    public IReadOnlyList<string> Hosts => _hosts.Count > 0 ? _hosts : ["localhost"];
 
     /// <summary>Why the last argument refused was refused, as the line or lines that follow <c>Error: </c>.</summary>
     public string? Error { get; private set; }
@@ -86,6 +97,10 @@ public sealed class StoreArguments(StoreOptions takes)
             case "-p" or "--port" when Takes(StoreOptions.Port):
                 if (i + 1 < args.Length && int.TryParse(args[++i], out var port))
                     Port = port;
+                return ArgumentRead.Read;
+            case "--listen" when Takes(StoreOptions.Listen):
+                if (i + 1 < args.Length)
+                    _hosts.Add(args[++i]);
                 return ArgumentRead.Read;
             case "--profile" when Takes(StoreOptions.Profile):
                 if (i + 1 < args.Length && Enum.TryParse<StoreProfile>(args[++i], ignoreCase: true, out var profile))
@@ -117,7 +132,11 @@ public sealed class StoreArguments(StoreOptions takes)
 
     /// <summary>The store's directory: the one given, else the store named, else the store <paramref name="defaultName"/>,
     /// under the stores' directory (<see cref="MercuryPaths.Store"/>).</summary>
-    public string ResolvePath(string defaultName) => Path ?? MercuryPaths.Store(Name ?? defaultName);
+    public string ResolvePath(string defaultName) => ResolvePath() ?? MercuryPaths.Store(defaultName);
+
+    /// <summary>The store's directory: the one given, else the store named, under the stores' directory; null when
+    /// neither was given.</summary>
+    public string? ResolvePath() => Path ?? (Name is null ? null : MercuryPaths.Store(Name));
 
     /// <summary>Whether an argument has the words or the characters of a SPARQL query, which never appear in a path.</summary>
     public static bool LooksLikeSparql(string arg)

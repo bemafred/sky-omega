@@ -98,9 +98,10 @@ public sealed class StoreSession : IDisposable
         return new StoreSession(pool, pool.BasePath!, log: null, tool);
     }
 
-    /// <summary>The SPARQL endpoint over this store at <c>http://localhost:{port}/</c>, not yet started.</summary>
-    public SparqlHttpServer CreateHttpServer(int port, bool enableUpdates) =>
-        new(() => Pool.Active, MercuryPorts.GetBaseUrl(port), new SparqlHttpServerOptions { EnableUpdates = enableUpdates });
+    /// <summary>The SPARQL endpoint over this store at <c>http://{host}:{port}/</c> for each host, not yet started.</summary>
+    public SparqlHttpServer CreateHttpServer(IReadOnlyList<string> hosts, int port, bool enableUpdates) =>
+        new(() => Pool.Active, hosts.Select(host => MercuryPorts.GetBaseUrl(host, port)),
+            new SparqlHttpServerOptions { EnableUpdates = enableUpdates });
 
     /// <summary>Closes the store, then writes the stop to its log.</summary>
     public void Dispose()

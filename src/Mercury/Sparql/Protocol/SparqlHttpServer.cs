@@ -48,9 +48,22 @@ public sealed class SparqlHttpServer : IDisposable, IAsyncDisposable
     /// <param name="baseUri">Base URI to listen on (e.g., "http://localhost:8080/").</param>
     /// <param name="options">Server configuration options.</param>
     public SparqlHttpServer(Func<QuadStore> storeFactory, string baseUri, SparqlHttpServerOptions? options = null)
+        : this(storeFactory, [baseUri], options)
+    {
+    }
+
+    /// <summary>
+    /// Creates a new SPARQL HTTP server with a store factory, on several addresses: one listener and one port, with
+    /// every address answered (ADR-065 D4).
+    /// </summary>
+    /// <param name="storeFactory">Factory function that returns the current QuadStore.</param>
+    /// <param name="baseUris">Base URIs to listen on, at least one (e.g., "http://localhost:3032/",
+    /// "http://100.67.254.98:3032/"). A URI given twice is listened on once.</param>
+    /// <param name="options">Server configuration options.</param>
+    public SparqlHttpServer(Func<QuadStore> storeFactory, IEnumerable<string> baseUris, SparqlHttpServerOptions? options = null)
     {
         _storeFactory = storeFactory ?? throw new ArgumentNullException(nameof(storeFactory));
-        _loop = new HttpListenerLoop(baseUri, RespondAsync);
+        _loop = new HttpListenerLoop(baseUris, RespondAsync);
         _options = options ?? new SparqlHttpServerOptions();
     }
 
@@ -64,7 +77,7 @@ public sealed class SparqlHttpServer : IDisposable, IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(store);
         _storeFactory = () => store;
-        _loop = new HttpListenerLoop(baseUri, RespondAsync);
+        _loop = new HttpListenerLoop([baseUri], RespondAsync);
         _options = options ?? new SparqlHttpServerOptions();
     }
 
@@ -74,7 +87,8 @@ public sealed class SparqlHttpServer : IDisposable, IAsyncDisposable
     public void Start() => _loop.Start();
 
     /// <summary>
-    /// Stop the HTTP server gracefully.
+    /// Stop the HTTP server gracefully: it stops taking requests, and returns once the responses in progress are
+    /// written, so the store can be closed after it (ADR-065 D3). A request that comes meanwhile is answered 503.
     /// </summary>
     public Task StopAsync() => _loop.StopAsync();
 
@@ -84,9 +98,9 @@ public sealed class SparqlHttpServer : IDisposable, IAsyncDisposable
     public bool IsListening => _loop.IsListening;
 
     /// <summary>
-    /// The base URI the server is listening on.
+    /// The base URIs the server listens on, each with its trailing slash.
     /// </summary>
-    public string BaseUri => _loop.BaseUri;
+    public IReadOnlyList<string> BaseUris => _loop.BaseUris;
 
     /// <summary>
     /// One request: the query endpoint, the update endpoint, or 404. The loop closes the response, and answers an
@@ -167,7 +181,7 @@ public sealed class SparqlHttpServer : IDisposable, IAsyncDisposable
 
         if (string.IsNullOrWhiteSpace(queryString))
         {
-            await WriteServiceDescriptionAsync(response, ct).ConfigureAwait(false);
+            await WriteServiceDescriptionAsync(request, response, ct).ConfigureAwait(false);
             return;
         }
 
@@ -373,16 +387,20 @@ public sealed class SparqlHttpServer : IDisposable, IAsyncDisposable
         }
     }
 
-    private async Task WriteServiceDescriptionAsync(HttpListenerResponse response, CancellationToken ct)
+    private async Task WriteServiceDescriptionAsync(HttpListenerRequest request, HttpListenerResponse response, CancellationToken ct)
     {
         response.ContentType = "text/turtle";
         response.StatusCode = 200;
+
+        // The endpoint is the one the request reached: a server on several addresses has no one base URI, and a
+        // listener's "+" or "*" is no IRI (ADR-065 D4).
+        var baseUri = request.Url is { } url ? url.GetLeftPart(UriPartial.Authority) + "/" : _loop.BaseUris[0];
 
         var sb = new StringBuilder();
         sb.AppendLine("@prefix sd: <http://www.w3.org/ns/sparql-service-description#> .");
         sb.AppendLine("@prefix void: <http://rdfs.org/ns/void#> .");
         sb.AppendLine();
-        sb.AppendLine($"<{_loop.BaseUri}sparql> a sd:Service ;");
+        sb.AppendLine($"<{baseUri}sparql> a sd:Service ;");
         sb.AppendLine("    sd:endpoint <sparql> ;");
         sb.AppendLine("    sd:supportedLanguage sd:SPARQL11Query ;");
 

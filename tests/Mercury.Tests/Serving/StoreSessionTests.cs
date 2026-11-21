@@ -32,7 +32,17 @@ public sealed class StoreSessionTests : IDisposable
 
     private StoreSession Open() => StoreSession.Open(StorePath, "mercury-test", "9.9.9", StorageOptions.ForTesting);
 
-    private string[] LogLines() => File.ReadAllLines(StoreSession.LogPathFor(StorePath));
+    // The log's lines as a reader beside its writer reads them. While the store is open its logger holds the file open
+    // for writing, and Windows refuses a reader that does not share writing (File.ReadAllLines does not; CI run
+    // 44810648562).
+    private string[] LogLines()
+    {
+        using var reader = new StreamReader(new FileStream(StoreSession.LogPathFor(StorePath), FileMode.Open, FileAccess.Read, FileShare.ReadWrite));
+        var lines = new List<string>();
+        while (reader.ReadLine() is { } line)
+            lines.Add(line);
+        return lines.ToArray();
+    }
 
     [Fact]
     public void Open_TheLogStartsWithTheToolItsVersionAndItsProcess()
@@ -135,7 +145,7 @@ public sealed class StoreSessionTests : IDisposable
         using var session = Open();
         SparqlEngine.Update(session.Pool.Active, "INSERT DATA { <urn:s> <urn:p> \"from the session\" }", ct);
         int port = FreePort();
-        using var server = session.CreateHttpServer(port, enableUpdates);
+        using var server = session.CreateHttpServer(["localhost"], port, enableUpdates);
         server.Start();
         try
         {

@@ -316,10 +316,86 @@ The order follows the dependencies (ADR-064's rule).
    W3C syntax suites' skips). One change seen: `:store` and mercury-mcp's pipe welcome name the store by its full
    path when a relative one is given. The stop signals are tested in Step 4, on mercuryd's own process.
 3. **Several listen addresses** in `HttpListenerLoop` and `SparqlHttpServer` (D4), with tests.
+   Done on zbook, 2026-11-20:
+   - The addresses are one listener's prefixes, one port and one accept loop. A duplicate is listened on once, and
+     `SparqlHttpServer.BaseUri` became `BaseUris`.
+   - The service description names the endpoint the request reached. A server on several addresses has no one base
+     URI, and `+` or `*` is no IRI.
+   - A start that fails on any address fails whole. The managed listener (Linux, macOS) unbinds what it had bound and
+     closes itself. The loop now makes its stop state only after a start: a stop of that closed listener bound the
+     failed address again and threw, which would have hidden the start's exception (D3). Both servers had made it
+     before the start since before `4f0e95c` (sky-omega read `4f0e95c^`), so the fix covers both.
+   - `MercuryPorts.GetBaseUrl(host, port)` and `GetEndpoint(host, port)` form an address, an IPv6 one in brackets.
+   - `SolidServer` keeps one address, since a resource's IRI is built from it.
+   - Tests: `SparqlHttpServerAddressesTests`, each failing under a mutation that undoes what it tests (five).
+     - On Windows a listener on `127.0.0.1` needs a URL reservation or an administrator; without either, those tests
+       are skipped.
+     - The failed start is tested on Linux and macOS only: Windows' http.sys registers an address that isn't the
+       machine's without binding it.
 4. **`src/Mercury.Daemon`** (D1 to D3, D5, D6, D9), with tests in `tests/Mercury.Hosting.Tests`: a start that serves
    queries and updates over HTTP, an attach over the socket, a SIGTERM that closes the store and writes the stop to
    the log, a start that fails exits with a code other than 0, and a second process on the store is refused. Each test
    fails under a mutation that undoes what it tests.
+   Done on zbook, 2026-11-21:
+   - **The tool.** `mercuryd` reads its options with `DaemonArguments` (Mercury.Hosting) and serves its store with
+     `StoreHost`. Its default port is 3032, `MercuryPorts.Daemon` (Q1).
+     - A store must be named, with `--store` or `-d` (D2). A service that made a store nobody named would serve the
+       wrong one.
+     - It prints `Ready.` once its endpoints have started, and `Stopping: …` when a stop begins.
+   - **The attach socket** (D6) is `MercuryPorts.DaemonPipeName`, for the daemon and its clients.
+     - A socket's path is held with its terminating zero. On Linux a path of 107 bytes is bound and one of 108 is
+       refused (measured); macOS holds 103 bytes and 104 with the zero.
+     - A socket file left by a killed process is replaced at the next start (measured: .NET deletes it and binds again).
+       A directory at that path fails the start.
+     - Connecting needs write permission on the socket, and the umask sets it (`srwxrwxr-x` on zbook). So D6's
+       "whoever may read the store's directory may attach" holds for the user and the group, not for others.
+     - Not handled: two stores of the same name, when the socket falls back to the store's name (on Windows always).
+       The second process then takes the first one's name: on Linux and macOS it deletes the first one's socket, and
+       on Windows it adds instances to the first one's pipe. Step 9 decides Windows'.
+   - **D3's start.** A part that cannot start fails the start whole. mercuryd then says why on standard error, and
+     once the store is open in its log too, closes the store, and exits 1. Found on the way:
+     - `PipeServer` made its pipe in its accept loop, which took the error for a connection's and made the pipe again
+       at once. A pipe that could not be made spun for ever inside `Start`. The first pipe is now made in `Start`.
+     - `StoreHost.RunAsync` let a failed host's exception out of Main: the store was not closed, and the process ended
+       by abort. It now returns the exit code.
+     - A store that cannot be opened is said, and not let out of Main, for the same reason.
+   - **D3's stop.** The requests in progress finish before the store is closed. Found on the way:
+     - `HttpListener.Stop` ends a response in progress (measured: the write after it throws, and the client gets an
+       empty response).
+     - Neither server waited for its requests or its sessions, so the store was closed while they could still read it,
+       and `QuadStore.Dispose` takes no lock.
+     - Now the HTTP loop stops taking requests, answers 503 to one that comes meanwhile, waits for the responses in
+       progress, and only then stops the listener. The pipe waits for each session's command.
+     - The bound is the service manager's (D8). The Generic Host waits for a stop past its own shutdown timeout
+       (measured), and a service manager that stops waiting kills the process, which the next open recovers from
+       (ADR-058).
+   - **mercury-mcp** runs the same host, so it starts and stops the same way.
+     - A port in use now exits 1 with the store closed.
+     - Its stop waits for the requests in progress. Its MCP tool calls in progress at a stop belong to the MCP server,
+       and are not waited for here.
+     - Its log gains two lines at each start: where it serves SPARQL, and its pipe.
+   - **Tests.**
+     - `MercurydTests` runs mercuryd as a process with no input, as a service manager does:
+       - queries and updates over HTTP, and none with `--read-only`;
+       - each `--listen` address;
+       - an attach over the store's socket;
+       - SIGTERM and SIGINT, each closing the store, writing the stop and exiting 0;
+       - three failed starts (the port in use, an address that is not the machine's, a file where the store goes),
+         each exiting 1;
+       - a second process refused while the first serves on;
+       - a start after a kill, serving what was written;
+       - the profile, applied when the store is made.
+     - `DaemonArgumentsTests` has 8 cases.
+     - In Mercury.Tests: `HttpListenerLoopStopTests`, `PipeServerStartAndStopTests` (2), `DaemonPipeNameTests` (3), and
+       `--listen` in `StoreArgumentsTests`.
+     - 18 mutations, each undoing one of these, each failed by its test. Under the first run of one of them (the listener
+       stopped before the responses), the HTTP stop test hung rather than failed: its disposal waited for the
+       response it held. Both stop tests now let it go in a `finally`.
+   - **Not refuted:** a SIGTERM while the store is being closed (ADR-058 Q7's `StopSignals`). While the host runs, its
+     console lifetime handles SIGTERM and SIGINT too, so a signal test passes without `StopSignals`. The window it
+     covers is the store's close after the host has stopped, and no test holds that open.
+   - **Windows:** the signals, an address that is not the machine's and a second address are not tested there. The
+     pipe's access list and the stop request are Step 9.
 5. **The CLI attaches by store** (D7).
 6. **SERVICE** in `SparqlEngine.Query` (D10), with a test that queries one endpoint from another.
 7. **Linux:** the unit file and the runbook; mercuryd on elite with the store of Q4, installed by Martin; queried and
