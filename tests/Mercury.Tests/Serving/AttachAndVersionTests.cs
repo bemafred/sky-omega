@@ -29,7 +29,7 @@ public sealed class AttachAndVersionTests
         var target = $"mt-{Guid.NewGuid():N}"[..16];
         using var output = new StringWriter();
 
-        int exitCode = await AttachClient.RunToExitCodeAsync(target, output);
+        int exitCode = await AttachClient.RunToExitCodeAsync(AttachTarget.Named(target), output);
 
         Assert.Equal(1, exitCode);
         var lines = output.ToString().Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries);

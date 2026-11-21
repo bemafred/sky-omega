@@ -11,16 +11,13 @@ public static class AttachClient
     /// <summary>How long a connection is waited for.</summary>
     public const int ConnectTimeoutMs = 5000;
 
-    /// <summary>
-    /// Connects to the pipe <paramref name="target"/> names (<see cref="MercuryPorts.AttachPipeName"/>) and runs its
-    /// REPL on the console until the user leaves it.
-    /// </summary>
+    /// <summary>Connects to <paramref name="target"/>'s pipe and runs its REPL on the console until the user leaves
+    /// it.</summary>
     /// <exception cref="TimeoutException">Nothing answered on the pipe in time.</exception>
-    public static async Task RunAsync(string target, TextWriter output)
+    public static async Task RunAsync(AttachTarget target, TextWriter output)
     {
-        var pipeName = MercuryPorts.AttachPipeName(target);
-        output.WriteLine($"Attaching to {target} via pipe '{pipeName}'...");
-        using var client = new PipeClient(pipeName);
+        output.WriteLine($"Attaching to {target.Description} via pipe '{target.PipeName}'...");
+        using var client = new PipeClient(target.PipeName);
         await client.ConnectAsync(timeoutMs: ConnectTimeoutMs);
         await client.RunInteractiveAsync();
     }
@@ -29,7 +26,7 @@ public static class AttachClient
     /// <see cref="RunAsync"/> for a tool that attaches and exits: says on <paramref name="output"/> why it could not,
     /// and returns the exit code, 0 when it attached.
     /// </summary>
-    public static async Task<int> RunToExitCodeAsync(string target, TextWriter output)
+    public static async Task<int> RunToExitCodeAsync(AttachTarget target, TextWriter output)
     {
         try
         {
@@ -38,7 +35,7 @@ public static class AttachClient
         }
         catch (TimeoutException)
         {
-            output.WriteLine($"Error: Could not connect to {target}. Is it running?");
+            output.WriteLine($"Error: Could not connect to {target.Description}. Is it running?");
             return 1;
         }
         catch (Exception ex)

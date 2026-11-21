@@ -397,6 +397,47 @@ The order follows the dependencies (ADR-064's rule).
    - **Windows:** the signals, an address that is not the machine's and a second address are not tested there. The
      pipe's access list and the stop request are Step 9.
 5. **The CLI attaches by store** (D7).
+   Done on zbook, 2026-11-21:
+   - **The attach.** `mercury --attach` with a store given (`--store <name>`, `-d <path>`, or the path as the
+     argument) attaches to the mercuryd of that store, on the pipe that `MercuryPorts.DaemonPipeName` names for it,
+     the one mercuryd makes. `AttachTarget` (Mercury.Serving) is what is attached to: `Named`, mercury-mcp or a pipe,
+     and `DaemonOf`, a store's mercuryd. The store is not opened.
+     - `--attach` reads a pipe's name only when the next argument is not an option. Before, `--attach --store kb`
+       attached to mercury-mcp: an option after `--attach` made the target `mcp`, and the store was read and ignored.
+     - A pipe's name and a store together are refused, and the CLI exits 1.
+     - `--attach` alone and `--attach <pipe>` work as before. `--attach <store's directory>` is a pipe's name, as
+       before: a store's directory goes with `-d`, or before `--attach`.
+   - **Found on the way: a store made in the current directory.** `MercuryPaths.Store` asked .NET for the user's data
+     directory, and .NET gives an empty path for a special folder that does not exist yet. A user that had never kept
+     data there got `SkyOmega/stores/<name>` in the current directory: measured with `XDG_DATA_HOME` naming a
+     directory not made, and with it unset and no `~/.local/share`. The account a service runs as is such a user, and
+     a systemd service's directory is `/` (Step 7). Every tool that names a store had it. The path is now taken
+     without looking (`SpecialFolderOption.DoNotVerify`), and the store's directory is made with its parents.
+   - **A stop while a CLI is attached** (measured): mercuryd ends the session at once and exits 0. The CLI waits for
+     the user's next line, and learns at it that mercuryd has gone: it says `Error: Broken pipe` and exits 1. That is
+     the client as before, attached to mercury-mcp too. A client that watched the pipe while it waits would say so at
+     once; not done here.
+   - **Not handled:**
+     - `--attach --store` with no name attaches to mercury-mcp: a missing value is ignored (`StoreArguments`).
+     - `--attach --store <name>` makes the store's directory when there is none, as every `--store` does. `-d` makes
+       nothing.
+     - The fallback socket name (D6) is in the temporary directory, so the CLI finds it only with mercuryd's
+       temporary directory. A systemd unit with `PrivateTmp=` has one of its own (Step 7); on macOS a user's `TMPDIR`
+       is the user's, and a LaunchDaemon's may not be (Step 8).
+     - A store reached through a symbolic link of another name: the socket in the store's directory is the same
+       file, but the fallback name is the link's.
+     - The REPL's `:attach` takes a pipe's name, not a store.
+   - **Tests.** `AttachToMercurydTests` runs mercury and mercuryd as processes, with the test's own stores' directory,
+     not made beforehand, and its own temporary directory, so no mercury-mcp of the machine's answers:
+     - five ways of giving the store (`--attach --store`, `--store … --attach`, `-a --store`, `--attach -d`, the path
+       before `--attach`), each attached to its mercuryd;
+     - mercuryd's socket attached by its name, as a pipe before;
+     - `--attach` alone, on mercury-mcp's pipe;
+     - a store nothing serves, said, and not made;
+     - a pipe's name and a store, refused;
+     - an attached CLI that does not hold mercuryd's stop.
+     - 10 mutations, each undoing one of these, each failed by its test: among them `MercuryPaths.Store` looking for
+       the data directory again, and a pipe session that a stop does not end.
 6. **SERVICE** in `SparqlEngine.Query` (D10), with a test that queries one endpoint from another.
 7. **Linux:** the unit file and the runbook; mercuryd on elite with the store of Q4, installed by Martin; queried and
    written from zbook and macbook over the tailnet.

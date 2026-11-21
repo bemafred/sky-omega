@@ -277,7 +277,7 @@ SkyOmega.sln
 │   │   ├── Sparql/          # SPARQL parser, executor, protocol tests
 │   │   ├── Storage/         # Storage layer tests (QuadStore, AtomStore, WAL)
 │   │   └── W3C/             # W3C conformance test suites
-│   ├── Mercury.Hosting.Tests/ # Mercury.Hosting tests (a store served on the Generic Host, closed when the host stops; mercuryd run as a process)
+│   ├── Mercury.Hosting.Tests/ # Mercury.Hosting tests (a store served on the Generic Host, closed when the host stops; mercuryd run as a process, and mercury attached to it)
 │   ├── Mercury.Solid.Tests/ # Mercury Solid protocol tests
 │   ├── SkyOmega.Bcl.Tests/  # SkyOmega.Bcl xUnit tests
 │   ├── Minerva.Tests/       # (placeholder dir, no csproj yet)

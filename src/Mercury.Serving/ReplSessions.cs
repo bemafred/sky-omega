@@ -50,7 +50,7 @@ public static class ReplSessions
             executeAttach: commands.HasFlag(ReplCommands.Attach)
                 ? async target =>
                 {
-                    await AttachClient.RunAsync(target, Console.Out);
+                    await AttachClient.RunAsync(AttachTarget.Named(target), Console.Out);
                     Console.WriteLine($"Detached from {target}.");
                 }
                 : null,

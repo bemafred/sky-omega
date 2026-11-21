@@ -21,7 +21,8 @@ bool inMemory = false;
 bool showHelp = false;
 bool showVersion = false;
 bool enableHttp = true;
-string? attachTarget = null;
+bool attach = false;
+string? attachPipe = null;
 string? loadFile = null;
 string? bulkLoadFile = null;
 string? convertInput = null;
@@ -58,9 +59,10 @@ for (int i = 0; i < args.Length; i++)
             break;
         case "-a":
         case "--attach":
-            attachTarget = i + 1 < args.Length && !args[i + 1].StartsWith('-')
-                ? args[++i]
-                : "mcp";
+            // A pipe's name may follow; an option that follows is read as an option, a store's among them (ADR-065 D7).
+            attach = true;
+            if (i + 1 < args.Length && !args[i + 1].StartsWith('-'))
+                attachPipe = args[++i];
             break;
         case "--load":
             if (i + 1 < args.Length)
@@ -182,7 +184,8 @@ if (showHelp)
           --store <name>             Named store (e.g., wikidata, fhir)
           -p, --port <port>          HTTP port (default: 3031)
           --no-http                  Disable HTTP endpoint
-          -a, --attach [target]      Attach to running instance (default: mcp)
+          -a, --attach [pipe]        Attach to a running instance: mcp (the default) or a pipe, or with
+                                     --store or -d the mercuryd that serves that store
           --load <file>              Load RDF file at startup, then enter REPL
           --bulk-load <file>         Bulk load (GSPO only, no fsync), then enter REPL
           --convert <in> <out>       Streaming format conversion (no store, exits after)
@@ -205,6 +208,7 @@ if (showHelp)
           mercury --convert data.ttl data.nt     # Convert Turtle to N-Triples
           mercury --store wikidata --rebuild-indexes     # Build GPOS/GOSP/TGSP
           mercury -m                             # Temporary store (deleted on exit)
+          mercury --attach --store kb            # The REPL of the mercuryd that serves kb
 
         Inside the REPL:
           :help              Show REPL commands
@@ -222,10 +226,20 @@ if (showHelp)
     return 0;
 }
 
-// Handle attach mode
-if (attachTarget != null)
+// Attach: to mercury-mcp, to a pipe named, or to the mercuryd that serves the store given (ADR-065 D7). The store is
+// not opened: the process attached to holds it.
+if (attach)
 {
-    return await AttachClient.RunToExitCodeAsync(attachTarget, Console.Out);
+    var attachedStore = store.ResolvePath();
+    if (attachPipe != null && attachedStore != null)
+    {
+        Console.Error.WriteLine($"Error: --attach names the pipe '{attachPipe}' and a store is given: attach to one of them.");
+        Console.Error.WriteLine("Use --help for usage information.");
+        return 1;
+    }
+    return await AttachClient.RunToExitCodeAsync(
+        attachedStore != null ? AttachTarget.DaemonOf(attachedStore) : AttachTarget.Named(attachPipe ?? "mcp"),
+        Console.Out);
 }
 
 // ADR-030 Phase 1 + follow-up: the CLI's load-progress records and the
