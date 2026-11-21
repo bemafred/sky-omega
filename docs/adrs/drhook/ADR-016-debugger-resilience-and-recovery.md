@@ -784,8 +784,9 @@ that had run a session before).
   in 2 of 18 fresh workers on omega a first launch took about 500 ms more. A session's close sleeps 200 ms after its
   target has ended (`ExitWorkSettleMs`).
 
-*6.7's design, drafted 2026-11-21 for review* (sky-omega; nothing of it is built). This is the smallest worker that does
-what 6.5, 6.7, 6.8 and 6.9 decided. Where the design names a measurement, that measurement comes first.
+*6.7's design, drafted 2026-11-21 and accepted the same day* (sky-omega; Martin: "Draft accepted."; nothing of it is
+built yet). This is the smallest worker that does what 6.5, 6.7, 6.8 and 6.9 decided. Where the design names a
+measurement, that measurement comes first.
 
 - **Where the boundary falls: at the tool.**
   - **The worker** is a new program, `drhook-worker` (`src/DrHook.Worker`).
