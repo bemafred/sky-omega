@@ -1,0 +1,21 @@
+aee6e218
+10.0.301
+2026-11-21T15:05:24Z
+platform: macOS 27.0.1 Arm64, .NET 10.0.9
+targets: /var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/probe115-net9.0-70771/115-runtime-switch-target.dll
+         /var/folders/hd/hcv1b7fj7xg507z17s4c9kyh0000gn/T/probe115-net10.0-70771/115-runtime-switch-target.dll
+breakpoint: /private/tmp/claude-501/-Users-bemafred-src-repos-sky-omega/f163c189-105f-49c1-99d2-69ca8fdbb95a/scratchpad/p115/poc/drhook-engine/115-runtime-switch-target.cs:15
+
+== through the supervisor: a worker per session
+  .NET 9: status launched, stoppedReason breakpoint, lockedRuntime .NET 9, 802 ms
+    kill: killed, killedWhile stopped
+  .NET 10: status launched, stoppedReason breakpoint, lockedRuntime .NET 10, 630 ms
+    kill: killed, killedWhile stopped
+
+== the control: both targets in this process
+  .NET 9: launched, EntryModuleLoaded, this process locked to .NET 9
+  .NET 10: refused, as finding 86 predicts: This DrHook debugger process is locked to .NET 9 — the runtime of the first target it debugged — and cannot also debug a...
+
+RESULT(0): through the supervisor each session's worker locked to its own target's version, and both launches stopped; in one process the second was refused
+exit 0
+2026-11-21T15:05:30Z
