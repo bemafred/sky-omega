@@ -21,7 +21,7 @@ internal sealed class Mercuryd : IDisposable
     private readonly ConcurrentQueue<string> _errorLines = new();
     private readonly TaskCompletionSource _ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-    private Mercuryd(params string[] args)
+    private Mercuryd(IReadOnlyDictionary<string, string> environment, string[] args)
     {
         // The test project references mercuryd, so its launcher is beside the tests.
         var start = new ProcessStartInfo(Path.Combine(AppContext.BaseDirectory, OperatingSystem.IsWindows() ? "mercuryd.exe" : "mercuryd"))
@@ -33,6 +33,8 @@ internal sealed class Mercuryd : IDisposable
         };
         foreach (var arg in args)
             start.ArgumentList.Add(arg);
+        foreach (var (name, value) in environment)
+            start.Environment[name] = value;
         _process = new Process { StartInfo = start };
         _process.ErrorDataReceived += (_, line) =>
         {
@@ -51,7 +53,12 @@ internal sealed class Mercuryd : IDisposable
     }
 
     /// <summary>Starts mercuryd with <paramref name="args"/>.</summary>
-    public static Mercuryd Start(params string[] args) => new(args);
+    public static Mercuryd Start(params string[] args) => new(new Dictionary<string, string>(), args);
+
+    /// <summary>Starts mercuryd with <paramref name="args"/>, and <paramref name="environment"/> over this process's
+    /// environment.</summary>
+    public static Mercuryd Start(IReadOnlyDictionary<string, string> environment, params string[] args) =>
+        new(environment, args);
 
     /// <summary>The process's id.</summary>
     public int Id => _process.Id;

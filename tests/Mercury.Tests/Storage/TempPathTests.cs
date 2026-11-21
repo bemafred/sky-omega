@@ -109,6 +109,62 @@ public class TempPathTests
     }
 
     /// <summary>
+    /// A lock file of a process that runs, with its start time as another process reads it. On Linux another process
+    /// reads it a little off the value the owner wrote (0.47 to 0.62 ms, measured on zbook, 2026-11-21), and a sweep
+    /// that compared the two for equality deleted live directories of other test projects (CI 44891150639, Linux
+    /// arm64). The start time here is the owner's own, 0.6 ms later. The category is this test's own.
+    /// </summary>
+    [Fact]
+    public void CleanupStale_PreservesTheDirectoryOfAProcessThatRuns_WithItsStartTimeAsAnotherProcessReadsIt()
+    {
+        var path = TempPath.Create("test-start-time", "alive", unique: true);
+        var dir = path.FullPath;
+        var startTime = Process.GetCurrentProcess().StartTime.ToFileTimeUtc() + TimeSpan.FromMilliseconds(0.6).Ticks;
+
+        try
+        {
+            Directory.CreateDirectory(dir);
+            File.WriteAllText(Path.Combine(dir, ".mercury.lock"), $"{Environment.ProcessId}\n{startTime}");
+
+            TempPath.CleanupStale("test-start-time");
+
+            Assert.True(Directory.Exists(dir), "CleanupStale should preserve the directory of a process that runs");
+        }
+        finally
+        {
+            if (Directory.Exists(dir))
+                Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    /// <summary>
+    /// A lock file that names the ID of a process that runs, with a start time an hour before that process's: the ID of
+    /// an owner that has ended, given since to another process. The category is this test's own.
+    /// </summary>
+    [Fact]
+    public void CleanupStale_RemovesTheDirectoryOfAProcessWhoseIdWasGivenAgain()
+    {
+        var path = TempPath.Create("test-start-time", "reused", unique: true);
+        var dir = path.FullPath;
+        var startTime = Process.GetCurrentProcess().StartTime.AddHours(-1).ToFileTimeUtc();
+
+        try
+        {
+            Directory.CreateDirectory(dir);
+            File.WriteAllText(Path.Combine(dir, ".mercury.lock"), $"{Environment.ProcessId}\n{startTime}");
+
+            TempPath.CleanupStale("test-start-time");
+
+            Assert.False(Directory.Exists(dir), "CleanupStale should remove the directory of an owner that has ended");
+        }
+        finally
+        {
+            if (Directory.Exists(dir))
+                Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    /// <summary>
     /// Verifies that directories without lock files older than 24 hours are cleaned up.
     /// </summary>
     [Fact]

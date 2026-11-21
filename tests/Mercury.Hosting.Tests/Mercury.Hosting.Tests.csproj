@@ -18,6 +18,8 @@
     <!-- mercuryd, run by the tests as a process of its own: its stop signals, its exit code and its store's lock are a
          process's (ADR-065 Step 4). -->
     <ProjectReference Include="..\..\src\Mercury.Daemon\Mercury.Daemon.csproj" />
+    <!-- mercury, run as a process to attach to a mercuryd by its store (ADR-065 Step 5). -->
+    <ProjectReference Include="..\..\src\Mercury.Cli\Mercury.Cli.csproj" />
   </ItemGroup>
 
   <ItemGroup>
