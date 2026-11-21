@@ -190,8 +190,11 @@ public sealed class CallbackPumpTests
         Assert.NotNull(pump.WaitForStop(TimeSpan.FromSeconds(2)));
         Assert.True(pump.IsParked);
 
-        pump.Dispose(); // completes the resume queue: the parked Take throws, and the worker ends
-        Assert.False(pump.IsParked);
+        // Dispose completes the resume queue: the parked Take throws, and the worker ends. Dispose waits for that only up
+        // to its own bound (2 s), and on a loaded runner the worker woke later (macOS x64 CI, 2026-11-21, run
+        // 44918126706: the test took 2.25 s and IsParked was still true), so the release is waited for here.
+        pump.Dispose();
+        Assert.True(SpinWait.SpinUntil(() => !pump.IsParked, TimeSpan.FromSeconds(10)), "The parked worker was not released.");
     }
 
     [Fact]

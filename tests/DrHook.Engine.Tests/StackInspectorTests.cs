@@ -85,10 +85,17 @@ public sealed partial class StackInspectorTests
     [Fact]
     public async Task Capture_CountsTheGarbageCollectionsTheProcessRuns()
     {
+        // When the collector starts each collection, in local time, as TraceEvent stamps a GCStart.
+        var started = new List<DateTime>();
         var stop = new StrongBox<bool>(false);
         var collector = new Thread(() =>
         {
-            while (!Volatile.Read(ref stop.Value)) { GC.Collect(); Thread.Sleep(50); }
+            while (!Volatile.Read(ref stop.Value))
+            {
+                lock (started) started.Add(DateTime.Now);
+                GC.Collect();
+                Thread.Sleep(50);
+            }
         }) { IsBackground = true, Name = "collector" };
         collector.Start();
 
@@ -104,7 +111,16 @@ public sealed partial class StackInspectorTests
             collector.Join();
         }
 
-        Assert.True(snapshot.GcEvents.Count >= 5, $"{snapshot.GcEvents.Count} garbage collections were counted in a second of one every 50 ms");
+        // How many collections fall in the capture depends on the machine's load: on a loaded runner a second held 4 of
+        // them, not about 20 (macOS x64 CI, 2026-11-21, run 44918126706). What does not depend on it: every collection
+        // the collector started between the first and the last one counted is counted too (10 ms for the two clocks).
+        Assert.True(snapshot.GcEvents.Count >= 2, $"{snapshot.GcEvents.Count} garbage collections were counted in a second of one every 50 ms");
+        DateTime first = snapshot.GcEvents.Min(e => e.Timestamp) - TimeSpan.FromMilliseconds(10);
+        DateTime last = snapshot.GcEvents.Max(e => e.Timestamp) + TimeSpan.FromMilliseconds(10);
+        int ranInBetween;
+        lock (started) ranInBetween = started.Count(t => t >= first && t <= last);
+        Assert.True(snapshot.GcEvents.Count >= ranInBetween,
+            $"{snapshot.GcEvents.Count} garbage collections were counted, and the collector started {ranInBetween} between the first and the last of them");
     }
 
     [Fact]
