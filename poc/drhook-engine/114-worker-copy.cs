@@ -39,6 +39,9 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using SkyOmega.DrHook.Wire;
 
+// Every number prints the same way on every machine (at dbd336d the per-copy lines followed omega-windows' Swedish culture).
+CultureInfo.CurrentCulture = CultureInfo.InvariantCulture;
+
 int copies = args.Length > 0 ? int.Parse(args[0], CultureInfo.InvariantCulture) : 20;
 if (copies < 2) { Console.WriteLine("copies must be at least 2"); return 1; }
 

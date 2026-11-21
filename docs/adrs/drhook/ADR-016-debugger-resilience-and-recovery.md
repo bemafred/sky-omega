@@ -894,6 +894,10 @@ measurement, that measurement comes first.
     why, and a reconnect is needed, as today.
   - **To measure first:** what the copy costs, on finding 113's three machines. If it is not small beside the start-up,
     the copy is made once per build instead.
+    *Measured 2026-11-21* ([finding 114](../../../poc/drhook-engine/findings/114-worker-copy.md); probe 114 at
+    `dbd336d1`, 20 copies of drhook-mcp's whole Debug output, 92 files and 37 MB, an upper bound on the worker's).
+    - The copy took 12.8 ms at the median on omega, 3.9 on omega-ubuntu and 33.4 on omega-windows, at most 45.6 ms.
+    - That is 8 to 26 % of the start-up. So the copy is made at each worker's start, not once per build.
 - **The journal** (6.9).
   - **Where.** `journal.ndjson` in DrHook's directory, append-only.
   - **When.** It is written and flushed before each of these:
@@ -1113,7 +1117,8 @@ not the default.
 - What holds a Windows target after a detach (6.6).
 - A worker's own start-up time (6.7). Measured 2026-11-21 on omega, omega-ubuntu and omega-windows
   ([finding 113](../../../poc/drhook-engine/findings/113-worker-startup.md)); not on x64 or the runners.
-- What a worker's copy of the build costs (6.7's design, above).
+- What a worker's copy of the build costs (6.7's design, above). Measured 2026-11-21 on omega, omega-ubuntu and
+  omega-windows ([finding 114](../../../poc/drhook-engine/findings/114-worker-copy.md)); not on x64 or the runners.
 - A real `DebuggerError` (6.8).
 - Probes 106 and 112 on the six runners.
 

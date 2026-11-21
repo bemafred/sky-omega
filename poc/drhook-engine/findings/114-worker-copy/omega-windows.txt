@@ -1,0 +1,47 @@
+## main...origin/main [behind 56]
+05a2d8ef
+dbd336d1
+## HEAD (no branch)
+10.0.404
+
+Microsoft.AspNetCore.App 10.0.10 [C:\Program Files\dotnet\shared\Microsoft.AspNetCore.App]
+Microsoft.AspNetCore.App 10.0.15 [C:\Program Files\dotnet\shared\Microsoft.AspNetCore.App]
+Microsoft.NETCore.App 10.0.10 [C:\Program Files\dotnet\shared\Microsoft.NETCore.App]
+Microsoft.NETCore.App 10.0.15 [C:\Program Files\dotnet\shared\Microsoft.NETCore.App]
+
+NTFS
+2026-11-21T11:14:02.6959128+01:00
+platform: Microsoft Windows 10.0.26200 Arm64, 4 cores, .NET 10.0.15
+source: C:\Users\bemafred\diag\p114-dbd336d\src\DrHook.Mcp\bin\Debug\net10.0\
+  92 files, 34 directories, 37┬á200┬á186 bytes
+destination: C:\Users\bemafred\.local\share\sky-omega\drhook\probe114-10776
+20 copies
+  copy 1: copy 36,0 ms, delete 7,3 ms
+  copy 2: copy 37,9 ms, delete 7,0 ms
+  copy 3: copy 31,1 ms, delete 6,3 ms
+  copy 4: copy 32,6 ms, delete 6,3 ms
+  copy 5: copy 33,0 ms, delete 6,6 ms
+  copy 6: copy 32,4 ms, delete 7,0 ms
+  copy 7: copy 36,5 ms, delete 6,1 ms
+  copy 8: copy 38,0 ms, delete 8,6 ms
+  copy 9: copy 42,6 ms, delete 6,5 ms
+  copy 10: copy 43,2 ms, delete 8,1 ms
+  copy 11: copy 45,6 ms, delete 14,5 ms
+  copy 12: copy 32,6 ms, delete 6,7 ms
+  copy 13: copy 32,8 ms, delete 6,1 ms
+  copy 14: copy 36,3 ms, delete 5,9 ms
+  copy 15: copy 36,3 ms, delete 6,4 ms
+  copy 16: copy 37,3 ms, delete 6,8 ms
+  copy 17: copy 33,4 ms, delete 6,6 ms
+  copy 18: copy 32,0 ms, delete 6,5 ms
+  copy 19: copy 31,3 ms, delete 6,3 ms
+  copy 20: copy 33,1 ms, delete 6,4 ms
+
+== copies 2 to 20 (median [minΓÇômax] ms)
+   copy     33.4 [31.1ΓÇô45.6]
+   delete   6.5 [5.9ΓÇô14.5]
+   copy 1   copy 36,0, delete 7,3
+
+RESULT(0): every copy held the source's files and bytes, and was deleted
+exit 0
+2026-11-21T11:14:10.6968567+01:00

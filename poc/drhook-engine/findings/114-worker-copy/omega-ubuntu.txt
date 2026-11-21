@@ -1,0 +1,42 @@
+dbd336d1
+## HEAD (no branch)
+/home/bemafred/.dotnet/dotnet
+10.0.114
+Microsoft.NETCore.App 10.0.13 [/home/bemafred/.dotnet/shared/Microsoft.NETCore.App]
+Microsoft.NETCore.App 10.0.14 [/home/bemafred/.dotnet/shared/Microsoft.NETCore.App]
+ext4
+ 11:12:46 up 14 days, 16:34,  3 users,  load average: 0.19, 0.09, 0.02
+platform: Ubuntu 26.04.1 LTS Arm64, 4 cores, .NET 10.0.14
+source: /home/bemafred/diag/p114-dbd336d/src/DrHook.Mcp/bin/Debug/net10.0/
+  92 files, 34 directories, 37,135,885 bytes
+destination: /home/bemafred/.local/share/sky-omega/drhook/probe114-3315316
+20 copies
+  copy 1: copy 5.3 ms, delete 1.7 ms
+  copy 2: copy 4.1 ms, delete 1.1 ms
+  copy 3: copy 4.2 ms, delete 1.2 ms
+  copy 4: copy 4.1 ms, delete 1.2 ms
+  copy 5: copy 4.2 ms, delete 1.2 ms
+  copy 6: copy 3.9 ms, delete 1.1 ms
+  copy 7: copy 4.0 ms, delete 1.1 ms
+  copy 8: copy 3.8 ms, delete 1.4 ms
+  copy 9: copy 3.7 ms, delete 1.0 ms
+  copy 10: copy 3.7 ms, delete 1.0 ms
+  copy 11: copy 3.8 ms, delete 1.1 ms
+  copy 12: copy 4.0 ms, delete 1.1 ms
+  copy 13: copy 4.0 ms, delete 1.2 ms
+  copy 14: copy 3.9 ms, delete 1.2 ms
+  copy 15: copy 3.9 ms, delete 1.1 ms
+  copy 16: copy 3.8 ms, delete 1.0 ms
+  copy 17: copy 3.7 ms, delete 1.0 ms
+  copy 18: copy 3.8 ms, delete 1.1 ms
+  copy 19: copy 3.7 ms, delete 1.1 ms
+  copy 20: copy 3.7 ms, delete 1.1 ms
+
+== copies 2 to 20 (median [min–max] ms)
+   copy     3.9 [3.7–4.2]
+   delete   1.1 [1.0–1.4]
+   copy 1   copy 5.3, delete 1.7
+
+RESULT(0): every copy held the source's files and bytes, and was deleted
+exit 0
+ 11:12:50 up 14 days, 16:34,  3 users,  load average: 0.34, 0.12, 0.03

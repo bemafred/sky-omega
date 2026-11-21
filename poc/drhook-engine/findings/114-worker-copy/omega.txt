@@ -1,0 +1,60 @@
+dbd336d
+## HEAD (no branch)
+10.0.301
+Microsoft.NETCore.App 6.0.10 [/usr/local/share/dotnet/shared/Microsoft.NETCore.App]
+Microsoft.NETCore.App 6.0.11 [/usr/local/share/dotnet/shared/Microsoft.NETCore.App]
+Microsoft.NETCore.App 6.0.12 [/usr/local/share/dotnet/shared/Microsoft.NETCore.App]
+Microsoft.NETCore.App 6.0.13 [/usr/local/share/dotnet/shared/Microsoft.NETCore.App]
+Microsoft.NETCore.App 6.0.14 [/usr/local/share/dotnet/shared/Microsoft.NETCore.App]
+Microsoft.NETCore.App 6.0.15 [/usr/local/share/dotnet/shared/Microsoft.NETCore.App]
+Microsoft.NETCore.App 6.0.16 [/usr/local/share/dotnet/shared/Microsoft.NETCore.App]
+Microsoft.NETCore.App 6.0.21 [/usr/local/share/dotnet/shared/Microsoft.NETCore.App]
+Microsoft.NETCore.App 7.0.1 [/usr/local/share/dotnet/shared/Microsoft.NETCore.App]
+Microsoft.NETCore.App 7.0.2 [/usr/local/share/dotnet/shared/Microsoft.NETCore.App]
+Microsoft.NETCore.App 7.0.3 [/usr/local/share/dotnet/shared/Microsoft.NETCore.App]
+Microsoft.NETCore.App 7.0.4 [/usr/local/share/dotnet/shared/Microsoft.NETCore.App]
+Microsoft.NETCore.App 7.0.5 [/usr/local/share/dotnet/shared/Microsoft.NETCore.App]
+Microsoft.NETCore.App 7.0.10 [/usr/local/share/dotnet/shared/Microsoft.NETCore.App]
+Microsoft.NETCore.App 8.0.0-preview.1.23110.8 [/usr/local/share/dotnet/shared/Microsoft.NETCore.App]
+Microsoft.NETCore.App 8.0.0 [/usr/local/share/dotnet/shared/Microsoft.NETCore.App]
+Microsoft.NETCore.App 8.0.7 [/usr/local/share/dotnet/shared/Microsoft.NETCore.App]
+Microsoft.NETCore.App 9.0.4 [/usr/local/share/dotnet/shared/Microsoft.NETCore.App]
+Microsoft.NETCore.App 10.0.0 [/usr/local/share/dotnet/shared/Microsoft.NETCore.App]
+Microsoft.NETCore.App 10.0.9 [/usr/local/share/dotnet/shared/Microsoft.NETCore.App]
+Microsoft.NETCore.App 11.0.0-preview.5.26302.115 [/usr/local/share/dotnet/shared/Microsoft.NETCore.App]
+   File System Personality:   APFS
+11:11  up 19 days, 19:37, 3 users, load averages: 1.23 1.23 1.33
+platform: macOS 27.0.1 Arm64, 18 cores, .NET 10.0.9
+source: /private/tmp/claude-501/-Users-bemafred-src-repos-sky-omega/f163c189-105f-49c1-99d2-69ca8fdbb95a/scratchpad/p114-dbd336d/src/DrHook.Mcp/bin/Debug/net10.0/
+  92 files, 34 directories, 37,184,071 bytes
+destination: /Users/bemafred/Library/SkyOmega/drhook/probe114-46926
+20 copies
+  copy 1: copy 15.0 ms, delete 5.0 ms
+  copy 2: copy 13.1 ms, delete 6.2 ms
+  copy 3: copy 12.7 ms, delete 5.1 ms
+  copy 4: copy 12.7 ms, delete 5.5 ms
+  copy 5: copy 12.8 ms, delete 5.8 ms
+  copy 6: copy 13.1 ms, delete 5.1 ms
+  copy 7: copy 13.1 ms, delete 5.7 ms
+  copy 8: copy 12.4 ms, delete 5.6 ms
+  copy 9: copy 13.0 ms, delete 5.3 ms
+  copy 10: copy 12.8 ms, delete 5.6 ms
+  copy 11: copy 13.0 ms, delete 6.1 ms
+  copy 12: copy 12.4 ms, delete 5.0 ms
+  copy 13: copy 12.8 ms, delete 5.8 ms
+  copy 14: copy 12.3 ms, delete 5.5 ms
+  copy 15: copy 13.1 ms, delete 5.5 ms
+  copy 16: copy 13.0 ms, delete 5.6 ms
+  copy 17: copy 11.9 ms, delete 5.8 ms
+  copy 18: copy 12.9 ms, delete 4.8 ms
+  copy 19: copy 12.7 ms, delete 5.1 ms
+  copy 20: copy 11.9 ms, delete 5.2 ms
+
+== copies 2 to 20 (median [min–max] ms)
+   copy     12.8 [11.9–13.1]
+   delete   5.5 [4.8–6.2]
+   copy 1   copy 15.0, delete 5.0
+
+RESULT(0): every copy held the source's files and bytes, and was deleted
+exit 0
+11:11  up 19 days, 19:37, 3 users, load averages: 1.53 1.30 1.35
