@@ -1,11 +1,12 @@
 # Limit: Mercury.Tests takes 15 times longer on the Windows runners, close to the CI job's limit
 
-**Status:**        Monitoring
+**Status:**        Triggered — 2026-11-21: Windows x64 stopped at its 90-minute limit in run 44918126706 (Mercury.Tests
+                   1 h 28 min, no test failed)
 **Surfaced:**      2026-11-20, from the durations of CI runs on `main` (below). sky-omega's Mercury handover noted the margin
                    the same day: Windows arm64 ran 87, 84 and 78 minutes of its 90.
-**Last reviewed:** 2026-11-20
-**Promotes to:**   an ADR, or a fix in the tests, when a Windows job reaches its 90-minute limit, or before tests are
-                   added that open many stores.
+**Last reviewed:** 2026-11-21
+**Promotes to:**   [ADR-067](../adrs/mercury/ADR-067-index-pages-are-written-back-lazily.md) (Proposed), for the
+                   flushing that makes a write cost disk time; and a change to the costliest tests, for CI now.
 
 ## Description
 
@@ -23,7 +24,22 @@ In run 44801380410 the same project took 5 min 21 s on the macOS arm64 runner an
 and on zbook (Linux x64, local) it takes about 3 min. The other test projects take seconds to under a minute on every
 platform. Windows arm64's whole job was 75 to 87 minutes in these runs.
 
-## Why it is slow: not known
+## Why it is slow: measured 2026-11-21
+
+A session write flushes each index's whole file after every page write (`BTreeFile.FlushPage`), so a batch of N quads
+costs 4N + 4 device flushes and one insert 8. A test's writes therefore cost what a flush costs on the disk under the
+temporary directory:
+
+- On zbook, the same commit took 208 s with the temporary directory on tmpfs (a flush costs nothing) and 1,117 s on
+  ext4 (1.9 ms a flush). Twelve test classes carry 83% of the increase, `PruningTests` alone 38%.
+- On omega-windows, whose virtual disk flushes in 0.16 ms, the suite takes 3 min 35 s. Windows is not slow; the
+  runners' disks make a flush dear. Their own flush cost is not measured yet (ADR-067 Q6).
+- The step in CI on 2026-11-14 (Linux x64 5 to 10 min) is the 48 tests that ADR-061 P1 (`33e7701c`) added; the write
+  path's cost did not change there.
+
+ADR-067 records the measurements and the design question. What follows is the record as it stood on 2026-11-20.
+
+## Why it is slow: not known (2026-11-20)
 
 CI keeps no time per test: the workflow writes no test report, and the console names a test only when it fails or is
 skipped. So which tests take the time on Windows, and why, is not measured. Read, and ruled out: the store's mapped
