@@ -1,0 +1,155 @@
+d6e77e0
+ 6:27  up 19 days, 14:53, 2 users, load averages: 0.83 0.98 0.99
+platform: macOS 27.0.1 Arm64, 18 cores, supervisor .NET 10.0.9
+worker Debug: /Users/bemafred/Library/Application Support/dotnet/runfile/106-worker-5f716d537784083ef436be09c60fe2670753bb74fa3dcdf5da47bc72289cba18/bin/debug/106-worker.dll
+worker Release: /Users/bemafred/Library/Application Support/dotnet/runfile/106-worker-5f716d537784083ef436be09c60fe2670753bb74fa3dcdf5da47bc72289cba18/bin/release/106-worker.dll
+target: /Users/bemafred/Library/Application Support/dotnet/runfile/106-worker-target-ca3280f235fe644c37b3673da25cbe7748cf5add644ffd7471270a3aeae3fb01/bin/debug/106-worker-target.dll
+10 runs, 5 sessions per worker
+Debug run 1: worker 25940 ready in 37 ms (.NET 10.0.9)
+  Debug run 1 session 1: launch 607, break 15, locals 7, end 96, close 212, total 937 ms (target 25941, beat 'done 499500')
+  Debug run 1 session 2: launch 525, break 15, locals 2, end 96, close 210, total 848 ms (target 25944, beat 'done 499500')
+  Debug run 1 session 3: launch 525, break 15, locals 2, end 90, close 200, total 832 ms (target 25947, beat 'done 499500')
+  Debug run 1 session 4: launch 524, break 15, locals 2, end 79, close 210, total 830 ms (target 25948, beat 'done 499500')
+  Debug run 1 session 5: launch 525, break 15, locals 2, end 89, close 210, total 840 ms (target 25950, beat 'done 499500')
+Release run 1: worker 25952 ready in 35 ms (.NET 10.0.9)
+  Release run 1 session 1: launch 809, break 26, locals 8, end 90, close 206, total 1138 ms (target 25953, beat 'done 499500')
+  Release run 1 session 2: launch 547, break 32, locals 3, end 88, close 202, total 873 ms (target 25955, beat 'done 499500')
+  Release run 1 session 3: launch 552, break 26, locals 3, end 88, close 204, total 872 ms (target 25957, beat 'done 499500')
+  Release run 1 session 4: launch 554, break 31, locals 3, end 94, close 209, total 891 ms (target 25963, beat 'done 499500')
+  Release run 1 session 5: launch 557, break 33, locals 3, end 96, close 206, total 895 ms (target 25965, beat 'done 499500')
+Debug run 2: worker 25967 ready in 71 ms (.NET 10.0.9)
+  Debug run 2 session 1: launch 561, break 29, locals 9, end 90, close 214, total 903 ms (target 25968, beat 'done 499500')
+  Debug run 2 session 2: launch 547, break 32, locals 3, end 95, close 203, total 881 ms (target 25970, beat 'done 499500')
+  Debug run 2 session 3: launch 549, break 31, locals 3, end 88, close 206, total 877 ms (target 25972, beat 'done 499500')
+  Debug run 2 session 4: launch 557, break 32, locals 3, end 92, close 207, total 891 ms (target 25974, beat 'done 499500')
+  Debug run 2 session 5: launch 549, break 32, locals 3, end 88, close 201, total 873 ms (target 25977, beat 'done 499500')
+Release run 2: worker 25979 ready in 71 ms (.NET 10.0.9)
+  Release run 2 session 1: launch 1059, break 30, locals 8, end 95, close 213, total 1405 ms (target 25980, beat 'done 499500')
+  Release run 2 session 2: launch 552, break 30, locals 3, end 91, close 205, total 881 ms (target 25982, beat 'done 499500')
+  Release run 2 session 3: launch 551, break 31, locals 3, end 93, close 203, total 881 ms (target 25984, beat 'done 499500')
+  Release run 2 session 4: launch 554, break 32, locals 3, end 89, close 204, total 882 ms (target 25986, beat 'done 499500')
+  Release run 2 session 5: launch 553, break 32, locals 3, end 92, close 207, total 888 ms (target 25988, beat 'done 499500')
+Debug run 3: worker 25990 ready in 73 ms (.NET 10.0.9)
+  Debug run 3 session 1: launch 562, break 30, locals 9, end 95, close 213, total 910 ms (target 25991, beat 'done 499500')
+  Debug run 3 session 2: launch 550, break 32, locals 3, end 91, close 208, total 883 ms (target 25992, beat 'done 499500')
+  Debug run 3 session 3: launch 548, break 33, locals 3, end 92, close 208, total 884 ms (target 25995, beat 'done 499500')
+  Debug run 3 session 4: launch 544, break 33, locals 3, end 92, close 208, total 881 ms (target 25999, beat 'done 499500')
+  Debug run 3 session 5: launch 550, break 32, locals 3, end 93, close 211, total 890 ms (target 26000, beat 'done 499500')
+Release run 3: worker 26002 ready in 75 ms (.NET 10.0.9)
+  Release run 3 session 1: launch 563, break 29, locals 9, end 91, close 213, total 905 ms (target 26003, beat 'done 499500')
+  Release run 3 session 2: launch 549, break 32, locals 3, end 93, close 206, total 884 ms (target 26005, beat 'done 499500')
+  Release run 3 session 3: launch 544, break 32, locals 3, end 89, close 210, total 879 ms (target 26007, beat 'done 499500')
+  Release run 3 session 4: launch 553, break 33, locals 3, end 87, close 208, total 884 ms (target 26009, beat 'done 499500')
+  Release run 3 session 5: launch 551, break 32, locals 3, end 83, close 207, total 875 ms (target 26011, beat 'done 499500')
+Debug run 4: worker 26013 ready in 74 ms (.NET 10.0.9)
+  Debug run 4 session 1: launch 560, break 30, locals 9, end 87, close 214, total 901 ms (target 26014, beat 'done 499500')
+  Debug run 4 session 2: launch 551, break 32, locals 3, end 88, close 203, total 876 ms (target 26016, beat 'done 499500')
+  Debug run 4 session 3: launch 542, break 22, locals 2, end 88, close 208, total 862 ms (target 26018, beat 'done 499500')
+  Debug run 4 session 4: launch 551, break 32, locals 3, end 92, close 201, total 880 ms (target 26020, beat 'done 499500')
+  Debug run 4 session 5: launch 555, break 32, locals 3, end 89, close 205, total 883 ms (target 26021, beat 'done 499500')
+Release run 4: worker 26024 ready in 74 ms (.NET 10.0.9)
+  Release run 4 session 1: launch 559, break 29, locals 9, end 90, close 214, total 900 ms (target 26025, beat 'done 499500')
+  Release run 4 session 2: launch 548, break 31, locals 3, end 92, close 211, total 885 ms (target 26027, beat 'done 499500')
+  Release run 4 session 3: launch 555, break 32, locals 3, end 83, close 211, total 884 ms (target 26029, beat 'done 499500')
+  Release run 4 session 4: launch 545, break 33, locals 3, end 87, close 204, total 871 ms (target 26031, beat 'done 499500')
+  Release run 4 session 5: launch 554, break 31, locals 3, end 84, close 210, total 882 ms (target 26032, beat 'done 499500')
+Debug run 5: worker 26034 ready in 74 ms (.NET 10.0.9)
+  Debug run 5 session 1: launch 1068, break 29, locals 9, end 89, close 213, total 1409 ms (target 26035, beat 'done 499500')
+  Debug run 5 session 2: launch 549, break 32, locals 3, end 93, close 211, total 888 ms (target 26038, beat 'done 499500')
+  Debug run 5 session 3: launch 550, break 31, locals 3, end 86, close 210, total 880 ms (target 26039, beat 'done 499500')
+  Debug run 5 session 4: launch 547, break 31, locals 3, end 92, close 210, total 884 ms (target 26042, beat 'done 499500')
+  Debug run 5 session 5: launch 549, break 31, locals 2, end 94, close 205, total 882 ms (target 26043, beat 'done 499500')
+Release run 5: worker 26046 ready in 68 ms (.NET 10.0.9)
+  Release run 5 session 1: launch 562, break 29, locals 9, end 97, close 214, total 911 ms (target 26047, beat 'done 499500')
+  Release run 5 session 2: launch 548, break 30, locals 3, end 96, close 211, total 887 ms (target 26048, beat 'done 499500')
+  Release run 5 session 3: launch 551, break 32, locals 3, end 94, close 210, total 891 ms (target 26050, beat 'done 499500')
+  Release run 5 session 4: launch 552, break 32, locals 3, end 94, close 209, total 890 ms (target 26052, beat 'done 499500')
+  Release run 5 session 5: launch 556, break 33, locals 3, end 89, close 206, total 888 ms (target 26054, beat 'done 499500')
+Debug run 6: worker 26056 ready in 72 ms (.NET 10.0.9)
+  Debug run 6 session 1: launch 559, break 27, locals 8, end 96, close 214, total 904 ms (target 26058, beat 'done 499500')
+  Debug run 6 session 2: launch 550, break 32, locals 3, end 80, close 211, total 876 ms (target 26060, beat 'done 499500')
+  Debug run 6 session 3: launch 554, break 32, locals 3, end 84, close 208, total 882 ms (target 26062, beat 'done 499500')
+  Debug run 6 session 4: launch 551, break 33, locals 3, end 96, close 201, total 884 ms (target 26064, beat 'done 499500')
+  Debug run 6 session 5: launch 552, break 31, locals 3, end 96, close 210, total 893 ms (target 26066, beat 'done 499500')
+Release run 6: worker 26067 ready in 70 ms (.NET 10.0.9)
+  Release run 6 session 1: launch 561, break 30, locals 9, end 96, close 214, total 910 ms (target 26068, beat 'done 499500')
+  Release run 6 session 2: launch 555, break 32, locals 3, end 94, close 211, total 895 ms (target 26071, beat 'done 499500')
+  Release run 6 session 3: launch 550, break 33, locals 3, end 95, close 206, total 887 ms (target 26073, beat 'done 499500')
+  Release run 6 session 4: launch 552, break 32, locals 3, end 83, close 207, total 876 ms (target 26075, beat 'done 499500')
+  Release run 6 session 5: launch 551, break 33, locals 3, end 92, close 204, total 882 ms (target 26077, beat 'done 499500')
+Debug run 7: worker 26078 ready in 67 ms (.NET 10.0.9)
+  Debug run 7 session 1: launch 558, break 29, locals 9, end 96, close 210, total 902 ms (target 26079, beat 'done 499500')
+  Debug run 7 session 2: launch 548, break 32, locals 3, end 93, close 210, total 886 ms (target 26081, beat 'done 499500')
+  Debug run 7 session 3: launch 544, break 32, locals 3, end 95, close 205, total 878 ms (target 26084, beat 'done 499500')
+  Debug run 7 session 4: launch 546, break 30, locals 3, end 95, close 201, total 875 ms (target 26085, beat 'done 499500')
+  Debug run 7 session 5: launch 550, break 32, locals 3, end 91, close 210, total 887 ms (target 26087, beat 'done 499500')
+Release run 7: worker 26090 ready in 74 ms (.NET 10.0.9)
+  Release run 7 session 1: launch 561, break 29, locals 8, end 97, close 212, total 907 ms (target 26091, beat 'done 499500')
+  Release run 7 session 2: launch 545, break 31, locals 3, end 87, close 209, total 876 ms (target 26092, beat 'done 499500')
+  Release run 7 session 3: launch 547, break 31, locals 3, end 93, close 207, total 881 ms (target 26094, beat 'done 499500')
+  Release run 7 session 4: launch 548, break 32, locals 3, end 91, close 211, total 884 ms (target 26096, beat 'done 499500')
+  Release run 7 session 5: launch 553, break 32, locals 3, end 94, close 201, total 883 ms (target 26098, beat 'done 499500')
+Debug run 8: worker 26100 ready in 73 ms (.NET 10.0.9)
+  Debug run 8 session 1: launch 561, break 27, locals 9, end 92, close 215, total 903 ms (target 26101, beat 'done 499500')
+  Debug run 8 session 2: launch 546, break 32, locals 3, end 91, close 208, total 880 ms (target 26103, beat 'done 499500')
+  Debug run 8 session 3: launch 548, break 32, locals 3, end 88, close 211, total 881 ms (target 26105, beat 'done 499500')
+  Debug run 8 session 4: launch 551, break 32, locals 3, end 89, close 211, total 886 ms (target 26107, beat 'done 499500')
+  Debug run 8 session 5: launch 553, break 30, locals 2, end 95, close 207, total 887 ms (target 26108, beat 'done 499500')
+Release run 8: worker 26111 ready in 58 ms (.NET 10.0.9)
+  Release run 8 session 1: launch 564, break 29, locals 9, end 96, close 209, total 907 ms (target 26112, beat 'done 499500')
+  Release run 8 session 2: launch 552, break 32, locals 3, end 89, close 209, total 886 ms (target 26114, beat 'done 499500')
+  Release run 8 session 3: launch 553, break 32, locals 3, end 93, close 207, total 887 ms (target 26115, beat 'done 499500')
+  Release run 8 session 4: launch 549, break 32, locals 3, end 81, close 203, total 867 ms (target 26118, beat 'done 499500')
+  Release run 8 session 5: launch 555, break 33, locals 3, end 93, close 208, total 893 ms (target 26119, beat 'done 499500')
+Debug run 9: worker 26121 ready in 73 ms (.NET 10.0.9)
+  Debug run 9 session 1: launch 557, break 27, locals 9, end 92, close 207, total 892 ms (target 26122, beat 'done 499500')
+  Debug run 9 session 2: launch 550, break 32, locals 3, end 90, close 210, total 885 ms (target 26124, beat 'done 499500')
+  Debug run 9 session 3: launch 545, break 33, locals 3, end 94, close 209, total 883 ms (target 26126, beat 'done 499500')
+  Debug run 9 session 4: launch 545, break 31, locals 3, end 86, close 210, total 876 ms (target 26128, beat 'done 499500')
+  Debug run 9 session 5: launch 556, break 31, locals 3, end 89, close 203, total 882 ms (target 26130, beat 'done 499500')
+Release run 9: worker 26132 ready in 73 ms (.NET 10.0.9)
+  Release run 9 session 1: launch 561, break 28, locals 8, end 87, close 208, total 893 ms (target 26133, beat 'done 499500')
+  Release run 9 session 2: launch 547, break 32, locals 3, end 88, close 203, total 873 ms (target 26135, beat 'done 499500')
+  Release run 9 session 3: launch 552, break 32, locals 3, end 82, close 211, total 879 ms (target 26136, beat 'done 499500')
+  Release run 9 session 4: launch 556, break 32, locals 3, end 87, close 209, total 886 ms (target 26139, beat 'done 499500')
+  Release run 9 session 5: launch 555, break 31, locals 3, end 93, close 202, total 883 ms (target 26141, beat 'done 499500')
+Debug run 10: worker 26143 ready in 73 ms (.NET 10.0.9)
+  Debug run 10 session 1: launch 558, break 27, locals 9, end 96, close 215, total 906 ms (target 26144, beat 'done 499500')
+  Debug run 10 session 2: launch 553, break 32, locals 3, end 95, close 211, total 894 ms (target 26145, beat 'done 499500')
+  Debug run 10 session 3: launch 547, break 31, locals 3, end 96, close 209, total 885 ms (target 26147, beat 'done 499500')
+  Debug run 10 session 4: launch 548, break 32, locals 3, end 79, close 211, total 873 ms (target 26149, beat 'done 499500')
+  Debug run 10 session 5: launch 551, break 32, locals 3, end 95, close 201, total 882 ms (target 26151, beat 'done 499500')
+Release run 10: worker 26153 ready in 68 ms (.NET 10.0.9)
+  Release run 10 session 1: launch 561, break 28, locals 8, end 84, close 214, total 895 ms (target 26154, beat 'done 499500')
+  Release run 10 session 2: launch 552, break 31, locals 3, end 95, close 202, total 883 ms (target 26156, beat 'done 499500')
+  Release run 10 session 3: launch 547, break 33, locals 3, end 90, close 211, total 883 ms (target 26158, beat 'done 499500')
+  Release run 10 session 4: launch 550, break 26, locals 2, end 93, close 211, total 883 ms (target 26160, beat 'done 499500')
+  Release run 10 session 5: launch 545, break 31, locals 3, end 94, close 210, total 883 ms (target 26162, beat 'done 499500')
+
+== Debug: 9 workers after run 1 (median [min–max] ms)
+   ready      73 [67–74]
+   exit       7 [5–8]
+   launch     first 560 [557–1068]         warm 550 [542–557]
+   break      first 29 [27–30]             warm 32 [22–33]
+   locals     first 9 [8–9]                warm 3 [2–3]
+   end        first 92 [87–96]             warm 92 [79–96]
+   close      first 214 [207–215]          warm 208 [201–211]
+   total      first 903 [892–1409]         warm 882 [862–894]
+   start-up   95 [83–600]   (ready + first − median of the worker's warm sessions)
+   run 1      ready 37, first 937, warm median 836, start-up 138
+
+== Release: 9 workers after run 1 (median [min–max] ms)
+   ready      71 [58–75]
+   exit       7 [7–8]
+   launch     first 561 [559–1059]         warm 551 [544–556]
+   break      first 29 [28–30]             warm 32 [26–33]
+   locals     first 9 [8–9]                warm 3 [2–3]
+   end        first 95 [84–97]             warm 92 [81–96]
+   close      first 213 [208–214]          warm 208 [201–211]
+   total      first 907 [893–1405]         warm 883 [867–895]
+   start-up   91 [79–594]   (ready + first − median of the worker's warm sessions)
+   run 1      ready 35, first 1138, warm median 882, start-up 291
+
+RESULT(0): every session completed and every worker ended by itself
+exit 0
+ 6:28  up 19 days, 14:55, 2 users, load averages: 1.55 1.22 1.08

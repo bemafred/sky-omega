@@ -771,6 +771,19 @@ removed because the suite has turned green.
   - The stop bound's measurement.
   - Whether a kill of a stopped target makes that race likelier.
 
+*6.7's start-up measured 2026-11-21* (sky-omega; [finding 113](../../../poc/drhook-engine/findings/113-worker-startup.md),
+probe 113 at `0ff69282` on omega, omega-ubuntu and omega-windows, 100 sessions each, in fresh workers and in workers
+that had run a session before).
+
+- **What a worker per session adds to a session.** 43 to 141 ms at the median, at most 600 ms. Closing a session whose
+  target has ended takes about 200 ms on every machine, more than that.
+- **What it is.** On omega and omega-ubuntu it is mostly the worker's own process start (73 and 37 ms); on omega-windows
+  that start is about half of it. A first session is slower than a later one in the same worker mostly on its launch.
+  Debug and Release workers cost the same.
+- **Seen on the way, the same in every design.** A launch on macOS takes about 550 ms (11 to 26 ms on omega-ubuntu), and
+  in 2 of 18 fresh workers on omega a first launch took about 500 ms more. A session's close sleeps 200 ms after its
+  target has ended (`ExitWorkSettleMs`).
+
 ### Step 6: the decisions (decided 2026-11-20)
 
 Drafted from Steps 1 to 5, and **decided by Martin on 2026-11-20**, every item as drafted: "I approve the draft, your
@@ -963,7 +976,8 @@ not the default.
 - `S_FALSE` for `ControlCTrap`, and a CTRL+BREAK sender for a target launched with `CREATE_NO_WINDOW` (6.4).
 - A target running when its worker dies, and `DebugSetProcessKillOnExit` (6.5).
 - What holds a Windows target after a detach (6.6).
-- A worker's own start-up time (6.7).
+- A worker's own start-up time (6.7). Measured 2026-11-21 on omega, omega-ubuntu and omega-windows
+  ([finding 113](../../../poc/drhook-engine/findings/113-worker-startup.md)); not on x64 or the runners.
 - A real `DebuggerError` (6.8).
 - Probes 106 and 112 on the six runners.
 
