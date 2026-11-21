@@ -22,4 +22,8 @@ public static class OperatorJson
         WriteIndented = true,
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
     };
+
+    /// <summary>A tool's result when it could not do what it was asked: <c>{"status": "error", "message": ...}</c>.</summary>
+    public static string Error(string message) =>
+        new System.Text.Json.Nodes.JsonObject { ["status"] = "error", ["message"] = message }.ToJsonString(Options);
 }

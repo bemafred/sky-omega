@@ -939,6 +939,56 @@ measurement, that measurement comes first.
   On omega the engine's tests passed 236 of 239 (3 skipped) and the integration suite 28 of 29 (1 skipped).
 - **Not yet seen on a real stuck session.** Probe 106's constructions come with the worker's own tests.
 
+*6.7's worker and drhook-mcp's relay built 2026-11-21* (sky-omega, omega): the second part.
+- **The worker.** `drhook-worker` (`src/DrHook.Worker`). `EngineSteppingSession` moved into it, and the libdbgshim
+  packages with it. Its life is as designed:
+  - it says it is ready, then runs the requests one at a time;
+  - it ends on `exit`, at the end of its stdin, or on SIGTERM, SIGINT or SIGHUP. A session still open is ended as
+    `drhook_stop` ends it, and a target left running is left running. If a request is hung, it exits after 30 s
+    anyway;
+  - it holds a target left running until that target ends.
+- **The protocol.** `WorkerProtocol`, in DrHook.Engine, written and read by the same code on both sides. Two changes
+  from the design:
+  - every answer says what the session is afterwards: `active`, `holding` or `ended`. So the supervisor never reads
+    the tools' JSON;
+  - `target` has no start time yet, and is sent with the answer, not as soon as the session knows it. Both come with
+    the discard, which needs them.
+
+  `state` and `health` come with the discard too.
+- **The supervisor.** drhook-mcp:
+  - the drain tools read its buffers, which it resets when a new session starts;
+  - it relays one request at a time, each session in a fresh worker;
+  - a session tool asked for with no session open goes to a fresh worker, which answers as the session does, so
+    every result still comes from one place;
+  - `drhook_kill` with no session open goes to the worker that holds the target it names. Both the supervisor and
+    the session choose with `LeftRunningChoice`;
+  - at its own end it closes every worker's stdin, and waits up to 10 s for them.
+- **Built into `worker/`** in drhook-mcp's output, in the output of a project that references it, and in its package:
+  60 files, 32 MB in Debug on omega. It is not yet copied at each start; that is the next part. drhook-mcp now
+  references neither the debugger nor DrHook.Viz.
+- **Tests.** `WorkerTest` has four:
+  - a session through a worker, whose anomalies reach the drain;
+  - a target that ends before its breakpoint, whose console reaches the drain;
+  - drhook-mcp ending with a session open;
+  - a target left running, held by its worker, then killed through it.
+
+  Results on omega:
+
+  | Suite | Passed | Skipped |
+  |---|---|---|
+  | DrHook.Engine.Tests | 236 | 3 |
+  | Integration suite | 32 | 1 |
+  | DrHook.Viz.Tests | 74 | 0 |
+  | DrHook.Wire.Tests | 7 | 0 |
+  | DrHook.Capture.Tests | 1 | 0 |
+- **Finding 86's lock is gone between sessions.** A .NET 9 session and then a .NET 10 session both stopped at their
+  breakpoints, each worker locked to its own target's version. In one process, the second launch was refused (probe
+  115, [finding 115](../../../poc/drhook-engine/findings/115-runtime-switch.md)).
+- **Not yet:**
+  - health, suspicion, the discard, the copy and the journal;
+  - the runners and the other platforms;
+  - the live server, which needs a reconnect.
+
 ### Step 6: the decisions (decided 2026-11-20)
 
 Drafted from Steps 1 to 5, and **decided by Martin on 2026-11-20**, every item as drafted: "I approve the draft, your

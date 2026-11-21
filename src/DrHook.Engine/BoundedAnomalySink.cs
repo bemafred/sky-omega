@@ -24,6 +24,10 @@ public sealed record AnomalyDrainResult(IReadOnlyList<EngineAnomaly> Anomalies, 
 /// lifetime of the sink.</summary>
 public sealed class BoundedAnomalySink : IDebugEventSink
 {
+    /// <summary>The capacity of a debug session's buffer: 256 anomalies (~128 KB at most). Both of a session's copies have it (ADR-016
+    /// 6.7): the one drhook-mcp keeps for the drain tool, and the worker's own, read for the snapshots it publishes.</summary>
+    public const int SessionCapacity = 256;
+
     private readonly int _capacity;
     private readonly LinkedList<EngineAnomaly> _buffer = new();
     private readonly object _lock = new();

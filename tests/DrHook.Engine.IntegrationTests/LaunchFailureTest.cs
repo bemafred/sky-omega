@@ -20,7 +20,8 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
-using SkyOmega.DrHook.Mcp;
+using SkyOmega.DrHook.Engine;
+using SkyOmega.DrHook.Worker;
 
 namespace DrHook.Engine.IntegrationTests;
 
@@ -36,7 +37,7 @@ public sealed class LaunchFailureTest
         string dotnet = Path.Combine(Path.GetDirectoryName(Path.GetDirectoryName(Path.GetDirectoryName(runtimeDir)))!,
             OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet");
 
-        using var session = new EngineSteppingSession();
+        using var session = new EngineSteppingSession(new CompositeEventSink());
         string launch = await session.LaunchAsync(dotnet, new[] { "exec", missingDll }, cwd: null,
             source, line: 1, hypothesis: "the muxer exits at once: the DLL does not exist", env: null, CancellationToken.None);
 
@@ -61,7 +62,7 @@ public sealed class LaunchFailureTest
         string source = IntegrationTargetPaths.SnapshotTargetSource();
         string missingProgram = Path.Combine(Path.GetTempPath(), $"drhook-missing-{Guid.NewGuid():N}", "program");
 
-        using var session = new EngineSteppingSession();
+        using var session = new EngineSteppingSession(new CompositeEventSink());
         string launch = await session.LaunchAsync(missingProgram, Array.Empty<string>(), cwd: null,
             source, line: 1, hypothesis: "the spawn fails: the program does not exist", env: null, CancellationToken.None);
 

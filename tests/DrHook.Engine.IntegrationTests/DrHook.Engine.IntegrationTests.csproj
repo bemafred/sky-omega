@@ -24,7 +24,9 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\DrHook.Engine\DrHook.Engine.csproj" />
-    <!-- MCP-layer session (EngineSteppingSession) — exercised by the launch-breakpoint-removable regression. -->
+    <!-- The session as the MCP tools run it (EngineSteppingSession), driven in this process by the session tests. -->
+    <ProjectReference Include="..\..\src\DrHook.Worker\DrHook.Worker.csproj" />
+    <!-- drhook-mcp's supervisor, and the worker it carries in worker/, for the worker's own tests (ADR-016 6.7). -->
     <ProjectReference Include="..\..\src\DrHook.Mcp\DrHook.Mcp.csproj" />
     <!-- Build dependency on the MTP integration target so its exe is available at test time. -->
     <ProjectReference Include="..\DrHook.Engine.IntegrationTargets.Mtp\DrHook.Engine.IntegrationTargets.Mtp.csproj">

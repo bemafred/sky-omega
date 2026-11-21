@@ -19,35 +19,40 @@
         <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.0" />
     </ItemGroup>
 
-    <!--
-      libdbgshim for the GLOBAL TOOL — all RIDs referenced unconditionally so
-      `dotnet tool install -g drhook-mcp` works on any platform. Each PackageReference deploys
-      its native asset under runtimes/<rid>/native/ in the tool's install dir; DrHook.Engine's
-      DbgShim.Resolve loads the one for the host's RID, falling back to the portable RID. Seven
-      RIDs, 1.9 MB uncompressed in the 1.8.36 package.
-
-      DrHook.Mcp has used them since 1.8.2, when DrHook.Engine replaced the netcoredbg-based
-      src/DrHook/ (drhook ADR-006).
-    -->
     <ItemGroup>
-        <PackageReference Include="Microsoft.Diagnostics.DbgShim.osx-arm64"      Version="9.0.*" />
-        <PackageReference Include="Microsoft.Diagnostics.DbgShim.osx-x64"        Version="9.0.*" />
-        <PackageReference Include="Microsoft.Diagnostics.DbgShim.linux-x64"      Version="9.0.*" />
-        <PackageReference Include="Microsoft.Diagnostics.DbgShim.linux-arm64"    Version="9.0.*" />
-        <PackageReference Include="Microsoft.Diagnostics.DbgShim.linux-musl-x64" Version="9.0.*" />
-        <PackageReference Include="Microsoft.Diagnostics.DbgShim.win-x64"        Version="9.0.*" />
-        <PackageReference Include="Microsoft.Diagnostics.DbgShim.win-arm64"      Version="9.0.*" />
-    </ItemGroup>
-
-    <ItemGroup>
-        <!-- DrHook.Engine — BCL-only stepping substrate (finding 51) + EventPipe diagnostics
-             (Diagnostics/ProcessAttacher + StackInspector, moved here as part of the netcoredbg
-             retirement, finding 52). -->
+        <!-- DrHook.Engine — the EventPipe diagnostics drhook_processes and drhook_snapshot read through
+             (Diagnostics/ProcessAttacher + StackInspector, finding 52), the sinks behind the drain tools, and the
+             worker protocol. drhook-mcp loads no debugger: the session runs in drhook-worker (ADR-016 6.7). -->
         <ProjectReference Include="..\DrHook.Engine\DrHook.Engine.csproj" />
-        <!-- DrHook.Viz — the Wire-pure visualization lib (references only DrHook.Wire, no native deps).
-             drhook_snapshot_image renders the current debug-state through the SHARED DebugStateTextRenderer
-             + TextImageRenderer to a PNG, so the image is exactly what drhook-viz-console shows (ADR-012). -->
-        <ProjectReference Include="..\DrHook.Viz\DrHook.Viz.csproj" />
+        <!-- drhook-worker, the debugger's own process: built first, and carried in worker/ (below), not referenced. -->
+        <ProjectReference Include="..\DrHook.Worker\DrHook.Worker.csproj" ReferenceOutputAssembly="false" Private="false" />
     </ItemGroup>
+
+    <ItemGroup>
+        <!-- The worker's own tests read which worker is in session (Supervisor.SessionWorkerPid). -->
+        <InternalsVisibleTo Include="DrHook.Engine.IntegrationTests" />
+    </ItemGroup>
+
+    <!--
+      The worker's own directory, in drhook-mcp's output and package (ADR-016 6.7): everything drhook-worker's build put
+      in its output, at worker/ beside drhook-mcp. As ContentWithTargetPath items, so they are copied to drhook-mcp's
+      output, to the output of a project that references drhook-mcp (the integration suite), and to the publish
+      directory that `dotnet pack` packs a tool from.
+    -->
+    <Target Name="IncludeTheWorker" BeforeTargets="AssignTargetPaths">
+        <MSBuild Projects="..\DrHook.Worker\DrHook.Worker.csproj" Targets="GetTargetPath" Properties="Configuration=$(Configuration)">
+            <Output TaskParameter="TargetOutputs" ItemName="_DrHookWorkerTargetPath" />
+        </MSBuild>
+        <PropertyGroup>
+            <_DrHookWorkerDirectory>@(_DrHookWorkerTargetPath->'%(RootDir)%(Directory)')</_DrHookWorkerDirectory>
+        </PropertyGroup>
+        <ItemGroup>
+            <_DrHookWorkerFile Include="$(_DrHookWorkerDirectory)**\*" />
+            <ContentWithTargetPath Include="@(_DrHookWorkerFile)"
+                                   TargetPath="worker\%(RecursiveDir)%(Filename)%(Extension)"
+                                   CopyToOutputDirectory="PreserveNewest"
+                                   CopyToPublishDirectory="PreserveNewest" />
+        </ItemGroup>
+    </Target>
 
 </Project>

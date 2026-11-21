@@ -19,7 +19,8 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
-using SkyOmega.DrHook.Mcp;
+using SkyOmega.DrHook.Engine;
+using SkyOmega.DrHook.Worker;
 
 namespace DrHook.Engine.IntegrationTests;
 
@@ -41,7 +42,7 @@ public sealed class TeardownOrderTest
         string dotnet = Path.Combine(Path.GetDirectoryName(Path.GetDirectoryName(Path.GetDirectoryName(runtimeDir)))!, "dotnet");
         string report = Path.Combine(Path.GetTempPath(), $"drhook-teardown-order-{Guid.NewGuid():N}.txt");
 
-        using var session = new EngineSteppingSession();
+        using var session = new EngineSteppingSession(new CompositeEventSink());
         int pid = 0;
         try
         {

@@ -1,18 +1,37 @@
 using System.ComponentModel;
+using System.Text.Json.Nodes;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 using SkyOmega.DrHook.Engine.Diagnostics;
 
 namespace SkyOmega.DrHook.Mcp;
 
+// The 25 tools. The session's tools run in the session's debugger worker (ADR-016 6.7): each passes its arguments to
+// the supervisor, which relays them, and returns the worker's answer, which is the session's own result. The
+// observation tools and the drains run here.
 [McpServerToolType]
 public sealed class DrHookTools
 {
-    private readonly EngineSteppingSession _session;
+    private readonly Supervisor _supervisor;
 
-    public DrHookTools(EngineSteppingSession session)
+    public DrHookTools(Supervisor supervisor)
     {
-        _session = session;
+        _supervisor = supervisor;
+    }
+
+    private async Task<string> Session(string tool, JsonObject args, CancellationToken ct) =>
+        (await _supervisor.CallAsync(tool, args, ct)).Result!;
+
+    private async Task<IEnumerable<ContentBlock>> SessionImage(string tool, JsonObject args, CancellationToken ct)
+    {
+        WorkerAnswer answer = await _supervisor.CallAsync(tool, args, ct);
+        if (answer.Result is { } failure) return [new TextContentBlock { Text = failure }]; // the worker could not answer
+        if (answer.Png is null) return [new TextContentBlock { Text = answer.Caption ?? "" }]; // no session / capture failed — text only
+        return
+        [
+            new TextContentBlock { Text = answer.Caption ?? "" },
+            new ImageContentBlock { Data = Convert.ToBase64String(answer.Png), MimeType = "image/png" },
+        ];
     }
 
     // ─── Observation layer (EventPipe) ──────────────────────────────────────
@@ -62,19 +81,28 @@ public sealed class DrHookTools
         [Description("Environment variables as KEY=VALUE strings, merged onto the inherited environment (e.g. [\"DOTNET_TieredCompilation=0\"]). Launch/Owned only — an attached target's environment is fixed at its own start.")] string[]? env = null,
         CancellationToken ct = default)
     {
-        Dictionary<string, string>? envDict = null;
+        JsonObject? envObject = null;
         if (env is { Length: > 0 })
         {
-            envDict = new Dictionary<string, string>();
+            envObject = new JsonObject();
             foreach (var entry in env)
             {
                 var eqIndex = entry.IndexOf('=');
                 if (eqIndex > 0)
-                    envDict[entry[..eqIndex]] = entry[(eqIndex + 1)..];
+                    envObject[entry[..eqIndex]] = entry[(eqIndex + 1)..];
             }
         }
 
-        return await _session.LaunchAsync(program, args, cwd, sourceFile, line, hypothesis, envDict, ct);
+        return await Session("drhook_launch", new JsonObject
+        {
+            ["program"] = program,
+            ["args"] = new JsonArray(args.Select(a => (JsonNode?)a).ToArray()),
+            ["cwd"] = cwd,
+            ["sourceFile"] = sourceFile,
+            ["line"] = line,
+            ["hypothesis"] = hypothesis,
+            ["env"] = envObject,
+        }, ct);
     }
 
     [McpServerTool(Name = "drhook_attach"), Description(
@@ -88,7 +116,10 @@ public sealed class DrHookTools
         [Description("What you expect to observe at this breakpoint")] string hypothesis,
         CancellationToken ct = default)
     {
-        return await _session.AttachAsync(pid, sourceFile, line, hypothesis, ct);
+        return await Session("drhook_attach", new JsonObject
+        {
+            ["pid"] = pid, ["sourceFile"] = sourceFile, ["line"] = line, ["hypothesis"] = hypothesis,
+        }, ct);
     }
 
     [McpServerTool(Name = "drhook_step_over"), Description(
@@ -100,7 +131,7 @@ public sealed class DrHookTools
         [Description("What you expect on the next line (optional but valuable)")] string? hypothesis = null,
         CancellationToken ct = default)
     {
-        return await _session.StepOverAsync(hypothesis, ct);
+        return await Session("drhook_step_over", new JsonObject { ["hypothesis"] = hypothesis }, ct);
     }
 
     [McpServerTool(Name = "drhook_step_into"), Description(
@@ -112,7 +143,7 @@ public sealed class DrHookTools
         [Description("What you expect inside the method (optional but valuable)")] string? hypothesis = null,
         CancellationToken ct = default)
     {
-        return await _session.StepIntoAsync(hypothesis, ct);
+        return await Session("drhook_step_into", new JsonObject { ["hypothesis"] = hypothesis }, ct);
     }
 
     [McpServerTool(Name = "drhook_step_out"), Description(
@@ -123,7 +154,7 @@ public sealed class DrHookTools
         [Description("What you expect at the return site (optional but valuable)")] string? hypothesis = null,
         CancellationToken ct = default)
     {
-        return await _session.StepOutAsync(hypothesis, ct);
+        return await Session("drhook_step_out", new JsonObject { ["hypothesis"] = hypothesis }, ct);
     }
 
     [McpServerTool(Name = "drhook_continue"), Description(
@@ -135,7 +166,10 @@ public sealed class DrHookTools
         [Description("If true (default), wait for a breakpoint hit. If false, return immediately for use with drhook_pause.")] bool waitForBreakpoint = true,
         CancellationToken ct = default)
     {
-        return await _session.ContinueAsync(hypothesis, waitForBreakpoint, ct);
+        return await Session("drhook_continue", new JsonObject
+        {
+            ["hypothesis"] = hypothesis, ["waitForBreakpoint"] = waitForBreakpoint,
+        }, ct);
     }
 
     [McpServerTool(Name = "drhook_pause"), Description(
@@ -146,7 +180,7 @@ public sealed class DrHookTools
         [Description("What you expect to find when execution is interrupted (optional but valuable)")] string? hypothesis = null,
         CancellationToken ct = default)
     {
-        return await _session.PauseAsync(hypothesis, ct);
+        return await Session("drhook_pause", new JsonObject { ["hypothesis"] = hypothesis }, ct);
     }
 
     [McpServerTool(Name = "drhook_break_source"), Description(
@@ -166,7 +200,11 @@ public sealed class DrHookTools
         [Description("'all' (default — surface the stop) or 'none' (don't stop; intended for logpoint mode when paired with logMessage).")] string? suspend = null,
         CancellationToken ct = default)
     {
-        return await _session.SetBreakpointAsync(sourceFile, line, condition, hitCount, logMessage, suspend, ct);
+        return await Session("drhook_break_source", new JsonObject
+        {
+            ["sourceFile"] = sourceFile, ["line"] = line, ["condition"] = condition, ["hitCount"] = hitCount,
+            ["logMessage"] = logMessage, ["suspend"] = suspend,
+        }, ct);
     }
 
     [McpServerTool(Name = "drhook_break_function"), Description(
@@ -184,7 +222,11 @@ public sealed class DrHookTools
         [Description("'all' (default — surface the stop) or 'none' (don't stop; intended for logpoint mode when paired with logMessage).")] string? suspend = null,
         CancellationToken ct = default)
     {
-        return await _session.SetFunctionBreakpointAsync(functionName, condition, hitCount, logMessage, suspend, ct);
+        return await Session("drhook_break_function", new JsonObject
+        {
+            ["functionName"] = functionName, ["condition"] = condition, ["hitCount"] = hitCount,
+            ["logMessage"] = logMessage, ["suspend"] = suspend,
+        }, ct);
     }
 
     [McpServerTool(Name = "drhook_break_exception"), Description(
@@ -207,7 +249,11 @@ public sealed class DrHookTools
         [Description("'all' (default — surface the stop) or 'none' (don't stop; intended for logpoint-style emission when paired with logMessage).")] string? suspend = null,
         CancellationToken ct = default)
     {
-        return await _session.SetExceptionBreakpointAsync(typeName, phase, condition, hitCount, logMessage, suspend, ct);
+        return await Session("drhook_break_exception", new JsonObject
+        {
+            ["typeName"] = typeName, ["phase"] = phase, ["condition"] = condition, ["hitCount"] = hitCount,
+            ["logMessage"] = logMessage, ["suspend"] = suspend,
+        }, ct);
     }
 
     [McpServerTool(Name = "drhook_break_remove"), Description(
@@ -220,7 +266,7 @@ public sealed class DrHookTools
         [Description("Substrate-assigned breakpoint id, as returned by drhook_break_source, drhook_break_function, or drhook_break_exception, or as listed in drhook_break_list.")] int id,
         CancellationToken ct = default)
     {
-        return await _session.RemoveByIdAsync(id, ct);
+        return await Session("drhook_break_remove", new JsonObject { ["id"] = id }, ct);
     }
 
     [McpServerTool(Name = "drhook_break_list"), Description(
@@ -229,9 +275,9 @@ public sealed class DrHookTools
         "hits (running count of times the breakpoint's policy evaluator has been entered), and " +
         "policy (when one is attached — condition / hitCount / logMessage / suspend, as the agent originally supplied). " +
         "Use this to discover IDs and to verify what's armed before stepping.")]
-    public string BreakList()
+    public async Task<string> BreakList(CancellationToken ct = default)
     {
-        return _session.ListBreakpoints();
+        return await Session("drhook_break_list", new JsonObject(), ct);
     }
 
     [McpServerTool(Name = "drhook_break_clear"), Description(
@@ -241,7 +287,7 @@ public sealed class DrHookTools
         [Description("Optional category: 'source', 'function', or 'exception'. Omit to clear all.")] string? category = null,
         CancellationToken ct = default)
     {
-        return await _session.ClearBreakpointsAsync(category, ct);
+        return await Session("drhook_break_clear", new JsonObject { ["category"] = category }, ct);
     }
 
     [McpServerTool(Name = "drhook_locals"), Description(
@@ -255,7 +301,7 @@ public sealed class DrHookTools
         [Description("1 = locals/args + one level of children (default); 0 = collapsed (just the variables, each with hasChildren). Deeper levels are reached via drhook_expand, not this parameter.")] int depth = 1,
         CancellationToken ct = default)
     {
-        return await _session.InspectVariablesAsync(depth, hypothesis, ct);
+        return await Session("drhook_locals", new JsonObject { ["hypothesis"] = hypothesis, ["depth"] = depth }, ct);
     }
 
     [McpServerTool(Name = "drhook_expand"), Description(
@@ -273,7 +319,12 @@ public sealed class DrHookTools
         CancellationToken ct = default)
     {
         string[] segments = path.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        return await _session.ExpandAsync(target, segments, string.IsNullOrWhiteSpace(hypothesis) ? null : hypothesis, ct);
+        return await Session("drhook_expand", new JsonObject
+        {
+            ["target"] = target,
+            ["path"] = new JsonArray(segments.Select(p => (JsonNode?)p).ToArray()),
+            ["hypothesis"] = string.IsNullOrWhiteSpace(hypothesis) ? null : hypothesis,
+        }, ct);
     }
 
     [McpServerTool(Name = "drhook_snapshot_image"), Description(
@@ -283,16 +334,11 @@ public sealed class DrHookTools
         "shows. Use while stopped to PERCEIVE the state visually rather than reading JSON — and the same eye for " +
         "inspecting a Mira/TUI/GUI surface under development. Returns a short caption plus the image. Requires a " +
         "hypothesis: state what you expect the state to look like before you look.")]
-    public IEnumerable<ContentBlock> SnapshotImage(
-        [Description("What you expect the state to look like. Required — state it before you look (epistemic discipline).")] string hypothesis)
+    public async Task<IEnumerable<ContentBlock>> SnapshotImage(
+        [Description("What you expect the state to look like. Required — state it before you look (epistemic discipline).")] string hypothesis,
+        CancellationToken ct = default)
     {
-        (byte[]? png, string caption) = _session.RenderCurrentStateImage(hypothesis);
-        if (png is null) return [new TextContentBlock { Text = caption }]; // no session / capture failed — text only
-        return
-        [
-            new TextContentBlock { Text = caption },
-            new ImageContentBlock { Data = Convert.ToBase64String(png), MimeType = "image/png" },
-        ];
+        return await SessionImage("drhook_snapshot_image", new JsonObject { ["hypothesis"] = hypothesis }, ct);
     }
 
     [McpServerTool(Name = "drhook_capture_visual"), Description(
@@ -309,7 +355,7 @@ public sealed class DrHookTools
         "unreproduced); if the app beachballs afterwards, sample it (`sample <pid> 3`) before killing it. GUARDED: once " +
         "a capture has run, drhook_detach (and a Borrowed drhook_stop) report uiLiveness — whether the app's UI thread " +
         "still drains its dispatcher after release. Detach from the stop to get a verdict.")]
-    public IEnumerable<ContentBlock> CaptureVisual(
+    public async Task<IEnumerable<ContentBlock>> CaptureVisual(
         [Description("What you expect the rendered window to show. Required — state it before you look (epistemic discipline).")] string hypothesis,
         [Description("Image width in pixels (default 1024).")] int width = 1024,
         [Description("Image height in pixels (default 768).")] int height = 768,
@@ -321,18 +367,17 @@ public sealed class DrHookTools
         [Description("Pixel-size value type, namespace-qualified (default 'Avalonia.PixelSize').")] string pixelSizeType = "Avalonia.PixelSize",
         [Description("Render-target bitmap type, namespace-qualified (default 'Avalonia.Media.Imaging.RenderTargetBitmap').")] string bitmapType = "Avalonia.Media.Imaging.RenderTargetBitmap",
         [Description("Method that renders a visual into the bitmap (default 'Render').")] string renderMethod = "Render",
-        [Description("Method that saves the bitmap to a file path (default 'Save').")] string saveMethod = "Save")
+        [Description("Method that saves the bitmap to a file path (default 'Save').")] string saveMethod = "Save",
+        CancellationToken ct = default)
     {
-        (byte[]? png, string caption) = _session.CaptureVisual(
-            string.IsNullOrWhiteSpace(hypothesis) ? null : hypothesis, width, height,
-            appModule, appType, currentGetter, windowGetterChain,
-            gfxModule, pixelSizeType, bitmapType, renderMethod, saveMethod);
-        if (png is null) return [new TextContentBlock { Text = caption }]; // no session / not stopped / capture failed — text only
-        return
-        [
-            new TextContentBlock { Text = caption },
-            new ImageContentBlock { Data = Convert.ToBase64String(png), MimeType = "image/png" },
-        ];
+        return await SessionImage("drhook_capture_visual", new JsonObject
+        {
+            ["hypothesis"] = string.IsNullOrWhiteSpace(hypothesis) ? null : hypothesis,
+            ["width"] = width, ["height"] = height,
+            ["appModule"] = appModule, ["appType"] = appType, ["currentGetter"] = currentGetter,
+            ["windowGetterChain"] = windowGetterChain, ["gfxModule"] = gfxModule, ["pixelSizeType"] = pixelSizeType,
+            ["bitmapType"] = bitmapType, ["renderMethod"] = renderMethod, ["saveMethod"] = saveMethod,
+        }, ct);
     }
 
     [McpServerTool(Name = "drhook_stop"), Description(
@@ -349,7 +394,7 @@ public sealed class DrHookTools
         [Description("Your closing read — what you concluded or expected at session end (e.g. 'confirmed the off-by-one at line 42').")] string hypothesis,
         CancellationToken ct = default)
     {
-        return await _session.StopAsync(hypothesis, ct);
+        return await Session("drhook_stop", new JsonObject { ["hypothesis"] = hypothesis }, ct);
     }
 
     [McpServerTool(Name = "drhook_detach"), Description(
@@ -365,7 +410,7 @@ public sealed class DrHookTools
         [Description("What you expect the target to do after you disconnect (e.g. 'keeps serving requests un-debugged').")] string hypothesis,
         CancellationToken ct = default)
     {
-        return await _session.DetachAsync(hypothesis, ct);
+        return await Session("drhook_detach", new JsonObject { ["hypothesis"] = hypothesis }, ct);
     }
 
     [McpServerTool(Name = "drhook_kill"), Description(
@@ -383,7 +428,7 @@ public sealed class DrHookTools
         [Description("Only without an active session: the pid of the target drhook_stop left running to end. Omit it when there is one such target, and during a session.")] int? pid = null,
         CancellationToken ct = default)
     {
-        return await _session.KillAsync(hypothesis, pid, ct);
+        return await Session("drhook_kill", new JsonObject { ["hypothesis"] = hypothesis, ["pid"] = pid }, ct);
     }
 
     // ─── Substrate diagnostics ──────────────────────────────────────────────
@@ -399,7 +444,7 @@ public sealed class DrHookTools
         "something unexpected happened, surfaced so AI consumers can decide whether to escalate.")]
     public string DrainAnomalies()
     {
-        return _session.DrainAnomaliesAsJson();
+        return _supervisor.DrainAnomaliesAsJson();
     }
 
     [McpServerTool(Name = "drhook_drain_console"), Description(
@@ -412,7 +457,7 @@ public sealed class DrHookTools
         "sessions produce captured output; an Attached target owns its own console.)")]
     public string DrainConsole()
     {
-        return _session.DrainConsoleAsJson();
+        return _supervisor.DrainConsoleAsJson();
     }
 
     [McpServerTool(Name = "drhook_drain_log"), Description(
@@ -423,6 +468,6 @@ public sealed class DrHookTools
         "logMessage='v={value}' suspend='none', run, then drain here.")]
     public string DrainLog()
     {
-        return _session.DrainLogAsJson();
+        return _supervisor.DrainLogAsJson();
     }
 }

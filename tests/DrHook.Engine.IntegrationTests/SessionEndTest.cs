@@ -19,7 +19,7 @@ using System.Threading.Tasks;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SkyOmega.DrHook.Engine;
 using SkyOmega.DrHook.Engine.Interop;
-using SkyOmega.DrHook.Mcp;
+using SkyOmega.DrHook.Worker;
 
 namespace DrHook.Engine.IntegrationTests;
 
@@ -43,7 +43,7 @@ public sealed class SessionEndTest
             ? new[] { "exec", targetDll }
             : new[] { "exec", targetDll, "ignore-sigterm", report };
 
-        using var session = new EngineSteppingSession();
+        using var session = new EngineSteppingSession(new CompositeEventSink());
         int pid = 0;
         try
         {
@@ -106,7 +106,7 @@ public sealed class SessionEndTest
         Assert.IsTrue(File.Exists(targetDll), $"Snapshot target DLL not found at {targetDll} — build dependency missing?");
         string source = IntegrationTargetPaths.SnapshotTargetSource();
 
-        using var session = new EngineSteppingSession();
+        using var session = new EngineSteppingSession(new CompositeEventSink());
         int pid = 0;
         try
         {
@@ -134,7 +134,7 @@ public sealed class SessionEndTest
         Assert.IsTrue(File.Exists(targetDll), $"Snapshot target DLL not found at {targetDll} — build dependency missing?");
         string source = IntegrationTargetPaths.SnapshotTargetSource();
 
-        using var session = new EngineSteppingSession();
+        using var session = new EngineSteppingSession(new CompositeEventSink());
         int pid = 0;
         try
         {

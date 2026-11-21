@@ -51,7 +51,9 @@ if (showHelp)
         DrHook provides .NET runtime inspection for AI coding agents:
           - Passive observation via EventPipe (thread sampling, GC, exceptions)
           - Controlled stepping via DrHook.Engine — BCL-only ICorDebug interop
-            (no netcoredbg dependency; libdbgshim bundled per-RID via NuGet).
+            (no netcoredbg dependency; libdbgshim bundled per-RID via NuGet),
+            in a debugger worker process of its own per session (drhook-worker,
+            in worker/ beside drhook-mcp), so a lost debugger costs only its worker.
 
         Optional override:
           Set DBGSHIM_PATH to a custom libdbgshim build (testing only;
@@ -71,10 +73,10 @@ builder.Logging.AddConsole(options =>
     options.LogToStandardErrorThreshold = LogLevel.Trace;
 });
 
-// Register EngineSteppingSession as singleton (stateful — one session at a time, BCL-only via
-// DrHook.Engine's ICorDebug interop; replaces the netcoredbg-DAP-backed SteppingSessionManager
-// per finding 51).
-builder.Services.AddSingleton<EngineSteppingSession>();
+// The supervisor of the debugger workers (ADR-016 6.7): every session runs in a drhook-worker of its own, built into
+// worker/ beside drhook-mcp. A factory, so that the host disposes it at its end: each worker's stdin then closes, and a
+// session still open is ended as drhook_stop ends it.
+builder.Services.AddSingleton(_ => new Supervisor(Path.Combine(AppContext.BaseDirectory, "worker")));
 
 // Register MCP server with stdio transport and tools
 builder.Services

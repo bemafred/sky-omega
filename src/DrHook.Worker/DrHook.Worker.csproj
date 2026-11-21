@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <!--
+      drhook-worker: the debugger in a process of its own (ADR-016 6.7). drhook-mcp starts one per session and talks
+      to it over stdin and stdout (DrHook.Engine's WorkerProtocol). It is the only DrHook process that loads dbgshim,
+      mscordbi and the DAC. It is not a tool of its own: drhook-mcp carries it in its own output and package, in the
+      directory worker/ (see DrHook.Mcp.csproj).
+    -->
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <AssemblyName>drhook-worker</AssemblyName>
+        <RootNamespace>SkyOmega.DrHook.Worker</RootNamespace>
+        <IsPackable>false</IsPackable>
+    </PropertyGroup>
+
+    <!--
+      libdbgshim for the installed tool: all RIDs referenced unconditionally, so that `dotnet tool install -g drhook-mcp`
+      works on any platform. Each PackageReference deploys its native asset under runtimes/<rid>/native/ in the worker's
+      directory; DrHook.Engine's DbgShim.Resolve loads the one for the host's RID, falling back to the portable RID. Seven
+      RIDs, 1.9 MB uncompressed in the 1.8.36 package. They moved here from DrHook.Mcp with the debugger (ADR-016 6.7);
+      DrHook.Mcp has referenced them since 1.8.2, when DrHook.Engine replaced the netcoredbg-based src/DrHook/ (ADR-006).
+    -->
+    <ItemGroup>
+        <PackageReference Include="Microsoft.Diagnostics.DbgShim.osx-arm64"      Version="9.0.*" />
+        <PackageReference Include="Microsoft.Diagnostics.DbgShim.osx-x64"        Version="9.0.*" />
+        <PackageReference Include="Microsoft.Diagnostics.DbgShim.linux-x64"      Version="9.0.*" />
+        <PackageReference Include="Microsoft.Diagnostics.DbgShim.linux-arm64"    Version="9.0.*" />
+        <PackageReference Include="Microsoft.Diagnostics.DbgShim.linux-musl-x64" Version="9.0.*" />
+        <PackageReference Include="Microsoft.Diagnostics.DbgShim.win-x64"        Version="9.0.*" />
+        <PackageReference Include="Microsoft.Diagnostics.DbgShim.win-arm64"      Version="9.0.*" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <!-- DrHook.Engine — the ICorDebug substrate the session runs on. -->
+        <ProjectReference Include="..\DrHook.Engine\DrHook.Engine.csproj" />
+        <!-- DrHook.Viz — the Wire-pure visualization lib (references only DrHook.Wire, no native deps).
+             drhook_snapshot_image renders the current debug-state through the SHARED DebugStateTextRenderer
+             + TextImageRenderer to a PNG, so the image is exactly what drhook-viz-console shows (ADR-012). -->
+        <ProjectReference Include="..\DrHook.Viz\DrHook.Viz.csproj" />
+    </ItemGroup>
+
+</Project>

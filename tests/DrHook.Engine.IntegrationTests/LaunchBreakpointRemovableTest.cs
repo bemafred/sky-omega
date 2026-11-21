@@ -20,7 +20,8 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
-using SkyOmega.DrHook.Mcp;
+using SkyOmega.DrHook.Engine;
+using SkyOmega.DrHook.Worker;
 
 namespace DrHook.Engine.IntegrationTests;
 
@@ -38,7 +39,7 @@ public sealed class LaunchBreakpointRemovableTest
         int markerLine = FindMarker(source, MarkerToken);
         Assert.IsTrue(markerLine > 0, $"'{MarkerToken}' marker not found in the snapshot target source.");
 
-        using var session = new EngineSteppingSession();
+        using var session = new EngineSteppingSession(new CompositeEventSink());
         int pid = 0;
         try
         {

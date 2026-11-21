@@ -15,7 +15,8 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
-using SkyOmega.DrHook.Mcp;
+using SkyOmega.DrHook.Engine;
+using SkyOmega.DrHook.Worker;
 
 namespace DrHook.Engine.IntegrationTests;
 
@@ -34,7 +35,7 @@ public sealed class TargetExitTest
         string dotnet = Path.Combine(Path.GetDirectoryName(Path.GetDirectoryName(Path.GetDirectoryName(runtimeDir)))!,
             OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet");
 
-        using var session = new EngineSteppingSession();
+        using var session = new EngineSteppingSession(new CompositeEventSink());
         int pid = 0;
         try
         {
@@ -77,7 +78,7 @@ public sealed class TargetExitTest
         string dotnet = Path.Combine(Path.GetDirectoryName(Path.GetDirectoryName(Path.GetDirectoryName(runtimeDir)))!,
             OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet");
 
-        using var session = new EngineSteppingSession();
+        using var session = new EngineSteppingSession(new CompositeEventSink());
         int pid = 0;
         try
         {
@@ -130,7 +131,7 @@ public sealed class TargetExitTest
         string dotnet = Path.Combine(Path.GetDirectoryName(Path.GetDirectoryName(Path.GetDirectoryName(runtimeDir)))!,
             OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet");
 
-        using var session = new EngineSteppingSession();
+        using var session = new EngineSteppingSession(new CompositeEventSink());
         int pid = 0;
         try
         {

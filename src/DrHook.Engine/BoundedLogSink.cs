@@ -19,6 +19,10 @@ public sealed record DrainResult(IReadOnlyList<LogRecord> Records, long Dropped)
 /// is fixed for the lifetime of the sink.</summary>
 public sealed class BoundedLogSink : IDebugEventSink
 {
+    /// <summary>The capacity of a debug session's buffer: 512 logpoint records. Both of a session's copies have it (ADR-016
+    /// 6.7): the one drhook-mcp keeps for the drain tool, and the worker's own, read for the snapshots it publishes.</summary>
+    public const int SessionCapacity = 512;
+
     private readonly int _capacity;
     private readonly LinkedList<LogRecord> _buffer = new();
     private readonly object _lock = new();

@@ -1,10 +1,14 @@
-// EngineSteppingSession — the BCL-only replacement for SteppingSessionManager (the netcoredbg-
-// DAP-backed one in src/DrHook/Stepping/, retired at 1.8.2). Same async surface; consumers (DrHookTools
-// and through it the MCP wire) see the same JSON-shaped responses. Backed entirely by
-// SkyOmega.DrHook.Engine.DebugSession.
+// EngineSteppingSession — a debug session as the MCP tools run it: the session's tools, their JSON results, the braid
+// and the debug-state publisher (ADR-012), over SkyOmega.DrHook.Engine.DebugSession. It runs in drhook-worker, the
+// debugger's own process (ADR-016 6.7): drhook-mcp starts a worker per session and relays the session's tools to it,
+// and the worker forwards every record its sinks get (anomalies, logpoint output, console output) to drhook-mcp, whose
+// buffers the drain tools read. The integration suite drives it in its own process.
 //
-// One session at a time (the engine model — DI-injected as singleton). drhook_attach / drhook_launch
-// create the session; drhook_detach ends it; other tools require IsActive.
+// It replaced SteppingSessionManager (the netcoredbg-DAP-backed one in src/DrHook/Stepping/, retired at 1.8.2), and
+// moved from DrHook.Mcp into the worker on 2026-11-21.
+//
+// One session at a time. drhook_attach / drhook_launch create the session; drhook_stop, drhook_detach and drhook_kill
+// end it; other tools require IsActive.
 //
 // JSON shapes preserved at the TOP-LEVEL key level (status, operation, step, currentState,
 // stoppedReason, hypothesis, prompt, metrics). Inner shapes (currentState, variables) carry
@@ -26,7 +30,7 @@ using SkyOmega.DrHook.Engine.Transport;
 using SkyOmega.DrHook.Viz;
 using SkyOmega.DrHook.Wire;
 
-namespace SkyOmega.DrHook.Mcp;
+namespace SkyOmega.DrHook.Worker;
 
 public sealed class EngineSteppingSession : IDisposable
 {
@@ -60,16 +64,13 @@ public sealed class EngineSteppingSession : IDisposable
     private enum BreakpointKind { Source, Function, Exception }
     private readonly Dictionary<int, BreakpointKind> _breakpointKinds = new();
 
-    // EA-5: substrate-anomaly buffer drained by drhook_drain_anomalies (per ADR-007 Phase 1).
-    // Cross-session — anomalies accumulate until the consumer drains; capacity 256 (~128 KB max).
-    private readonly BoundedAnomalySink _anomalies = new(capacity: 256);
-
-    // ADR-011 D3: logpoint output (previously DROPPED at the MCP layer — BoundedLogSink existed but
-    // was never wired) and launched-debuggee console output each get a bounded buffer, drained by
-    // drhook_drain_log / drhook_drain_console. _sink fans every channel to them — the surface-agnostic
-    // seam (D5): the substrate emits to one sink; Mira views will add their own consumers later.
-    private readonly BoundedLogSink _logs = new(capacity: 512);
-    private readonly BoundedConsoleSink _console = new(capacity: 512);
+    // The session's recent records, read for the snapshots the publisher sends (Peek): substrate anomalies (ADR-007
+    // Phase 1), logpoint output and a launched debuggee's console output (ADR-011 D3). The drain tools read drhook-mcp's
+    // copies, which get every record through the records sink given to the constructor (ADR-016 6.7). _sink fans every
+    // channel to all of them: the surface-agnostic seam (ADR-011 D5).
+    private readonly BoundedAnomalySink _anomalies = new(BoundedAnomalySink.SessionCapacity);
+    private readonly BoundedLogSink _logs = new(BoundedLogSink.SessionCapacity);
+    private readonly BoundedConsoleSink _console = new(BoundedConsoleSink.SessionCapacity);
 
     // ADR-012 Phase 2: the debug-state transport — a 4th sink on the composite. It observes the live delta
     // stream via the fan-out (no-ops while not running), and the session driver pushes a fresh snapshot after
@@ -100,105 +101,34 @@ public sealed class EngineSteppingSession : IDisposable
     // the console view's). Reading source from disk is sound — the MCP server is co-located with the target.
     private readonly SourceWindowReader _sourceReader = new();
 
-    public EngineSteppingSession()
+    /// <summary>A session whose records also go to <paramref name="records"/> as they happen: every anomaly, logpoint
+    /// record and console chunk, the engine's and the session's own. drhook-worker forwards them to drhook-mcp.</summary>
+    public EngineSteppingSession(IDebugEventSink records)
     {
-        _sink = new CompositeEventSink(_anomalies, _logs, _console, _transport);
-    }
-
-    /// <summary>Drain the substrate-anomaly buffer as a structured JSON envelope. Anomalies
-    /// array is newest-last; dropped count reports records lost to capacity since last drain
-    /// (the substrate's honesty marker — no silent loss). Backing for drhook_drain_anomalies.
-    /// Public to allow direct invocation from validation probes (e.g. Probe 41).</summary>
-    public string DrainAnomaliesAsJson()
-    {
-        AnomalyDrainResult drain = _anomalies.Drain();
-        JsonArray records = new();
-        foreach (EngineAnomaly a in drain.Anomalies)
-        {
-            JsonObject record = new()
-            {
-                ["capturedAt"] = a.CapturedAt.ToString("O", CultureInfo.InvariantCulture),
-                ["kind"]       = a.Kind.ToString(),
-                ["thread"]     = a.Thread,
-                ["operation"]  = a.Operation,
-                ["observed"]   = a.Observed,
-                ["expected"]   = a.Expected,
-            };
-            if (a.Context is { Count: > 0 } ctx)
-            {
-                JsonObject contextNode = new();
-                foreach ((string k, string v) in ctx) contextNode[k] = v;
-                record["context"] = contextNode;
-            }
-            records.Add(record);
-        }
-
-        return Render(new JsonObject
-        {
-            ["status"]   = "ok",
-            ["count"]    = drain.Anomalies.Count,
-            ["dropped"]  = drain.Dropped,
-            ["capacity"] = _anomalies.Capacity,
-            ["anomalies"] = records,
-            ["prompt"] = drain.Anomalies.Count == 0 && drain.Dropped == 0
-                ? "No anomalies captured since previous drain."
-                : $"{drain.Anomalies.Count} anomalies surfaced ({drain.Dropped} dropped to capacity since previous drain). Each is structured evidence of a substrate-correctness invariant that wasn't upheld — review the Kind and observed-vs-expected delta to decide whether to escalate.",
-        });
-    }
-
-    /// <summary>Drain the debuggee-console buffer (ADR-011 D3) as a JSON envelope. Chunks are
-    /// newest-last; dropped reports chunks lost to capacity since the last drain. Backs drhook_drain_console.</summary>
-    public string DrainConsoleAsJson()
-    {
-        ConsoleDrainResult drain = _console.Drain();
-        JsonArray records = new();
-        foreach (ConsoleOutputRecord r in drain.Records)
-            records.Add(new JsonObject
-            {
-                ["capturedAt"] = r.CapturedAt.ToString("O", CultureInfo.InvariantCulture),
-                ["stream"] = r.Stream.ToString(),
-                ["text"] = r.Text,
-            });
-        return Render(new JsonObject
-        {
-            ["status"] = "ok",
-            ["count"] = drain.Records.Count,
-            ["dropped"] = drain.Dropped,
-            ["capacity"] = _console.Capacity,
-            ["output"] = records,
-            ["prompt"] = drain.Records.Count == 0 && drain.Dropped == 0
-                ? "No debuggee console output captured since the previous drain."
-                : $"{drain.Records.Count} console chunk(s) since previous drain ({drain.Dropped} dropped to capacity). Concatenate text in order for the debuggee's stdout/stderr; chunk boundaries are arbitrary (not line-aligned).",
-        });
-    }
-
-    /// <summary>Drain the logpoint-output buffer (ADR-011 D3 — previously dropped at the MCP layer)
-    /// as a JSON envelope. Records newest-last; dropped reports records lost to capacity. Backs drhook_drain_log.</summary>
-    public string DrainLogAsJson()
-    {
-        DrainResult drain = _logs.Drain();
-        JsonArray records = new();
-        foreach (LogRecord r in drain.Records)
-            records.Add(new JsonObject
-            {
-                ["timestamp"] = r.TimestampUtc.ToString("O", CultureInfo.InvariantCulture),
-                ["message"] = r.Message,
-                ["isFault"] = r.IsFault,
-            });
-        return Render(new JsonObject
-        {
-            ["status"] = "ok",
-            ["count"] = drain.Records.Count,
-            ["dropped"] = drain.Dropped,
-            ["capacity"] = _logs.Capacity,
-            ["logs"] = records,
-            ["prompt"] = drain.Records.Count == 0 && drain.Dropped == 0
-                ? "No logpoint records since the previous drain."
-                : $"{drain.Records.Count} logpoint record(s) since previous drain ({drain.Dropped} dropped to capacity). Each is a rendered logMessage template from a suspend='none' breakpoint (or a condition fault, isFault=true).",
-        });
+        _sink = new CompositeEventSink(_anomalies, _logs, _console, _transport, records);
     }
 
     public bool IsActive => _session is not null;
+
+    /// <summary>The active session's target, 0 without one.</summary>
+    public int TargetPid => _targetPid;
+
+    /// <summary>Whether the active session launched its target (Owned) rather than attached to it.</summary>
+    public bool OwnsTarget => _session?.OwnsTarget ?? false;
+
+    /// <summary>True while an owned target that drhook_stop left running (ADR-016 6.2) is still running: drhook_kill can
+    /// end it through this session. Read from the operating system.</summary>
+    public bool HoldsLeftRunningTarget
+    {
+        get
+        {
+            lock (_leftRunning)
+            {
+                _leftRunning.RemoveAll(s => s.TargetHasExited);
+                return _leftRunning.Count > 0;
+            }
+        }
+    }
 
     // ─── ADR-012 Phase 2 transport plumbing ─────────────────────────────────────────────────────
 
@@ -213,7 +143,7 @@ public sealed class EngineSteppingSession : IDisposable
         }
         catch (Exception ex)
         {
-            _anomalies.OnAnomaly(new EngineAnomaly(DateTimeOffset.UtcNow, AnomalyKind.UnexpectedHResult, "mcp-request",
+            _sink.OnAnomaly(new EngineAnomaly(DateTimeOffset.UtcNow, AnomalyKind.UnexpectedHResult, "mcp-request",
                 "DebugStateServer.Start",
                 Observed: $"{ex.GetType().Name}: {ex.Message}",
                 Expected: "transport listener bound to the rendezvous socket",
@@ -672,21 +602,14 @@ public sealed class EngineSteppingSession : IDisposable
     // before the kill (DebugSession.KillLeftRunningTarget); one that has ended meanwhile is reported, not signalled.
     private string KillLeftRunning(string hypothesis, int? pid)
     {
-        List<DebugSession> candidates;
+        DebugSession session;
         lock (_leftRunning)
         {
             _leftRunning.RemoveAll(s => s.TargetHasExited);
-            candidates = pid is int wanted ? _leftRunning.FindAll(s => s.ProcessId == wanted) : new List<DebugSession>(_leftRunning);
+            LeftRunningChoice choice = LeftRunningChoice.Among(_leftRunning.ConvertAll(s => s.ProcessId), pid);
+            if (choice.Refusal is { } refusal) return Error(refusal);
+            session = _leftRunning.Find(s => s.ProcessId == choice.Pid)!;
         }
-        if (candidates.Count == 0)
-            return Error(pid is int p
-                ? $"No active stepping session, and no running target {p} that drhook_stop left running."
-                : "No active stepping session, and no target that drhook_stop left running.");
-        if (candidates.Count > 1)
-            return Error("No active stepping session, and drhook_stop left more than one target running: pass the pid of " +
-                         $"the one to end ({string.Join(", ", candidates.ConvertAll(s => s.ProcessId))}).");
-
-        DebugSession session = candidates[0];
         bool sent;
         try { sent = session.KillLeftRunningTarget(); }
         catch (Exception ex) { return Error($"Kill of left-running target {session.ProcessId} failed: {ex.GetType().Name}: {ex.Message}"); }
@@ -1547,8 +1470,7 @@ public sealed class EngineSteppingSession : IDisposable
         _sink.OnHypothesis(new HypothesisRecord(DateTimeOffset.UtcNow, hypothesis, lens));
     }
 
-    private static string Error(string message)
-        => Render(new JsonObject { ["status"] = "error", ["message"] = message });
+    private static string Error(string message) => OperatorJson.Error(message);
 
     // ToJsonString on the JsonNode tree avoids the reflection-based serializer (which is
     // disabled when the host runs trimmed/AOT — e.g., the .NET 10 file-based-app context used
@@ -1581,7 +1503,7 @@ public sealed class EngineSteppingSession : IDisposable
             if (sentinel.WaitForDrain(UiLivenessDrainTimeout))
                 return new JsonObject { ["verdict"] = "alive", ["note"] = "the UI thread drained a queued dispatcher job after release" };
         }
-        _anomalies.OnAnomaly(new EngineAnomaly(
+        _sink.OnAnomaly(new EngineAnomaly(
             DateTimeOffset.UtcNow, AnomalyKind.UiThreadUnresponsive, "mcp-request", "ReadUiLivenessVerdict",
             Observed: $"target {pid}: UI thread did not drain the liveness job within {UiLivenessDrainTimeout.TotalSeconds:0} s of release after drhook_capture_visual",
             Expected: "the released target's UI thread executes a queued dispatcher job promptly (probe 88: < 50 ms when idle)",
@@ -1616,7 +1538,7 @@ public sealed class EngineSteppingSession : IDisposable
                 // The substrate's Interlocked gates (ENG-DS-1) and idempotent native frees mean
                 // most exception paths are now structurally avoided, but anything that escapes
                 // surfaces here rather than silently disappearing.
-                _anomalies.OnAnomaly(new EngineAnomaly(
+                _sink.OnAnomaly(new EngineAnomaly(
                     DateTimeOffset.UtcNow, AnomalyKind.UnexpectedCleanupException, "mcp-request",
                     "CleanupSession.SessionDispose",
                     Observed: $"{ex.GetType().Name}: {ex.Message}",
