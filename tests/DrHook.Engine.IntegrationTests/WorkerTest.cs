@@ -3,8 +3,8 @@
 // drhook-mcp's supervisor runs every session in a drhook-worker of its own, and relays the session's tools to it over
 // the worker's stdin and stdout. These tests drive the supervisor as drhook-mcp's tools do, with the worker this
 // suite's build carries in worker/ beside drhook-mcp: a session through a worker, whose records reach drhook-mcp's
-// drain buffers; a target that ends before its breakpoint; drhook-mcp ending with a session open; and a target
-// drhook_stop left running, held by its worker and killed through it. The session's own logic keeps its tests in
+// drain buffers; a target that ends before its breakpoint; drhook-mcp ending with a session open; a target
+// drhook_stop left running, held by its worker and killed through it; and a worker that stops answering, discarded. The session's own logic keeps its tests in
 // this process (SessionEndTest and the others drive EngineSteppingSession directly).
 
 using System;
@@ -24,6 +24,8 @@ namespace DrHook.Engine.IntegrationTests;
 [TestClass]
 public sealed class WorkerTest
 {
+    public TestContext TestContext { get; set; } = null!;
+
     // The worker drhook-mcp's build carries, copied beside drhook-mcp into this suite's output.
     private static readonly string WorkerDirectory = Path.Combine(AppContext.BaseDirectory, "worker");
 
@@ -174,6 +176,68 @@ public sealed class WorkerTest
         {
             if (pid != 0) { try { Process.GetProcessById(pid).Kill(entireProcessTree: true); } catch { /* already gone */ } }
             try { File.Delete(report); } catch { /* best effort */ }
+        }
+    }
+
+    [TestMethod]
+    public async Task AWorkerThatStopsAnswering_IsDiscarded_ItsOwnedTargetIsEnded_AndAFreshSessionWorks()
+    {
+        // SIGSTOP stands in for a hung worker: it answers nothing, health requests included (ADR-016 6.8). Windows has
+        // no such stop for a process.
+        if (OperatingSystem.IsWindows()) Assert.Inconclusive("SIGSTOP stands in for a hung worker; Windows has none.");
+        string targetDll = IntegrationTargetPaths.SnapshotTargetDll();
+        string source = IntegrationTargetPaths.SnapshotTargetSource();
+        using var supervisor = new Supervisor(WorkerDirectory);
+        int pid = 0, worker = 0, fresh = 0;
+        try
+        {
+            string launch = (await supervisor.CallAsync("drhook_launch", Launch(targetDll, source, "SNAPSHOT_HERE"), CancellationToken.None)).Result!;
+            using (JsonDocument doc = JsonDocument.Parse(launch)) pid = doc.RootElement.GetProperty("pid").GetInt32();
+            long start = ProcessLifetime.StartOf(pid)!.Value;
+            worker = supervisor.SessionWorkerPid!.Value;
+            supervisor.DrainAnomaliesAsJson(); // only what the discard raises, below
+
+            // No breakpoint left, so the continue waits for a stop that does not come; meanwhile the worker is stopped.
+            await supervisor.CallAsync("drhook_break_clear", new JsonObject(), CancellationToken.None);
+            var clock = Stopwatch.StartNew();
+            Task<WorkerAnswer> continuing = supervisor.CallAsync("drhook_continue", new JsonObject { ["hypothesis"] = "no stop comes", ["waitForBreakpoint"] = true }, CancellationToken.None);
+            await Task.Delay(1000);
+            using (Process stop = Process.Start("kill", $"-STOP {worker}")) stop.WaitForExit();
+
+            string discarded = (await continuing).Result!;
+            TestContext.WriteLine($"discarded {clock.ElapsedMilliseconds} ms after the continue, the worker stopped at 1000 ms: {discarded}");
+            using (JsonDocument doc = JsonDocument.Parse(discarded))
+            {
+                JsonElement root = doc.RootElement;
+                Assert.AreEqual("workerDiscarded", root.GetProperty("status").GetString(), $"continue: {discarded}");
+                StringAssert.Contains(root.GetProperty("reason").GetString(), "health request", $"continue: {discarded}");
+                Assert.AreEqual("unknown", root.GetProperty("cause").GetString(), $"continue: {discarded}");
+                Assert.AreEqual(pid, root.GetProperty("target").GetProperty("pid").GetInt32(), $"continue: {discarded}");
+                Assert.AreEqual("ended", root.GetProperty("target").GetProperty("state").GetString(), $"continue: {discarded}");
+                Assert.IsTrue(root.GetProperty("target").GetProperty("endedByDrHook").GetBoolean(), $"continue: {discarded}");
+            }
+            Assert.IsTrue(Ended(worker, TimeSpan.FromSeconds(5)), $"The discarded worker {worker} should have been killed.");
+            Assert.AreEqual(true, ProcessLifetime.HasEnded(pid, start), $"The owned target {pid} should have been ended.");
+            Assert.IsNull(supervisor.SessionWorkerPid, "No worker is in session after the discard.");
+            string anomalies = supervisor.DrainAnomaliesAsJson();
+            StringAssert.Contains(anomalies, "\"WorkerSuspected\"", $"anomalies: {anomalies}");
+            StringAssert.Contains(anomalies, "\"WorkerDiscarded\"", $"anomalies: {anomalies}");
+
+            // A fresh worker's session works.
+            string again = (await supervisor.CallAsync("drhook_launch", Launch(targetDll, source, "SNAPSHOT_HERE"), CancellationToken.None)).Result!;
+            using (JsonDocument doc = JsonDocument.Parse(again))
+            {
+                Assert.AreEqual("breakpoint", doc.RootElement.GetProperty("stoppedReason").GetString(), $"launch after the discard: {again}");
+                fresh = doc.RootElement.GetProperty("pid").GetInt32();
+            }
+            Assert.AreNotEqual(worker, supervisor.SessionWorkerPid, "The session after a discard runs in a fresh worker.");
+            await supervisor.CallAsync("drhook_kill", new JsonObject { ["hypothesis"] = "end the fresh session" }, CancellationToken.None);
+        }
+        finally
+        {
+            if (worker != 0) { try { Process.GetProcessById(worker).Kill(); } catch { /* already gone */ } }
+            foreach (int p in new[] { pid, fresh })
+                if (p != 0) { try { Process.GetProcessById(p).Kill(entireProcessTree: true); } catch { /* already gone */ } }
         }
     }
 

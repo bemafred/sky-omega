@@ -1001,6 +1001,53 @@ measurement, that measurement comes first.
   - health, suspicion, the discard and the journal;
   - the runners and the other platforms.
 
+*6.8's health checks and the discard built 2026-11-21* (sky-omega, omega): the third part.
+- **What the worker reports.**
+  - `target`: the target's PID, its start time on Unix (`DebugSession.TargetStart`, read as `TargetHasExited` reads
+    it), and whether the session owns it. Sent as soon as the session has a target, before it runs to its breakpoint.
+  - `state`: stopped, running or ended, with the stop's reason and top frame. Sent from the one place a stop is
+    recorded (`PublishTransportSnapshot`); the top frame costs one frame walk per stop.
+  - **Health.** The thread that reads stdin answers a health request at once, with the tool running, its phase and
+    how long it has been in it. The phase is the engine's own mark: the pump flags each wait for a stop or an
+    evaluation's end (`DebugSession.IsWaitingForTarget`); everything else is debugger work.
+  - **A lost debugger.** An answer whose session's debugger is lost says so (`lost`, with the cause).
+- **Suspicion.** While a request runs, drhook-mcp asks for health every 5 s. It suspects the worker when:
+  - a health request is unanswered after 5 s;
+  - debugger work has run past 30 s;
+  - the worker is not ready within 30 s, or not ended 5 s after `exit`.
+
+  Each raises `WorkerSuspected` or `WorkerDiscarded`.
+- **The discard.** It happens when the worker is suspected, when it calls its debugger lost, or when it ended before
+  it answered:
+  1. drhook-mcp kills the worker and waits for it;
+  2. an owned target still running under the same identity is ended through the operating system. On Unix the
+     identity is the PID and start time; between that check and the kill the PID could in principle be reused. On
+     Windows it is a handle drhook-mcp opened at the `target` event, so there is no such window;
+  3. a borrowed target is left as it is. If it was last reported stopped, on Unix, `TargetLeftHeld` says so;
+  4. the pending call is answered with `status: workerDiscarded`: the reason, the cause (`DebuggerError`,
+     `ExitNotDelivered` or unknown), and the target's PID, ownership, state as the operating system shows it, and
+     last reported state;
+  5. `WorkerDiscarded` is raised. The worker's own `DebuggerError` or `ExitNotDelivered` anomaly is 6.8's "debugger
+     lost".
+
+  When the worker called its debugger lost, its own answer is the one returned, and it is discarded afterwards rather
+  than asked to exit.
+- **Tests.** `WorkerTest` gained a discard. A worker stopped with SIGSTOP during a continue that waits:
+  - is discarded 10.0 s after the continue began, the health request at 5 s unanswered;
+  - its owned target is ended through the operating system;
+  - both anomalies are raised;
+  - a fresh worker's session works.
+
+  On omega every DrHook suite passed: DrHook.Engine.Tests 236 (3 skipped), the integration suite 33 (1 skipped),
+  DrHook.Viz.Tests 74, DrHook.Wire.Tests 7, DrHook.Capture.Tests 1.
+
+  Not tested yet:
+  - the lost path through a worker, which needs probe 106's induced loss, which is not deterministic;
+  - the 30 s debugger-work bound, which no construction yet holds a native call for;
+  - Windows, where the SIGSTOP construction has no equivalent.
+- **The 5 s health bound** is not yet checked against measured round trips. That waits for omega to be quiet (a
+  long run on omega-windows meanwhile).
+
 ### Step 6: the decisions (decided 2026-11-20)
 
 Drafted from Steps 1 to 5, and **decided by Martin on 2026-11-20**, every item as drafted: "I approve the draft, your

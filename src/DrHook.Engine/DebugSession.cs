@@ -216,6 +216,19 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
     /// <summary>OS process id of the attached target.</summary>
     public int ProcessId { get; }
 
+    /// <summary>The target's start time, in the operating system's own unit, read once when the session began
+    /// (ProcessLifetime): with <see cref="ProcessId"/>, the target's identity. Null on Windows, where the process handle
+    /// identifies it, or when it could not be read.</summary>
+    public long? TargetStart => _targetStart;
+
+    /// <summary>True while the session waits for the target: for a stop, or for an evaluation's end, each bounded by its
+    /// own timeout. Everything else it does is debugger work (ADR-016 6.8). Read from any thread.</summary>
+    public bool IsWaitingForTarget => _pump.IsWaiting;
+
+    /// <summary>The <see cref="Stopwatch"/> timestamp at which the session last started or ended a wait for the target; 0
+    /// before the first.</summary>
+    public long WaitingChangedAt => _pump.WaitingChangedAt;
+
     /// <summary>True when the substrate launched the target (Owned — caller handles kill-first
     /// before Dispose); false when the substrate attached to an existing target (Attached —
     /// Dispose does detach-leave-running). Probe 44 design.</summary>

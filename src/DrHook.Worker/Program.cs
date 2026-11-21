@@ -7,7 +7,10 @@
 //
 // Its life:
 //   1. ready: it says so, with its PID, its runtime and the protocol's version.
-//   2. in session: the requests are run one at a time, in order. Each answer says what the session is afterwards.
+//   2. in session: the requests are run one at a time, in order. Each answer says what the session is afterwards, and
+//      whether its debugger is lost. The target's identity is sent as soon as the session has a target, and each stop
+//      or release as the session records it. A health request is answered at once, by the thread that reads stdin:
+//      the tool running, and whether the session waits for its target or does debugger work (ADR-016 6.8).
 //   3. ending: on drhook-mcp's exit request, or when its stdin ends (drhook-mcp is gone), or on SIGTERM, SIGINT or
 //      SIGHUP. A session still open is ended as drhook_stop ends it; a target drhook_stop left running is left running
 //      (ADR-016 6.2's open rule, unchanged). The worker then exits. If the request it is running does not let the end
@@ -20,6 +23,7 @@
 // passes on to its own.
 
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json.Nodes;
@@ -46,9 +50,20 @@ namespace SkyOmega.DrHook.Worker
         private int _endQueued;
         private int _announcedTarget; // the PID the last target event named, 0 before any
         private int _watchingHeldTarget;
+        private volatile Running? _running; // the request running, for health answers; null when idle
+
+        private sealed record Running(string Tool, long StartedAt);
 
         public int Run(TextReader requests)
         {
+            session.TargetKnown += (pid, start, owned) =>
+            {
+                _announcedTarget = pid;
+                channel.Send(WorkerProtocol.Target(pid, start, owned));
+            };
+            session.StopRecorded += (stop, where) => channel.Send(stop is null
+                ? WorkerProtocol.State("running", null, null)
+                : WorkerProtocol.State(stop.EndsSession ? "ended" : "stopped", stop.Reason.ToString(), where));
             channel.Send(WorkerProtocol.Ready(Environment.ProcessId, RuntimeInformation.FrameworkDescription));
             new Thread(RunRequests) { IsBackground = true, Name = "drhook-worker requests" }.Start();
             using var term = PosixSignalRegistration.Create(PosixSignal.SIGTERM, OnSignal);
@@ -77,6 +92,7 @@ namespace SkyOmega.DrHook.Worker
                 try { message = JsonNode.Parse(line); }
                 catch (System.Text.Json.JsonException ex) { Console.Error.WriteLine($"drhook-worker: not a message ({ex.Message}): {line}"); continue; }
                 if (message?["exit"] is not null) { AskEnd("drhook-mcp asked the worker to exit"); return; }
+                if (message?["health"] is not null) { AnswerHealth((long)message["id"]!); continue; }
                 if (message?["tool"] is JsonNode tool)
                 {
                     long id = (long)message["id"]!;
@@ -99,23 +115,39 @@ namespace SkyOmega.DrHook.Worker
             catch (InvalidOperationException) { /* the end has run: nothing more is done */ }
         }
 
+        // The phase is the session's own mark (the engine marks where it waits for the target); its length counts from
+        // the later of the request's start and the last change of that mark.
+        private void AnswerHealth(long id)
+        {
+            long now = Stopwatch.GetTimestamp();
+            if (_running is not { } running)
+            {
+                channel.Send(WorkerProtocol.HealthAnswer(id, null, WorkerProtocol.Idle, 0, 0));
+                return;
+            }
+            long phaseSince = Math.Max(running.StartedAt, session.WaitingChangedAt);
+            channel.Send(WorkerProtocol.HealthAnswer(id, running.Tool,
+                session.WaitingForTarget ? WorkerProtocol.WaitingForTarget : WorkerProtocol.DebuggerWork,
+                (long)Stopwatch.GetElapsedTime(phaseSince, now).TotalMilliseconds,
+                (long)Stopwatch.GetElapsedTime(running.StartedAt, now).TotalMilliseconds));
+        }
+
         private void Answer(long id, string tool, JsonObject args)
         {
             ToolAnswer answer;
+            _running = new Running(tool, Stopwatch.GetTimestamp());
             try { answer = SessionTools.Run(session, tool, args); }
             catch (Exception ex) { answer = new ToolAnswer(OperatorJson.Error($"{tool} failed in the debugger worker: {ex.GetType().Name}: {ex.Message}")); }
+            finally { _running = null; }
 
-            if (session.IsActive && session.TargetPid != 0 && session.TargetPid != _announcedTarget)
-            {
-                _announcedTarget = session.TargetPid;
-                channel.Send(WorkerProtocol.Target(session.TargetPid, session.OwnsTarget));
-            }
-            string state = session.IsActive ? WorkerProtocol.Active
+            string? lost = session.DebuggerLostCause;
+            string state = lost is not null ? WorkerProtocol.Lost
+                : session.IsActive ? WorkerProtocol.Active
                 : session.HoldsLeftRunningTarget ? WorkerProtocol.Holding
                 : WorkerProtocol.Ended;
             channel.Send(answer.Result is { } result
-                ? WorkerProtocol.Result(id, result, state)
-                : WorkerProtocol.ImageResult(id, answer.Caption ?? "", answer.Png, state));
+                ? WorkerProtocol.Result(id, result, state, lost)
+                : WorkerProtocol.ImageResult(id, answer.Caption ?? "", answer.Png, state, lost));
             if (state == WorkerProtocol.Holding && Interlocked.Exchange(ref _watchingHeldTarget, 1) == 0)
                 new Thread(WatchHeldTarget) { IsBackground = true, Name = "drhook-worker held target" }.Start();
         }

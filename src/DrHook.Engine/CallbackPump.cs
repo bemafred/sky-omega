@@ -240,6 +240,33 @@ internal sealed class CallbackPump : IManagedCallbackSink, IDisposable
     public StopInfo? WaitForStop(TimeSpan timeout)
     {
         long started = System.Diagnostics.Stopwatch.GetTimestamp();
+        Volatile.Write(ref _waitingChangedAt, started);
+        Volatile.Write(ref _waiting, 1);
+        try
+        {
+            return WaitForStopMarked(timeout, started);
+        }
+        finally
+        {
+            Volatile.Write(ref _waiting, 0);
+            Volatile.Write(ref _waitingChangedAt, System.Diagnostics.Stopwatch.GetTimestamp());
+        }
+    }
+
+    private int _waiting;            // 1 while a caller waits in WaitForStop
+    private long _waitingChangedAt;  // Stopwatch timestamp of the last start or end of such a wait
+
+    /// <summary>True while a caller waits for the target: for a stop, or for an evaluation's end, each bounded by its
+    /// own timeout. Everything else a session does is debugger work. Read from any thread, for drhook-mcp's health
+    /// requests (ADR-016 6.8).</summary>
+    public bool IsWaiting => Volatile.Read(ref _waiting) == 1;
+
+    /// <summary>The <see cref="System.Diagnostics.Stopwatch"/> timestamp at which the last wait for the target started or
+    /// ended; 0 before the first.</summary>
+    public long WaitingChangedAt => Volatile.Read(ref _waitingChangedAt);
+
+    private StopInfo? WaitForStopMarked(TimeSpan timeout, long started)
+    {
         while (true)
         {
             if (Volatile.Read(ref _lostStop) is { } lost) return lost;

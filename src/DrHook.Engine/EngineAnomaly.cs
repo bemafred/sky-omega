@@ -141,6 +141,24 @@ public enum AnomalyKind
     /// makes no further native call, as after <see cref="DebuggerError"/>. Context: <c>waitedMs</c>, <c>boundMs</c>.
     /// Actionable: the debugger process cannot debug again safely; drhook-mcp discards its worker.</summary>
     ExitNotDelivered,
+
+    /// <summary>drhook-mcp suspects a debugger worker (ADR-016 6.8): it did not answer a health request within its
+    /// bound, its debugger work ran past its bound, or it was not ready, or did not end, in time. Raised by drhook-mcp,
+    /// not the worker. Context: <c>workerPid</c>, <c>tool</c>, <c>reason</c>. Actionable: the worker is discarded at
+    /// once (<see cref="WorkerDiscarded"/>); a worker that was only slow is lost with its session.</summary>
+    WorkerSuspected,
+
+    /// <summary>drhook-mcp discarded a debugger worker (ADR-016 6.7, 6.8): killed it, ended an owned target still alive
+    /// under the same identity through the operating system, and left a borrowed one as it was. Context:
+    /// <c>workerPid</c>, <c>reason</c>, <c>cause</c> (lost, DebuggerError, ExitNotDelivered or unknown), and the
+    /// target's <c>pid</c>, <c>owned</c> and <c>targetState</c> as the operating system shows it afterwards.
+    /// Actionable: the session is over; the next drhook_launch or drhook_attach starts a fresh worker.</summary>
+    WorkerDiscarded,
+
+    /// <summary>A borrowed target was held at a stop when its worker was discarded. On Linux and macOS it stays held,
+    /// alive and frozen, and cannot be debugged again until it restarts (finding 106); on Windows it ended with the
+    /// worker. Context: <c>pid</c>, <c>lastState</c>. Actionable: restart the target, or end it.</summary>
+    TargetLeftHeld,
 }
 
 /// <summary>A structured record of a substrate-correctness anomaly. Surfaced through

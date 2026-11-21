@@ -18,13 +18,28 @@ namespace SkyOmega.DrHook.Mcp;
 /// <see cref="DrHookTools"/>).</item>
 /// </list>
 /// A worker whose session has ended is asked to exit; the next <c>drhook_launch</c> or <c>drhook_attach</c> starts a
-/// fresh one. A session tool asked for with no session open also goes to a fresh worker, which answers it as the
+/// fresh one. While a request runs the supervisor asks the worker how it is every <see cref="HealthEvery"/>, and
+/// discards it (ADR-016 6.8) when it is suspected, when it calls its debugger lost, or when it is gone before it
+/// answers: the worker is killed, an owned target still running under the same identity is ended through the
+/// operating system, a borrowed one is left as it is, the pending tool call is answered with what is known, and the
+/// anomalies say what happened. A session tool asked for with no session open also goes to a fresh worker, which answers it as the
 /// session answers it. When drhook-mcp ends, each worker's stdin closes: a session still open is ended as
 /// <c>drhook_stop</c> ends it, and a target left running is left running.</summary>
 public sealed class Supervisor : IDisposable
 {
     /// <summary>How long drhook-mcp's own end waits for its workers to end their sessions.</summary>
     private static readonly TimeSpan WorkersEndBound = TimeSpan.FromSeconds(10);
+
+    /// <summary>How often a worker running a request is asked how it is (ADR-016 6.8).</summary>
+    private static readonly TimeSpan HealthEvery = TimeSpan.FromSeconds(5);
+
+    /// <summary>How long a health request may go unanswered before the worker is suspected (ADR-016 6.8). The worker's
+    /// stdin thread answers it at once; the bound is to be checked against measured round trips before it is kept.</summary>
+    private static readonly TimeSpan HealthBound = TimeSpan.FromSeconds(5);
+
+    /// <summary>How long a request's debugger work may run before the worker is suspected: 6.8's bound. Waiting for the
+    /// target (a stop, an evaluation's end) is not debugger work; each such wait has its own timeout.</summary>
+    private static readonly TimeSpan DebuggerWorkBound = TimeSpan.FromSeconds(30);
 
     private readonly string _workerDirectory;
     private readonly BoundedAnomalySink _anomalies = new(BoundedAnomalySink.SessionCapacity);
@@ -60,11 +75,13 @@ public sealed class Supervisor : IDisposable
             {
                 if (tool is "drhook_launch" or "drhook_attach") ResetBuffers(); // a new session: its drains show only it
                 worker = WorkerProcess.Start(_workerDirectory, _records, out string? failure);
-                if (worker is null) return new WorkerAnswer(OperatorJson.Error(failure!), null, null, WorkerProtocol.Ended);
+                if (worker is null)
+                {
+                    RaiseWorkerDiscarded(0, tool, failure!, "unknown", (0, false, "unknown", false));
+                    return new WorkerAnswer(OperatorJson.Error(failure!), null, null, WorkerProtocol.Ended);
+                }
             }
-            WorkerAnswer answer = await worker.CallAsync(tool, args);
-            Settle(worker, answer.Session);
-            return answer;
+            return Settle(worker, tool, await Supervise(worker, tool, args));
         }
         finally
         {
@@ -91,31 +108,132 @@ public sealed class Supervisor : IDisposable
         if (choice.Refusal is { } refusal) return new WorkerAnswer(OperatorJson.Error(refusal), null, null, WorkerProtocol.Ended);
 
         WorkerProcess holder = holding.Find(h => h.TargetPid == choice.Pid)!;
-        WorkerAnswer answer = await holder.CallAsync("drhook_kill", args);
-        Settle(holder, answer.Session);
-        return answer;
+        return Settle(holder, "drhook_kill", await Supervise(holder, "drhook_kill", args));
     }
 
-    // What becomes of a worker after its answer: it stays in session, it holds a target left running, or it is asked to
-    // exit.
-    private void Settle(WorkerProcess worker, string session)
+    // The request, watched: every HealthEvery the worker is asked how it is. It is suspected when it does not answer
+    // within HealthBound, or when its debugger work has run past DebuggerWorkBound, and then discarded at once.
+    private async Task<WorkerAnswer> Supervise(WorkerProcess worker, string tool, JsonObject args)
     {
-        switch (session)
+        Task<WorkerAnswer> pending = worker.CallAsync(tool, args);
+        while (true)
+        {
+            if (await Task.WhenAny(pending, Task.Delay(HealthEvery)) == pending) return await pending;
+            JsonNode? health = await worker.HealthAsync(HealthBound);
+            if (pending.IsCompleted) return await pending;
+            string? suspicion = health is null
+                ? $"it did not answer a health request within {HealthBound.TotalSeconds:0} s"
+                : (string?)health["phase"] == WorkerProtocol.DebuggerWork && (long?)health["phaseMs"] > DebuggerWorkBound.TotalMilliseconds
+                    ? $"its debugger work in {tool} had run for {(long)health["phaseMs"]! / 1000.0:0.#} s, past {DebuggerWorkBound.TotalSeconds:0} s"
+                    : null;
+            if (suspicion is null) continue;
+            _anomalies.OnAnomaly(new EngineAnomaly(DateTimeOffset.UtcNow, AnomalyKind.WorkerSuspected, "drhook-mcp", "Supervise",
+                Observed: $"the debugger worker (pid {worker.Pid}) running {tool}: {suspicion}",
+                Expected: "a health answer at once, and debugger work within its bound (ADR-016 6.8)",
+                Context: new Dictionary<string, string>
+                {
+                    ["workerPid"] = worker.Pid.ToString(CultureInfo.InvariantCulture), ["tool"] = tool, ["reason"] = suspicion,
+                }));
+            return Discard(worker, tool, $"suspected: {suspicion}", "unknown");
+        }
+    }
+
+    // What becomes of a worker after its answer: it stays in session, it holds a target left running, it is asked to
+    // exit, or it is discarded (its debugger is lost, or it ended before it answered). Returns the answer to give.
+    private WorkerAnswer Settle(WorkerProcess worker, string tool, WorkerAnswer answer)
+    {
+        switch (answer.Session)
         {
             case WorkerProtocol.Active:
                 _inSession = worker;
-                break;
+                return answer;
             case WorkerProtocol.Holding:
                 if (_inSession == worker) _inSession = null;
                 lock (_holding) if (!_holding.Contains(worker)) _holding.Add(worker);
-                break;
+                return answer;
+            case WorkerProtocol.Lost:
+                // The worker answered as the session does; its debugger cannot be trusted with another call, so it is
+                // discarded rather than asked to exit (ADR-016 6.8).
+                Discard(worker, tool, $"it called its debugger lost ({answer.LostCause})", answer.LostCause ?? "unknown");
+                return answer;
+            case WorkerProcess.Gone:
+                return Discard(worker, tool, "it ended before it answered", "unknown");
+            case WorkerProcess.Discarded:
+                return answer; // the discard has dealt with the worker already
             default:
                 if (_inSession == worker) _inSession = null;
                 lock (_holding) _holding.Remove(worker);
-                worker.End();
-                break;
+                if (!worker.End())
+                    RaiseWorkerDiscarded(worker.Pid, tool, $"it did not end within {WorkerProcess.ExitBound.TotalSeconds:0} s of its exit request, and was killed", "unknown", (0, false, "unknown", false));
+                return answer;
         }
     }
+
+    // The discard (ADR-016 6.7): the worker is killed and waited for; an owned target still running under the same
+    // identity is ended through the operating system, a borrowed one is left as it is; the pending call is answered
+    // with the session's outcome, the target's state as the operating system shows it, and the cause as the evidence
+    // shows it; the anomalies say what happened. The next drhook_launch or drhook_attach starts a fresh worker.
+    private WorkerAnswer Discard(WorkerProcess worker, string tool, string reason, string cause)
+    {
+        if (_inSession == worker) _inSession = null;
+        lock (_holding) _holding.Remove(worker);
+        string? lastState = worker.LastState;
+        worker.KillAndWait();
+        (int Pid, bool Owned, string State, bool EndedByDrHook) target = worker.EndOwnedTarget();
+        worker.Dispose();
+        RaiseWorkerDiscarded(worker.Pid, tool, reason, cause, target);
+        bool leftHeld = !target.Owned && target.State == "running" && !OperatingSystem.IsWindows()
+                        && lastState is not null && lastState.StartsWith("stopped", StringComparison.Ordinal);
+        if (leftHeld)
+            _anomalies.OnAnomaly(new EngineAnomaly(DateTimeOffset.UtcNow, AnomalyKind.TargetLeftHeld, "drhook-mcp", "Discard",
+                Observed: $"the borrowed target {target.Pid} was {lastState} when its worker was discarded",
+                Expected: "a borrowed target left running, not held",
+                Context: new Dictionary<string, string>
+                {
+                    ["pid"] = target.Pid.ToString(CultureInfo.InvariantCulture), ["lastState"] = lastState!,
+                }));
+
+        var result = new JsonObject
+        {
+            ["status"] = "workerDiscarded",
+            ["operation"] = tool,
+            ["reason"] = reason,
+            ["cause"] = cause,
+            ["workerPid"] = worker.Pid,
+        };
+        if (target.Pid != 0)
+            result["target"] = new JsonObject
+            {
+                ["pid"] = target.Pid,
+                ["owned"] = target.Owned,
+                ["state"] = target.State,
+                ["endedByDrHook"] = target.EndedByDrHook,
+                ["lastKnown"] = lastState,
+            };
+        string targetSays = target.Pid == 0 ? "The session had no target yet."
+            : target.EndedByDrHook ? $"Its target (pid {target.Pid}, owned) was ended through the operating system."
+            : target.Owned ? $"Its target (pid {target.Pid}, owned) is {target.State}."
+            : leftHeld ? $"Its target (pid {target.Pid}, borrowed) was held at a stop and is left so: on this platform it stays frozen, and cannot be debugged again until it restarts (finding 106)."
+            : $"Its target (pid {target.Pid}, borrowed) is left as it is: {target.State}.";
+        result["prompt"] = $"The debugger worker was discarded during {tool}, so the session is over: {reason}. {targetSays} " +
+                           "Drain drhook_drain_anomalies for the record. The next drhook_launch or drhook_attach starts a fresh worker.";
+        return new WorkerAnswer(result.ToJsonString(OperatorJson.Options), null, null, WorkerProcess.Discarded);
+    }
+
+    private void RaiseWorkerDiscarded(int workerPid, string tool, string reason, string cause, (int Pid, bool Owned, string State, bool EndedByDrHook) target) =>
+        _anomalies.OnAnomaly(new EngineAnomaly(DateTimeOffset.UtcNow, AnomalyKind.WorkerDiscarded, "drhook-mcp", "Discard",
+            Observed: $"the debugger worker (pid {workerPid}) running {tool} was discarded: {reason}",
+            Expected: "a worker that answers, and ends when asked (ADR-016 6.7, 6.8)",
+            Context: new Dictionary<string, string>
+            {
+                ["workerPid"] = workerPid.ToString(CultureInfo.InvariantCulture),
+                ["tool"] = tool,
+                ["reason"] = reason,
+                ["cause"] = cause,
+                ["pid"] = target.Pid.ToString(CultureInfo.InvariantCulture),
+                ["owned"] = target.Owned ? "true" : "false",
+                ["targetState"] = target.State,
+            }));
 
     private void ResetBuffers()
     {

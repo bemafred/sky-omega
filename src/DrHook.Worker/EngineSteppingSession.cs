@@ -116,6 +116,29 @@ public sealed class EngineSteppingSession : IDisposable
     /// <summary>Whether the active session launched its target (Owned) rather than attached to it.</summary>
     public bool OwnsTarget => _session?.OwnsTarget ?? false;
 
+    /// <summary>Raised as soon as the session has a target, before it runs to its breakpoint: its PID, its start time
+    /// (<see cref="DebugSession.TargetStart"/>, null on Windows) and whether the session owns it. drhook-worker tells
+    /// drhook-mcp, which needs the target's identity if it must discard the worker (ADR-016 6.7).</summary>
+    public event Action<int, long?, bool>? TargetKnown;
+
+    /// <summary>Raised from the one place where a stop is recorded (<see cref="PublishTransportSnapshot"/>): the stop, or
+    /// null when the target was released to run, and the stop's top frame when it could be read.</summary>
+    public event Action<StopInfo?, string?>? StopRecorded;
+
+    /// <summary>Why this session's debugger is lost ("DebuggerError" or "ExitNotDelivered", ADR-016 6.8), whether the
+    /// session is still open or has just ended on the loss; null while the debugger is usable.</summary>
+    public string? DebuggerLostCause =>
+        _lostCause ?? (_session is { IsDebuggerLost: true } lost ? (lost.DebuggerError is null ? "ExitNotDelivered" : "DebuggerError") : null);
+    private string? _lostCause;
+
+    /// <summary>True while the session waits for its target (a stop, or an evaluation's end); otherwise it does debugger
+    /// work. Read from any thread, for drhook-mcp's health requests (ADR-016 6.8).</summary>
+    public bool WaitingForTarget => _session?.IsWaitingForTarget ?? false;
+
+    /// <summary>The <see cref="Stopwatch"/> timestamp at which the session last started or ended a wait for its target;
+    /// 0 without a session.</summary>
+    public long WaitingChangedAt => _session?.WaitingChangedAt ?? 0;
+
     /// <summary>True while an owned target that drhook_stop left running (ADR-016 6.2) is still running: drhook_kill can
     /// end it through this session. Read from the operating system.</summary>
     public bool HoldsLeftRunningTarget
@@ -161,6 +184,16 @@ public sealed class EngineSteppingSession : IDisposable
     private void PublishTransportSnapshot(StopInfo? stop)
     {
         _lastStop = stop; // track the current stop regardless of transport state (on-demand image capture)
+        if (StopRecorded is { } recorded)
+        {
+            string? where = null;
+            if (stop is { EndsSession: false } && _session is not null)
+            {
+                try { where = _session.GetStackFrames() is { Count: > 0 } frames ? frames[0] : null; }
+                catch (Exception) { /* the stop is still recorded, without its place */ }
+            }
+            recorded(stop, where);
+        }
         if (_session is null || !_transport.IsRunning) return;
         try { _transport.PublishSnapshot(_session.CaptureState(stop, _console.Peek(), _logs.Peek(), _anomalies.Peek())); }
         catch { /* transport is best-effort; never break a debug response */ }
@@ -277,6 +310,8 @@ public sealed class EngineSteppingSession : IDisposable
             _targetPid = pid;
 
             _session = DebugSession.Attach(pid, _sink);
+            _lostCause = null;
+            TargetKnown?.Invoke(pid, _session.TargetStart, false);
             StartTransport(); // a view can now connect; it gets its first snapshot at the first stop below
             EmitHypothesis(hypothesis, HypothesisLens.Navigation); // the session's own hypothesis opens the braid
             // Setup stop: most targets break on attach (the Debugger.IsAttached transition) and we drain it. But an
@@ -370,6 +405,8 @@ public sealed class EngineSteppingSession : IDisposable
             // now owns the Process handle internally and kill-firsts on Dispose — no separate
             // _launchedProcess management here.
             _targetPid = _session.ProcessId;
+            _lostCause = null;
+            TargetKnown?.Invoke(_targetPid, _session.TargetStart, true);
 
             // Setup stop (Debugger.Break() in user code, or the attach-before-main initial stop).
             StopInfo? setup = _session.WaitForStop(TimeSpan.FromSeconds(10));
@@ -1240,6 +1277,7 @@ public sealed class EngineSteppingSession : IDisposable
         int pid = _session?.ProcessId ?? 0;
         bool owned = _session?.OwnsTarget ?? false;
         TargetExit? exit = stop.Reason == StopReason.ProcessExited ? _session?.TargetExitWithin(TargetExitWait) : null;
+        if (stop.Reason == StopReason.DebuggerLost) _lostCause = stop.DebuggerError is null ? "ExitNotDelivered" : "DebuggerError";
         // The session's last picture: exited, with how (the record was waited for just above), or debugger lost.
         // Published before the teardown, which stops the transport; the transport sends it before it closes the views.
         PublishTransportSnapshot(stop);

@@ -5,16 +5,25 @@
 //
 // To the worker:
 //   {"id":N,"tool":"drhook_...","args":{...}}   run one of the session's tools, with its arguments
+//   {"id":N,"health":true}                      answered at once, by the thread that reads stdin, even while a request runs
 //   {"exit":true}                               end: a session still open is ended as drhook_stop ends it, a target
 //                                               left running is left running; then the worker exits
 // From the worker, answers:
-//   {"id":N,"result":"<the tool's JSON>","session":S}
-//   {"id":N,"caption":"...","image":"<PNG, base64>","session":S}   for the tools that return an image (image may be absent)
-//   S is what the session is after the request: "active", "holding" (it ended and left an owned target running, which
-//   the worker holds for drhook_kill, ADR-016 6.2), or "ended".
+//   {"id":N,"result":"<the tool's JSON>","session":S[,"lost":C]}
+//   {"id":N,"caption":"...","image":"<PNG, base64>","session":S[,"lost":C]}   the tools that return an image (image may
+//                                                                             be absent)
+//   S is what the session is after the request: "active"; "holding" (it ended and left an owned target running, which
+//   the worker holds for drhook_kill, ADR-016 6.2); "ended"; or "lost": its debugger is lost, for the cause C
+//   ("DebuggerError" or "ExitNotDelivered"), and drhook-mcp discards the worker (ADR-016 6.8).
+//   {"id":N,"health":{"tool":T,"phase":P,"phaseMs":M,"requestMs":R}}   T the tool running, or absent when idle; P "idle",
+//   "waiting for the target" (a stop or an evaluation's end, each bounded by its own timeout) or "debugger work"; M how
+//   long it has been in that phase; R how long the request has run.
 // From the worker, events, as they happen:
 //   {"event":"ready","pid":N,"runtime":"...","protocol":V}
-//   {"event":"target","pid":N,"owned":B}       a session's target, once the session has one
+//   {"event":"target","pid":N,"start":T,"owned":B}   a session's target, as soon as the session has one; T its start time
+//                                                    in the OS's own unit, absent on Windows (ProcessLifetime)
+//   {"event":"state","state":"stopped"|"running"|"ended","reason":R,"where":W}   each stop the session records, and each
+//                                                    release; W the top frame of a stop, when it could be read
 //   {"event":"anomaly"|"log"|"console", ...}   each record the worker's sinks get, for drhook-mcp's drain buffers
 //   {"event":"ended","pid":N}                  the target a holding worker held has ended; the worker then exits
 //
@@ -40,6 +49,12 @@ public static class WorkerProtocol
     public const string Active = "active";
     public const string Holding = "holding";
     public const string Ended = "ended";
+    public const string Lost = "lost";
+
+    /// <summary>The phases a health answer names (ADR-016 6.8).</summary>
+    public const string Idle = "idle";
+    public const string WaitingForTarget = "waiting for the target";
+    public const string DebuggerWork = "debugger work";
 
     // ─── To the worker ───────────────────────────────────────────────────────────────────────────────────────────
 
@@ -48,25 +63,36 @@ public static class WorkerProtocol
 
     public static string Exit() => new JsonObject { ["exit"] = true }.ToJsonString();
 
+    public static string Health(long id) => new JsonObject { ["id"] = id, ["health"] = true }.ToJsonString();
+
     // ─── From the worker: answers ────────────────────────────────────────────────────────────────────────────────
 
-    public static string Result(long id, string result, string session) =>
-        new JsonObject { ["id"] = id, ["result"] = result, ["session"] = session }.ToJsonString();
+    public static string Result(long id, string result, string session, string? lost) =>
+        new JsonObject { ["id"] = id, ["result"] = result, ["session"] = session, ["lost"] = lost }.ToJsonString();
 
-    public static string ImageResult(long id, string caption, byte[]? png, string session)
+    public static string ImageResult(long id, string caption, byte[]? png, string session, string? lost)
     {
-        var answer = new JsonObject { ["id"] = id, ["caption"] = caption, ["session"] = session };
+        var answer = new JsonObject { ["id"] = id, ["caption"] = caption, ["session"] = session, ["lost"] = lost };
         if (png is not null) answer["image"] = Convert.ToBase64String(png);
         return answer.ToJsonString();
     }
+
+    public static string HealthAnswer(long id, string? tool, string phase, long phaseMs, long requestMs) => new JsonObject
+    {
+        ["id"] = id,
+        ["health"] = new JsonObject { ["tool"] = tool, ["phase"] = phase, ["phaseMs"] = phaseMs, ["requestMs"] = requestMs },
+    }.ToJsonString();
 
     // ─── From the worker: events ─────────────────────────────────────────────────────────────────────────────────
 
     public static string Ready(int pid, string runtime) =>
         new JsonObject { ["event"] = "ready", ["pid"] = pid, ["runtime"] = runtime, ["protocol"] = Version }.ToJsonString();
 
-    public static string Target(int pid, bool owned) =>
-        new JsonObject { ["event"] = "target", ["pid"] = pid, ["owned"] = owned }.ToJsonString();
+    public static string Target(int pid, long? start, bool owned) =>
+        new JsonObject { ["event"] = "target", ["pid"] = pid, ["start"] = start, ["owned"] = owned }.ToJsonString();
+
+    public static string State(string state, string? reason, string? where) =>
+        new JsonObject { ["event"] = "state", ["state"] = state, ["reason"] = reason, ["where"] = where }.ToJsonString();
 
     public static string TargetEnded(int pid) =>
         new JsonObject { ["event"] = "ended", ["pid"] = pid }.ToJsonString();

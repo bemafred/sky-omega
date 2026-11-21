@@ -61,6 +61,8 @@
         <InternalsVisibleTo Include="SkyOmega.DrHook.Engine.Tests" />
         <!-- SessionEndTest reads whether a target has ended as DebugSession.TargetHasExited does (ProcessLifetime). -->
         <InternalsVisibleTo Include="DrHook.Engine.IntegrationTests" />
+        <!-- drhook-mcp checks a discarded worker's target by its PID and start time, as DebugSession does (ADR-016 6.7). -->
+        <InternalsVisibleTo Include="drhook-mcp" />
     </ItemGroup>
 
 </Project>
