@@ -15,17 +15,26 @@ namespace SkyOmega.Mercury.Hosting.Tests;
 /// that pipe, as before. mercury and mercuryd each run as a process of their own.
 /// </summary>
 /// <remarks>
+/// <para>
 /// Both processes have the test's own stores' directory and temporary directory: <c>--store</c> names a store of the
 /// test's, and a pipe named by a name rather than a path, mercury-mcp's among them, is looked for in the test's
-/// directory, where none is. The test's data directory is not made beforehand, as for a user that has never kept data
-/// there: the account a service runs as (MercuryPaths.Store). On Windows the stores' directory is the user's, and a
-/// pipe's name is the machine's.
+/// temporary directory, where none is. The test's data directory is not made beforehand, as for a user that has never
+/// kept data there: the account a service runs as (MercuryPaths.Store). On Windows the stores' directory is the user's,
+/// and a pipe's name is the machine's.
+/// </para>
+/// <para>
+/// The temporary directory is a short one under <c>/tmp</c>, not the test's directory. A pipe named by a name is a
+/// socket in it, and a socket's path is at most 103 bytes on macOS, whose own temporary directory is already about 49
+/// (<c>/var/folders/…/T/</c>). In the test's directory under it, mercury-mcp's socket and a store's fallback socket
+/// were too long, and every test failed on macOS (CI 44892395960).
+/// </para>
 /// </remarks>
 public sealed class AttachToMercurydTests : IDisposable
 {
     private readonly TempPath _dir;
     private readonly string _name = $"s{Guid.NewGuid():N}"[..9];
     private readonly string _home;
+    private readonly string _tmp;
     private readonly string _store;
     private readonly IReadOnlyDictionary<string, string> _environment;
 
@@ -35,15 +44,24 @@ public sealed class AttachToMercurydTests : IDisposable
         _dir.MarkOwnership();
         _home = Path.Combine(_dir.FullPath, "home");
         _store = Path.Combine(_dir.FullPath, _name);
+        // Windows reads no TMPDIR: a pipe's name there is the machine's.
+        _tmp = OperatingSystem.IsWindows()
+            ? _dir.FullPath
+            : Directory.CreateDirectory(Path.Combine("/tmp", $"mercury-attach-{Guid.NewGuid():N}"[..23])).FullName;
         _environment = new Dictionary<string, string>
         {
             // The stores' directory is under HOME on macOS, and under XDG_DATA_HOME on Linux (MercuryPaths.Store).
             [OperatingSystem.IsMacOS() ? "HOME" : "XDG_DATA_HOME"] = _home,
-            ["TMPDIR"] = _dir.FullPath,
+            ["TMPDIR"] = _tmp,
         };
     }
 
-    public void Dispose() => _dir.Cleanup();
+    public void Dispose()
+    {
+        if (_tmp != _dir.FullPath)
+            Directory.Delete(_tmp, recursive: true);
+        _dir.Cleanup();
+    }
 
     private string StoreNamed => OperatingSystem.IsMacOS()
         ? Path.Combine(_home, "Library", "SkyOmega", "stores", _name)
