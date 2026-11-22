@@ -101,19 +101,19 @@ public sealed class HttpListenerLoopStopTests
         await using var loop = new HttpListenerLoop([$"http://localhost:{port}/"], (context, token) => Task.FromResult(Body));
         loop.Start();
 
-        // A socket, not an HttpClient: an HttpClient drops a pooled connection that has data on it, and so never
+        // A TCP client, not an HttpClient: an HttpClient drops a pooled connection that has data on it, and so never
         // reads what came after a HEAD's head. The request closes its connection, so the server ends it after the
         // response, and the client reads all there is. A body written for a HEAD comes after the head (Linux), or the
-        // connection is reset (Windows; both measured on 2026-11-22).
-        using var socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-        await socket.ConnectAsync(IPAddress.Loopback, port, ct);
-        await socket.SendAsync(Encoding.ASCII.GetBytes(
+        // connection is reset (Windows; both measured on 2026-11-22). It connects to the name and tries each address
+        // it resolves to, as an HTTP client does: on the CI runners the listener on "localhost" is not on 127.0.0.1
+        // (CI 44995443554: a connection to 127.0.0.1 was refused on Linux and macOS; on zbook it was not).
+        using var tcp = new TcpClient();
+        await tcp.ConnectAsync("localhost", port, ct);
+        var stream = tcp.GetStream();
+        await stream.WriteAsync(Encoding.ASCII.GetBytes(
             $"HEAD / HTTP/1.1\r\nHost: localhost:{port}\r\nConnection: close\r\n\r\n"), ct);
         var received = new MemoryStream();
-        var buffer = new byte[64 << 10];
-        int n;
-        while ((n = await socket.ReceiveAsync(buffer, SocketFlags.None, ct)) > 0)
-            received.Write(buffer, 0, n);
+        await stream.CopyToAsync(received, ct);
 
         var text = Encoding.ASCII.GetString(received.ToArray());
         var headEnd = text.IndexOf("\r\n\r\n", StringComparison.Ordinal);

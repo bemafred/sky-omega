@@ -310,7 +310,6 @@ public class ConcurrentAccessTests : IDisposable
         const int writerCount = 2;
         const int operationsPerThread = 100;
         var errors = new ConcurrentBag<Exception>();
-        var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
 
         var threads = new List<Thread>();
         var startBarrier = new Barrier(readerCount + writerCount);
@@ -324,7 +323,7 @@ public class ConcurrentAccessTests : IDisposable
                 {
                     startBarrier.SignalAndWait();
 
-                    for (int i = 0; i < operationsPerThread && !cts.Token.IsCancellationRequested; i++)
+                    for (int i = 0; i < operationsPerThread; i++)
                     {
                         store.AcquireReadLock();
                         try
@@ -363,7 +362,7 @@ public class ConcurrentAccessTests : IDisposable
                 {
                     startBarrier.SignalAndWait();
 
-                    for (int i = 0; i < operationsPerThread && !cts.Token.IsCancellationRequested; i++)
+                    for (int i = 0; i < operationsPerThread; i++)
                     {
                         store.AddCurrent(
                             $"<http://example.org/w{writerId}/new{i}>",
@@ -380,10 +379,13 @@ public class ConcurrentAccessTests : IDisposable
         }
 
         foreach (var thread in threads) thread.Start();
-        foreach (var thread in threads) thread.Join();
+        // A deadlock never ends; a slow run does. Each insert waits on disk flushes (ADR-067), and in parallel on a CI
+        // runner these operations took longer than the 30 s this test once allowed them all (CI 44995443554, Windows
+        // arm64: 37 s, and no deadlock). The bound only keeps a deadlock from hanging the run.
+        foreach (var thread in threads)
+            Assert.True(thread.Join(TimeSpan.FromMinutes(5)), "A thread did not finish in 5 minutes: a deadlock");
 
         Assert.Empty(errors);
-        Assert.False(cts.IsCancellationRequested, "Test timed out - possible deadlock");
     }
 
     [Fact]
@@ -454,8 +456,9 @@ public class ConcurrentAccessTests : IDisposable
         readerThread.Start();
         writerThread.Start();
 
-        Assert.True(readerThread.Join(TimeSpan.FromSeconds(10)), "Reader thread timed out");
-        Assert.True(writerThread.Join(TimeSpan.FromSeconds(10)), "Writer thread timed out");
+        // The bound only keeps a deadlock from hanging the run, as in MixedReadWrite_ConcurrentOperations_NoDeadlock.
+        Assert.True(readerThread.Join(TimeSpan.FromMinutes(5)), "The reader did not finish in 5 minutes: a deadlock");
+        Assert.True(writerThread.Join(TimeSpan.FromMinutes(5)), "The writer did not finish in 5 minutes: a deadlock");
 
         Assert.Empty(errors);
         Assert.Equal(1, readerCompletedCount);
