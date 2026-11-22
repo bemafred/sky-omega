@@ -121,16 +121,6 @@ public static class SparqlResultComparer
             .GroupBy(x => x.row.GetStructuralHashCode())
             .ToDictionary(g => g.Key, g => g.ToList());
 
-        // Debug: Log hash bucket distribution
-        File.AppendAllText("/tmp/compare_debug.log",
-            $"\n=== Hash Buckets ===\nExpected rows: {expected.Count}, Actual rows: {actual.Count}\n" +
-            $"Actual buckets: {actualByHash.Count}\n");
-        foreach (var bucket in actualByHash.Take(5))
-        {
-            File.AppendAllText("/tmp/compare_debug.log",
-                $"  Hash {bucket.Key}: {bucket.Value.Count} rows\n");
-        }
-
         // Track which actual rows have been matched
         var matchedActual = new bool[actual.Count];
         var bnodeMapping = new Dictionary<string, string>();
@@ -139,17 +129,6 @@ public static class SparqlResultComparer
         if (TryMatchRows(expected.Rows, 0, actualByHash, matchedActual, expected.Variables, bnodeMapping))
         {
             return null; // All rows matched
-        }
-
-        // Debug: Log which expected rows failed to match
-        File.AppendAllText("/tmp/compare_debug.log", "\n=== Unmatched Expected Rows ===\n");
-        for (int i = 0; i < expected.Count && i < 5; i++)
-        {
-            var expRow = expected.Rows[i];
-            var expHash = expRow.GetStructuralHashCode();
-            var hasMatch = actualByHash.ContainsKey(expHash);
-            File.AppendAllText("/tmp/compare_debug.log",
-                $"Expected[{i}] hash={expHash}, has_bucket={hasMatch}: {expRow}\n");
         }
 
         // Failed to find a complete matching - generate helpful error message
@@ -264,14 +243,7 @@ public static class SparqlResultComparer
             var actBinding = actual[varName];
 
             if (!BindingsMatch(expBinding, actBinding, bnodeMapping))
-            {
-                // Debug: Log which binding failed with full details
-                File.AppendAllText("/tmp/compare_debug.log",
-                    $"[COMPARE] Binding mismatch for ?{varName}:\n" +
-                    $"  Expected: Type={expBinding.Type}, Value='{expBinding.Value}', Datatype='{expBinding.Datatype}', Lang='{expBinding.Language}'\n" +
-                    $"  Actual:   Type={actBinding.Type}, Value='{actBinding.Value}', Datatype='{actBinding.Datatype}', Lang='{actBinding.Language}'\n\n");
                 return false;
-            }
         }
 
         return true;
