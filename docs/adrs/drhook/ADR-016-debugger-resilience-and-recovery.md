@@ -1186,10 +1186,14 @@ not the default.
   - It needs the target launched with `CREATE_NEW_PROCESS_GROUP`, which also disables CTRL+C in that group
     (documented for `CreateProcess`), and a sender that shares the target's console.
   - DrHook launches with `CREATE_NO_WINDOW` (`WindowsSpawn.cs`), so the target's console is not `drhook-mcp`'s.
-    Whether a helper attached to it (`AttachConsole`) can send the event is to be built and measured. Probe 112's
-    sender shared the console by construction.
-  - Until it is built, Windows has no exit request. Under 6.2 (b), `drhook_stop` there would detach and report the
-    target left running; today it kills.
+    Probe 112's sender shared the console by construction. *Measured 2026-11-22* on omega-windows ([finding 117](../../../poc/drhook-engine/findings/117-ctrl-break.md)): a
+    sender that attaches to the target's console (`AttachConsole`) delivers the event to a target launched as DrHook
+    launches it with `CREATE_NEW_PROCESS_GROUP` added, 80 of 80, and neither the sender nor its parent receives it.
+    Both ways delivered: the worker itself, off drhook-mcp's console for about 1 ms, and a helper process, about 43 ms
+    from its start to its exit. Which is built is not decided.
+  - Until it is built, Windows has no exit request: `drhook_stop` detaches and reports a running owned target left
+    running (6.2 (b), built 2026-11-20). *Corrected 2026-11-22:* this line said "today it kills", which stopped being
+    true when 6.2 (b) was built.
 - **`ControlCTrap`.**
   - Today DrHook answers `S_OK`, so the runtime counts the event as handled: a target without a handler runs on (20
     of 20), and the debugger was never lost (finding 112).
@@ -1307,7 +1311,9 @@ not the default.
 
 - Step 2's scenarios: a test run under MTP and under VSTest, and DrHook's own test host (6.1).
 - Probe 112's owned path, and `drhook_kill` itself (6.2, 6.3).
-- `S_FALSE` for `ControlCTrap`, and a CTRL+BREAK sender for a target launched with `CREATE_NO_WINDOW` (6.4).
+- `S_FALSE` for `ControlCTrap` (6.4).
+- A CTRL+BREAK sender for a target launched with `CREATE_NO_WINDOW` (6.4). Measured 2026-11-22 on omega-windows
+  ([finding 117](../../../poc/drhook-engine/findings/117-ctrl-break.md)); not on x64 or the runners.
 - A target running when its worker dies, and `DebugSetProcessKillOnExit` (6.5).
 - What holds a Windows target after a detach (6.6).
 - A worker's own start-up time (6.7). Measured 2026-11-21 on omega, omega-ubuntu and omega-windows
