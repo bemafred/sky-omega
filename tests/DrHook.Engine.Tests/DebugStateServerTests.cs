@@ -23,7 +23,9 @@ public sealed class DebugStateServerTests
         Logs: new DrainResult(Array.Empty<LogRecord>(), 0),
         Anomalies: new AnomalyDrainResult(Array.Empty<EngineAnomaly>(), 0));
 
-    private static string TempSocketPath() => $"/tmp/dh-{Guid.NewGuid():N}.sock"; // short — UDS sun_path is ~104 chars
+    // In the user's temp folder: on Windows a literal /tmp is \tmp at the root of the current drive. The name is short
+    // because a Unix socket's path may be at most 104 bytes on macOS; under the login's temp folder there this is 89.
+    private static string TempSocketPath() => Path.Combine(Path.GetTempPath(), $"dh-{Guid.NewGuid():N}.sock");
 
     private static Socket Connect(string path)
     {

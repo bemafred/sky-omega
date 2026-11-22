@@ -38,7 +38,9 @@ public sealed class DebugStateClientTests
         new ConsoleDrainResult(Array.Empty<ConsoleOutputRecord>(), 0), new DrainResult(Array.Empty<LogRecord>(), 0),
         new AnomalyDrainResult(Array.Empty<EngineAnomaly>(), 0));
 
-    private static string TempSocketPath() => $"/tmp/dh-viz-{Guid.NewGuid():N}.sock";
+    // In the user's temp folder: on Windows a literal /tmp is \tmp at the root of the current drive. The name is short
+    // because a Unix socket's path may be at most 104 bytes on macOS; under the login's temp folder there this is 93.
+    private static string TempSocketPath() => Path.Combine(Path.GetTempPath(), $"dh-viz-{Guid.NewGuid():N}.sock");
 
     [Fact]
     public async Task Client_ConnectsToServer_ReceivesSnapshotThenDeltas_AndUpdatesModel()
