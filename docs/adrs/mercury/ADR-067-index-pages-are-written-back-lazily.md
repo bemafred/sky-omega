@@ -44,7 +44,7 @@ So Mercury pays the full price of synchronous I/O for its mapped files, and does
 | One insert | 1 | 4 | 3 | 8 |
 | A batch of N quads | 1 | 4N | 3 | 4N + 4 |
 
-### What it costs (a micro-benchmark of store operations, medians; it goes into the repository with Q6's workflow)
+### What it costs (a micro-benchmark of store operations, medians: [`tools/probes/runner-flush-cost`](../../../tools/probes/runner-flush-cost/README.md))
 
 | | zbook, tmpfs | omega-windows, VM disk | zbook, ext4 |
 |---|---|---|---|
@@ -131,7 +131,9 @@ question, since a single insert still waits on eight flushes.
   with the records that use them.
 - **Q5.** Windows: what `FileOptions.WriteThrough` on a mapped file's handle does to `FlushViewOfFile` and to the
   memory manager's own writeback; measured, not assumed.
-- **Q6.** The CI runners' own flush cost, and whether Defender adds to it: measured by a workflow started by hand.
+- **Q6.** The CI runners' own flush cost, and whether Defender adds to it: measured by a workflow started by hand,
+  `.github/workflows/runner-flush-cost.yml`, with the hypotheses and their predictions in
+  [`tools/probes/runner-flush-cost`](../../../tools/probes/runner-flush-cost/README.md).
 - **Q7.** How a power loss is tested: a block device that records writes and replays them up to any point
   (dm-log-writes, as xfstests uses), or a virtual machine's disk snapshot. Mercury has neither.
 

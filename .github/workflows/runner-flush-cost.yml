@@ -1,0 +1,184 @@
+# ADR-067 Q6 (and Q5): what makes Mercury.Tests about ten times slower on the Windows runners than on the Linux runners,
+# while on omega-windows it is as fast as on zbook (limit mercury-tests-windows-duration). Started by hand only.
+# The question, the hypotheses and what each predicts: tools/probes/runner-flush-cost/README.md.
+#
+# store-ops: one store operation and each file operation under it, timed in the temporary directory as the runner is
+# set up; on the runner's other disk (D: on Windows, /mnt on Linux); with Defender's real-time protection off; and as
+# set up again, to show how much a repeat differs.
+# suite: Mercury.Tests with a time for each test (an xunit TRX report), as CI runs it and under each condition.
+name: Runner flush cost
+
+on:
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: Also run Mercury.Tests under each condition, with a time for each test
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  store-ops:
+    name: store-ops, ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: Windows x64
+            runner: windows-latest
+          - platform: Windows arm64
+            runner: windows-11-arm
+          - platform: Linux x64
+            runner: ubuntu-24.04
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Install .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: The machine, its disks, and Defender
+        run: |
+          $ErrorActionPreference = 'Continue'
+          New-Item -ItemType Directory out | Out-Null
+          & {
+            "TEMP=$env:TEMP TMP=$env:TMP TMPDIR=$env:TMPDIR GetTempPath=$([System.IO.Path]::GetTempPath()) workspace=$env:GITHUB_WORKSPACE"
+            if ($IsWindows) {
+              Get-Volume | Where-Object DriveLetter | Format-Table DriveLetter, FileSystem, DriveType, Size, SizeRemaining -AutoSize | Out-String
+              Get-PhysicalDisk | Format-Table DeviceId, FriendlyName, MediaType, BusType, Size -AutoSize | Out-String
+              Get-Partition | Format-Table DiskNumber, DriveLetter, Size -AutoSize | Out-String
+              try { Get-MpComputerStatus | Format-List AMRunningMode, AntivirusEnabled, RealTimeProtectionEnabled, OnAccessProtectionEnabled, IoavProtectionEnabled, BehaviorMonitorEnabled, IsTamperProtected | Out-String } catch { "Get-MpComputerStatus: $_" }
+              try { "Defender's excluded paths: $((Get-MpPreference).ExclusionPath -join '; ')" } catch { "Get-MpPreference: $_" }
+            } else {
+              df -hT / /tmp /mnt $env:RUNNER_TEMP
+              lsblk -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT,ROTA,MODEL
+            }
+          } *>&1 | Tee-Object -FilePath out/0-the-machine.txt
+
+      - name: store-ops, as the runner is set up
+        run: |
+          dotnet run tools/probes/runner-flush-cost/what-a-store-operation-costs.cs -- "${{ matrix.platform }}: as the runner is set up" | Tee-Object -FilePath out/1-as-set-up.md
+
+      - name: store-ops, the temporary directory on the other disk
+        run: |
+          $other = if ($IsWindows) { 'D:\' } else { '/mnt' }
+          if (-not (Test-Path $other)) { "No $other on this runner." | Tee-Object -FilePath out/2-other-disk.md; exit 0 }
+          $temp = Join-Path $other 'mops-temp'
+          if ($IsWindows) { New-Item -ItemType Directory $temp | Out-Null; $env:TEMP = $temp; $env:TMP = $temp } else { sudo mkdir -p $temp; sudo chown "$(id -u):$(id -g)" $temp; $env:TMPDIR = $temp }
+          dotnet run tools/probes/runner-flush-cost/what-a-store-operation-costs.cs -- "${{ matrix.platform }}: the temporary directory on $other" | Tee-Object -FilePath out/2-other-disk.md
+
+      # A condition that did not take must not give numbers under its name: the step fails if protection is still on,
+      # and the job goes on to the repeat.
+      - name: store-ops, Defender's real-time protection off
+        if: runner.os == 'Windows'
+        continue-on-error: true
+        run: |
+          Set-MpPreference -DisableRealtimeMonitoring $true
+          $status = Get-MpComputerStatus
+          "RealTimeProtectionEnabled=$($status.RealTimeProtectionEnabled) OnAccessProtectionEnabled=$($status.OnAccessProtectionEnabled)" | Tee-Object -FilePath out/3-defender-off.txt
+          if ($status.RealTimeProtectionEnabled) { throw "Defender's real-time protection is still on." }
+          dotnet run tools/probes/runner-flush-cost/what-a-store-operation-costs.cs -- "${{ matrix.platform }}: Defender's real-time protection off" | Tee-Object -FilePath out/3-defender-off.md
+
+      - name: store-ops, as the runner is set up, again
+        if: always()
+        run: |
+          if ($IsWindows) { try { Set-MpPreference -DisableRealtimeMonitoring $false; "RealTimeProtectionEnabled=$((Get-MpComputerStatus).RealTimeProtectionEnabled)" } catch { "Defender: $_" } }
+          dotnet run tools/probes/runner-flush-cost/what-a-store-operation-costs.cs -- "${{ matrix.platform }}: as the runner is set up, again" | Tee-Object -FilePath out/4-as-set-up-again.md
+
+      - name: Summary
+        if: always()
+        run: Get-ChildItem out -Filter *.md | Sort-Object Name | Get-Content | Add-Content $env:GITHUB_STEP_SUMMARY
+
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: store-ops-${{ matrix.runner }}
+          path: out
+
+  suite:
+    name: Mercury.Tests, ${{ matrix.platform }}, ${{ matrix.condition }}
+    if: inputs.suite
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { platform: Windows x64, runner: windows-latest, key: as-set-up, condition: as the runner is set up }
+          - { platform: Windows x64, runner: windows-latest, key: other-disk, condition: the temporary directory on D }
+          - { platform: Windows x64, runner: windows-latest, key: defender-off, condition: Defender's real-time protection off }
+          - { platform: Windows arm64, runner: windows-11-arm, key: as-set-up, condition: as the runner is set up }
+          - { platform: Windows arm64, runner: windows-11-arm, key: defender-off, condition: Defender's real-time protection off }
+          - { platform: Linux x64, runner: ubuntu-24.04, key: as-set-up, condition: as the runner is set up }
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Check out, with the W3C test suites
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Build Mercury.Tests
+        run: dotnet build tests/Mercury.Tests
+
+      - name: The condition
+        run: |
+          New-Item -ItemType Directory out | Out-Null
+          switch ('${{ matrix.key }}') {
+            'other-disk' {
+              New-Item -ItemType Directory 'D:\mops-temp' | Out-Null
+              "TEMP=D:\mops-temp" >> $env:GITHUB_ENV
+              "TMP=D:\mops-temp" >> $env:GITHUB_ENV
+            }
+            'defender-off' {
+              Set-MpPreference -DisableRealtimeMonitoring $true
+              if ((Get-MpComputerStatus).RealTimeProtectionEnabled) { throw "Defender's real-time protection is still on." }
+            }
+          }
+          & {
+            "${{ matrix.platform }}: ${{ matrix.condition }}"
+            if ($IsWindows) { "RealTimeProtectionEnabled=$((Get-MpComputerStatus).RealTimeProtectionEnabled)" }
+          } | Tee-Object -FilePath out/condition.txt
+
+      - name: Mercury.Tests, with a time for each test
+        run: |
+          "GetTempPath=$([System.IO.Path]::GetTempPath())" | Tee-Object -Append -FilePath out/condition.txt
+          $wall = [System.Diagnostics.Stopwatch]::StartNew()
+          dotnet test --project tests/Mercury.Tests --no-build --report-xunit-trx --report-xunit-trx-filename mercury-tests.trx --results-directory out
+          $status = $LASTEXITCODE
+          "Mercury.Tests: $([int]$wall.Elapsed.TotalSeconds) s, exit code $status" | Tee-Object -Append -FilePath out/condition.txt
+          exit $status
+
+      - name: The tests by time
+        if: always()
+        run: |
+          & {
+            "### ${{ matrix.platform }}: ${{ matrix.condition }}"
+            ""
+            Get-Content out/condition.txt | ForEach-Object { "- $_" }
+            ""
+            dotnet run tools/probes/runner-flush-cost/the-tests-by-time.cs -- out/mercury-tests.trx 30
+          } | Tee-Object -FilePath out/the-tests-by-time.md | Add-Content $env:GITHUB_STEP_SUMMARY
+
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: suite-${{ matrix.runner }}-${{ matrix.key }}
+          path: out
