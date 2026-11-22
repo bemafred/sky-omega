@@ -1,0 +1,23 @@
+## main...origin/main [behind 147]
+1650978f
+b71d9cce
+## HEAD (no branch)
+/home/bemafred/.dotnet/dotnet
+10.0.114
+Microsoft.NETCore.App 10.0.13 [/home/bemafred/.dotnet/shared/Microsoft.NETCore.App]
+Microsoft.NETCore.App 10.0.14 [/home/bemafred/.dotnet/shared/Microsoft.NETCore.App]
+ 05:02:37 up 15 days, 10:24,  2 users,  load average: 0.02, 0.02, 0.00
+2026-11-22T05:02:37+01:00
+platform: Ubuntu 26.04.1 LTS Arm64, .NET 10.0.14
+worker: pid 3499823, .NET 10.0.14, protocol 1
+
+health round trips, 150 per phase or more, median [min–max] ms, and the phases the worker named:
+  idle     n= 150  0.14 [0.06–2.33]  unanswered 0  phases: idle 150
+  launch   n= 150  0.10 [0.04–1.59]  unanswered 0  phases: idle 54, debugger work 39, waiting for the target 57
+  waiting  n= 150  0.14 [0.09–2.09]  unanswered 0  phases: waiting for the target 150
+  launches: 53, each stopped at its breakpoint, 42 ms median [22–84] from the request to its answer
+  the worker exited 144 ms after its exit request, sent 150 health requests into the continue's wait
+
+RESULT(0): every health request was answered, every round trip under 500 ms
+exit 0
+2026-11-22T05:03:09+01:00

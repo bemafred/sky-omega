@@ -1,0 +1,15 @@
+checkout: b71d9cce ## HEAD (no branch)
+probe start 2026-11-22T05:05:10.6861327+01:00
+platform: Microsoft Windows 10.0.26200 Arm64, .NET 10.0.15
+worker: pid 45312, .NET 10.0.15, protocol 1
+
+health round trips, 150 per phase or more, median [minΓÇômax] ms, and the phases the worker named:
+  idle     n= 150  0.17 [0.03ΓÇô17.16]  unanswered 0  phases: idle 150
+  launch   n= 152  0.07 [0.03ΓÇô0.25]  unanswered 0  phases: debugger work 72, idle 37, waiting for the target 43
+  waiting  n= 150  0.16 [0.03ΓÇô0.56]  unanswered 0  phases: waiting for the target 150
+  launches: 38, each stopped at its breakpoint, 99 ms median [63ΓÇô264] from the request to its answer
+  the worker exited 84 ms after its exit request, sent 150 health requests into the continue's wait
+
+RESULT(0): every health request was answered, every round trip under 500 ms
+exit 0
+probe end 2026-11-22T05:05:51.3124741+01:00

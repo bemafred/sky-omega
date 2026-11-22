@@ -1,0 +1,11 @@
+platform: macOS 27.0.1 Arm64, .NET 10.0.9
+worker: pid 31313, .NET 10.0.9, protocol 1
+
+health round trips, 150 per phase or more, median [min–max] ms, and the phases the worker named:
+  idle     n= 150  0.09 [0.04–2.53]  unanswered 0  phases: idle 150
+  launch   n= 158  0.07 [0.03–0.85]  unanswered 0  phases: idle 7, debugger work 143, waiting for the target 8
+  waiting  n= 150  0.07 [0.04–0.14]  unanswered 0  phases: waiting for the target 150
+  launches: 7, each stopped at its breakpoint, 587 ms median [579–652] from the request to its answer
+  the worker exited 155 ms after its exit request, sent 150 health requests into the continue's wait
+
+RESULT(0): every health request was answered, every round trip under 500 ms

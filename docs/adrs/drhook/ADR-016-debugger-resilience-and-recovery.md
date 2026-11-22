@@ -1051,7 +1051,8 @@ measurement, that measurement comes first.
   - Windows, where the SIGSTOP construction has no equivalent.
 - **The 5 s health bound is kept** (probe 116, [finding 116](../../../poc/drhook-engine/findings/116-health-round-trip.md)).
   A health request every 20 ms, 150 or more per phase, idle, during launches and while a continue waited: every one
-  answered, the longest round trip 3.32 ms, on omega-windows. omega and omega-ubuntu agree.
+  answered, the longest round trip 3.32 ms, on omega-windows. omega and omega-ubuntu agree. In the runs after the fix
+  below, 5.91 ms at most, and 17.16 ms in one Windows run with a process watcher polling beside it.
 - **The worker's end waited for a request that waits** (finding 116). The worker runs its end after the request
   running, and a `drhook_continue` that waits returns only at a stop, at the target's end, or after 2 minutes. So a
   reconnect during such a continue ended the session as `drhook_stop` does only if the target stopped or ended within
@@ -1080,6 +1081,10 @@ measurement, that measurement comes first.
 
   On omega every DrHook suite passed: DrHook.Engine.Tests 239 (3 skipped), the integration suite 35 (1 skipped),
   DrHook.Viz.Tests 74, DrHook.Wire.Tests 7, DrHook.Capture.Tests 1.
+- **Probe 116 at `b71d9cc`:** asked to exit during a continue that waits, the worker exited 155 ms after the request
+  on omega, 144 ms on omega-ubuntu, and 265 ms and 84 ms in two runs on omega-windows (finding 116). On Windows the
+  last target, detached and left running as 6.4 has it, ran on and ended by itself; no target of the run's kills was
+  left.
 
 *6.9's journal built 2026-11-21* (sky-omega, omega): the last part.
 - **Where.** `journal.ndjson` in DrHook's directory, beside the rendezvous socket, one JSON object per line,

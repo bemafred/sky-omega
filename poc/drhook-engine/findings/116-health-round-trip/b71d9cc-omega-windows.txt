@@ -1,0 +1,25 @@
+## main...origin/main [behind 83]
+05a2d8ef
+b71d9cce
+## HEAD (no branch)
+10.0.404
+
+Microsoft.AspNetCore.App 10.0.10 [C:\Program Files\dotnet\shared\Microsoft.AspNetCore.App]
+Microsoft.AspNetCore.App 10.0.15 [C:\Program Files\dotnet\shared\Microsoft.AspNetCore.App]
+Microsoft.NETCore.App 10.0.10 [C:\Program Files\dotnet\shared\Microsoft.NETCore.App]
+Microsoft.NETCore.App 10.0.15 [C:\Program Files\dotnet\shared\Microsoft.NETCore.App]
+
+2026-11-22T05:03:22.9305645+01:00
+platform: Microsoft Windows 10.0.26200 Arm64, .NET 10.0.15
+worker: pid 14692, .NET 10.0.15, protocol 1
+
+health round trips, 150 per phase or more, median [minΓÇômax] ms, and the phases the worker named:
+  idle     n= 150  0.18 [0.05ΓÇô5.91]  unanswered 0  phases: idle 150
+  launch   n= 155  0.10 [0.04ΓÇô5.64]  unanswered 0  phases: idle 35, debugger work 76, waiting for the target 44
+  waiting  n= 150  0.16 [0.07ΓÇô0.33]  unanswered 0  phases: waiting for the target 150
+  launches: 36, each stopped at its breakpoint, 101 ms median [86ΓÇô294] from the request to its answer
+  the worker exited 265 ms after its exit request, sent 150 health requests into the continue's wait
+
+RESULT(0): every health request was answered, every round trip under 500 ms
+exit 0
+2026-11-22T05:04:06.8538237+01:00

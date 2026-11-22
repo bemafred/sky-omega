@@ -34,7 +34,8 @@ public sealed class Supervisor : IDisposable
     private static readonly TimeSpan HealthEvery = TimeSpan.FromSeconds(5);
 
     /// <summary>How long a health request may go unanswered before the worker is suspected (ADR-016 6.8). The worker's
-    /// stdin thread answers it at once: within 4 ms on omega, omega-ubuntu and omega-windows (finding 116).</summary>
+    /// stdin thread answers it at once: within 6 ms on quiet machines, omega, omega-ubuntu and omega-windows, and within
+    /// 18 ms with a process watcher polling beside it (finding 116).</summary>
     private static readonly TimeSpan HealthBound = TimeSpan.FromSeconds(5);
 
     /// <summary>How long a request's debugger work may run before the worker is suspected: 6.8's bound. Waiting for the

@@ -1,10 +1,11 @@
-# Finding 116 — how long a debugger worker takes to answer a health request (ADR-016 6.8): under 4 ms, against a 5 s bound
+# Finding 116 — how long a debugger worker takes to answer a health request (ADR-016 6.8): under 20 ms, against a 5 s bound
 
-**Date:** runs and record 2026-11-21
+**Date:** runs and record 2026-11-21; the runs after the fix 2026-11-22
 **Status:** **RECORDED** on omega (macOS arm64), omega-ubuntu (Linux arm64) and omega-windows (Windows 11 arm64).
 Probe 116 ran at `e0dfa5cb`, once on each machine, each in a clean clone at that commit (RESULT(0) on each). The
-machines ran one at a time, and nothing else of ours ran on omega or its two virtual machines meanwhile. Not run:
-zbook, macbook, the six runners, x64.
+machines ran one at a time, and nothing else of ours ran on omega or its two virtual machines meanwhile. After the fix
+of what it found, it ran again at `b71d9cce`: once on each machine, and once more on omega-windows with a watcher of
+its targets (RESULT(0) on each). Not run: zbook, macbook, the six runners, x64.
 
 ADR-016 6.8 has drhook-mcp ask a worker running a request how it is every 5 s, and suspect it when the answer has not
 come within 5 s (`Supervisor.HealthBound`). The design says: "That bound is checked against the first measured round
@@ -54,7 +55,8 @@ Round trips in ms, median [min–max], and the number of answers:
 
 **The hypothesis holds.** Every health request was answered, and the longest round trip, 3.32 ms, was idle on
 omega-windows: about 1/1,500 of the 5 s bound. The bound is kept as it is: a worker whose stdin thread runs answers
-three orders of magnitude inside it, so an answer missing at 5 s means that thread is not running.
+two to three orders of magnitude inside it (17.16 ms at most in any run, below), so an answer missing at 5 s means that
+thread is not running.
 
 Earlier runs of the probe, before it counted its launches and checked their stops (the same measurement otherwise),
 agree: three on omega, longest round trips 2.24, 2.28 and 3.25 ms; one on omega-ubuntu, 2.40 ms. At `ffb78e50`, one run
@@ -103,20 +105,56 @@ continue's health request could not be sent to a worker whose stdin drhook-mcp h
 answer, so the worker was discarded and its owned target killed. That is closed too. See ADR-016, Step 7, "The end of
 a wait at the worker's end".
 
+## After the fix, at `b71d9cce`
+
+The probe is unchanged; the worker's end now cancels the continue's wait. The logs:
+[`b71d9cc-omega.txt`](116-health-round-trip/b71d9cc-omega.txt),
+[`b71d9cc-omega-ubuntu.txt`](116-health-round-trip/b71d9cc-omega-ubuntu.txt),
+[`b71d9cc-omega-windows.txt`](116-health-round-trip/b71d9cc-omega-windows.txt), and the watched Windows run,
+[`b71d9cc-omega-windows-watched.txt`](116-health-round-trip/b71d9cc-omega-windows-watched.txt) with its
+[`targets`](116-health-round-trip/b71d9cc-omega-windows-targets.csv).
+
+| Machine | Exit after the exit request | Longest round trip |
+|---|---|---|
+| omega | 155 ms | 2.53 ms, idle |
+| omega-ubuntu | 144 ms | 2.33 ms, idle |
+| omega-windows | 265 ms | 5.91 ms, idle |
+| omega-windows, watched | 84 ms | 17.16 ms, idle |
+
+No worker wrote the `EndBound` line. The hypothesis holds in all four runs.
+
+**The watched run.** A PowerShell job beside the probe listed the snapshot targets with their creation times, through
+CIM, about every half second (each listing took longer than its 250 ms sleep). That load is the likely cause of the
+17.16 ms round trip; it is not shown. What the watcher saw:
+- 17 of the run's 39 targets (38 launches and the last one). Each of the 16 seen during the launches was seen in one
+  listing only, and none was left after: `drhook_kill` ended each.
+- The last target, from the launch before the continue, was seen until 63 s after it was created. Windows has no exit
+  request yet (ADR-016 6.4), so `drhook_stop`, the worker's end, detaches and leaves an owned target running, and it
+  ran on after its worker had exited. Its end came by itself, with nothing of ours acting on it; that it came at its
+  loop's end is likely and not shown.
+
+In the first run at `b71d9cce`, one target was listed 2 s after the run and none 22 s later. In the watched run the
+last target was created 11 s before the probe's end; taking the same spacing, the first run's lived about 33 s or less.
+That is an estimate. The watched run shows which target is left, not why the two lives differ.
+
 ## Not established
 
 - zbook, macbook, the runners, and x64.
-- A loaded machine. The machines were quiet, the bound's margin is wide, and a machine loaded enough to delay the
-  stdin thread by seconds was not tried.
+- A loaded machine. The machines were quiet except in the watched run, where a CIM listing every half second
+  coincided with the longest round trip of all, 17.16 ms. The bound's margin is wide, and a machine loaded enough to
+  delay the stdin thread by seconds was not tried.
 - A worker in native debugger work that the stdin thread waits on. As read in the code, the stdin thread reads the
   engine's marks without a lock (`CallbackPump.IsWaiting` and `WaitingChangedAt` are volatile reads), and writes its
   answer under `WorkerChannel`'s lock, which the request thread and the engine's callback and console-drain threads
   hold only while each writes one line. No construction yet holds a native call, which 6.8's 30 s debugger-work bound
   also waits for.
-- What becomes of a target when its worker exits with the session not ended.
+- What becomes of a target when its worker exits with the session not ended. Since the fix that happens only when
+  debugger work, or an evaluation within its own 30 s bound, holds the end past `EndBound`.
 
 ## What this establishes
 
-On omega, omega-ubuntu and omega-windows, a worker answered every health request within 4 ms in every run and every
-phase: idle, during launches and while waiting for its target. The 5 s bound is kept. The worker's end, as built, waits for a
-running request for up to 30 s, so a reconnect during a long wait leaves its session open.
+On omega, omega-ubuntu and omega-windows, a worker answered every health request in every run and every phase (idle,
+during launches and while waiting for its target): within 6 ms on quiet machines, and within 18 ms with a process
+watcher running. The 5 s bound is kept. As first built, the worker's end waited behind a running request for up to
+30 s, so a reconnect during a long wait left its session open. Since `b71d9cce` the end cancels the wait, and the
+worker exits 84 to 265 ms after its exit request.
