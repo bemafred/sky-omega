@@ -1,12 +1,15 @@
 # Limit: Mercury.Tests takes 15 times longer on the Windows runners, close to the CI job's limit
 
-**Status:**        Triggered — 2026-11-21: Windows x64 stopped at its 90-minute limit in run 44918126706 (Mercury.Tests
-                   1 h 28 min, no test failed)
+**Status:**        Resolved — 2026-11-22, by changed circumstances: the Windows runners keep the tests' temporary
+                   directory on their local disk (`9692d087`). In run 45017477851 the Windows x64 job took 10 min
+                   (Mercury.Tests 8 min 21 s) and the arm64 job 8 min (5 min 58 s). What a write costs on a slow disk
+                   stays with ADR-067. Triggered 2026-11-21: Windows x64 stopped at its 90-minute limit in run
+                   44918126706 (Mercury.Tests 1 h 28 min, no test failed).
 **Surfaced:**      2026-11-20, from the durations of CI runs on `main` (below). sky-omega's Mercury handover noted the margin
                    the same day: Windows arm64 ran 87, 84 and 78 minutes of its 90.
 **Last reviewed:** 2026-11-22
-**Promotes to:**   [ADR-067](../adrs/mercury/ADR-067-index-pages-are-written-back-lazily.md) (Proposed), for the
-                   flushing that makes a write cost disk time; and a change to the costliest tests, for CI now.
+**Promoted to:**   [ADR-067](../adrs/mercury/ADR-067-index-pages-are-written-back-lazily.md) (Proposed), for the
+                   flushing that makes a write cost disk time.
 
 ## Description
 
@@ -79,13 +82,26 @@ Monitored by hand, from the job durations. Store tests are kept small: `05a2d8e`
   sparse file writes its whole length: a store the crash target left, under 1 MB allocated, was copied as 4.6 GB, and
   in parallel the copy failed for want of quota. Its stores now have small files.
 
+2026-11-22, the cause measured on the runners (ADR-067 Q6, above), and the runners set up for it: the tests'
+temporary directory is on D: on Windows x64, and on Windows arm64 on its NVMe disk, given a partition and mounted at
+`C:\local-disk` (`9692d087`; `.github/workflows/test.yml`, the step before the tests). CI run 45017477851, against
+the runs before it, on C:
+
+| Job | Before (runs 44995443554 to 45015387463) | 45017477851 | Mercury.Tests in it |
+|---|---|---|---|
+| Windows x64 | 27 to 36 min | 10 min | 8 min 21 s |
+| Windows arm64 | 33 to 48 min | 8 min | 5 min 58 s |
+
+Martin, 2026-11-22: "Runners are also a hosting environment for Sky Omega, albeit running the system in an unusual
+way. We note and fix issues and learn here as well."
+
 ## Candidate mitigations
 
 The measurement is done (above, 2026-11-22): the cost is the disk under the temporary directory.
 
 - **The temporary directory on the runner's local disk:** D: on Windows x64; on Windows arm64 the NVMe disk, given a
   partition and a file system by the workflow first. It changes the machine the tests run on, not Mercury, so it is no
-  behaviour flag; and it hides the cost ADR-067 is about rather than removing it. Not decided.
+  behaviour flag; and it hides the cost ADR-067 is about rather than removing it. Done (`9692d087`, below).
 - Defender: not the cost on x64 (measured); on arm64 not testable, with both drives excluded from it.
 - If tests that open many stores are the cost: fewer stores, smaller ones, or shared ones.
 - Split Mercury.Tests across Windows jobs, or raise the limit. Either buys time; neither explains it.
