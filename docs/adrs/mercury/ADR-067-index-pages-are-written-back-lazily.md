@@ -131,9 +131,18 @@ question, since a single insert still waits on eight flushes.
   with the records that use them.
 - **Q5.** Windows: what `FileOptions.WriteThrough` on a mapped file's handle does to `FlushViewOfFile` and to the
   memory manager's own writeback; measured, not assumed.
+  Measured 2026-11-22 (run 45013340358, `tools/probes/runner-flush-cost`): a new page's view flush costs about 1.5
+  times as much with `WriteThrough`, on the runners' slow C: and their fast D: alike; on Linux the same. The memory
+  manager's own writeback is not measured. On Windows .NET's view flush is `FlushViewOfFile` alone, on Linux and macOS
+  `msync(MS_SYNC)`, read in .NET 10's source.
 - **Q6.** The CI runners' own flush cost, and whether Defender adds to it: measured by a workflow started by hand,
   `.github/workflows/runner-flush-cost.yml`, with the hypotheses and their predictions in
   [`tools/probes/runner-flush-cost`](../../../tools/probes/runner-flush-cost/README.md).
+  Measured 2026-11-22 (run 45013340358): the Windows runners keep the temporary directory on C:, where a log's commit
+  costs 3.3 to 5.0 ms and one insert 16.5 to 25.5 ms; on the x64 runner's D: and on the Linux runner 0.3 and 1.5 ms.
+  Mercury.Tests on Windows x64 took 1,749 and 2,256 s on C: and 415 s on D:. Defender is not the cost on x64, where
+  its real-time protection is off as the runner is set up; on arm64 it could not be turned off, and both runners exclude
+  C:\ and D:\ from it.
 - **Q7.** How a power loss is tested: a block device that records writes and replays them up to any point
   (dm-log-writes, as xfstests uses), or a virtual machine's disk snapshot. Mercury has neither.
 

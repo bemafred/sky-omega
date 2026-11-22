@@ -1,0 +1,1 @@
+RealTimeProtectionEnabled=False OnAccessProtectionEnabled=False

@@ -33,7 +33,14 @@ temporary directory:
 - On zbook, the same commit took 208 s with the temporary directory on tmpfs (a flush costs nothing) and 1,117 s on
   ext4 (1.9 ms a flush). Twelve test classes carry 83% of the increase, `PruningTests` alone 38%.
 - On omega-windows, whose virtual disk flushes in 0.16 ms, the suite takes 3 min 35 s. Windows is not slow; the
-  runners' disks make a flush dear. Their own flush cost is not measured yet (ADR-067 Q6).
+  runners' disks make a flush dear.
+- Measured on the runners on 2026-11-22 (ADR-067 Q6, run 45013340358, `tools/probes/runner-flush-cost`): the Windows
+  runners keep the temporary directory on C:, where a log's commit costs 3.3 to 5.0 ms and one insert 16.5 to 25.5 ms.
+  On the x64 runner's D: and on the Linux runner they cost 0.3 and 1.5 ms. With the temporary directory on D:,
+  Mercury.Tests on Windows x64 took 415 s, against 1,749 and 2,256 s on C:. Defender is not the cost on x64, where its
+  real-time protection is off as the runner is set up; on arm64 it could not be turned off, and both runners exclude
+  C:\ and D:\ from it. The arm64 runner has
+  no D:; it has a local NVMe disk with no partition.
 - The step in CI on 2026-11-14 (Linux x64 5 to 10 min) is the 48 tests that ADR-061 P1 (`33e7701c`) added; the write
   path's cost did not change there.
 
@@ -74,12 +81,12 @@ Monitored by hand, from the job durations. Store tests are kept small: `05a2d8e`
 
 ## Candidate mitigations
 
-The first is a measurement; the others depend on what it shows.
+The measurement is done (above, 2026-11-22): the cost is the disk under the temporary directory.
 
-- **Measure each test's time on Windows:** Mercury.Tests with `--report-xunit-trx` on omega-windows (about 80 minutes
-  there), or the same report written in CI for Mercury.Tests and kept with each run. Then rank the tests by time, and
-  compare one store's open, commit and close on Windows and Linux.
-- If Defender's scan is the cost: exclude the runner's temporary directory from it in the workflow.
+- **The temporary directory on the runner's local disk:** D: on Windows x64; on Windows arm64 the NVMe disk, given a
+  partition and a file system by the workflow first. It changes the machine the tests run on, not Mercury, so it is no
+  behaviour flag; and it hides the cost ADR-067 is about rather than removing it. Not decided.
+- Defender: not the cost on x64 (measured); on arm64 not testable, with both drives excluded from it.
 - If tests that open many stores are the cost: fewer stores, smaller ones, or shared ones.
 - Split Mercury.Tests across Windows jobs, or raise the limit. Either buys time; neither explains it.
 - Not a candidate as it stands: a durability setting that only tests use. It would be a behaviour flag, and Martin's

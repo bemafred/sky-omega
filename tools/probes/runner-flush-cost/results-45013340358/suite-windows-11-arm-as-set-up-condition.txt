@@ -1,0 +1,4 @@
+Windows arm64: as the runner is set up
+RealTimeProtectionEnabled=True
+GetTempPath=C:\Users\runneradmin\AppData\Local\Temp\
+Mercury.Tests: 2288 s, exit code 2

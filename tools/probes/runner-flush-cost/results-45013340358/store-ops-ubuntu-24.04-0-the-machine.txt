@@ -1,0 +1,12 @@
+TEMP= TMP= TMPDIR= GetTempPath=/tmp/ workspace=/home/runner/work/sky-omega/sky-omega
+Filesystem     Type  Size  Used Avail Use% Mounted on
+/dev/root      ext4  145G   60G   85G  42% /
+/dev/root      ext4  145G   60G   85G  42% /
+/dev/root      ext4  145G   60G   85G  42% /
+/dev/root      ext4  145G   60G   85G  42% /
+NAME          SIZE TYPE FSTYPE MOUNTPOINT ROTA MODEL
+nvme0n1       150G disk                      0 MSFT NVMe Accelerator v1.0
+├─nvme0n1p1   149G part ext4   /             0 
+├─nvme0n1p14    4M part                      0 
+├─nvme0n1p15  106M part vfat   /boot/efi     0 
+└─nvme0n1p16  913M part ext4   /boot         0 

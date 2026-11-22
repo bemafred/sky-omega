@@ -1,0 +1,4 @@
+Windows x64: the temporary directory on D
+RealTimeProtectionEnabled=False
+GetTempPath=D:\mops-temp\
+Mercury.Tests: 415 s, exit code 2
