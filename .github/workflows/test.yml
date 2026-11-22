@@ -75,6 +75,35 @@ jobs:
       - name: Show .NET
         run: dotnet --info
 
+      # The tests' stores go under the temporary directory, and on the Windows runners that is on C:, where a write
+      # costs ten times what it costs on the runner's local disk: one insert 16.5 to 25.5 ms against 1.6 ms, and
+      # Mercury.Tests 29 to 38 minutes against 7 on Windows x64 (ADR-067 Q6, tools/probes/runner-flush-cost). The x64
+      # runner's local disk is D:. The arm64 runner's is an NVMe disk with no partition: it is given one and mounted
+      # as a folder on C:, so the temporary directory stays on the checkout's drive, as on x64 (a test opens a store by
+      # its path relative to the working directory, and between two drives there is none). A runner with neither keeps
+      # C:, with a warning.
+      - name: The temporary directory on the runner's local disk
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (Test-Path 'D:\') {
+            $root = 'D:\'
+          } elseif ($disk = Get-Disk | Where-Object PartitionStyle -eq 'RAW' | Select-Object -First 1) {
+            Initialize-Disk -Number $disk.Number -PartitionStyle GPT
+            $partition = New-Partition -DiskNumber $disk.Number -UseMaximumSize
+            Format-Volume -Partition $partition -FileSystem NTFS -NewFileSystemLabel 'Local disk' -Confirm:$false | Out-Null
+            $root = (New-Item -ItemType Directory 'C:\local-disk').FullName + '\'
+            Add-PartitionAccessPath -DiskNumber $disk.Number -PartitionNumber $partition.PartitionNumber -AccessPath $root
+            "$($disk.FriendlyName), $([int]($disk.Size / 1GB)) GB, mounted at $root"
+          } else {
+            "::warning::No local disk on this runner: the tests' temporary directory stays on C:, where a write is slow."
+            exit 0
+          }
+          $temp = (New-Item -ItemType Directory (Join-Path $root 'temp')).FullName
+          "TEMP=$temp" >> $env:GITHUB_ENV
+          "TMP=$temp" >> $env:GITHUB_ENV
+          "The tests' temporary directory: $temp"
+
       # global.json selects Microsoft.Testing.Platform, so this runs every test project in the solution.
       # No report switch: xunit projects take --report-xunit-trx and the MSTest projects --report-trx,
       # and a project given the other one runs nothing and exits with code 5.
