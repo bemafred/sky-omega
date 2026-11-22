@@ -1120,9 +1120,11 @@ measurement, that measurement comes first.
   skipped, POSIX-only). The log is omega-windows `C:\Users\bemafred\diag\b64-98416b5.log`, sha256
   `7623d24f…73b27507`. On omega: DrHook.Engine.Tests 239 (3 skipped), the integration suite 35 (1 skipped),
   DrHook.Viz.Tests 74, DrHook.Wire.Tests 7, DrHook.Capture.Tests 1.
+
+  CI run 45028119039, at `581c131`, passed on all six runners. On Windows x64 and Windows arm64 the integration
+  suite skipped only its three POSIX-only tests, so the tests above ran and passed on both, x64 included.
 - **Not established.** Finding 117's open items stay open: standard handles that are console handles, a sender with
-  no console or a console not its parent's, and a console event while the sender is away. The Windows runners and x64
-  are not run yet; CI runs them from the push.
+  no console or a console not its parent's, and a console event while the sender is away.
 
 *6.9's journal built 2026-11-21* (sky-omega, omega): the last part.
 - **Where.** `journal.ndjson` in DrHook's directory, beside the rendezvous socket, one JSON object per line,
@@ -1354,7 +1356,7 @@ not the default.
 - `S_FALSE` for `ControlCTrap` (6.4).
 - A CTRL+BREAK sender for a target launched with `CREATE_NO_WINDOW` (6.4). Measured 2026-11-22 on omega-windows
   ([finding 117](../../../poc/drhook-engine/findings/117-ctrl-break.md)); not on x64 or the runners. Built the same day;
-  its tests ran on omega-windows, and run on the Windows runners from the push.
+  its tests passed on omega-windows and on both Windows runners, x64 included (CI run 45028119039).
 - A target running when its worker dies, and `DebugSetProcessKillOnExit` (6.5).
 - What holds a Windows target after a detach (6.6).
 - A worker's own start-up time (6.7). Measured 2026-11-21 on omega, omega-ubuntu and omega-windows
