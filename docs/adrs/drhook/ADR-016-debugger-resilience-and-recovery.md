@@ -1086,6 +1086,44 @@ measurement, that measurement comes first.
   last target, detached and left running as 6.4 has it, ran on and ended by itself; no target of the run's kills was
   left.
 
+*Windows' exit request (6.4), built 2026-11-22* (sky-omega, omega), on Martin's decision: the worker way.
+- **The launch.** `WindowsSpawn` adds `CREATE_NEW_PROCESS_GROUP`, so a launched target roots a process group of its
+  own, whose ID is its PID.
+- **The send.** `WindowsConsoleBreak.SendTo` is finding 117's construction. The process running the session leaves its
+  console and attaches to the target's. Only once it is there does it send CTRL+BREAK to the target's group. It then
+  leaves, returns to its parent's console (drhook-worker's is drhook-mcp's) and sets its standard handles back.
+  - One send at a time per process.
+  - A step that does not go so is reported: `UnexpectedHResult`, operation `RequestExit (CTRL+BREAK by way of the
+    target's console)`.
+  - The wait for the target's end follows only an event that was sent.
+- **Which targets.** `DebugSession.ExitRequest` names the request:
+  - SIGTERM on Linux and macOS;
+  - CTRL+BREAK on Windows, for a target the session launched;
+  - none for a borrowed target, and none for an attached Windows target, whose group is not known. Windows does not
+    document what `GenerateConsoleCtrlEvent` does with a PID that roots no group.
+
+  A target with none is left running at once, as before. drhook-mcp's owned targets are all launched, so every
+  `drhook_stop` of one now sends a request. The stop's result and `TargetStuckAtDispose` name the request sent.
+- **A difference from Unix.** CTRL+BREAK also reaches the processes the target started in its group (finding 117).
+  SIGTERM reaches the target alone.
+- **Tests.** The snapshot target answers the platform's request; .NET names CTRL+BREAK `SIGQUIT`. On Windows, where
+  before a running launched target was left running:
+  - `TeardownOrderTest` runs: the target's handler found no debugger attached when the request came.
+  - `SessionEndTest`: a target that refuses CTRL+BREAK is left running, with the same record from its handler, and
+    `drhook_kill` ends it. One without a handler ends with `0xC000013A`.
+  - `TargetExitTest`: `drhook_stop` reports the target's end.
+  - `WorkerTest`: a drhook-worker sends the request, and the target ends. No anomaly of `RequestExit` reaches
+    drhook-mcp. A mutation that raised one on every send failed the test on omega. A target that refuses is left
+    running, and its handler's record shows the request came after the detach.
+
+  At `98416b5`, on omega-windows: DrHook.Engine.Tests 220 (22 skipped, POSIX-only), the integration suite 33 (3
+  skipped, POSIX-only). The log is omega-windows `C:\Users\bemafred\diag\b64-98416b5.log`, sha256
+  `7623d24f…73b27507`. On omega: DrHook.Engine.Tests 239 (3 skipped), the integration suite 35 (1 skipped),
+  DrHook.Viz.Tests 74, DrHook.Wire.Tests 7, DrHook.Capture.Tests 1.
+- **Not established.** Finding 117's open items stay open: standard handles that are console handles, a sender with
+  no console or a console not its parent's, and a console event while the sender is away. The Windows runners and x64
+  are not run yet; CI runs them from the push.
+
 *6.9's journal built 2026-11-21* (sky-omega, omega): the last part.
 - **Where.** `journal.ndjson` in DrHook's directory, beside the rendezvous socket, one JSON object per line,
   append-only. drhook-mcp is given its path, so the tests keep a journal of their own.
@@ -1190,10 +1228,12 @@ not the default.
     sender that attaches to the target's console (`AttachConsole`) delivers the event to a target launched as DrHook
     launches it with `CREATE_NEW_PROCESS_GROUP` added, 80 of 80, and neither the sender nor its parent receives it.
     Both ways delivered: the worker itself, off drhook-mcp's console for about 1 ms, and a helper process, about 43 ms
-    from its start to its exit. Which is built is not decided.
-  - Until it is built, Windows has no exit request: `drhook_stop` detaches and reports a running owned target left
+    from its start to its exit. *Decided 2026-11-22 (Martin):* the worker way, "Build the worker way." *Built
+    2026-11-22* (Step 7, "Windows' exit request").
+  - Until it was built, Windows had no exit request: `drhook_stop` detached and reported a running owned target left
     running (6.2 (b), built 2026-11-20). *Corrected 2026-11-22:* this line said "today it kills", which stopped being
-    true when 6.2 (b) was built.
+    true when 6.2 (b) was built. An attached Windows target still has none: CTRL+BREAK goes to a process group, and
+    an attached target's is not known.
 - **`ControlCTrap`.**
   - Today DrHook answers `S_OK`, so the runtime counts the event as handled: a target without a handler runs on (20
     of 20), and the debugger was never lost (finding 112).
@@ -1313,7 +1353,8 @@ not the default.
 - Probe 112's owned path, and `drhook_kill` itself (6.2, 6.3).
 - `S_FALSE` for `ControlCTrap` (6.4).
 - A CTRL+BREAK sender for a target launched with `CREATE_NO_WINDOW` (6.4). Measured 2026-11-22 on omega-windows
-  ([finding 117](../../../poc/drhook-engine/findings/117-ctrl-break.md)); not on x64 or the runners.
+  ([finding 117](../../../poc/drhook-engine/findings/117-ctrl-break.md)); not on x64 or the runners. Built the same day;
+  its tests ran on omega-windows, and run on the Windows runners from the push.
 - A target running when its worker dies, and `DebugSetProcessKillOnExit` (6.5).
 - What holds a Windows target after a detach (6.6).
 - A worker's own start-up time (6.7). Measured 2026-11-21 on omega, omega-ubuntu and omega-windows
