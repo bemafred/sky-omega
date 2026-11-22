@@ -103,10 +103,10 @@ public sealed class SparqlHttpServer : IDisposable, IAsyncDisposable
     public IReadOnlyList<string> BaseUris => _loop.BaseUris;
 
     /// <summary>
-    /// One request: the query endpoint, the update endpoint, or 404. The loop closes the response, and answers an
-    /// exception with 500.
+    /// One request: the query endpoint, the update endpoint, or 404. It returns the response's body, which the loop
+    /// writes; the loop answers an exception with 500.
     /// </summary>
-    private async Task RespondAsync(HttpListenerContext context, CancellationToken ct)
+    private async Task<byte[]> RespondAsync(HttpListenerContext context, CancellationToken ct)
     {
         var request = context.Request;
         var response = context.Response;
@@ -123,26 +123,19 @@ public sealed class SparqlHttpServer : IDisposable, IAsyncDisposable
         if (request.HttpMethod == "OPTIONS")
         {
             response.StatusCode = 204;
-            return;
+            return [];
         }
 
         var path = request.Url?.AbsolutePath ?? "/";
 
         if (path.EndsWith("/sparql/update", StringComparison.OrdinalIgnoreCase))
-        {
-            await HandleUpdateRequestAsync(request, response, ct).ConfigureAwait(false);
-        }
-        else if (path.EndsWith("/sparql", StringComparison.OrdinalIgnoreCase))
-        {
-            await HandleQueryRequestAsync(request, response, ct).ConfigureAwait(false);
-        }
-        else
-        {
-            await HttpListenerLoop.WriteErrorResponseAsync(response, 404, "Not Found", "Unknown endpoint").ConfigureAwait(false);
-        }
+            return await HandleUpdateRequestAsync(request, response, ct).ConfigureAwait(false);
+        if (path.EndsWith("/sparql", StringComparison.OrdinalIgnoreCase))
+            return await HandleQueryRequestAsync(request, response, ct).ConfigureAwait(false);
+        return HttpListenerLoop.ErrorResponse(response, 404, "Not Found", "Unknown endpoint");
     }
 
-    private async Task HandleQueryRequestAsync(HttpListenerRequest request, HttpListenerResponse response, CancellationToken ct)
+    private async Task<byte[]> HandleQueryRequestAsync(HttpListenerRequest request, HttpListenerResponse response, CancellationToken ct)
     {
         string? queryString = null;
 
@@ -167,22 +160,19 @@ public sealed class SparqlHttpServer : IDisposable, IAsyncDisposable
             }
             else
             {
-                await HttpListenerLoop.WriteErrorResponseAsync(response, 415, "Unsupported Media Type",
-                    "Expected application/x-www-form-urlencoded or application/sparql-query").ConfigureAwait(false);
-                return;
+                return HttpListenerLoop.ErrorResponse(response, 415, "Unsupported Media Type",
+                    "Expected application/x-www-form-urlencoded or application/sparql-query");
             }
         }
         else
         {
-            await HttpListenerLoop.WriteErrorResponseAsync(response, 405, "Method Not Allowed",
-                "Query endpoint accepts GET or POST").ConfigureAwait(false);
-            return;
+            return HttpListenerLoop.ErrorResponse(response, 405, "Method Not Allowed",
+                "Query endpoint accepts GET or POST");
         }
 
         if (string.IsNullOrWhiteSpace(queryString))
         {
-            await WriteServiceDescriptionAsync(request, response, ct).ConfigureAwait(false);
-            return;
+            return ServiceDescription(request, response);
         }
 
         // Determine output format from Accept header
@@ -194,9 +184,8 @@ public sealed class SparqlHttpServer : IDisposable, IAsyncDisposable
 
         if (!result.Success)
         {
-            await HttpListenerLoop.WriteErrorResponseAsync(response, 400, "Bad Request",
-                result.ErrorMessage ?? "Query execution failed").ConfigureAwait(false);
-            return;
+            return HttpListenerLoop.ErrorResponse(response, 400, "Bad Request",
+                result.ErrorMessage ?? "Query execution failed");
         }
 
         // CONSTRUCT/DESCRIBE return RDF graphs, SELECT/ASK return SPARQL results
@@ -207,8 +196,7 @@ public sealed class SparqlHttpServer : IDisposable, IAsyncDisposable
                 RdfFormat.Turtle);
             response.ContentType = RdfFormatNegotiator.GetContentType(rdfFormat);
 
-            var resultBytes = FormatGraphResult(result, rdfFormat);
-            await response.OutputStream.WriteAsync(resultBytes, ct).ConfigureAwait(false);
+            return FormatGraphResult(result, rdfFormat);
         }
         else if (result.Kind == ExecutionResultKind.Ask)
         {
@@ -217,8 +205,7 @@ public sealed class SparqlHttpServer : IDisposable, IAsyncDisposable
                 : SparqlResultFormatNegotiator.FromAcceptHeader(acceptHeader.AsSpan(), SparqlResultFormat.Json);
             response.ContentType = SparqlResultFormatNegotiator.GetContentType(format);
 
-            var resultBytes = FormatAskResult(result, format);
-            await response.OutputStream.WriteAsync(resultBytes, ct).ConfigureAwait(false);
+            return FormatAskResult(result, format);
         }
         else
         {
@@ -227,8 +214,7 @@ public sealed class SparqlHttpServer : IDisposable, IAsyncDisposable
                 : SparqlResultFormatNegotiator.FromAcceptHeader(acceptHeader.AsSpan(), SparqlResultFormat.Json);
             response.ContentType = SparqlResultFormatNegotiator.GetContentType(format);
 
-            var resultBytes = FormatSelectResult(result, format);
-            await response.OutputStream.WriteAsync(resultBytes, ct).ConfigureAwait(false);
+            return FormatSelectResult(result, format);
         }
     }
 
@@ -325,20 +311,18 @@ public sealed class SparqlHttpServer : IDisposable, IAsyncDisposable
 
     #endregion
 
-    private async Task HandleUpdateRequestAsync(HttpListenerRequest request, HttpListenerResponse response, CancellationToken ct)
+    private async Task<byte[]> HandleUpdateRequestAsync(HttpListenerRequest request, HttpListenerResponse response, CancellationToken ct)
     {
         if (request.HttpMethod != "POST")
         {
-            await HttpListenerLoop.WriteErrorResponseAsync(response, 405, "Method Not Allowed",
-                "Update endpoint accepts POST only").ConfigureAwait(false);
-            return;
+            return HttpListenerLoop.ErrorResponse(response, 405, "Method Not Allowed",
+                "Update endpoint accepts POST only");
         }
 
         if (!_options.EnableUpdates)
         {
-            await HttpListenerLoop.WriteErrorResponseAsync(response, 403, "Forbidden",
-                "Updates are disabled on this endpoint").ConfigureAwait(false);
-            return;
+            return HttpListenerLoop.ErrorResponse(response, 403, "Forbidden",
+                "Updates are disabled on this endpoint");
         }
 
         string? updateString = null;
@@ -357,16 +341,14 @@ public sealed class SparqlHttpServer : IDisposable, IAsyncDisposable
         }
         else
         {
-            await HttpListenerLoop.WriteErrorResponseAsync(response, 415, "Unsupported Media Type",
-                "Expected application/x-www-form-urlencoded or application/sparql-update").ConfigureAwait(false);
-            return;
+            return HttpListenerLoop.ErrorResponse(response, 415, "Unsupported Media Type",
+                "Expected application/x-www-form-urlencoded or application/sparql-update");
         }
 
         if (string.IsNullOrWhiteSpace(updateString))
         {
-            await HttpListenerLoop.WriteErrorResponseAsync(response, 400, "Bad Request",
-                "Missing update parameter").ConfigureAwait(false);
-            return;
+            return HttpListenerLoop.ErrorResponse(response, 400, "Bad Request",
+                "Missing update parameter");
         }
 
         var store = _storeFactory();
@@ -377,17 +359,12 @@ public sealed class SparqlHttpServer : IDisposable, IAsyncDisposable
             response.StatusCode = 200;
             response.ContentType = "application/json";
 
-            var responseBytes = Encoding.UTF8.GetBytes($"{{\"success\":true,\"affected\":{result.AffectedCount}}}");
-            await response.OutputStream.WriteAsync(responseBytes, ct).ConfigureAwait(false);
+            return Encoding.UTF8.GetBytes($"{{\"success\":true,\"affected\":{result.AffectedCount}}}");
         }
-        else
-        {
-            await HttpListenerLoop.WriteErrorResponseAsync(response, 400, "Bad Request",
-                result.ErrorMessage ?? "Update failed").ConfigureAwait(false);
-        }
+        return HttpListenerLoop.ErrorResponse(response, 400, "Bad Request", result.ErrorMessage ?? "Update failed");
     }
 
-    private async Task WriteServiceDescriptionAsync(HttpListenerRequest request, HttpListenerResponse response, CancellationToken ct)
+    private byte[] ServiceDescription(HttpListenerRequest request, HttpListenerResponse response)
     {
         response.ContentType = "text/turtle";
         response.StatusCode = 200;
@@ -438,8 +415,7 @@ public sealed class SparqlHttpServer : IDisposable, IAsyncDisposable
         sb.AppendLine("    sd:resultFormat <http://www.w3.org/ns/formats/N-Triples> ;");
         sb.AppendLine("    sd:resultFormat <http://www.w3.org/ns/formats/RDF_XML> .");
 
-        var bytes = Encoding.UTF8.GetBytes(sb.ToString());
-        await response.OutputStream.WriteAsync(bytes, ct).ConfigureAwait(false);
+        return Encoding.UTF8.GetBytes(sb.ToString());
     }
 
     private static string? ParseFormParameter(string body, string name)

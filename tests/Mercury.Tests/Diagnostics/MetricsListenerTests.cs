@@ -471,21 +471,23 @@ public class MetricsListenerTests : IDisposable
             stateEmissionInterval: TimeSpan.FromMilliseconds(50));
 
         int producerInvocations = 0;
+        using var firedTwice = new System.Threading.ManualResetEventSlim();
         jsonl.RegisterStateProducer(l =>
         {
-            System.Threading.Interlocked.Increment(ref producerInvocations);
             l.OnRssState(new RssState(DateTimeOffset.UtcNow, 1024, 512));
+            if (System.Threading.Interlocked.Increment(ref producerInvocations) >= 2)
+                firedTwice.Set();
         });
 
-        // Wait for the timer to fire several times.
-        System.Threading.Thread.Sleep(300);
+        // The ticks run on the thread pool, which a machine running many tests at once delays past any fixed wait
+        // (Mercury.Tests in parallel on zbook, 2026-11-21: no tick in 300 ms). So the test waits for the second tick,
+        // and the bound only keeps a timer that never fires from hanging it.
+        Assert.True(firedTwice.Wait(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken),
+            $"expected 2 timer fires within 30 s; saw {producerInvocations}");
         // Dispose, not Flush: the 50 ms timer keeps writing, and a record written after the rewind below lands at
         // position 0 over the start of an older one. After Dispose the listener writes nothing, even from a tick
         // already running.
         jsonl.Dispose();
-
-        Assert.True(producerInvocations >= 2,
-            $"expected at least 2 timer fires in 300ms; saw {producerInvocations}");
 
         buffer.Position = 0;
         using var reader = new StreamReader(buffer, leaveOpen: true);

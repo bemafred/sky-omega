@@ -203,7 +203,7 @@ public class AtomStoreMetricsTests : IDisposable
     }
 
     [Fact]
-    public async Task RegisterAll_FromQuadStore_EmitsAllThreeStateRecordsViaTimer()
+    public void RegisterAll_FromQuadStore_EmitsAllThreeStateRecordsViaTimer()
     {
         var dir = Path.Combine(_testDir, "register_all");
         Directory.CreateDirectory(dir);
@@ -216,7 +216,14 @@ public class AtomStoreMetricsTests : IDisposable
 
         for (int i = 0; i < 30; i++) store.AddCurrent("s" + i, "p", "o" + i);
 
-        await Task.Delay(250, TestContext.Current.CancellationToken);
+        // The producers run in the order they were registered, so once this one has run, the store's have run in the
+        // same tick. The ticks run on the thread pool, which a machine running many tests at once delays past any
+        // fixed wait (Mercury.Tests in parallel on zbook, 2026-11-22: no record in 250 ms); the bound only keeps a
+        // timer that never fires from hanging the test.
+        using var ticked = new ManualResetEventSlim();
+        jsonl.RegisterStateProducer(_ => ticked.Set());
+        Assert.True(ticked.Wait(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken),
+            "expected a timer tick within 30 s");
         // Dispose, not Flush: the 50 ms timer keeps writing, and a record written after the rewind below lands at
         // position 0 over the start of an older one. After Dispose the listener writes nothing, even from a tick
         // already running.

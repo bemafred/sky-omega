@@ -83,9 +83,10 @@ public sealed class SolidServer : IDisposable, IAsyncDisposable
     public string BaseUri => _loop.BaseUris[0];
 
     /// <summary>
-    /// One request, routed by its path and method. The loop closes the response, and answers an exception with 500.
+    /// One request, routed by its path and method. It returns the response's body, which the loop writes; the loop
+    /// answers an exception with 500.
     /// </summary>
-    private async Task RespondAsync(HttpListenerContext context, CancellationToken ct)
+    private async Task<byte[]> RespondAsync(HttpListenerContext context, CancellationToken ct)
     {
         var request = context.Request;
         var response = context.Response;
@@ -103,24 +104,18 @@ public sealed class SolidServer : IDisposable, IAsyncDisposable
         if (request.HttpMethod == "OPTIONS")
         {
             response.StatusCode = 204;
-            return;
+            return [];
         }
 
         var path = request.Url?.AbsolutePath ?? "/";
 
         // Route to SPARQL endpoints if enabled
         if (_options.EnableSparql && path.EndsWith("/sparql", StringComparison.OrdinalIgnoreCase))
-        {
-            await HandleSparqlRequestAsync(request, response, ct).ConfigureAwait(false);
-            return;
-        }
+            return SparqlRequest(response);
 
         if (_options.EnableSparql && _options.EnableSparqlUpdate &&
             path.EndsWith("/sparql/update", StringComparison.OrdinalIgnoreCase))
-        {
-            await HandleSparqlUpdateRequestAsync(request, response, ct).ConfigureAwait(false);
-            return;
-        }
+            return SparqlUpdateRequest(response);
 
         // Extract resource URI from path
         var resourceUri = BaseUri.TrimEnd('/') + path;
@@ -133,27 +128,9 @@ public sealed class SolidServer : IDisposable, IAsyncDisposable
 
         switch (request.HttpMethod)
         {
+            // A HEAD is answered as a GET: the loop sends the body's length, and not the body.
             case "GET":
-                if (resourceUri.EndsWith("/"))
-                {
-                    result = await _containerHandler.HandleGetAsync(
-                        resourceUri,
-                        agentWebId,
-                        request.Headers["Accept"],
-                        ct);
-                }
-                else
-                {
-                    result = await _resourceHandler.HandleGetAsync(
-                        resourceUri,
-                        agentWebId,
-                        request.Headers["Accept"],
-                        ct);
-                }
-                break;
-
             case "HEAD":
-                // Same as GET but don't send body
                 if (resourceUri.EndsWith("/"))
                 {
                     result = await _containerHandler.HandleGetAsync(
@@ -170,17 +147,6 @@ public sealed class SolidServer : IDisposable, IAsyncDisposable
                         request.Headers["Accept"],
                         ct);
                 }
-                // Clear body for HEAD
-                result = new ResourceResult
-                {
-                    StatusCode = result.StatusCode,
-                    StatusDescription = result.StatusDescription,
-                    ContentType = result.ContentType,
-                    ETag = result.ETag,
-                    LastModified = result.LastModified,
-                    LinkHeader = result.LinkHeader,
-                    Body = null // No body for HEAD
-                };
                 break;
 
             case "PUT":
@@ -227,16 +193,14 @@ public sealed class SolidServer : IDisposable, IAsyncDisposable
                 break;
 
             default:
-                await HttpListenerLoop.WriteErrorResponseAsync(response, 405, "Method Not Allowed",
-                    $"Method {request.HttpMethod} not supported").ConfigureAwait(false);
-                return;
+                return HttpListenerLoop.ErrorResponse(response, 405, "Method Not Allowed",
+                    $"Method {request.HttpMethod} not supported");
         }
 
-        // Send response
-        await SendResourceResultAsync(response, result, ct).ConfigureAwait(false);
+        return ResourceResponse(response, result);
     }
 
-    private async Task SendResourceResultAsync(HttpListenerResponse response, ResourceResult result, CancellationToken ct)
+    private static byte[] ResourceResponse(HttpListenerResponse response, ResourceResult result)
     {
         response.StatusCode = result.StatusCode;
         response.StatusDescription = result.StatusDescription ?? "OK";
@@ -266,15 +230,9 @@ public sealed class SolidServer : IDisposable, IAsyncDisposable
         }
 
         if (result.ErrorMessage != null)
-        {
-            await HttpListenerLoop.WriteErrorResponseAsync(response, result.StatusCode, result.StatusDescription ?? "Error", result.ErrorMessage).ConfigureAwait(false);
-            return;
-        }
+            return HttpListenerLoop.ErrorResponse(response, result.StatusCode, result.StatusDescription ?? "Error", result.ErrorMessage);
 
-        if (result.Body != null && result.Body.Length > 0)
-        {
-            await response.OutputStream.WriteAsync(result.Body, ct).ConfigureAwait(false);
-        }
+        return result.Body ?? [];
     }
 
     private string? ExtractAgentWebId(HttpListenerRequest request)
@@ -304,20 +262,17 @@ public sealed class SolidServer : IDisposable, IAsyncDisposable
         return null;
     }
 
-    private async Task HandleSparqlRequestAsync(HttpListenerRequest request, HttpListenerResponse response, CancellationToken ct)
+    private static byte[] SparqlRequest(HttpListenerResponse response)
     {
         // Delegate to SPARQL endpoint handling
         // This is a simplified implementation - real implementation would use SparqlHttpServer
 
-        await HttpListenerLoop.WriteErrorResponseAsync(response, 501, "Not Implemented",
-            "SPARQL endpoint not yet implemented - use dedicated SparqlHttpServer").ConfigureAwait(false);
+        return HttpListenerLoop.ErrorResponse(response, 501, "Not Implemented",
+            "SPARQL endpoint not yet implemented - use dedicated SparqlHttpServer");
     }
 
-    private async Task HandleSparqlUpdateRequestAsync(HttpListenerRequest request, HttpListenerResponse response, CancellationToken ct)
-    {
-        await HttpListenerLoop.WriteErrorResponseAsync(response, 501, "Not Implemented",
-            "SPARQL Update endpoint not yet implemented").ConfigureAwait(false);
-    }
+    private static byte[] SparqlUpdateRequest(HttpListenerResponse response) =>
+        HttpListenerLoop.ErrorResponse(response, 501, "Not Implemented", "SPARQL Update endpoint not yet implemented");
 
     public void Dispose() => _loop.Dispose();
 

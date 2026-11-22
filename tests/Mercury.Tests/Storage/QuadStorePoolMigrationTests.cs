@@ -8,6 +8,7 @@ namespace SkyOmega.Mercury.Tests.Storage;
 /// <summary>
 /// Tests for QuadStorePool flat-store auto-migration.
 /// </summary>
+[Collection(Infrastructure.CrossProcessStoreGateUsers.Name)] // its pools take slots of the gate
 public class QuadStorePoolMigrationTests : IDisposable
 {
     private readonly string _tempDir;

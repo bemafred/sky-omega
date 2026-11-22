@@ -4,7 +4,7 @@
                    1 h 28 min, no test failed)
 **Surfaced:**      2026-11-20, from the durations of CI runs on `main` (below). sky-omega's Mercury handover noted the margin
                    the same day: Windows arm64 ran 87, 84 and 78 minutes of its 90.
-**Last reviewed:** 2026-11-21
+**Last reviewed:** 2026-11-22
 **Promotes to:**   [ADR-067](../adrs/mercury/ADR-067-index-pages-are-written-back-lazily.md) (Proposed), for the
                    flushing that makes a write cost disk time; and a change to the costliest tests, for CI now.
 
@@ -60,6 +60,17 @@ out. Candidates, none measured:
 
 Monitored by hand, from the job durations. Store tests are kept small: `05a2d8e` shrank tests of 100,000 quads to
 7,000 after a timeout.
+
+2026-11-22, two changes for CI now; ADR-067 stays open for the cause:
+
+- `PruningTests.LargeTransfer_BatchesCorrectly` transfers 2,550 quads, not 25,000 (`041af4dc`): 337 s to 30 s on
+  zbook's ext4.
+- Mercury.Tests runs in parallel. It had run one test at a time since 2026-01-26 (`7c9975f4`), a stop-gap for a stack
+  overflow that ADR-011 removed the same day. Measured in parallel, 0 failures: zbook 81 to 89 s on tmpfs (208 s
+  serially) and 316 s on ext4 (1,117 s serially); omega-windows 73 and 83 s (215 s serially). Seven tests failed only
+  in parallel, each for a reason of its own, and were fixed first. One of them found that on Windows a copy of a
+  sparse file writes its whole length: a store the crash target left, under 1 MB allocated, was copied as 4.6 GB, and
+  in parallel the copy failed for want of quota. Its stores now have small files.
 
 ## Candidate mitigations
 

@@ -8,6 +8,7 @@ namespace SkyOmega.Mercury.Tests.Storage;
 /// <summary>
 /// Tests for pruning workflow via QuadStorePool Switch pattern.
 /// </summary>
+[Collection(Infrastructure.CrossProcessStoreGateUsers.Name)] // its pools take slots of the gate
 public class QuadStorePoolPruneTests : IDisposable
 {
     private QuadStorePool? _pool;

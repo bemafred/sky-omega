@@ -366,6 +366,13 @@ The order follows the dependencies (ADR-064's rule).
        and `QuadStore.Dispose` takes no lock.
      - Now the HTTP loop stops taking requests, answers 503 to one that comes meanwhile, waits for the responses in
        progress, and only then stops the listener. The pipe waits for each session's command.
+     - On Windows the listener's stop resets every connection http.sys still holds, and a client loses what it has
+       not yet read (measured 2026-11-22, after Mercury.Tests run in parallel found it). The loop now writes every body
+       with its length, and a response written once the stop has begun closes its connection, which http.sys then
+       closes gracefully. A response written before the stop began can still be lost on Windows:
+       [limit](../../limits/http-stop-resets-keep-alive-connections-on-windows.md).
+     - The stop closes the listener, and does not stop it: on Linux and macOS a Close after a Stop binds the port again,
+       and the disposal after a stop threw when the port was taken.
      - The bound is the service manager's (D8). The Generic Host waits for a stop past its own shutdown timeout
        (measured), and a service manager that stops waiting kills the process, which the next open recovers from
        (ADR-058).

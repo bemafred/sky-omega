@@ -11,8 +11,9 @@ namespace SkyOmega.Mercury.Sparql.Protocol;
 
 /// <summary>
 /// An <see cref="HttpListener"/> on one or more base URIs and the loop that accepts their requests. Each request goes
-/// to the server's respond function, which the loop does not wait for before it accepts the next. An exception the
-/// function lets out is answered with 500, and the response is closed after the function either way.
+/// to the server's respond function, which the loop does not wait for before it accepts the next. The function sets the
+/// response's status and headers and returns its body, and the loop writes the body and closes the response. An
+/// exception the function lets out is answered with 500.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -23,11 +24,19 @@ namespace SkyOmega.Mercury.Sparql.Protocol;
 /// A stop lets the responses in progress finish before the listener stops (ADR-065 D3): what they read is closed
 /// after the stop, mercuryd's store among it.
 /// </para>
+/// <para>
+/// Every body is written with its length, and a response written once the stop has begun closes its connection. On
+/// Windows the listener's stop resets every connection http.sys still holds, and its client loses what it has not yet
+/// read; http.sys closes a connection gracefully only after a response that has a length and closes it, and the stop
+/// does not reset that one (measured on omega-windows, 2026-11-22). A response written before the stop began keeps its
+/// connection, and on Windows the stop can still take it from a client that has not read it
+/// (<c>docs/limits/http-stop-resets-keep-alive-connections-on-windows.md</c>).
+/// </para>
 /// </remarks>
 internal sealed class HttpListenerLoop : IDisposable, IAsyncDisposable
 {
     private readonly HttpListener _listener;
-    private readonly Func<HttpListenerContext, CancellationToken, Task> _respond;
+    private readonly Func<HttpListenerContext, CancellationToken, Task<byte[]>> _respond;
     private readonly HashSet<Task> _responding = [];
     private readonly CancellationTokenSource _disposing = new();
     private Task? _acceptTask;
@@ -36,9 +45,10 @@ internal sealed class HttpListenerLoop : IDisposable, IAsyncDisposable
 
     /// <param name="baseUris">The URIs to listen on, at least one (e.g., "http://localhost:8080/"). A trailing slash
     /// is added to one that has none, and a URI given twice is listened on once.</param>
-    /// <param name="respond">Writes the response to one request. The loop closes the response after it. Its token is
-    /// cancelled when the loop is disposed, not when it stops.</param>
-    public HttpListenerLoop(IEnumerable<string> baseUris, Func<HttpListenerContext, CancellationToken, Task> respond)
+    /// <param name="respond">Sets the status and headers of the response to one request, and returns its body, which
+    /// the loop writes (for a HEAD request, the loop sends its length and not the body). Its token is cancelled when
+    /// the loop is disposed, not when it stops.</param>
+    public HttpListenerLoop(IEnumerable<string> baseUris, Func<HttpListenerContext, CancellationToken, Task<byte[]>> respond)
     {
         ArgumentNullException.ThrowIfNull(baseUris);
         BaseUris = baseUris
@@ -81,13 +91,19 @@ internal sealed class HttpListenerLoop : IDisposable, IAsyncDisposable
     }
 
     /// <summary>
-    /// Stops taking requests, waits for the responses in progress, then stops the listener and waits for the loop to
-    /// end. A request that comes while the responses finish is answered 503.
+    /// Stops taking requests, waits for the responses in progress, then closes the listener and waits for the loop to
+    /// end. A request that comes while the responses finish is answered 503. A stopped loop is not started again.
     /// </summary>
     /// <remarks>
     /// The listener's stop ends the responses it has not finished: a write after it throws ObjectDisposedException,
-    /// and the client gets an empty response (measured on zbook, 2026-11-21). So they finish first. The wait has no
-    /// bound of its own: the bound is the service manager's, which then kills the process (ADR-065 D3).
+    /// and the client gets an empty response (measured on zbook, 2026-11-21). So they finish first, and each closes its
+    /// connection, which on Windows keeps the stop from resetting it (the class's remarks). The wait has no bound of
+    /// its own: the bound is the service manager's, which then kills the process (ADR-065 D3).
+    /// <para>
+    /// The listener is closed, not stopped. On Linux and macOS a listener's Close after its Stop looks each prefix up
+    /// again and binds its port to do so, and throws if the port is not free at that moment (measured on zbook,
+    /// 2026-11-22), so a disposal after the stop could throw. A closed listener's Close does nothing.
+    /// </para>
     /// </remarks>
     public async Task StopAsync()
     {
@@ -102,7 +118,7 @@ internal sealed class HttpListenerLoop : IDisposable, IAsyncDisposable
         }
         await Task.WhenAll(inProgress).ConfigureAwait(false);
 
-        _listener.Stop();
+        _listener.Close();
         await _acceptTask.ConfigureAwait(false);
     }
 
@@ -117,9 +133,8 @@ internal sealed class HttpListenerLoop : IDisposable, IAsyncDisposable
             }
             catch (Exception) when (_stopping)
             {
-                // A stop reaches this wait as the listener's exception, and which one depends on when the stop
-                // came: a wait pending at Stop throws ObjectDisposedException, and a wait begun after Stop
-                // throws InvalidOperationException (Linux and macOS).
+                // A stop reaches this wait as the listener's exception, whichever it is: the close ends a wait
+                // pending at it, and a wait begun after it throws.
                 break;
             }
 
@@ -142,46 +157,61 @@ internal sealed class HttpListenerLoop : IDisposable, IAsyncDisposable
 
     private async Task RespondAsync(HttpListenerContext context)
     {
+        byte[] body;
         try
         {
-            await _respond(context, _disposing.Token).ConfigureAwait(false);
+            body = await _respond(context, _disposing.Token).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
-            try
-            {
-                await WriteErrorResponseAsync(context.Response, 500, "Internal Server Error", ex.Message).ConfigureAwait(false);
-            }
-            catch
-            {
-                // The response may already be written or its connection gone
-            }
+            body = ErrorResponse(context.Response, 500, "Internal Server Error", ex.Message);
         }
-        finally
-        {
-            context.Response.Close();
-        }
+        await WriteAsync(context, body).ConfigureAwait(false);
     }
 
     // A request that came while the stop waits for the responses in progress.
-    private static async Task RefuseAsync(HttpListenerContext context)
+    private async Task RefuseAsync(HttpListenerContext context)
     {
+        byte[] body;
         try
         {
-            await WriteErrorResponseAsync(context.Response, 503, "Service Unavailable", "The server is stopping.").ConfigureAwait(false);
-            context.Response.Close();
+            body = ErrorResponse(context.Response, 503, "Service Unavailable", "The server is stopping.");
         }
-        catch
+        catch (ObjectDisposedException)
         {
-            // The listener stopped, and ended the response
+            // The stop stopped the listener meanwhile, and it ended the response
+            return;
+        }
+        await WriteAsync(context, body).ConfigureAwait(false);
+    }
+
+    // The body, with its length, and once the stop has begun the connection's close after it (the class's remarks).
+    private async Task WriteAsync(HttpListenerContext context, byte[] body)
+    {
+        var response = context.Response;
+        try
+        {
+            if (_stopping)
+                response.KeepAlive = false;
+            response.ContentLength64 = body.Length;
+            if (context.Request.HttpMethod != "HEAD")
+                await response.OutputStream.WriteAsync(body, _disposing.Token).ConfigureAwait(false);
+            response.Close();
+        }
+        catch (Exception)
+        {
+            // The client is gone, or the listener stopped or was disposed: the response cannot be written, and its
+            // connection is ended. The stop waits for this task, so nothing is let out of it.
+            response.Abort();
         }
     }
 
     /// <summary>
-    /// The error response both servers send: the status, and a JSON body with the status description and the message.
+    /// The error response both servers send: sets the status, and returns a JSON body with the status description and
+    /// the message.
     /// </summary>
-    public static async Task WriteErrorResponseAsync(HttpListenerResponse response, int statusCode,
-        string statusDescription, string message)
+    public static byte[] ErrorResponse(HttpListenerResponse response, int statusCode, string statusDescription,
+        string message)
     {
         response.StatusCode = statusCode;
         response.StatusDescription = statusDescription;
@@ -194,8 +224,7 @@ internal sealed class HttpListenerLoop : IDisposable, IAsyncDisposable
             .Replace("\r", "\\r")
             .Replace("\t", "\\t");
 
-        var bytes = Encoding.UTF8.GetBytes($"{{\"error\":\"{statusDescription}\",\"message\":\"{escapedMessage}\"}}");
-        await response.OutputStream.WriteAsync(bytes).ConfigureAwait(false);
+        return Encoding.UTF8.GetBytes($"{{\"error\":\"{statusDescription}\",\"message\":\"{escapedMessage}\"}}");
     }
 
     public void Dispose()

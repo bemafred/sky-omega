@@ -59,9 +59,12 @@ public sealed class PipeServerStartAndStopTests
             await using var client = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
             await client.ConnectAsync(5000, ct);
             using var reader = new StreamReader(client, new UTF8Encoding(false), detectEncodingFromByteOrderMarks: false, leaveOpen: true);
-            await using var writer = new StreamWriter(client, new UTF8Encoding(false), leaveOpen: true) { AutoFlush = true };
             await ReadUntil(reader, "test> ", ct);
-            await writer.WriteLineAsync(":stats".AsMemory(), ct);
+            // The writer is closed once the command is written. The session's end breaks the pipe, and a writer
+            // disposed after it flushes into the broken pipe and throws (omega-windows, Mercury.Tests in parallel,
+            // 2026-11-22).
+            await using (var writer = new StreamWriter(client, new UTF8Encoding(false), leaveOpen: true) { AutoFlush = true })
+                await writer.WriteLineAsync(":stats".AsMemory(), ct);
             await inProgress.Task.WaitAsync(ct);
 
             var stopping = server.StopAsync();

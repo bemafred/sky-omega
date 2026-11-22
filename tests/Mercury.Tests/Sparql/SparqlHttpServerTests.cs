@@ -12,16 +12,14 @@ using Xunit;
 namespace SkyOmega.Mercury.Tests.Sparql;
 
 /// <summary>
-/// Tests for SPARQL HTTP Server.
-/// Note: These tests require HttpListener which may need admin privileges on some platforms.
-/// Tests are skipped if the port is unavailable.
+/// Tests for SPARQL HTTP Server, each on a port of its own that the system gave as free. A server that does not start
+/// fails its test.
 /// </summary>
 public class SparqlHttpServerTests : IDisposable
 {
     private readonly string _testDir;
     private readonly QuadStore _store;
-    private readonly int _port;
-    private static int _portCounter = 18080;
+    private readonly int _port = FreePort();
 
     public SparqlHttpServerTests()
     {
@@ -35,9 +33,6 @@ public class SparqlHttpServerTests : IDisposable
         _store.AddCurrent("<http://example.org/alice>", "<http://xmlns.com/foaf/0.1/age>", "\"30\"^^<http://www.w3.org/2001/XMLSchema#integer>");
         _store.AddCurrent("<http://example.org/alice>", "<http://xmlns.com/foaf/0.1/knows>", "<http://example.org/bob>");
         _store.AddCurrent("<http://example.org/bob>", "<http://xmlns.com/foaf/0.1/name>", "\"Bob\"");
-
-        // Use unique port for each test class instance
-        _port = System.Threading.Interlocked.Increment(ref _portCounter);
     }
 
     public void Dispose()
@@ -46,20 +41,20 @@ public class SparqlHttpServerTests : IDisposable
         TempPath.SafeCleanup(_testDir);
     }
 
-    private bool TryStartServer(out SparqlHttpServer server, SparqlHttpServerOptions? options = null)
+    private SparqlHttpServer StartServer(SparqlHttpServerOptions? options = null)
     {
-        try
-        {
-            server = new SparqlHttpServer(_store, $"http://localhost:{_port}/", options);
-            server.Start();
-            return true;
-        }
-        catch (HttpListenerException)
-        {
-            // Port unavailable or insufficient privileges
-            server = null!;
-            return false;
-        }
+        var server = new SparqlHttpServer(_store, $"http://localhost:{_port}/", options);
+        server.Start();
+        return server;
+    }
+
+    private static int FreePort()
+    {
+        var listener = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        listener.Stop();
+        return port;
     }
 
     #region Server Lifecycle Tests
@@ -98,11 +93,7 @@ public class SparqlHttpServerTests : IDisposable
     [Fact]
     public async Task QueryEndpoint_SelectQuery_ReturnsJsonResults()
     {
-        if (!TryStartServer(out var server))
-        {
-            // Skip if can't bind to port
-            return;
-        }
+        var server = StartServer();
 
         try
         {
@@ -129,10 +120,7 @@ public class SparqlHttpServerTests : IDisposable
     [Fact]
     public async Task QueryEndpoint_AskQuery_ReturnsBooleanResult()
     {
-        if (!TryStartServer(out var server))
-        {
-            return;
-        }
+        var server = StartServer();
 
         try
         {
@@ -157,10 +145,7 @@ public class SparqlHttpServerTests : IDisposable
     [Fact]
     public async Task QueryEndpoint_PostFormEncoded_Works()
     {
-        if (!TryStartServer(out var server))
-        {
-            return;
-        }
+        var server = StartServer();
 
         try
         {
@@ -184,10 +169,7 @@ public class SparqlHttpServerTests : IDisposable
     [Fact]
     public async Task QueryEndpoint_PostDirectQuery_Works()
     {
-        if (!TryStartServer(out var server))
-        {
-            return;
-        }
+        var server = StartServer();
 
         try
         {
@@ -210,10 +192,7 @@ public class SparqlHttpServerTests : IDisposable
     [Fact]
     public async Task QueryEndpoint_NoQuery_ReturnsServiceDescription()
     {
-        if (!TryStartServer(out var server))
-        {
-            return;
-        }
+        var server = StartServer();
 
         try
         {
@@ -238,10 +217,7 @@ public class SparqlHttpServerTests : IDisposable
     [Fact]
     public async Task QueryEndpoint_InvalidQuery_Returns400()
     {
-        if (!TryStartServer(out var server))
-        {
-            return;
-        }
+        var server = StartServer();
 
         try
         {
@@ -269,10 +245,7 @@ public class SparqlHttpServerTests : IDisposable
     [Fact]
     public async Task QueryEndpoint_AcceptXml_ReturnsXml()
     {
-        if (!TryStartServer(out var server))
-        {
-            return;
-        }
+        var server = StartServer();
 
         try
         {
@@ -298,10 +271,7 @@ public class SparqlHttpServerTests : IDisposable
     [Fact]
     public async Task QueryEndpoint_AcceptCsv_ReturnsCsv()
     {
-        if (!TryStartServer(out var server))
-        {
-            return;
-        }
+        var server = StartServer();
 
         try
         {
@@ -328,10 +298,7 @@ public class SparqlHttpServerTests : IDisposable
     [Fact]
     public async Task UpdateEndpoint_DisabledByDefault_Returns403()
     {
-        if (!TryStartServer(out var server))
-        {
-            return;
-        }
+        var server = StartServer();
 
         try
         {
@@ -355,10 +322,7 @@ public class SparqlHttpServerTests : IDisposable
     public async Task UpdateEndpoint_WhenEnabled_Works()
     {
         var options = new SparqlHttpServerOptions { EnableUpdates = true };
-        if (!TryStartServer(out var server, options))
-        {
-            return;
-        }
+        var server = StartServer(options);
 
         try
         {
@@ -385,10 +349,7 @@ public class SparqlHttpServerTests : IDisposable
     public async Task UpdateEndpoint_GetMethod_Returns405()
     {
         var options = new SparqlHttpServerOptions { EnableUpdates = true };
-        if (!TryStartServer(out var server, options))
-        {
-            return;
-        }
+        var server = StartServer(options);
 
         try
         {
@@ -412,10 +373,7 @@ public class SparqlHttpServerTests : IDisposable
     [Fact]
     public async Task CorsHeaders_EnabledByDefault()
     {
-        if (!TryStartServer(out var server))
-        {
-            return;
-        }
+        var server = StartServer();
 
         try
         {
@@ -437,10 +395,7 @@ public class SparqlHttpServerTests : IDisposable
     public async Task CorsHeaders_CanBeDisabled()
     {
         var options = new SparqlHttpServerOptions { EnableCors = false };
-        if (!TryStartServer(out var server, options))
-        {
-            return;
-        }
+        var server = StartServer(options);
 
         try
         {
@@ -461,10 +416,7 @@ public class SparqlHttpServerTests : IDisposable
     [Fact]
     public async Task OptionsRequest_Returns204()
     {
-        if (!TryStartServer(out var server))
-        {
-            return;
-        }
+        var server = StartServer();
 
         try
         {
@@ -489,10 +441,7 @@ public class SparqlHttpServerTests : IDisposable
     [Fact]
     public async Task UnknownEndpoint_Returns404()
     {
-        if (!TryStartServer(out var server))
-        {
-            return;
-        }
+        var server = StartServer();
 
         try
         {
@@ -512,10 +461,7 @@ public class SparqlHttpServerTests : IDisposable
     [Fact]
     public async Task UnsupportedMediaType_Returns415()
     {
-        if (!TryStartServer(out var server))
-        {
-            return;
-        }
+        var server = StartServer();
 
         try
         {
@@ -540,10 +486,7 @@ public class SparqlHttpServerTests : IDisposable
     [Fact]
     public async Task QueryEndpoint_ConstructQuery_ReturnsTurtle()
     {
-        if (!TryStartServer(out var server))
-        {
-            return;
-        }
+        var server = StartServer();
 
         try
         {
@@ -568,10 +511,7 @@ public class SparqlHttpServerTests : IDisposable
     [Fact]
     public async Task QueryEndpoint_DescribeQuery_ReturnsTurtle()
     {
-        if (!TryStartServer(out var server))
-        {
-            return;
-        }
+        var server = StartServer();
 
         try
         {
@@ -599,10 +539,7 @@ public class SparqlHttpServerTests : IDisposable
     [Fact]
     public async Task QueryEndpoint_ConstructQuery_AcceptNTriples_ReturnsNTriples()
     {
-        if (!TryStartServer(out var server))
-        {
-            return;
-        }
+        var server = StartServer();
 
         try
         {
@@ -630,10 +567,7 @@ public class SparqlHttpServerTests : IDisposable
     [Fact]
     public async Task QueryEndpoint_ConstructQuery_AcceptRdfXml_ReturnsRdfXml()
     {
-        if (!TryStartServer(out var server))
-        {
-            return;
-        }
+        var server = StartServer();
 
         try
         {
@@ -661,10 +595,7 @@ public class SparqlHttpServerTests : IDisposable
     [Fact]
     public async Task QueryEndpoint_ConstructQuery_DefaultAccept_ReturnsTurtle()
     {
-        if (!TryStartServer(out var server))
-        {
-            return;
-        }
+        var server = StartServer();
 
         try
         {

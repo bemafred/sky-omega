@@ -22,6 +22,7 @@ namespace SkyOmega.Mercury.Tests.Infrastructure;
 /// isolated gates with different max values.
 /// </para>
 /// </remarks>
+[Collection(CrossProcessStoreGateUsers.Name)]
 public class CrossProcessStoreGateTests
 {
     [Fact]
@@ -349,4 +350,16 @@ public class CrossProcessStoreGateTests
         // Global slots should be released
         Assert.Equal(0, pool.GlobalSlotsHeld);
     }
+}
+
+/// <summary>
+/// The test classes that take slots of <see cref="CrossProcessStoreGate.Instance"/>, or count them. Its slots are one
+/// set for the machine, so these classes run one at a time: otherwise a slot one of them releases can go to another,
+/// and a count includes the others' slots (Mercury.Tests in parallel on omega-windows, 2026-11-22: the waiter of
+/// <c>Singleton_ReleaseUnblocksWaiter</c> did not get the slot released for it). They run beside every other test.
+/// </summary>
+[CollectionDefinition(Name)]
+public sealed class CrossProcessStoreGateUsers
+{
+    public const string Name = "The cross-process store gate";
 }

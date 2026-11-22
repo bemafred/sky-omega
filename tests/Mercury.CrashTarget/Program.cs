@@ -48,7 +48,12 @@ var delayMs = args.Length > 4 ? int.Parse(args[4], System.Globalization.CultureI
 if (mode is "periods-first" or "periods-killed")
 {
     var clock = new SuppliedClock { Reading = Periods.Reading(1) };
-    var periods = new QuadStore(storePath, null, null, new StorageOptions { Clock = clock });
+    // Small files, as in the stores of states-first: the tests copy this store.
+    var periods = new QuadStore(storePath, null, null, new StorageOptions
+    {
+        Clock = clock, IndexInitialSizeBytes = 1L << 20, AtomDataInitialSizeBytes = 1L << 20,
+        AtomOffsetInitialCapacity = 1L << 16, AtomHashTableInitialCapacity = 1L << 16,
+    });
     Say("opened");
 
     if (mode == "periods-first")
@@ -88,7 +93,14 @@ if (mode is "periods-first" or "periods-killed")
 
 if (mode is "states-first" or "states-killed")
 {
-    var states = new QuadStore(storePath, null, null, new StorageOptions { Profile = Enum.Parse<StoreProfile>(tag) });
+    // Small files: the tests copy this store, and on Windows a copy of a sparse file writes its whole length
+    // (omega-windows, 2026-11-22: a 1 GB index file with 0.1 MB allocated became 1,024 MB; a store with the default
+    // sizes became 4.6 GB, and in parallel the copy failed for want of quota).
+    var states = new QuadStore(storePath, null, null, new StorageOptions
+    {
+        Profile = Enum.Parse<StoreProfile>(tag), IndexInitialSizeBytes = 1L << 20, AtomDataInitialSizeBytes = 1L << 20,
+        AtomOffsetInitialCapacity = 1L << 16, AtomHashTableInitialCapacity = 1L << 16,
+    });
     Say("opened");
 
     if (mode == "states-first")
