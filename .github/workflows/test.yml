@@ -1,6 +1,7 @@
 # Builds the solution and runs every test project on each platform Sky Omega supports.
 # The five machines in STATISTICS.md cover macOS arm64, Linux x64 and arm64, and Windows arm64;
-# these runners add Windows x64 and macOS x64, and a second Linux distribution version.
+# these runners add Windows x64 and macOS x64, and a second Linux distribution version. Linux x64 runs with /tmp in
+# memory, as a personal Linux machine does.
 # A separate job checks that SkyOmega.sln lists every ADR in docs/adrs.
 name: Build and test
 
@@ -60,6 +61,16 @@ jobs:
           - platform: Windows arm64
             runner: windows-11-arm
     steps:
+      # /tmp as a personal Linux machine has it: Ubuntu 26.04 makes it a tmpfs of half the RAM (systemd's tmp.mount).
+      # The runners' /tmp is on their disk, so no run saw that a default store's disk budget does not fit there. A clone
+      # must build and pass its tests on such a machine with no preparation. The size and options are elite's /tmp:
+      # half of its 7.3 GiB. One runner is enough to see it; Linux arm64 keeps /tmp on its disk.
+      - name: /tmp in memory, as on a personal Linux machine
+        if: matrix.runner == 'ubuntu-24.04'
+        run: |
+          sudo mount -t tmpfs -o mode=1777,strictatime,nosuid,nodev,size=3801320k,nr_inodes=1m tmpfs /tmp
+          findmnt /tmp
+
       - name: Check out, with the W3C test suites
         uses: actions/checkout@v4
         with:
