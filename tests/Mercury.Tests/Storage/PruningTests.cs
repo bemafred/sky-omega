@@ -360,8 +360,11 @@ public class PruningTests : IDisposable
     {
         CreateStores();
 
-        // Add many quads
-        const int count = 25_000;
+        // 26 batches of the transfer, the last one partial (50 quads), which the transfer commits on its own. What is
+        // tested is the batches, not the number of quads: each quad written costs a flush of each index file per page
+        // write, and 25,000 quads in batches of 1,000 took 337 s with the temporary directory on a disk (zbook, ext4,
+        // 2026-11-21; 3.7 s on tmpfs), and never had a partial last batch (ADR-067).
+        const int count = 2_550;
         _source!.BeginBatch();
         for (int i = 0; i < count; i++)
         {
@@ -369,8 +372,7 @@ public class PruningTests : IDisposable
         }
         _source.CommitBatch();
 
-        // Transfer with small batch size
-        var options = new TransferOptions { BatchSize = 1000 };
+        var options = new TransferOptions { BatchSize = 100 };
         var transfer = new PruningTransfer(_source, _target!, options);
         var result = transfer.Execute();
 
