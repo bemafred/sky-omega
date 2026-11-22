@@ -3,9 +3,10 @@
 // drhook-mcp's supervisor runs every session in a drhook-worker of its own, and relays the session's tools to it over
 // the worker's stdin and stdout. These tests drive the supervisor as drhook-mcp's tools do, with the worker this
 // suite's build carries in worker/ beside drhook-mcp: a session through a worker, whose records reach drhook-mcp's
-// drain buffers; a target that ends before its breakpoint; drhook-mcp ending with a session open; a target
-// drhook_stop left running, held by its worker and killed through it; and a worker that stops answering, discarded. The session's own logic keeps its tests in
-// this process (SessionEndTest and the others drive EngineSteppingSession directly).
+// drain buffers; a target that ends before its breakpoint; drhook-mcp ending with a session open, at a stop and during
+// a continue that waits; a target drhook_stop left running, held by its worker and killed through it; and a worker that
+// stops answering, discarded. The session's own logic keeps its tests in this process (SessionEndTest and the others
+// drive EngineSteppingSession directly).
 
 using System;
 using System.Diagnostics;
@@ -131,6 +132,56 @@ public sealed class WorkerTest
             supervisor.Dispose(); // drhook-mcp's end: the worker's stdin closes
 
             Assert.IsTrue(Ended(worker, TimeSpan.FromSeconds(10)), $"The worker {worker} should exit once drhook-mcp has ended.");
+            if (!OperatingSystem.IsWindows())
+            {
+                // As drhook_stop ends it: detached, then asked to exit; the target has no SIGTERM handler, so it ends.
+                var waited = Stopwatch.StartNew();
+                while (ProcessLifetime.HasEnded(pid, start!.Value) != true && waited.Elapsed < TimeSpan.FromSeconds(5)) Thread.Sleep(50);
+                Assert.AreEqual(true, ProcessLifetime.HasEnded(pid, start.Value), $"The target {pid} should have ended with its session.");
+            }
+        }
+        finally
+        {
+            supervisor.Dispose();
+            if (pid != 0) { try { Process.GetProcessById(pid).Kill(entireProcessTree: true); } catch { /* already gone */ } }
+        }
+    }
+
+    [TestMethod]
+    public async Task DrHookMcpEnding_DuringAContinueThatWaits_EndsTheWait_ThenTheSessionAsStopDoes()
+    {
+        // Finding 116: the worker's end ran after the request running, so a continue that waited held it until the
+        // target stopped, ended, or the worker's 30 s EndBound passed. Meanwhile drhook-mcp's health request for the
+        // continue, 5 s after it began, could not be sent to a worker whose stdin drhook-mcp had closed, so the worker
+        // was suspected and discarded: killed, and its owned target with it. Now the continue's wait is cancelled at the
+        // end: the continue answers so, nothing is discarded, and the session ends as drhook_stop ends it.
+        string targetDll = IntegrationTargetPaths.SnapshotTargetDll();
+        string source = IntegrationTargetPaths.SnapshotTargetSource();
+        var supervisor = new Supervisor(WorkerDirectory, _journal);
+        int pid = 0;
+        try
+        {
+            string launch = (await supervisor.CallAsync("drhook_launch", Launch(targetDll, source, "SNAPSHOT_HERE"), CancellationToken.None)).Result!;
+            using (JsonDocument doc = JsonDocument.Parse(launch)) pid = doc.RootElement.GetProperty("pid").GetInt32();
+            long? start = ProcessLifetime.StartOf(pid); // null on Windows
+            int worker = supervisor.SessionWorkerPid!.Value;
+
+            // No breakpoint left, so the continue waits for a stop that does not come.
+            await supervisor.CallAsync("drhook_break_clear", new JsonObject(), CancellationToken.None);
+            Task<WorkerAnswer> continuing = supervisor.CallAsync("drhook_continue", new JsonObject { ["hypothesis"] = "no stop comes", ["waitForBreakpoint"] = true }, CancellationToken.None);
+            await Task.Delay(1000);
+            Assert.IsFalse(continuing.IsCompleted, "The continue should still wait: no breakpoint is left.");
+
+            var clock = Stopwatch.StartNew();
+            supervisor.Dispose(); // drhook-mcp's end: the worker's stdin closes
+
+            Assert.IsTrue(Ended(worker, TimeSpan.FromSeconds(10)), $"The worker {worker} should exit once drhook-mcp has ended.");
+            TestContext.WriteLine($"the worker exited {clock.ElapsedMilliseconds} ms after drhook-mcp's end");
+            string continued = (await continuing.WaitAsync(TimeSpan.FromSeconds(30))).Result!;
+            StringAssert.Contains(continued, "The wait for a stop was cancelled", $"continue: {continued}");
+            Assert.IsFalse(File.Exists(_journal), $"Nothing is discarded or killed, so nothing is journaled: {(File.Exists(_journal) ? File.ReadAllText(_journal) : "")}");
+            string anomalies = supervisor.DrainAnomaliesAsJson();
+            Assert.IsFalse(anomalies.Contains("\"WorkerSuspected\"", StringComparison.Ordinal), $"anomalies: {anomalies}");
             if (!OperatingSystem.IsWindows())
             {
                 // As drhook_stop ends it: detached, then asked to exit; the target has no SIGTERM handler, so it ends.

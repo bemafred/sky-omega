@@ -12,9 +12,10 @@
 //      or release as the session records it. A health request is answered at once, by the thread that reads stdin:
 //      the tool running, and whether the session waits for its target or does debugger work (ADR-016 6.8).
 //   3. ending: on drhook-mcp's exit request, or when its stdin ends (drhook-mcp is gone), or on SIGTERM, SIGINT or
-//      SIGHUP. A session still open is ended as drhook_stop ends it; a target drhook_stop left running is left running
-//      (ADR-016 6.2's open rule, unchanged). The worker then exits. If the request it is running does not let the end
-//      happen within EndBound, the worker exits anyway.
+//      SIGHUP. A request waiting for its target to stop (a launch or attach to its breakpoint, a continue, a step) is
+//      ended first: its wait is cancelled (finding 116). A session still open is then ended as drhook_stop ends it; a
+//      target drhook_stop left running is left running (ADR-016 6.2's open rule, unchanged). The worker then exits. If
+//      the request it is running does not let the end happen within EndBound, the worker exits anyway.
 //   4. holding: after a drhook_stop that left an owned target running, the worker stays, debugging nothing, so that
 //      drhook_kill can still end that target through the session (KillLeftRunningTarget). When the target ends, the
 //      worker says so and exits.
@@ -41,8 +42,12 @@ namespace SkyOmega.DrHook.Worker
 {
     internal sealed class WorkerLife(WorkerChannel channel, EngineSteppingSession session)
     {
-        /// <summary>How long the end may wait for the request that is running: 6.8's bound for debugger work.</summary>
+        /// <summary>How long the end may wait for the request that is running: 6.8's bound for debugger work. A wait for
+        /// the target to stop is cancelled at the end and does not count against it.</summary>
         private static readonly TimeSpan EndBound = TimeSpan.FromSeconds(30);
+
+        /// <summary>Cancelled when the end is asked for; every request is given it (SessionTools).</summary>
+        private readonly CancellationTokenSource _ending = new();
 
         private readonly BlockingCollection<Action> _requests = new();
         private readonly ManualResetEventSlim _endAsked = new(false);
@@ -136,7 +141,7 @@ namespace SkyOmega.DrHook.Worker
         {
             ToolAnswer answer;
             _running = new Running(tool, Stopwatch.GetTimestamp());
-            try { answer = SessionTools.Run(session, tool, args); }
+            try { answer = SessionTools.Run(session, tool, args, _ending.Token); }
             catch (Exception ex) { answer = new ToolAnswer(OperatorJson.Error($"{tool} failed in the debugger worker: {ex.GetType().Name}: {ex.Message}")); }
             finally { _running = null; }
 
@@ -165,8 +170,10 @@ namespace SkyOmega.DrHook.Worker
             _endAsked.Set();
         }
 
+        // The request running, if it waits for its target, is ended first, so that the end queued after it runs.
         private void AskEnd(string reason)
         {
+            _ending.Cancel();
             Queue(() => End(reason));
             _endAsked.Set();
         }

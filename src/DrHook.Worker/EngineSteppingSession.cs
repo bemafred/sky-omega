@@ -204,16 +204,19 @@ public sealed class EngineSteppingSession : IDisposable
     // fill them again each time.
     private static readonly TimeSpan RunningNotice = TimeSpan.FromMilliseconds(250);
 
-    /// <summary>Wait for the resumed target's next stop, as <see cref="DebugSession.WaitForStop"/> does, and tell the
-    /// views that it runs when it has not stopped again within <see cref="RunningNotice"/>. Without this a view
-    /// keeps showing the stop the target left, for as long as the target runs. The running snapshot reads no target
-    /// state: no frame is walked, and the breakpoints and their counts are the debugger's own records.</summary>
-    private StopInfo? WaitForStopShowingRunning(TimeSpan budget)
+    /// <summary>Wait for the resumed target's next stop, as <see cref="DebugSession.WaitForStop(TimeSpan, CancellationToken)"/>
+    /// does, and tell the views that it runs when it has not stopped again within <see cref="RunningNotice"/>. Without
+    /// this a view keeps showing the stop the target left, for as long as the target runs. The running snapshot reads
+    /// no target state: no frame is walked, and the breakpoints and their counts are the debugger's own records.
+    /// This is the wait whose length the target sets (a launch or attach to its breakpoint, a continue, a step), so it
+    /// is the one the request's token ends: the worker cancels it when its end is asked for (ADR-016 6.7, finding 116),
+    /// and the request fails with <see cref="OperationCanceledException"/>'s message.</summary>
+    private StopInfo? WaitForStopShowingRunning(TimeSpan budget, CancellationToken ct)
     {
-        StopInfo? stop = _session!.WaitForStop(RunningNotice);
+        StopInfo? stop = _session!.WaitForStop(RunningNotice, ct);
         if (stop is not null) return stop;
         PublishTransportSnapshot(null);
-        return _session.WaitForStop(budget - RunningNotice);
+        return _session.WaitForStop(budget - RunningNotice, ct);
     }
 
     /// <summary>Render the CURRENT debug-state to a PNG (drhook_snapshot_image): capture the live state, map it to
@@ -347,7 +350,7 @@ public sealed class EngineSteppingSession : IDisposable
 
             _lastStop = null; // released — no current stop until the next one arrives
             _session.Resume();
-            StopInfo? stop = WaitForStopShowingRunning(TimeSpan.FromMinutes(2));
+            StopInfo? stop = WaitForStopShowingRunning(TimeSpan.FromMinutes(2), ct);
             if (stop is null) return Task.FromResult(Error("Timed out waiting for the breakpoint to hit."));
             if (stop.EndsSession)
                 return Task.FromResult(RenderSessionEnd("attach", stop,
@@ -432,7 +435,7 @@ public sealed class EngineSteppingSession : IDisposable
 
             _lastStop = null; // released — no current stop until the next one arrives
             _session.Resume();
-            StopInfo? stop = WaitForStopShowingRunning(TimeSpan.FromMinutes(2));
+            StopInfo? stop = WaitForStopShowingRunning(TimeSpan.FromMinutes(2), ct);
             if (stop is null) { CleanupSession(); return Task.FromResult(Error("Timed out waiting for the breakpoint to hit.")); }
             if (stop.EndsSession)
                 return Task.FromResult(RenderSessionEnd("launch", stop,
@@ -671,9 +674,9 @@ public sealed class EngineSteppingSession : IDisposable
 
     // ─── Step operations ──────────────────────────────────────────────────────────────────────
 
-    public Task<string> StepOverAsync(string? hypothesis, CancellationToken ct) => StepOperation("stepOver", s => s.StepOver(), hypothesis);
-    public Task<string> StepIntoAsync(string? hypothesis, CancellationToken ct) => StepOperation("stepIn", s => s.StepInto(), hypothesis);
-    public Task<string> StepOutAsync(string? hypothesis, CancellationToken ct)  => StepOperation("stepOut", s => s.StepOut(), hypothesis);
+    public Task<string> StepOverAsync(string? hypothesis, CancellationToken ct) => StepOperation("stepOver", s => s.StepOver(), hypothesis, ct);
+    public Task<string> StepIntoAsync(string? hypothesis, CancellationToken ct) => StepOperation("stepIn", s => s.StepInto(), hypothesis, ct);
+    public Task<string> StepOutAsync(string? hypothesis, CancellationToken ct)  => StepOperation("stepOut", s => s.StepOut(), hypothesis, ct);
 
     public Task<string> ContinueAsync(string? hypothesis, bool waitForBreakpoint, CancellationToken ct)
     {
@@ -694,7 +697,7 @@ public sealed class EngineSteppingSession : IDisposable
                     ["prompt"] = "Process resumed without waiting. Use drhook_pause to interrupt or drhook_continue with waitForBreakpoint=true to block on a stop."
                 }));
             }
-            StopInfo? stop = WaitForStopShowingRunning(TimeSpan.FromMinutes(2));
+            StopInfo? stop = WaitForStopShowingRunning(TimeSpan.FromMinutes(2), ct);
             if (stop is null) return Task.FromResult(Error("Timed out waiting for a stop."));
 
             // The debuggee can run to completion during continue (e.g. a suspend=none logpoint that
@@ -756,7 +759,7 @@ public sealed class EngineSteppingSession : IDisposable
         catch (Exception ex) { return Task.FromResult(Error($"Pause failed: {ex.Message}")); }
     }
 
-    private Task<string> StepOperation(string operationName, Action<DebugSession> step, string? hypothesis)
+    private Task<string> StepOperation(string operationName, Action<DebugSession> step, string? hypothesis, CancellationToken ct)
     {
         if (_session is null) return Task.FromResult(Error("No active stepping session. Use drhook_launch or drhook_attach first."));
         EmitHypothesis(hypothesis, HypothesisLens.Navigation);
@@ -765,7 +768,7 @@ public sealed class EngineSteppingSession : IDisposable
             _stepCount++;
             _lastStop = null; // released — no current stop until the step completes
             step(_session);
-            StopInfo? stop = WaitForStopShowingRunning(TimeSpan.FromMinutes(2));
+            StopInfo? stop = WaitForStopShowingRunning(TimeSpan.FromMinutes(2), ct);
             if (stop is null) return Task.FromResult(Error("Step did not complete within budget."));
             if (stop.EndsSession)
                 return Task.FromResult(RenderSessionEnd(operationName, stop,

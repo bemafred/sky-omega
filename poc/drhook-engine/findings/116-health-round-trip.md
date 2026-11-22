@@ -97,6 +97,12 @@ that waits for a target which neither stops nor ends within 30 s leaves the sess
 `ContinueAsync`'s cancellation token is not observed by its wait, and the worker passes `none`. This is recorded for a
 decision; nothing is changed here.
 
+**Decided 2026-11-22 (Martin), and built the same day:** the worker's end cancels the wait of the request it runs, and
+the session then ends as `drhook_stop` ends it. Building it showed a second gap at drhook-mcp's end: the pending
+continue's health request could not be sent to a worker whose stdin drhook-mcp had just closed, and was read as no
+answer, so the worker was discarded and its owned target killed. That is closed too. See ADR-016, Step 7, "The end of
+a wait at the worker's end".
+
 ## Not established
 
 - zbook, macbook, the runners, and x64.

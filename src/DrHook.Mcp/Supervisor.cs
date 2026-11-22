@@ -51,6 +51,12 @@ public sealed class Supervisor : IDisposable
     private WorkerProcess? _inSession;
     private readonly List<WorkerProcess> _holding = new();
 
+    // Set at drhook-mcp's end (Dispose), which closes each worker's stdin. After it nothing a worker does is read as its
+    // failure: a request still pending is not asked for health (the request could not be sent) and its answer is
+    // returned as it comes, the worker neither kept, held nor discarded. Each worker ends its session by itself, as
+    // drhook_stop ends it (finding 116).
+    private volatile bool _ended;
+
     /// <summary>A supervisor whose workers start from <paramref name="workerDirectory"/>, where drhook-worker is built
     /// (worker/ in drhook-mcp's own directory), and which journals its discards and kills in
     /// <paramref name="journalPath"/> (journal.ndjson in DrHook's directory, ADR-016 6.9).</summary>
@@ -148,7 +154,7 @@ public sealed class Supervisor : IDisposable
         {
             if (await Task.WhenAny(pending, Task.Delay(HealthEvery)) == pending) return await pending;
             JsonNode? health = await worker.HealthAsync(HealthBound);
-            if (pending.IsCompleted) return await pending;
+            if (pending.IsCompleted || _ended) return await pending;
             string? suspicion = health is null
                 ? $"it did not answer a health request within {HealthBound.TotalSeconds:0} s"
                 : (string?)health["phase"] == WorkerProtocol.DebuggerWork && (long?)health["phaseMs"] > DebuggerWorkBound.TotalMilliseconds
@@ -170,6 +176,7 @@ public sealed class Supervisor : IDisposable
     // exit, or it is discarded (its debugger is lost, or it ended before it answered). Returns the answer to give.
     private WorkerAnswer Settle(WorkerProcess worker, string tool, WorkerAnswer answer)
     {
+        if (_ended) return answer;
         switch (answer.Session)
         {
             case WorkerProtocol.Active:
@@ -401,6 +408,7 @@ public sealed class Supervisor : IDisposable
     /// worker still running then ends by itself.</summary>
     public void Dispose()
     {
+        _ended = true;
         List<WorkerProcess> workers;
         lock (_holding)
         {

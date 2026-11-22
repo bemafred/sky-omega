@@ -88,7 +88,7 @@ public sealed class CallbackPumpTests
         // A breakpoint hit must NOT be auto-continued — the worker parks at the stop.
         pump.OnCallback(CallbackKind.BreakpointHit, "Breakpoint", 0, 0x1234, 0);
 
-        StopInfo? stop = pump.WaitForStop(TimeSpan.FromSeconds(2));
+        StopInfo? stop = pump.WaitForStop(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
         Assert.NotNull(stop);
         Assert.Equal(StopReason.Breakpoint, stop!.Reason);
         Assert.Equal(0, Volatile.Read(ref continues));      // parked — not resumed
@@ -112,7 +112,7 @@ public sealed class CallbackPumpTests
 
         // Park at a stop carrying a specific thread pointer, then step.
         pump.OnCallback(CallbackKind.BreakpointHit, "Breakpoint", 0, 0xABCD, 0);
-        Assert.NotNull(pump.WaitForStop(TimeSpan.FromSeconds(2)));
+        Assert.NotNull(pump.WaitForStop(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken));
 
         pump.StepOver();
 
@@ -135,7 +135,7 @@ public sealed class CallbackPumpTests
 
         pump.RequestPause();
 
-        StopInfo? stop = pump.WaitForStop(TimeSpan.FromSeconds(2));
+        StopInfo? stop = pump.WaitForStop(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
         Assert.NotNull(stop);
         Assert.Equal(StopReason.Pause, stop!.Reason);
         Assert.Equal(1, Volatile.Read(ref pauseCalls));       // pause handler fired
@@ -164,7 +164,7 @@ public sealed class CallbackPumpTests
         Assert.False(pump.IsParked); // an informational callback is continued, never held
 
         pump.OnCallback(CallbackKind.BreakpointHit, "Breakpoint", 0, 0xABCD, 0);
-        Assert.NotNull(pump.WaitForStop(TimeSpan.FromSeconds(2)));
+        Assert.NotNull(pump.WaitForStop(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken));
         Assert.True(pump.IsParked); // a caller that has taken the stop reads it held
 
         pump.Resume();
@@ -172,7 +172,7 @@ public sealed class CallbackPumpTests
         Assert.False(pump.IsParked);
 
         pump.RequestPause();
-        Assert.Equal(StopReason.Pause, pump.WaitForStop(TimeSpan.FromSeconds(2))?.Reason);
+        Assert.Equal(StopReason.Pause, pump.WaitForStop(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken)?.Reason);
         Assert.True(pump.IsParked); // a Pause stop holds it the same way
 
         pump.Resume();
@@ -187,7 +187,7 @@ public sealed class CallbackPumpTests
         var pump = new CallbackPump(sink);
         pump.Start((_, _) => 0, () => { });
         pump.OnCallback(CallbackKind.BreakpointHit, "Breakpoint", 0, 0, 0);
-        Assert.NotNull(pump.WaitForStop(TimeSpan.FromSeconds(2)));
+        Assert.NotNull(pump.WaitForStop(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken));
         Assert.True(pump.IsParked);
 
         // Dispose completes the resume queue: the parked Take throws, and the worker ends. Dispose waits for that only up
@@ -206,7 +206,7 @@ public sealed class CallbackPumpTests
         pump.Start((_, _) => 0, () => { });
         pump.OnCallback(CallbackKind.Informational, "ExitProcess", 0, 0, 0);
 
-        StopInfo? stop = pump.WaitForStop(TimeSpan.FromSeconds(2));
+        StopInfo? stop = pump.WaitForStop(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
         Assert.NotNull(stop);
         Assert.Equal(StopReason.ProcessExited, stop!.Reason);
     }
@@ -221,7 +221,52 @@ public sealed class CallbackPumpTests
         // Only informational traffic — no stop should ever surface.
         pump.OnCallback(CallbackKind.Informational, "LoadModule", 0, 0, 0);
 
-        Assert.Null(pump.WaitForStop(TimeSpan.FromMilliseconds(200)));
+        Assert.Null(pump.WaitForStop(TimeSpan.FromMilliseconds(200), TestContext.Current.CancellationToken));
+    }
+
+    // A debugger worker cancels the wait of the request it runs when its end is asked for (ADR-016 6.7, finding 116).
+    // A wait that ignored the token would return null after its minute instead of throwing, so the throw is the evidence;
+    // no elapsed time is asserted.
+    [Fact]
+    public void ACancelledWait_ThrowsOperationCanceled_AndIsNoLongerMarkedWaiting()
+    {
+        var sink = new RecordingSink();
+        using var pump = new CallbackPump(sink);
+        pump.Start((_, _) => 0, () => { });
+        using var ending = new CancellationTokenSource();
+        ending.CancelAfter(TimeSpan.FromMilliseconds(200));
+
+        Assert.Throws<OperationCanceledException>(() => pump.WaitForStop(TimeSpan.FromMinutes(1), ending.Token));
+        Assert.False(pump.IsWaiting);
+    }
+
+    [Fact]
+    public void AStopThatHasCome_IsReturned_ThoughTheWaitIsCancelled()
+    {
+        var sink = new RecordingSink();
+        using var pump = new CallbackPump(sink);
+        pump.Start((_, _) => 0, () => { });
+        pump.OnCallback(CallbackKind.BreakpointHit, "Breakpoint", 0, 0x1234, 0);
+        using var ending = new CancellationTokenSource();
+        ending.Cancel();
+
+        StopInfo? stop = pump.WaitForStop(TimeSpan.FromMinutes(1), ending.Token);
+        Assert.Equal(StopReason.Breakpoint, stop?.Reason);
+    }
+
+    [Fact]
+    public void ALossThatHasCome_IsReturned_ThoughTheWaitIsCancelled()
+    {
+        var sink = new RecordingSink();
+        using var pump = new CallbackPump(sink);
+        pump.Start((_, _) => 0, () => { });
+        pump.OnCallback(CallbackKind.DebuggerError, "DebuggerError", 0, 0, unchecked((int)0x8013FFFF), 0, 42);
+        Assert.True(SpinWait.SpinUntil(() => pump.LostStop is not null, TimeSpan.FromSeconds(2)), "the loss should be recorded");
+        using var ending = new CancellationTokenSource();
+        ending.Cancel();
+
+        StopInfo? stop = pump.WaitForStop(TimeSpan.FromMinutes(1), ending.Token);
+        Assert.Equal(StopReason.DebuggerLost, stop?.Reason);
     }
 
     // DebuggerError (ICorDebugManagedCallback.DebuggerError): "debugging services have been disabled due to an error";
@@ -239,7 +284,7 @@ public sealed class CallbackPumpTests
         pump.Start((_, _) => { Interlocked.Increment(ref continues); return 0; }, () => { });
 
         pump.OnCallback(CallbackKind.DebuggerError, "DebuggerError", 0, 0, unchecked((int)0x8013FFFF), 0, 42);
-        StopInfo? stop = pump.WaitForStop(TimeSpan.FromSeconds(2));
+        StopInfo? stop = pump.WaitForStop(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
         pump.OnCallback(CallbackKind.Informational, "CreateThread", 0, 0, 0);
         pump.Dispose(); // joins the worker: everything it was going to do is done
 
@@ -258,7 +303,7 @@ public sealed class CallbackPumpTests
         pump.Start((_, _) => 0, () => { });
 
         pump.OnCallback(CallbackKind.DebuggerError, "DebuggerError", 0, 0, unchecked((int)0x8013FFFF), 0, 42);
-        StopInfo? stop = pump.WaitForStop(TimeSpan.FromSeconds(2));
+        StopInfo? stop = pump.WaitForStop(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
 
         Assert.NotNull(stop);
         Assert.Equal(new DebuggerErrorInfo(unchecked((int)0x8013FFFF), 42u), stop!.DebuggerError);
@@ -280,10 +325,10 @@ public sealed class CallbackPumpTests
         int continues = 0;
         pump.Start((_, _) => { Interlocked.Increment(ref continues); return 0; }, () => { });
         pump.OnCallback(CallbackKind.BreakpointHit, "Breakpoint", 0, 0x1234, 0);
-        StopInfo? atBreakpoint = pump.WaitForStop(TimeSpan.FromSeconds(2));
+        StopInfo? atBreakpoint = pump.WaitForStop(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
 
         pump.OnCallback(CallbackKind.DebuggerError, "DebuggerError", 0, 0, unchecked((int)0x8013FFFF), 0, 42);
-        StopInfo? lost = pump.WaitForStop(TimeSpan.FromSeconds(2));
+        StopInfo? lost = pump.WaitForStop(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
         pump.Resume();
         pump.Dispose(); // joins the worker
 
@@ -300,9 +345,9 @@ public sealed class CallbackPumpTests
         pump.Start((_, _) => 0, () => { });
 
         pump.OnCallback(CallbackKind.DebuggerError, "DebuggerError", 0, 0, unchecked((int)0x8013FFFF), 0, 42);
-        StopInfo? first = pump.WaitForStop(TimeSpan.FromSeconds(2));
-        StopInfo? second = pump.WaitForStop(TimeSpan.Zero);
-        StopInfo? third = pump.WaitForStop(TimeSpan.Zero);
+        StopInfo? first = pump.WaitForStop(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
+        StopInfo? second = pump.WaitForStop(TimeSpan.Zero, TestContext.Current.CancellationToken);
+        StopInfo? third = pump.WaitForStop(TimeSpan.Zero, TestContext.Current.CancellationToken);
 
         Assert.Equal(StopReason.DebuggerLost, first?.Reason);
         Assert.Same(first, second);
@@ -320,7 +365,7 @@ public sealed class CallbackPumpTests
         pump.Start((_, _) => 0, () => Interlocked.Increment(ref pauses));
 
         pump.OnCallback(CallbackKind.DebuggerError, "DebuggerError", 0, 0, unchecked((int)0x8013FFFF), 0, 42);
-        StopInfo? lost = pump.WaitForStop(TimeSpan.FromSeconds(2));
+        StopInfo? lost = pump.WaitForStop(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
         pump.RequestPause();
         pump.Dispose(); // joins the worker
 
@@ -337,7 +382,7 @@ public sealed class CallbackPumpTests
 
         pump.OnCallback(CallbackKind.DebuggerError, "DebuggerError", 0, 0, unchecked((int)0x8013FFFF), 0, 42);
         pump.OnCallback(CallbackKind.DebuggerError, "DebuggerError", 0, 0, unchecked((int)0x8013FFFE), 0, 43);
-        StopInfo? stop = pump.WaitForStop(TimeSpan.FromSeconds(2));
+        StopInfo? stop = pump.WaitForStop(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
 
         Assert.Equal(42u, stop?.DebuggerError?.ErrorCode); // the first error is the one kept
         Assert.Single(sink.Anomalies);
@@ -359,11 +404,11 @@ public sealed class CallbackPumpTests
         var clock = System.Diagnostics.Stopwatch.StartNew();
         StopInfo? stop = null;
         while (stop is null && clock.Elapsed < TimeSpan.FromSeconds(30))
-            stop = pump.WaitForStop(TimeSpan.FromMilliseconds(300));
+            stop = pump.WaitForStop(TimeSpan.FromMilliseconds(300), TestContext.Current.CancellationToken);
         TimeSpan calledAt = clock.Elapsed;
         pump.OnCallback(CallbackKind.Informational, "CreateThread", 0, 0, 0);
         pump.OnCallback(CallbackKind.DebuggerError, "DebuggerError", 0, 0, unchecked((int)0x8013FFFF), 0, 42);
-        StopInfo? later = pump.WaitForStop(TimeSpan.Zero);
+        StopInfo? later = pump.WaitForStop(TimeSpan.Zero, TestContext.Current.CancellationToken);
         pump.Dispose(); // joins the worker
 
         Assert.Equal(StopReason.DebuggerLost, stop?.Reason);
@@ -389,10 +434,10 @@ public sealed class CallbackPumpTests
         using var pump = new CallbackPump(sink);
         pump.Start((_, _) => 0, () => { }, targetEnded: () => true);
 
-        Assert.Null(pump.WaitForStop(TimeSpan.FromMilliseconds(500))); // the end is seen; the exit has not come yet
+        Assert.Null(pump.WaitForStop(TimeSpan.FromMilliseconds(500), TestContext.Current.CancellationToken)); // the end is seen; the exit has not come yet
         pump.OnCallback(CallbackKind.Informational, "ExitProcess", 0, 0, 0);
-        StopInfo? exited = pump.WaitForStop(TimeSpan.FromSeconds(2));
-        StopInfo? afterwards = pump.WaitForStop(CallbackPump.ExitDeliveryBound + TimeSpan.FromMilliseconds(500));
+        StopInfo? exited = pump.WaitForStop(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
+        StopInfo? afterwards = pump.WaitForStop(CallbackPump.ExitDeliveryBound + TimeSpan.FromMilliseconds(500), TestContext.Current.CancellationToken);
 
         Assert.Equal(StopReason.ProcessExited, exited?.Reason);
         Assert.Null(afterwards);      // the exit was delivered, so a wait after it is not a loss
@@ -410,10 +455,10 @@ public sealed class CallbackPumpTests
         bool ended = false;
         pump.Start((_, _) => 0, () => { }, targetEnded: () => Volatile.Read(ref ended));
         pump.OnCallback(CallbackKind.BreakpointHit, "Breakpoint", 0, 0x1234, 0);
-        Assert.Equal(StopReason.Breakpoint, pump.WaitForStop(TimeSpan.FromSeconds(2))?.Reason);
+        Assert.Equal(StopReason.Breakpoint, pump.WaitForStop(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken)?.Reason);
 
         Volatile.Write(ref ended, true);
-        StopInfo? held = pump.WaitForStop(CallbackPump.ExitDeliveryBound + TimeSpan.FromMilliseconds(500));
+        StopInfo? held = pump.WaitForStop(CallbackPump.ExitDeliveryBound + TimeSpan.FromMilliseconds(500), TestContext.Current.CancellationToken);
 
         Assert.Null(held);
         Assert.Null(pump.LostStop);
@@ -427,7 +472,7 @@ public sealed class CallbackPumpTests
         using var pump = new CallbackPump(sink);
         pump.Start((_, _) => 0, () => { }, targetEnded: () => false);
 
-        Assert.Null(pump.WaitForStop(CallbackPump.ExitDeliveryBound + TimeSpan.FromMilliseconds(500)));
+        Assert.Null(pump.WaitForStop(CallbackPump.ExitDeliveryBound + TimeSpan.FromMilliseconds(500), TestContext.Current.CancellationToken));
         Assert.Null(pump.LostStop);
         Assert.Empty(sink.Anomalies);
     }

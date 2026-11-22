@@ -711,14 +711,19 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
     /// non-matching <see cref="StopReason.Exception"/> stops are auto-resumed inside the wait
     /// (the deadline budget is preserved across resumes). With no filters armed every stop surfaces
     /// — the legacy behavior probes 26/27 rely on.</summary>
-    public StopInfo? WaitForStop(TimeSpan timeout)
+    public StopInfo? WaitForStop(TimeSpan timeout) => WaitForStop(timeout, CancellationToken.None);
+
+    /// <summary>As <see cref="WaitForStop(TimeSpan)"/>, and <paramref name="cancel"/> ends the wait with
+    /// <see cref="OperationCanceledException"/>, within <see cref="CallbackPump"/>'s poll of 100 ms; a stop or a loss
+    /// that has come is returned first. The debuggee then runs on, as after a timeout.</summary>
+    public StopInfo? WaitForStop(TimeSpan timeout, CancellationToken cancel)
     {
         DateTimeOffset deadline = DateTimeOffset.UtcNow + timeout;
         while (true)
         {
             TimeSpan remaining = deadline - DateTimeOffset.UtcNow;
             if (remaining <= TimeSpan.Zero) return null;
-            StopInfo? stop = _pump.WaitForStop(remaining);
+            StopInfo? stop = _pump.WaitForStop(remaining, cancel);
             if (stop is null) return null;
 
             // Breakpoint stops: evaluate the entry's policy on the caller thread (where the pump is

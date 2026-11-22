@@ -237,14 +237,21 @@ internal sealed class CallbackPump : IManagedCallbackSink, IDisposable
     /// once, every time: nothing else can come. The debugger is lost when mscordbi sends <c>DebuggerError</c>, or when
     /// the target has ended and mscordbi has delivered no <c>ExitProcess</c> within <see cref="ExitDeliveryBound"/>,
     /// which the wait reads from the operating system every <see cref="EndPoll"/>.</summary>
-    public StopInfo? WaitForStop(TimeSpan timeout)
+    public StopInfo? WaitForStop(TimeSpan timeout) => WaitForStop(timeout, CancellationToken.None);
+
+    /// <summary>As <see cref="WaitForStop(TimeSpan)"/>, and <paramref name="cancel"/> ends the wait: once it is
+    /// cancelled, a wait that finds no stop within its next <see cref="EndPoll"/> throws
+    /// <see cref="OperationCanceledException"/>. A stop or a loss that has come is returned first. A debugger worker
+    /// cancels the wait of the request it runs when its end is asked for, so that its session ends as drhook_stop ends
+    /// it (ADR-016 6.7, finding 116).</summary>
+    public StopInfo? WaitForStop(TimeSpan timeout, CancellationToken cancel)
     {
         long started = System.Diagnostics.Stopwatch.GetTimestamp();
         Volatile.Write(ref _waitingChangedAt, started);
         Volatile.Write(ref _waiting, 1);
         try
         {
-            return WaitForStopMarked(timeout, started);
+            return WaitForStopMarked(timeout, started, cancel);
         }
         finally
         {
@@ -265,7 +272,7 @@ internal sealed class CallbackPump : IManagedCallbackSink, IDisposable
     /// ended; 0 before the first.</summary>
     public long WaitingChangedAt => Volatile.Read(ref _waitingChangedAt);
 
-    private StopInfo? WaitForStopMarked(TimeSpan timeout, long started)
+    private StopInfo? WaitForStopMarked(TimeSpan timeout, long started, CancellationToken cancel)
     {
         while (true)
         {
@@ -283,6 +290,7 @@ internal sealed class CallbackPump : IManagedCallbackSink, IDisposable
                 return Volatile.Read(ref _lostStop); // session torn down; null unless the debugger was lost
             }
             if (LossByUndeliveredExit() is { } undelivered) return undelivered;
+            if (cancel.IsCancellationRequested) throw new OperationCanceledException("The wait for a stop was cancelled before one came.", cancel);
             if (remaining == TimeSpan.Zero) return null;
         }
     }

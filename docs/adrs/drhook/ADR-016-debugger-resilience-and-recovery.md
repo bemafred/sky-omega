@@ -842,7 +842,11 @@ measurement, that measurement comes first.
        the target's pipes still open. The supervisor does not get a second one.
 
   **When drhook-mcp ends** (a reconnect), each worker reads the end of its stdin.
-  - A worker in session ends the session as `drhook_stop` does, then exits.
+  - A worker in session ends the session as `drhook_stop` does, then exits. *Amended 2026-11-22 (Martin), after
+    finding 116:* a request waiting for its target to stop (a launch or attach to its breakpoint, a continue, a step)
+    is ended first: its wait is cancelled, so the end is not held behind it.
+  - From its own end, drhook-mcp reads nothing a worker does as a failure: a request still pending is not asked for
+    health, and its answer is returned as it comes. The worker is neither kept nor discarded.
   - A worker holding a target exits and leaves the target running.
   - So a reconnect ends a session by its scenario's end (6.5), even when drhook-mcp is killed. What then becomes of a
     target left running is 6.2's open rule, unchanged.
@@ -1048,11 +1052,34 @@ measurement, that measurement comes first.
 - **The 5 s health bound is kept** (probe 116, [finding 116](../../../poc/drhook-engine/findings/116-health-round-trip.md)).
   A health request every 20 ms, 150 or more per phase, idle, during launches and while a continue waited: every one
   answered, the longest round trip 3.32 ms, on omega-windows. omega and omega-ubuntu agree.
-- **The worker's end waits for a request that waits** (finding 116). The worker runs its end after the request
+- **The worker's end waited for a request that waits** (finding 116). The worker runs its end after the request
   running, and a `drhook_continue` that waits returns only at a stop, at the target's end, or after 2 minutes. So a
-  reconnect during such a continue ends the session as `drhook_stop` does only if the target stops or ends within
-  `EndBound` (30 s); otherwise the worker exits with its session not ended. On omega-windows it did, at 30.1 s.
-  Recorded for a decision.
+  reconnect during such a continue ended the session as `drhook_stop` does only if the target stopped or ended within
+  `EndBound` (30 s); otherwise the worker exited with its session not ended. On omega-windows it did, at 30.1 s.
+
+*The end of a wait at the worker's end, built 2026-11-22* (sky-omega, omega), on Martin's decision.
+- **The wait is cancelled.** The worker cancels a token when its end is asked for (`exit`, the end of its stdin, a
+  signal). Every request is given it. The wait whose length the target sets observes it:
+  `EngineSteppingSession.WaitForStopShowingRunning`, used by launch and attach to their breakpoint, by continue and by
+  the steps. Through `DebugSession.WaitForStop(timeout, cancel)`, `CallbackPump.WaitForStop` reads the token once per
+  100 ms poll, after a stop or a loss that has come, and throws `OperationCanceledException`. The request fails with
+  that message, and the end then runs as `drhook_stop` runs. The debugger's own short waits (10 s or less) and an
+  evaluation's own bound are not cancelled.
+- **drhook-mcp's own end.** Building it showed a second gap. When drhook-mcp ended, the continue's pending health
+  request could not be sent to a worker whose stdin drhook-mcp had just closed. It was read as no answer: the worker
+  was suspected, discarded and killed, and its owned target with it. The answer of a request still pending was then
+  settled too, as if drhook-mcp still ran. Now, from its end, the supervisor asks no health and settles no answer.
+- **Tests.**
+  - `CallbackPumpTests`: a cancelled wait throws; a stop or a loss that has come is returned first. Each fails under
+    its mutation: the token not read, or read before the stop is taken.
+  - `WorkerTest.DrHookMcpEnding_DuringAContinueThatWaits_EndsTheWait_ThenTheSessionAsStopDoes`: the worker exits
+    within 10 s of drhook-mcp's end (133 ms on omega). The continue answers that its wait was cancelled. Nothing is
+    journaled and no worker is suspected, and on Unix the target ends with its session. Without the fix it fails: the
+    answer is `workerDiscarded`, "it did not answer a health request within 5 s". With the supervisor's part but no
+    cancellation it fails too: the worker had not exited within 10 s.
+
+  On omega every DrHook suite passed: DrHook.Engine.Tests 239 (3 skipped), the integration suite 35 (1 skipped),
+  DrHook.Viz.Tests 74, DrHook.Wire.Tests 7, DrHook.Capture.Tests 1.
 
 *6.9's journal built 2026-11-21* (sky-omega, omega): the last part.
 - **Where.** `journal.ndjson` in DrHook's directory, beside the rendezvous socket, one JSON object per line,
