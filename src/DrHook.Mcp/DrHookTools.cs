@@ -383,11 +383,11 @@ public sealed class DrHookTools
     [McpServerTool(Name = "drhook_stop"), Description(
         "End the active debugging session — the normal way to finish. " +
         "Borrowed sessions (started with drhook_attach) detach and leave the target running. " +
-        "Owned sessions (started with drhook_launch) detach the debugger, then ask the target to exit: SIGTERM, which a " +
-        "program with a handler honours (exit 0) and one without ends on abruptly (killed by signal 15); the result says " +
-        "which (finding 110, ADR-016 6.2). A target still running ~2s later is NOT killed: it is left running and " +
-        "reported (targetLeftRunning, pid) — end it with drhook_kill, or let it finish. On Windows there is no exit " +
-        "request yet, so a running owned target is left running at once (ADR-016 6.4). " +
+        "Owned sessions (started with drhook_launch) detach the debugger, then ask the target to exit: SIGTERM (on Windows " +
+        "CTRL+BREAK, ADR-016 6.4), which a program with a handler honours (exit 0) and one without ends on abruptly " +
+        "(killed by signal 15; on Windows exit code 0xC000013A); the result says which (finding 110, ADR-016 6.2). A " +
+        "target still running ~2s later is NOT killed: it is left running and reported (targetLeftRunning, pid) — end " +
+        "it with drhook_kill, or let it finish. " +
         "Use drhook_detach to explicitly keep an attached target running, or drhook_kill to force-terminate. " +
         "Requires a hypothesis — your closing read of the session.")]
     public async Task<string> Stop(

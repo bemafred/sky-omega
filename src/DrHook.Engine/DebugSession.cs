@@ -48,6 +48,7 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
     private int _disposed;  // 0 = live, 1 = disposed; atomic via Interlocked.Exchange (ENG-DS-1)
     private readonly bool _ownsTarget;  // true = Owned (substrate kills target on Dispose); false = Borrowed (detach-leave-running). Probe 44 + finding 64.
     private readonly long? _targetStart;       // Unix: the target's start time (ProcessLifetime), with its PID its identity; null on Windows or when unreadable.
+    private readonly bool _targetIsProcessGroupRoot;  // Windows: Launch made the target the root of a process group of its own (CREATE_NEW_PROCESS_GROUP), which its exit request needs (ADR-016 6.4). Not known for an attached target.
     private readonly Process? _targetProcess;  // Owned: the handle the substrate kills through on Dispose (closes MCH-RE-2, finding 63). Borrowed (Attach): death detection only, never killed. Null only for an owned launch whose target was already gone.
     private readonly string? _imageBaseDir;    // directory of the launched/attached executable — where a single-file app's sidecar <module>.pdb lives when the bundled module has no on-disk PE.
 
@@ -168,7 +169,7 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
     private DebugSession(int processId, DbgShim dbgShim, CallbackPump pump, ManagedCallbackHost callback,
                          ICorDebug cordbg, ICorDebugController controller, IDebugEventSink sink,
                          nint pUnknown, nint pProcess, bool ownsTarget, Process? targetProcess,
-                         TimeSpan naturalExitTimeout, string? imageBaseDir, Task<TargetExit> targetExit)
+                         TimeSpan naturalExitTimeout, string? imageBaseDir, Task<TargetExit> targetExit, bool targetIsProcessGroupRoot)
     {
         ProcessId = processId;
         _dbgShim = dbgShim;
@@ -180,6 +181,7 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
         _pUnknown = pUnknown;
         _pProcess = pProcess;
         _ownsTarget = ownsTarget;
+        _targetIsProcessGroupRoot = targetIsProcessGroupRoot;
         _targetProcess = targetProcess;
         _targetStart = targetProcess is null ? null : Interop.ProcessLifetime.StartOf(processId);
         _naturalExitTimeout = naturalExitTimeout;
@@ -492,7 +494,8 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
                     try { targetProcess = Process.GetProcessById(pid); } catch (ArgumentException) { /* exited already */ }
                     windowsSession = FromCordbg(dbgShim, sink, pid, pCordb, ownsTarget: true,
                         targetProcess: targetProcess, naturalExitTimeout: naturalExitTimeout ?? DefaultNaturalExitTimeout, targetExit: windowsTargetExit,
-                        entryModule: entryModule, imageBaseDir: launchedImageDir ?? ImageDirOf(targetProcess), targetRuntimeMajor: targetRuntimeMajor);
+                        entryModule: entryModule, imageBaseDir: launchedImageDir ?? ImageDirOf(targetProcess), targetRuntimeMajor: targetRuntimeMajor,
+                        targetIsProcessGroupRoot: true);   // WindowsSpawn: CREATE_NEW_PROCESS_GROUP
                 },
                 out WindowsSpawnedProcess spawned, out pUnknown, out Task<TargetExit> _);
             windowsChild = spawned;
@@ -638,7 +641,7 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
                 $"#:property TargetFramework=net{locked}.0).");
     }
 
-    private static DebugSession FromCordbg(DbgShim dbgShim, IDebugEventSink sink, int processId, nint pUnknown, bool ownsTarget, Process? targetProcess, TimeSpan naturalExitTimeout, Task<TargetExit> targetExit, string? entryModule = null, string? imageBaseDir = null, int? targetRuntimeMajor = null)
+    private static DebugSession FromCordbg(DbgShim dbgShim, IDebugEventSink sink, int processId, nint pUnknown, bool ownsTarget, Process? targetProcess, TimeSpan naturalExitTimeout, Task<TargetExit> targetExit, string? entryModule = null, string? imageBaseDir = null, int? targetRuntimeMajor = null, bool targetIsProcessGroupRoot = false)
     {
         CallbackPump? pump = null;
         ManagedCallbackHost? callback = null;
@@ -678,7 +681,7 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
             // Construct the session before Start so the pump's per-LoadModule hook can call
             // session.TryBindPending (full pending-breakpoints). Start begins the worker; nothing
             // drains until then, so building the session first is race-free.
-            var session = new DebugSession(processId, dbgShim, pump, callback, cordbg, controller, sink, pUnknown, pProcess, ownsTarget, targetProcess, naturalExitTimeout, imageBaseDir, targetExit);
+            var session = new DebugSession(processId, dbgShim, pump, callback, cordbg, controller, sink, pUnknown, pProcess, ownsTarget, targetProcess, naturalExitTimeout, imageBaseDir, targetExit, targetIsProcessGroupRoot);
             pump.Start(
                 (kind, thread) =>
                 {
@@ -794,22 +797,27 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
         _pump.Resume();
     }
 
-    /// <summary>Send a graceful-termination request to the Owned target (SIGTERM on Unix;
-    /// Windows path is deferred to ADR-007 Phase 9 / GenerateConsoleCtrlEvent). Wait up to
-    /// <paramref name="timeout"/> for the target to exit naturally. Returns true if the target
-    /// exited within the window; false if still alive. Does NOT force-kill on timeout — caller
-    /// chooses the next action (call <see cref="Abandon"/> to escalate; retry; wait longer).
+    /// <summary>The request an owned <see cref="Dispose"/> sends its target after the detach, asking it to exit (ADR-016
+    /// 6.2, 6.4): SIGTERM on Linux and macOS; on Windows CTRL+BREAK to the target's process group, for a target this
+    /// session launched, which roots a group of its own (<see cref="Interop.WindowsSpawn"/>). Null when there is none: for
+    /// a borrowed target, and on Windows for an attached one, whose group is not known. Windows does not document what
+    /// <c>GenerateConsoleCtrlEvent</c> does with a PID that roots no group.</summary>
+    public string? ExitRequest => !_ownsTarget ? null
+        : !OperatingSystem.IsWindows() ? "SIGTERM"
+        : _targetIsProcessGroupRoot ? "CTRL+BREAK" : null;
+
+    /// <summary>Send the owned target its <see cref="ExitRequest"/> and wait up to <paramref name="timeout"/> for it to
+    /// exit. Returns true if it exited within the window, false if it still runs. Does NOT force-kill on timeout: the
+    /// caller chooses the next action (<see cref="Abandon"/> to escalate; retry; wait longer).
     ///
-    /// <para>Layer 1 discipline primitive per ADR-008 / finding 68. Well-behaved targets respond
-    /// to SIGTERM in 12-45 ms on macOS-arm64 (per finding 68 probes 49/50/52/53). Tight CPU
-    /// loops with no explicit handler also exit cleanly via CoreCLR's default signal disposition.
-    /// Only targets that explicitly catch + ignore SIGTERM (or Cancel=true their handler) will
-    /// survive past timeout.</para>
+    /// <para>A target with a handler for the request cancels its work and exits; one without ends at once: killed by
+    /// signal 15 on Unix (finding 68), exit code <c>0xC000013A</c> on Windows (finding 112). On Windows the request
+    /// is sent by way of the target's console, which is not this process's (<see cref="Interop.WindowsConsoleBreak"/>,
+    /// finding 117).</para>
     ///
-    /// <para>Throws <see cref="InvalidOperationException"/> if called on a Borrowed (Attach)
-    /// session — substrate doesn't own the target's lifecycle for Borrowed sessions, so the
-    /// caller is not entitled to request its termination through the substrate.</para></summary>
-    /// <exception cref="InvalidOperationException">Called on a Borrowed session.</exception>
+    /// <para>Throws <see cref="InvalidOperationException"/> when the session has no exit request: a Borrowed (Attach)
+    /// session, whose target's lifecycle is the caller's, and on Windows an attached one.</para></summary>
+    /// <exception cref="InvalidOperationException">The session has no <see cref="ExitRequest"/>.</exception>
     public bool RequestExit(TimeSpan timeout)
     {
         if (!_ownsTarget)
@@ -819,7 +827,29 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
                 "sessions don't own the target's lifecycle — the caller does. To terminate a Borrowed " +
                 "target, the caller (who owns it) should signal it via their own process-management path.");
         }
+        if (ExitRequest is null)
+        {
+            throw new InvalidOperationException(
+                "On Windows the exit request is CTRL+BREAK to the target's own process group, which a target has when this " +
+                "session launched it (ADR-016 6.4). An attached target's group is not known, so it has no exit request.");
+        }
         if (TargetHasExited) return true;
+
+        if (OperatingSystem.IsWindows())
+        {
+            Interop.ConsoleBreakOutcome outcome = Interop.WindowsConsoleBreak.SendTo(ProcessId);
+            if (outcome.Deviation is not null)
+            {
+                _sink.OnAnomaly(new EngineAnomaly(
+                    DateTimeOffset.UtcNow, AnomalyKind.UnexpectedHResult, "mcp-request",
+                    "RequestExit (CTRL+BREAK by way of the target's console)",
+                    Observed: outcome.Deviation,
+                    Expected: "attached to the target's console, sent CTRL+BREAK to its group, and back on this process's parent's console (finding 117)",
+                    Context: new Dictionary<string, string> { ["pid"] = ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture), ["sent"] = outcome.Sent ? "true" : "false" }));
+            }
+            if (!outcome.Sent) return TargetHasExited;
+            return WaitForTargetExit((int)timeout.TotalMilliseconds);
+        }
 
         try
         {
@@ -835,18 +865,6 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
                     Context: new Dictionary<string, string> { ["pid"] = _targetProcess.Id.ToString(System.Globalization.CultureInfo.InvariantCulture), ["errno"] = err.ToString(System.Globalization.CultureInfo.InvariantCulture) }));
                 return TargetHasExited;
             }
-        }
-        catch (PlatformNotSupportedException)
-        {
-            // Windows: GenerateConsoleCtrlEvent path deferred to Phase 9.
-            // For now, the caller can fall back to Abandon (Process.Kill).
-            _sink.OnAnomaly(new EngineAnomaly(
-                DateTimeOffset.UtcNow, AnomalyKind.UnexpectedHResult, "mcp-request",
-                "RequestExit (platform not supported)",
-                Observed: $"PosixSignals.Kill threw PlatformNotSupportedException on {RuntimeInformation.OSDescription}",
-                Expected: "Unix: SIGTERM via libc.kill",
-                Context: new Dictionary<string, string> { ["platform"] = RuntimeInformation.OSDescription }));
-            return false;
         }
         catch (Exception ex)
         {
@@ -921,8 +939,8 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
     }
 
     /// <summary>True when <see cref="Dispose"/> detached from an owned target, asked it to exit, and it was still running
-    /// when the natural-exit bound expired, or, on Windows, which has no exit request yet, whenever the owned target was
-    /// running at the detach (ADR-016 6.2 and 6.4). The target is left running, un-debugged; the client ends it with
+    /// when the natural-exit bound expired, or, for an owned target with no <see cref="ExitRequest"/> (on Windows, an
+    /// attached one), whenever it was running at the detach (ADR-016 6.2 and 6.4). The target is left running, un-debugged; the client ends it with
     /// <see cref="KillLeftRunningTarget"/>, or lets it finish.</summary>
     public bool TargetLeftRunning => _targetLeftRunning;
 
@@ -2617,7 +2635,8 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
                 // ADR-016 6.2 (replacing ADR-008's Decision 1): the ordinary end of an OWNED session never signals an
                 // attached target. It detaches first (finding 110), then sends the request the target may honour:
                 // SIGTERM, on which a target with a handler cancels its work and exits 0, and one without ends at once,
-                // killed by signal 15 (finding 68); Windows has none yet (ADR-016 6.4). How it ended is read from the OS
+                // killed by signal 15 (finding 68); on Windows CTRL+BREAK, ending one without a handler with 0xC000013A
+                // (ADR-016 6.4, finding 112). How it ended is read from the OS
                 // (TargetExit). A target still running when NaturalExitTimeout expires is left running and reported
                 // (TargetStuckAtDispose, TargetLeftRunning), for the client to end; Dispose never kills as cleanup.
                 bool detachedFirst = false;
@@ -2657,9 +2676,10 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
                     // ADR-016 6.2: the request the target may honour, then its answer. A target still running when the
                     // bound expires is left running for the client to end (KillLeftRunningTarget), never killed here:
                     // a forced end is never the fallback of an ordinary one (principle 4). ADR-008's Decision 1 killed it.
-                    // Windows has no exit request yet (ADR-016 6.4), so a running target is left running at once.
+                    // A target with no exit request (on Windows an attached one, ADR-016 6.4) is left running at once.
+                    string? request = ExitRequest;
                     bool exited;
-                    if (OperatingSystem.IsWindows()) exited = TargetHasExited;
+                    if (request is null) exited = TargetHasExited;
                     else
                     {
                         try { exited = RequestExit(_naturalExitTimeout); }
@@ -2668,13 +2688,13 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
 
                     if (!exited)
                     {
-                        if (!OperatingSystem.IsWindows())
+                        if (request is not null)
                         {
                             _sink.OnAnomaly(new EngineAnomaly(
                                 DateTimeOffset.UtcNow, AnomalyKind.TargetStuckAtDispose, "mcp-request",
                                 "DebugSession.Dispose (exit request unanswered)",
-                                Observed: $"target {_targetProcess.Id} was still running {_naturalExitTimeout.TotalMilliseconds}ms after SIGTERM, which reached it detached; left running, not killed (ADR-016 6.2)",
-                                Expected: "target completes its work and exits on SIGTERM (well-implemented process lifecycle)",
+                                Observed: $"target {_targetProcess.Id} was still running {_naturalExitTimeout.TotalMilliseconds}ms after {request}, sent after the detach; left running, not killed (ADR-016 6.2)",
+                                Expected: $"target completes its work and exits on {request} (well-implemented process lifecycle)",
                                 Context: new Dictionary<string, string>
                                 {
                                     ["pid"] = _targetProcess.Id.ToString(System.Globalization.CultureInfo.InvariantCulture),

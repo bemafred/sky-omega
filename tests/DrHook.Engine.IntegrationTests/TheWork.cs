@@ -8,7 +8,7 @@
 //
 // Until ADR-016 6.2 an owned target was ended at Dispose anyway, by SIGTERM on Linux and macOS and by the kill on
 // Windows, so a test that asserted a "natural exit" after a short attach passed without one. 6.2 leaves a running
-// target running on Windows, which has no exit request yet (6.4), and those tests failed there (CI run 44695388137,
+// target running on Windows, where an attached target has no exit request (6.4), and those tests failed there (CI run 44695388137,
 // 5 tests on Windows x64 and arm64). A breakpoint hit inside the test method proves the target is past the loop.
 
 using System;

@@ -42,20 +42,25 @@ if (args is ["kill-self"])
     System.Diagnostics.Process.GetCurrentProcess().Kill();   // KILL_HERE
 }
 
-// `report-attached-on-sigterm <report>`: the teardown-order test (finding 110). The target runs the loop below, through
-// the line a test stops at, and when SIGTERM reaches it, records in the report file whether a managed debugger was still
-// attached. The handler does not cancel the signal, so the process then ends as it would without it. A debugger that
-// asks its target to exit only after detaching yields "attached=False"; one that sends the signal while attached yields
-// "attached=True", or no report when the debugger holds the target stopped so that the handler never runs.
-PosixSignalRegistration? onTerm = null;
-if (args is ["report-attached-on-sigterm", string attachedReport])
-    onTerm = PosixSignalRegistration.Create(PosixSignal.SIGTERM,
+// The exit request DrHook sends a launched target after the detach (DebugSession.ExitRequest, ADR-016 6.2, 6.4): SIGTERM
+// on Linux and macOS, CTRL+BREAK on Windows, which .NET delivers as SIGQUIT.
+PosixSignal exitRequest = OperatingSystem.IsWindows() ? PosixSignal.SIGQUIT : PosixSignal.SIGTERM;
+
+// `report-attached-on-exit-request <report>`: the teardown-order test (finding 110). The target runs the loop below,
+// through the line a test stops at, and when the exit request reaches it, records in the report file whether a managed
+// debugger was still attached. The handler does not cancel the request, so the process then ends as it would without
+// it. A debugger that asks its target to exit only after detaching yields "attached=False"; one that sends the request
+// while attached yields "attached=True", or no report when the debugger holds the target stopped so that the handler
+// never runs.
+PosixSignalRegistration? onExitRequest = null;
+if (args is ["report-attached-on-exit-request", string attachedReport])
+    onExitRequest = PosixSignalRegistration.Create(exitRequest,
         _ => File.WriteAllText(attachedReport, $"attached={System.Diagnostics.Debugger.IsAttached}\n"));
 
-// `ignore-sigterm <report>`: the left-running test (ADR-016 6.2). The same record, but the handler cancels the signal,
-// so the target refuses its exit request and runs on through the loop below until something kills it, or the loop ends.
-if (args is ["ignore-sigterm", string ignoredReport])
-    onTerm = PosixSignalRegistration.Create(PosixSignal.SIGTERM, context =>
+// `ignore-exit-request <report>`: the left-running test (ADR-016 6.2). The same record, but the handler cancels the
+// request, so the target refuses it and runs on through the loop below until something kills it, or the loop ends.
+if (args is ["ignore-exit-request", string ignoredReport])
+    onExitRequest = PosixSignalRegistration.Create(exitRequest, context =>
     {
         context.Cancel = true;
         File.WriteAllText(ignoredReport, $"attached={System.Diagnostics.Debugger.IsAttached}\n");
@@ -69,7 +74,7 @@ for (int beat = 1; beat <= 600; beat++)
     worker.Scan(alphabet.AsSpan(0, (beat % 7) + 1));  // span length cycles 2..7 — gates `value.Length > 5`
     Thread.Sleep(50);
 }
-GC.KeepAlive(onTerm);   // the registration lives as long as the loop: a collected one unregisters its handler
+GC.KeepAlive(onExitRequest);   // the registration lives as long as the loop: a collected one unregisters its handler
 
 sealed class Worker
 {

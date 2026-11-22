@@ -75,12 +75,12 @@ public sealed class WorkerTest
 
             string stopped = (await supervisor.CallAsync("drhook_stop", new JsonObject { ["hypothesis"] = "the session ends" }, CancellationToken.None)).Result!;
             StringAssert.Contains(stopped, "\"status\": \"stopped\"", $"stop: {stopped}");
-            if (OperatingSystem.IsWindows())
-            {
-                // No exit request on Windows yet (ADR-016 6.4): the target is left running, held by its worker.
-                string killed = (await supervisor.CallAsync("drhook_kill", new JsonObject { ["hypothesis"] = "left running on Windows" }, CancellationToken.None)).Result!;
-                StringAssert.Contains(killed, "\"status\": \"killed\"", $"kill: {killed}");
-            }
+            Assert.IsFalse(stopped.Contains("targetLeftRunning", StringComparison.Ordinal), $"The exit request the worker sent should have ended the target: {stopped}");
+            // The worker sent it as finding 117 measured: on Windows by way of the target's console, and back on drhook-mcp's
+            // console after. A step that went otherwise is reported as an anomaly of RequestExit, forwarded here.
+            using (JsonDocument drained = JsonDocument.Parse(supervisor.DrainAnomaliesAsJson()))
+                foreach (JsonElement a in drained.RootElement.GetProperty("anomalies").EnumerateArray())
+                    Assert.IsFalse(a.GetProperty("operation").GetString()!.StartsWith("RequestExit", StringComparison.Ordinal), $"The exit request did not go as measured: {a}");
             Assert.IsNull(supervisor.SessionWorkerPid, "No worker is in session once the session has ended.");
             Assert.IsTrue(Ended(worker, TimeSpan.FromSeconds(10)), $"The worker {worker} should end with its session.");
         }
@@ -208,8 +208,8 @@ public sealed class WorkerTest
         try
         {
             JsonObject args = Launch(targetDll, source, "SNAPSHOT_HERE");
-            // POSIX: a target whose SIGTERM handler cancels the signal. Windows has no exit request, so any running target.
-            if (!OperatingSystem.IsWindows()) args["args"] = new JsonArray("exec", targetDll, "ignore-sigterm", report);
+            // A target whose handler for its exit request (SIGTERM, on Windows CTRL+BREAK) cancels it.
+            args["args"] = new JsonArray("exec", targetDll, "ignore-exit-request", report);
             string launch = (await supervisor.CallAsync("drhook_launch", args, CancellationToken.None)).Result!;
             using (JsonDocument doc = JsonDocument.Parse(launch)) pid = doc.RootElement.GetProperty("pid").GetInt32();
             long? start = ProcessLifetime.StartOf(pid);
@@ -217,6 +217,9 @@ public sealed class WorkerTest
 
             string stopped = (await supervisor.CallAsync("drhook_stop", new JsonObject { ["hypothesis"] = "it refuses to exit" }, CancellationToken.None)).Result!;
             StringAssert.Contains(stopped, "\"targetLeftRunning\": true", $"stop: {stopped}");
+            // The worker's request reached the target after the detach, and the target refused it.
+            Assert.IsTrue(File.Exists(report), "The target's handler for its exit request wrote nothing: the worker's request never reached it.");
+            Assert.AreEqual("attached=False", File.ReadAllText(report).Trim(), "The exit request reached the target while the debugger was attached.");
             Assert.IsNull(supervisor.SessionWorkerPid, "The session has ended.");
             Assert.IsFalse(Ended(worker, TimeSpan.FromMilliseconds(500)), "The worker holds the target left running, so it stays.");
 

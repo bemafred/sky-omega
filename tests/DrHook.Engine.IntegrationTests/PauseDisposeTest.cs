@@ -93,7 +93,7 @@ public sealed class PauseDisposeTest
                 $"Expected 0 WorkerException; got {workerExceptions.Length}. _pauseHandler or _resumeHandler threw — substrate bug.");
 
             // Increment 3 discipline assertion. The target ends on SIGTERM (Linux, macOS) or finishes its work by itself
-            // (Windows, which has no exit request yet: ADR-016 6.4); either way, it must be gone shortly after Dispose.
+            // (Windows, where an attached target has no exit request: ADR-016 6.4); either way, it must be gone shortly after Dispose.
             bool exitedNaturally = bootstrap.WaitForExit(5000);
             Assert.IsTrue(exitedNaturally,
                 "MTP target did not exit within 5s after Dispose — Layer 1 discipline violation OR substrate's two-stage escalation didn't terminate target.");

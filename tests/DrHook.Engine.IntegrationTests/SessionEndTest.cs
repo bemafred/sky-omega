@@ -2,8 +2,8 @@
 //
 // 6.2 (replacing ADR-008's Decision 1): drhook_stop of a launched target detaches, then asks it to exit. A target that
 // refuses is left running and reported, never killed as cleanup; drhook_kill then ends it after the session is gone,
-// once it has checked that the PID still names that process. Windows has no exit request yet (6.4), so a running
-// launched target is left running there at once.
+// once it has checked that the PID still names that process. The request is SIGTERM on Linux and macOS and CTRL+BREAK
+// on Windows (6.4).
 //
 // 6.3 (replacing ADR-008's Decision 3): drhook_kill stops the target first and kills it while stopped, so no request of
 // the debugger's is in flight when it dies (findings 104, 105). A target held at a stop is stopped already; a running
@@ -38,10 +38,8 @@ public sealed class SessionEndTest
         string source = IntegrationTargetPaths.SnapshotTargetSource();
         int markerLine = MarkerLine(source, "SNAPSHOT_HERE");
         string report = Path.Combine(Path.GetTempPath(), $"drhook-left-running-{Guid.NewGuid():N}.txt");
-        // POSIX: a target whose SIGTERM handler cancels the signal. Windows has no exit request, so any running target.
-        string[] args = OperatingSystem.IsWindows()
-            ? new[] { "exec", targetDll }
-            : new[] { "exec", targetDll, "ignore-sigterm", report };
+        // A target whose handler for its exit request (SIGTERM, on Windows CTRL+BREAK) cancels it.
+        string[] args = { "exec", targetDll, "ignore-exit-request", report };
 
         using var session = new EngineSteppingSession(new CompositeEventSink());
         int pid = 0;
@@ -63,12 +61,9 @@ public sealed class SessionEndTest
                 StringAssert.Contains(root.GetProperty("prompt").GetString(), "drhook_kill", $"stop: {stopped}");
             }
             Assert.IsFalse(HasEnded(pid, start), $"Target {pid} should still run after drhook_stop left it running.");
-            if (!OperatingSystem.IsWindows())
-            {
-                // The request reached the target after the detach, and the target refused it.
-                Assert.IsTrue(File.Exists(report), "The target's SIGTERM handler wrote nothing: the exit request never reached it.");
-                Assert.AreEqual("attached=False", File.ReadAllText(report).Trim(), "The exit request reached the target while the debugger was attached.");
-            }
+            // The request reached the target after the detach, and the target refused it.
+            Assert.IsTrue(File.Exists(report), "The target's handler for its exit request wrote nothing: the request never reached it.");
+            Assert.AreEqual("attached=False", File.ReadAllText(report).Trim(), "The exit request reached the target while the debugger was attached.");
 
             string killed = await session.KillAsync("the target refused to exit; end it", leftRunningPid: null, CancellationToken.None);
             using (JsonDocument doc = JsonDocument.Parse(killed))
@@ -96,12 +91,11 @@ public sealed class SessionEndTest
 
     // Since finding 110 an owned stop detaches before the target ends, so mscordbi's PAL, which reaps only a child it
     // still debugs (finding 87), no longer reaped it: every launched target drhook_stop ended stayed a zombie of the
-    // DrHook process (zbook, 2026-11-20). The session now reaps it once its end has been read.
+    // DrHook process (zbook, 2026-11-20). The session now reaps it once its end has been read. Windows has no zombies;
+    // there the test shows that the request, CTRL+BREAK, ends a target without a handler as Windows' default does.
     [TestMethod]
     public async Task Stop_OfALaunchedTargetThatExits_LeavesNoZombie()
     {
-        if (OperatingSystem.IsWindows())
-            Assert.Inconclusive("Windows has no zombies, and no exit request yet: a running launched target is left running.");
         string targetDll = IntegrationTargetPaths.SnapshotTargetDll();
         Assert.IsTrue(File.Exists(targetDll), $"Snapshot target DLL not found at {targetDll} — build dependency missing?");
         string source = IntegrationTargetPaths.SnapshotTargetSource();
@@ -114,10 +108,20 @@ public sealed class SessionEndTest
                 MarkerLine(source, "SNAPSHOT_HERE"), hypothesis: "stops in Worker.Compute", env: null, CancellationToken.None);
             pid = LaunchedPid(launch);
 
-            string stopped = await session.StopAsync("the target has no SIGTERM handler, so it ends on the request", CancellationToken.None);
+            string stopped = await session.StopAsync("the target has no handler for its exit request, so it ends on it", CancellationToken.None);
             using JsonDocument doc = JsonDocument.Parse(stopped);
-            Assert.AreEqual("killed", doc.RootElement.GetProperty("targetExit").GetProperty("kind").GetString(), $"stop: {stopped}");
-            Assert.AreEqual(15, doc.RootElement.GetProperty("targetExit").GetProperty("signal").GetInt32(), $"stop: {stopped}");
+            JsonElement exit = doc.RootElement.GetProperty("targetExit");
+            if (OperatingSystem.IsWindows())
+            {
+                // STATUS_CONTROL_C_EXIT: CTRL+BREAK's default end (finding 112).
+                Assert.AreEqual("exited", exit.GetProperty("kind").GetString(), $"stop: {stopped}");
+                Assert.AreEqual(unchecked((int)0xC000013A), exit.GetProperty("code").GetInt32(), $"stop: {stopped}");
+            }
+            else
+            {
+                Assert.AreEqual("killed", exit.GetProperty("kind").GetString(), $"stop: {stopped}");
+                Assert.AreEqual(15, exit.GetProperty("signal").GetInt32(), $"stop: {stopped}");
+            }
             Assert.IsTrue(Reaped(pid), $"Target {pid} was left a zombie of this process after drhook_stop.");
         }
         finally

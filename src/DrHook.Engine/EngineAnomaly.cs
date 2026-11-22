@@ -82,7 +82,7 @@ public enum AnomalyKind
     /// rather than silent loss.</summary>
     UnexpectedCleanupException,
 
-    /// <summary>An owned target that Dispose had detached from and asked to exit (SIGTERM) was still running when
+    /// <summary>An owned target that Dispose had detached from and asked to exit (SIGTERM, on Windows CTRL+BREAK) was still running when
     /// <c>NaturalExitTimeout</c> expired. It is left running, un-debugged, and reported
     /// (<c>DebugSession.TargetLeftRunning</c>) for the client to end with a deliberate kill: Dispose never kills as
     /// cleanup (ADR-016 6.2; until then ADR-008's Decision 1 escalated to SIGKILL here). The target did not honour

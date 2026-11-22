@@ -55,8 +55,9 @@ public sealed class AttachDisposeTest
                 session.Resume();
 
                 // session.Dispose() runs at end of using: it detaches, then (Linux, macOS) sends SIGTERM and waits
-                // NaturalExitTimeout. Windows has no exit request yet (ADR-016 6.4): the target, mid-[TestMethod], is
-                // left running and finishes its work by itself.
+                // NaturalExitTimeout. On Windows an attached target has no exit request (CTRL+BREAK goes to a process
+                // group, and an attached target's is not known, ADR-016 6.4): the target, mid-[TestMethod], is left
+                // running and finishes its work by itself.
             }
 
             // Increment 3 discipline assertion: bootstrap (the OS Process) MUST have

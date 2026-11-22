@@ -1,7 +1,6 @@
 // Minimal Posix signal-send primitive for substrate RequestExit (ADR-008 / finding 68).
 // Sends SIGTERM (or any signal) to a target by PID via libc.kill. macOS + Linux.
-// Windows path is NotImplemented today — Phase 0.1 / ADR-007 Phase 9 will add
-// GenerateConsoleCtrlEvent-based equivalent.
+// Windows' exit request is CTRL+BREAK, sent by WindowsConsoleBreak (ADR-016 6.4).
 
 using System;
 using System.Runtime.InteropServices;
@@ -25,18 +24,16 @@ internal static class PosixSignals
     /// <summary>Send a POSIX signal to a target by PID. Returns 0 on success, -1 on
     /// failure (caller can read <see cref="Marshal.GetLastWin32Error"/> for errno).
     /// Throws <see cref="PlatformNotSupportedException"/> on Windows — Windows uses
-    /// a different mechanism (GenerateConsoleCtrlEvent for soft-signal-equivalent,
-    /// TerminateProcess for hard kill, which Process.Kill already wraps).
-    /// Substrate consumers (RequestExit on Unix) check
-    /// <see cref="RuntimeInformation.IsOSPlatform"/> before calling.</summary>
+    /// a different mechanism (CTRL+BREAK, <see cref="WindowsConsoleBreak"/>, for the exit
+    /// request; TerminateProcess for hard kill, which Process.Kill already wraps).
+    /// RequestExit calls this on Unix only.</summary>
     public static int Kill(int pid, int signal)
     {
         if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
         {
             throw new PlatformNotSupportedException(
-                "PosixSignals.Kill is Unix-only. Windows substrate path is deferred to " +
-                "ADR-007 Phase 9 (Windows uses GenerateConsoleCtrlEvent for soft signals " +
-                "and Process.Kill / TerminateProcess for hard kill).");
+                "PosixSignals.Kill is Unix-only. Windows' exit request is CTRL+BREAK " +
+                "(WindowsConsoleBreak, ADR-016 6.4), and its hard kill Process.Kill / TerminateProcess.");
         }
         return kill(pid, signal);
     }

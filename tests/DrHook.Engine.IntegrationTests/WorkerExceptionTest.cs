@@ -106,7 +106,7 @@ public sealed class WorkerExceptionTest
             // The target's end. The sink's throw ended the pump at the target's first callback before the pump continued
             // it (ADR-016 6.6), so the target was held there for the whole session and never got past MTP's --debug
             // loop: it cannot exit by itself (TheWork). Linux and macOS end it with the exit request Dispose sends after
-            // the detach. Windows has none yet (6.4): Dispose leaves it running and reports that (6.2), and the finally
+            // the detach. On Windows an attached target has none (6.4): Dispose leaves it running and reports that (6.2), and the finally
             // ends it. Until 6.2 Windows killed it at Dispose, and this test asserted a natural exit it never had.
             if (OperatingSystem.IsWindows())
             {
@@ -171,7 +171,8 @@ public sealed class WorkerExceptionTest
 
             // The testhost's end, as in the MTP variant above: held at its first callback for the whole session, it
             // never got past the VSTEST_HOST_DEBUG hold and cannot exit by itself. Linux and macOS end it with the exit
-            // request; on Windows Dispose leaves it running and reports that (ADR-016 6.2, 6.4), and the finally ends it.
+            // request; on Windows, where an attached target has none, Dispose leaves it running and reports that (ADR-016
+            // 6.2, 6.4), and the finally ends it.
             if (OperatingSystem.IsWindows())
             {
                 Assert.IsTrue(session.TargetLeftRunning, "Dispose did not report the owned testhost as left running (ADR-016 6.2).");

@@ -11,6 +11,11 @@
 // CREATE_NO_WINDOW gives the child a console of its own with no window: console APIs work in the target, nothing
 // it does reaches a console the host may share, and no window pops up when the host has no console.
 //
+// CREATE_NEW_PROCESS_GROUP makes the child the root of a process group of its own, whose ID is the child's PID. It is
+// what DrHook's exit request on Windows needs: CTRL+BREAK sent to that group reaches the target and the processes it
+// starts, and nothing else on its console (ADR-016 6.4, WindowsConsoleBreak). Windows documents that it also disables
+// CTRL+C in the new group; the target's console is its own and has no window, so no one presses it there.
+//
 // BCL + P/Invoke (kernel32) only.
 
 using System;
@@ -47,6 +52,7 @@ internal static unsafe class WindowsSpawn
     private const uint CREATE_UNICODE_ENVIRONMENT = 0x00000400;
     private const uint EXTENDED_STARTUPINFO_PRESENT = 0x00080000;
     private const uint CREATE_NO_WINDOW = 0x08000000;
+    private const uint CREATE_NEW_PROCESS_GROUP = 0x00000200;
     private const int STARTF_USESTDHANDLES = 0x00000100;
     private const uint HANDLE_FLAG_INHERIT = 0x00000001;
     private const uint GENERIC_READ = 0x80000000;
@@ -105,7 +111,7 @@ internal static unsafe class WindowsSpawn
             fixed (char* pCwd = workingDirectory)
             {
                 created = CreateProcessW(null, pCommandLine, 0, 0, bInheritHandles: 1,
-                    CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT | EXTENDED_STARTUPINFO_PRESENT | CREATE_NO_WINDOW,
+                    CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT | EXTENDED_STARTUPINFO_PRESENT | CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP,
                     pEnvironment, pCwd, ref startup, out info);
             }
             if (!created) throw Failure($"CreateProcess({program})");

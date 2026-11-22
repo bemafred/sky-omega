@@ -148,17 +148,6 @@ public sealed class TargetExitTest
             using JsonDocument stoppedDoc = JsonDocument.Parse(stopped);
             JsonElement root = stoppedDoc.RootElement;
             Assert.AreEqual("stopped", root.GetProperty("status").GetString(), $"stop: {stopped}");
-            if (OperatingSystem.IsWindows())
-            {
-                // Windows has no exit request yet (ADR-016 6.4): a running launched target is left running, and its end
-                // is drhook_kill's to report.
-                Assert.IsTrue(root.TryGetProperty("targetLeftRunning", out JsonElement left) && left.GetBoolean(), $"stop: {stopped}");
-                string killed = await session.KillAsync("end the target drhook_stop left running", leftRunningPid: null, CancellationToken.None);
-                using JsonDocument killedDoc = JsonDocument.Parse(killed);
-                Assert.AreEqual("killed", killedDoc.RootElement.GetProperty("status").GetString(), $"kill: {killed}");
-                Assert.AreEqual("exited", killedDoc.RootElement.GetProperty("targetExit").GetProperty("kind").GetString(), $"kill: {killed}");
-                return;
-            }
             Assert.IsTrue(root.TryGetProperty("targetExit", out JsonElement exit), $"no targetExit in: {stopped}");
             string kind = exit.GetProperty("kind").GetString()!;
             Assert.AreNotEqual("unknown", kind, $"an owned target's end is DrHook's to know: {exit}");

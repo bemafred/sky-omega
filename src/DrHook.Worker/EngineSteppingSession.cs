@@ -492,7 +492,7 @@ public sealed class EngineSteppingSession : IDisposable
     }
 
     // drhook_stop — the normal session end (ADR-016 6.2). Owned: Dispose detaches, then asks the target to exit
-    // (SIGTERM; Windows has no exit request yet, ADR-016 6.4). A target still running after the bound is left running,
+    // (DebugSession.ExitRequest: SIGTERM, or CTRL+BREAK on Windows, ADR-016 6.4). A target still running after the bound is left running,
     // never killed as cleanup: it is kept here for drhook_kill. Borrowed: Dispose detaches, target left running.
     // Dispatches internally via DebugSession._ownsTarget.
     public Task<string> StopAsync(string hypothesis, CancellationToken ct)
@@ -513,9 +513,7 @@ public sealed class EngineSteppingSession : IDisposable
             ["hypothesis"] = hypothesis,
             ["mode"] = owned ? "owned" : "borrowed",
             ["disposition"] = owned
-                ? OperatingSystem.IsWindows()
-                    ? "Owned: detached; Windows has no exit request yet (ADR-016 6.4)"
-                    : "Owned: detached, then the target asked to exit (SIGTERM, after the detach, ADR-016 6.2)"
+                ? $"Owned: detached, then the target asked to exit ({session.ExitRequest}, after the detach, ADR-016 6.2)"
                 : "Borrowed: detached, target left running",
             ["totalSteps"] = steps,
             ["sessionHypothesis"] = sessionHypothesis,
@@ -530,12 +528,8 @@ public sealed class EngineSteppingSession : IDisposable
             lock (_leftRunning) _leftRunning.Add(session);
             summary["pid"] = pid;
             summary["targetLeftRunning"] = true;
-            summary["disposition"] = OperatingSystem.IsWindows()
-                ? "Owned: detached, and left running: Windows has no exit request yet (ADR-016 6.4). End it with drhook_kill, or let it finish."
-                : $"Owned: detached, then asked to exit (SIGTERM); still running {session.NaturalExitTimeout.TotalSeconds:0.#} s later, so left running, not killed (ADR-016 6.2). End it with drhook_kill, or let it finish.";
-            ending = OperatingSystem.IsWindows()
-                ? $"Owned: target {pid} left running (no exit request on Windows yet); drhook_kill ends it"
-                : $"Owned: target {pid} did not exit on SIGTERM and is left running; drhook_kill ends it";
+            summary["disposition"] = $"Owned: detached, then asked to exit ({session.ExitRequest}); still running {session.NaturalExitTimeout.TotalSeconds:0.#} s later, so left running, not killed (ADR-016 6.2). End it with drhook_kill, or let it finish.";
+            ending = $"Owned: target {pid} did not exit on {session.ExitRequest} and is left running; drhook_kill ends it";
         }
         else if (owned)
         {
