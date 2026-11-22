@@ -86,6 +86,30 @@ internal sealed class Mercuryd : IDisposable
     /// <summary>Sends it a signal (Linux and macOS).</summary>
     public void Signal(int signal) => Assert.Equal(0, kill(_process.Id, signal));
 
+    /// <summary>
+    /// Whether SIGINT is ignored in this process, and so in every mercuryd it starts (Linux and macOS). A command that a
+    /// non-interactive shell starts in the background (<c>&amp;</c>, <c>nohup</c>) has SIGINT ignored, by POSIX, and its
+    /// children inherit that. .NET keeps a signal that is ignored at the start ignored, so mercuryd's handler for SIGINT
+    /// never runs: SIGINT is not a stop signal for it then. Measured on zbook and elite, 2026-11-22.
+    /// </summary>
+    public static bool SigintIsIgnoredHere
+    {
+        get
+        {
+            // The handler is the first field of struct sigaction on Linux and on macOS; SIG_IGN is 1 on both.
+            var current = Marshal.AllocHGlobal(256);
+            try
+            {
+                Assert.Equal(0, sigaction(Sigint, IntPtr.Zero, current));
+                return Marshal.ReadIntPtr(current) == 1;
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(current);
+            }
+        }
+    }
+
     /// <summary>Kills it: SIGKILL on Linux and macOS, TerminateProcess on Windows.</summary>
     public void Kill() => _process.Kill();
 
@@ -101,4 +125,7 @@ internal sealed class Mercuryd : IDisposable
 
     [DllImport("libc", SetLastError = true)]
     private static extern int kill(int pid, int signal);
+
+    [DllImport("libc", SetLastError = true)]
+    private static extern int sigaction(int signal, IntPtr action, IntPtr oldAction);
 }

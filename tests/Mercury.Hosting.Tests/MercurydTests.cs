@@ -93,6 +93,9 @@ public sealed class MercurydTests : IDisposable
     public async Task AStopSignal_ClosesTheStore_WritesTheStopToTheLog_AndItExits0(int signal)
     {
         Assert.SkipWhen(OperatingSystem.IsWindows(), "Windows stops a service with its stop request (ADR-065 Step 9).");
+        Assert.SkipWhen(signal == Mercuryd.Sigint && Mercuryd.SigintIsIgnoredHere,
+            "SIGINT is ignored in this test run, as in a command a non-interactive shell starts in the background, and " +
+            "mercuryd inherits it ignored: SIGINT is not a stop signal for it then.");
         var ct = TestContext.Current.CancellationToken;
         using var mercuryd = StartOnTheStore();
         await mercuryd.WhenReady(ct);
