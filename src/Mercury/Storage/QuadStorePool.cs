@@ -222,17 +222,10 @@ public sealed class QuadStorePool : IDisposable
         _metadata = PoolMetadata.Load(PoolJsonPath);
         _activeName = _metadata.Active;
 
-        // Calculate disk budget. Here it is enforced per store creation (EnsureDiskBudget),
-        // not folded into the capacity.
+        // The disk budget is the caller's, unlimited unless given (ADR-008), and enforced per store creation
+        // (EnsureDiskBudget), not folded into the capacity. The free space is measured for the capacity event only.
         var available = DiskSpaceGuard.GetAvailableSpace(_basePath);
-        if (opts.MaxDiskBytes > 0)
-        {
-            _maxDiskBytes = opts.MaxDiskBytes;
-        }
-        else
-        {
-            _maxDiskBytes = available > 0 ? (long)(available * opts.DiskBudgetFraction) : long.MaxValue;
-        }
+        _maxDiskBytes = opts.MaxDiskBytes;
 
         // Initialize pool gate
         _capacity = opts.MaxPooledStores > 0 ? opts.MaxPooledStores : 8;
@@ -247,7 +240,7 @@ public sealed class QuadStorePool : IDisposable
             Capacity: _capacity,
             Bound: StorePoolCapacityBound.MaxPooledStores,
             AvailableBytes: available,
-            DiskBudgetFraction: opts.DiskBudgetFraction,
+            DiskBudgetFraction: 0,
             PerStoreEstimateBytes: EstimateStoreSize(_storageOptions)));
 
         // Rehydrate named stores from metadata

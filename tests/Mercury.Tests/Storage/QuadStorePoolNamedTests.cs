@@ -431,12 +431,27 @@ public class QuadStorePoolNamedTests : IDisposable
     }
 
     [Fact]
-    public void MaxDiskBytes_IsSet()
+    public void APoolHasNoDiskBudget_UnlessOneIsGiven()
     {
-        _pool = QuadStorePool.CreateTemp("test", QuadStorePoolOptions.ForTesting);
+        // ADR-008: "Maximum disk bytes across all stores. Default: unlimited." A budget taken from the free space would
+        // refuse a store by its files' lengths, which are sparse: a new store with the default options is 5.5 GB long
+        // and takes no space, so it could not be made where less than three times that is free.
+        _pool = QuadStorePool.CreateTemp("test", QuadStorePoolOptions.Default);
 
-        // Should have a positive budget
-        Assert.True(_pool.MaxDiskBytes > 0);
+        Assert.Equal(long.MaxValue, _pool.MaxDiskBytes);
+    }
+
+    [Fact]
+    public void AGivenDiskBudget_RefusesAStoreItCannotHold()
+    {
+        _pool = QuadStorePool.CreateTemp("test", new QuadStorePoolOptions
+        {
+            StorageOptions = StorageOptions.ForTesting,
+            UseCrossProcessGate = true,
+            MaxDiskBytes = 1L << 20, // 1 MB, less than a store with the test options starts with
+        });
+
+        Assert.Throws<InsufficientDiskSpaceException>(() => _pool.GetOrCreate("primary"));
     }
 
     #endregion

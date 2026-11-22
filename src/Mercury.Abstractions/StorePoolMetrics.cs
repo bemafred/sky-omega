@@ -33,7 +33,8 @@ public enum StorePoolCapacityBound
 /// <param name="Capacity">The capacity in effect: the most stores leased at once.</param>
 /// <param name="Bound">Which input set <paramref name="Capacity"/>.</param>
 /// <param name="AvailableBytes">Free space on the pool's filesystem, or -1 if unknown.</param>
-/// <param name="DiskBudgetFraction">Fraction of <paramref name="AvailableBytes"/> the pool may use.</param>
+/// <param name="DiskBudgetFraction">Fraction of <paramref name="AvailableBytes"/> the pool may use; 0 for a persistent
+/// pool, whose capacity is its <c>MaxPooledStores</c> and whose disk budget, if any, is its <c>MaxDiskBytes</c>.</param>
 /// <param name="PerStoreEstimateBytes">Estimated size of one store, from its storage options.</param>
 public readonly record struct StorePoolCapacityEvent(
     DateTimeOffset Timestamp,

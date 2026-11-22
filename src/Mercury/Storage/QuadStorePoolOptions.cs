@@ -11,10 +11,13 @@ namespace SkyOmega.Mercury.Storage;
 public sealed class QuadStorePoolOptions
 {
     /// <summary>
-    /// Maximum disk space in bytes for all stores combined.
-    /// 0 means use automatic calculation based on <see cref="DiskBudgetFraction"/>.
+    /// Maximum disk bytes across all stores. Default: unlimited (ADR-008).
+    /// A store is refused at creation when the lengths of the stores' files and the new store's initial sizes would
+    /// exceed it.
+    /// Without it, what guards the disk is each store's own <see cref="StorageOptions.MinimumFreeDiskSpace"/>, checked
+    /// where the space is used: as the store writes.
     /// </summary>
-    public long MaxDiskBytes { get; init; }
+    public long MaxDiskBytes { get; init; } = long.MaxValue;
 
     /// <summary>
     /// Maximum number of anonymous pooled stores for <see cref="QuadStorePool.Rent"/>/<see cref="QuadStorePool.Return"/> API.
@@ -35,13 +38,6 @@ public sealed class QuadStorePoolOptions
     /// Default: false.
     /// </summary>
     public bool UseCrossProcessGate { get; init; }
-
-    /// <summary>
-    /// Fraction of available disk space to use as budget (0.0-1.0).
-    /// Only used when <see cref="MaxDiskBytes"/> is 0.
-    /// Default: 0.33 (33%).
-    /// </summary>
-    public double DiskBudgetFraction { get; init; } = QuadStorePool.DefaultDiskBudgetFraction;
 
     /// <summary>
     /// Receives the pool's state events: its capacity decision at creation, and each
