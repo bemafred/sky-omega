@@ -237,23 +237,26 @@ public class HttpSparqlServiceExecutorTests
         public HttpStatusCode StatusCode { get; set; } = HttpStatusCode.OK;
         public string Content { get; set; } = "";
         public string ContentType { get; set; } = "application/sparql-results+json";
+        public string? CharSet { get; set; }
         public Exception? ExceptionToThrow { get; set; }
+        public TimeSpan Delay { get; set; }
         public string? LastRequestUri { get; private set; }
 
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             LastRequestUri = request.RequestUri?.ToString();
 
             if (ExceptionToThrow != null)
                 throw ExceptionToThrow;
+            await Task.Delay(Delay, cancellationToken);
 
             var response = new HttpResponseMessage(StatusCode)
             {
                 Content = new StringContent(Content)
             };
-            response.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(ContentType);
+            response.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(ContentType) { CharSet = CharSet };
 
-            return Task.FromResult(response);
+            return response;
         }
     }
 
@@ -657,12 +660,12 @@ public class HttpSparqlServiceExecutorTests
     #region Error Handling Tests
 
     [Fact]
-    public async Task ExecuteSelectAsync_HttpError_ThrowsSparqlServiceException()
+    public async Task ExecuteSelectAsync_HttpError_IsSaidWithTheEndpointsReason()
     {
         var handler = new MockHttpHandler
         {
-            StatusCode = HttpStatusCode.InternalServerError,
-            Content = "Internal Server Error"
+            StatusCode = HttpStatusCode.BadRequest,
+            Content = "{\"error\":\"Bad Request\",\"message\":\"the endpoint's reason\"}"
         };
 
         using var httpClient = new HttpClient(handler);
@@ -671,7 +674,8 @@ public class HttpSparqlServiceExecutorTests
         var ex = await Assert.ThrowsAsync<SparqlServiceException>(
             () => executor.ExecuteSelectAsync("http://example.org/sparql", "SELECT * WHERE { ?s ?p ?o }", TestContext.Current.CancellationToken).AsTask());
 
-        Assert.Contains("HTTP request", ex.Message);
+        Assert.Equal("The SPARQL endpoint http://example.org/sparql answered 400 Bad Request: " +
+                     "{\"error\":\"Bad Request\",\"message\":\"the endpoint's reason\"}", ex.Message);
         Assert.Equal("http://example.org/sparql", ex.EndpointUri);
         Assert.Equal("SELECT * WHERE { ?s ?p ?o }", ex.Query);
     }
@@ -747,9 +751,165 @@ public class HttpSparqlServiceExecutorTests
         Assert.Contains("parse SPARQL results JSON", ex.Message);
     }
 
+    /// <summary>
+    /// JSON of another shape is an answer that cannot be read, the endpoint's failure (ADR-066 D3): a binding with no
+    /// type, bindings that are not an array.
+    /// </summary>
+    [Theory]
+    [InlineData("{\"results\":{\"bindings\":[{\"s\":{\"value\":\"x\"}}]}}")]
+    [InlineData("{\"results\":{\"bindings\":{}}}")]
+    public async Task ExecuteSelectAsync_AnAnswerOfAnotherShape_ThrowsSparqlServiceException(string answer)
+    {
+        var handler = new MockHttpHandler { Content = answer };
+        using var httpClient = new HttpClient(handler);
+        using var executor = new HttpSparqlServiceExecutor(httpClient);
+
+        var ex = await Assert.ThrowsAsync<SparqlServiceException>(
+            () => executor.ExecuteSelectAsync("http://example.org/sparql", "SELECT * WHERE { ?s ?p ?o }", TestContext.Current.CancellationToken).AsTask());
+
+        Assert.Contains("parse SPARQL results JSON", ex.Message);
+    }
+
+    /// <summary>An ASK answered with a boolean that is not one cannot be read, the endpoint's failure (ADR-066 D3).</summary>
+    [Fact]
+    public async Task ExecuteAskAsync_AnAnswerOfAnotherShape_ThrowsSparqlServiceException()
+    {
+        var handler = new MockHttpHandler { Content = "{\"boolean\":\"yes\"}" };
+        using var httpClient = new HttpClient(handler);
+        using var executor = new HttpSparqlServiceExecutor(httpClient);
+
+        var ex = await Assert.ThrowsAsync<SparqlServiceException>(
+            () => executor.ExecuteAskAsync("http://example.org/sparql", "ASK WHERE { ?s ?p ?o }", TestContext.Current.CancellationToken).AsTask());
+
+        Assert.Contains("parse SPARQL results JSON", ex.Message);
+    }
+
+    /// <summary>
+    /// An answer whose character set is not one cannot be read as text, the endpoint's failure (ADR-066 D3).
+    /// </summary>
+    [Fact]
+    public async Task ExecuteSelectAsync_AnAnswerInACharacterSetThatIsNotOne_ThrowsSparqlServiceException()
+    {
+        var handler = new MockHttpHandler { Content = "{\"results\":{\"bindings\":[]}}", CharSet = "bogus" };
+        using var httpClient = new HttpClient(handler);
+        using var executor = new HttpSparqlServiceExecutor(httpClient);
+
+        var ex = await Assert.ThrowsAsync<SparqlServiceException>(
+            () => executor.ExecuteSelectAsync("http://example.org/sparql", "SELECT * WHERE { ?s ?p ?o }", TestContext.Current.CancellationToken).AsTask());
+
+        Assert.StartsWith("The SPARQL endpoint http://example.org/sparql answered, and its answer cannot be read: ", ex.Message);
+    }
+
+    /// <summary>
+    /// A SERVICE IRI that is not an HTTP endpoint cannot be asked: a call that fails, the endpoint's failure (SPARQL 1.1
+    /// Federated Query §2.3; ADR-066 D3), and nothing is sent.
+    /// </summary>
+    [Theory]
+    [InlineData("urn:x")]
+    [InlineData("x")]
+    [InlineData("http://[bad/sparql")]
+    public async Task ExecuteSelectAsync_AnIriThatIsNotAnHttpEndpoint_ThrowsSparqlServiceException(string endpoint)
+    {
+        var handler = new MockHttpHandler();
+        using var httpClient = new HttpClient(handler);
+        using var executor = new HttpSparqlServiceExecutor(httpClient);
+
+        var ex = await Assert.ThrowsAsync<SparqlServiceException>(
+            () => executor.ExecuteSelectAsync(endpoint, "SELECT * WHERE { ?s ?p ?o }", TestContext.Current.CancellationToken).AsTask());
+
+        Assert.Equal($"The SERVICE IRI {endpoint} is not an HTTP endpoint.", ex.Message);
+        Assert.Null(handler.LastRequestUri);
+    }
+
     #endregion
 
     #region Cancellation Tests
+
+    [Fact]
+    public async Task ExecuteSelectAsync_NoAnswerInTime_IsSaidSo_NotAsACancellation()
+    {
+        // The call's bound is the executor's own: the client's is left at its 100 s
+        var handler = new MockHttpHandler { Delay = TimeSpan.FromMinutes(1) };
+        using var httpClient = new HttpClient(handler);
+        using var executor = new HttpSparqlServiceExecutor(httpClient, TimeSpan.FromSeconds(1));
+
+        var ex = await Assert.ThrowsAsync<SparqlServiceException>(
+            () => executor.ExecuteSelectAsync("http://example.org/sparql", "SELECT * WHERE { ?s ?p ?o }", TestContext.Current.CancellationToken).AsTask());
+
+        Assert.Equal("The SPARQL endpoint http://example.org/sparql did not answer within 1 s.", ex.Message);
+    }
+
+    /// <summary>
+    /// An endpoint that does not take the connection within the connect timeout is said not to have been connected
+    /// to, with the runtime's reason, not to have not answered, and not as a cancellation (ADR-066 D5). The
+    /// connection that never comes stands in for an address that drops what is sent to it.
+    /// </summary>
+    [Fact]
+    public async Task ExecuteSelectAsync_NoConnectionInTime_IsSaidSo()
+    {
+        using var handler = new SocketsHttpHandler
+        {
+            ConnectTimeout = TimeSpan.FromSeconds(1),
+            ConnectCallback = async (_, ct) =>
+            {
+                await Task.Delay(Timeout.Infinite, ct);
+                throw new InvalidOperationException("not reached");
+            }
+        };
+        using var httpClient = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
+        using var executor = new HttpSparqlServiceExecutor(httpClient);
+
+        var ex = await Assert.ThrowsAsync<SparqlServiceException>(
+            () => executor.ExecuteSelectAsync("http://example.org/sparql", "SELECT * WHERE { ?s ?p ?o }", TestContext.Current.CancellationToken).AsTask());
+
+        Assert.StartsWith("The SPARQL endpoint http://example.org/sparql could not be connected to: ", ex.Message);
+        Assert.IsType<TimeoutException>(ex.InnerException!.InnerException);
+    }
+
+    /// <summary>
+    /// An endpoint's failure says at most the first 4 KiB of its body, and says that it was cut (ADR-066 R2).
+    /// </summary>
+    [Fact]
+    public async Task ExecuteSelectAsync_HttpError_SaysTheFirst4KiBOfTheBody()
+    {
+        var handler = new MockHttpHandler { StatusCode = HttpStatusCode.BadRequest, Content = new string('x', 5000) };
+        using var httpClient = new HttpClient(handler);
+        using var executor = new HttpSparqlServiceExecutor(httpClient);
+
+        var ex = await Assert.ThrowsAsync<SparqlServiceException>(
+            () => executor.ExecuteSelectAsync("http://example.org/sparql", "SELECT * WHERE { ?s ?p ?o }", TestContext.Current.CancellationToken).AsTask());
+
+        Assert.Equal("The SPARQL endpoint http://example.org/sparql answered 400 Bad Request: " + new string('x', 4096) +
+                     " [the first 4 KiB of 5000 bytes]", ex.Message);
+    }
+
+    /// <summary>A body of 4 KiB exactly is said whole (ADR-066 R2).</summary>
+    [Fact]
+    public async Task ExecuteSelectAsync_HttpError_Says4KiBOfBodyWhole()
+    {
+        var handler = new MockHttpHandler { StatusCode = HttpStatusCode.BadRequest, Content = new string('x', 4096) };
+        using var httpClient = new HttpClient(handler);
+        using var executor = new HttpSparqlServiceExecutor(httpClient);
+
+        var ex = await Assert.ThrowsAsync<SparqlServiceException>(
+            () => executor.ExecuteSelectAsync("http://example.org/sparql", "SELECT * WHERE { ?s ?p ?o }", TestContext.Current.CancellationToken).AsTask());
+
+        Assert.Equal("The SPARQL endpoint http://example.org/sparql answered 400 Bad Request: " + new string('x', 4096),
+            ex.Message);
+    }
+
+    [Fact]
+    public async Task ExecuteSelectAsync_CancelledByTheCaller_IsACancellation()
+    {
+        var handler = new MockHttpHandler { Delay = TimeSpan.FromMinutes(1) };
+        using var httpClient = new HttpClient(handler);
+        using var executor = new HttpSparqlServiceExecutor(httpClient);
+        using var cancel = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        cancel.CancelAfter(TimeSpan.FromMilliseconds(200));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => executor.ExecuteSelectAsync("http://example.org/sparql", "SELECT * WHERE { ?s ?p ?o }", cancel.Token).AsTask());
+    }
 
     // Note: Cancellation behavior is tested implicitly through HttpClient.
     // The mock handler returns synchronously, so pre-cancelled tokens may not trigger.

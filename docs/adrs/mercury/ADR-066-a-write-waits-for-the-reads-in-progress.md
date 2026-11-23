@@ -34,9 +34,12 @@ of a close racing a queued write (D2); which callers can cancel (D4); and the or
 writer starvation accepted (D1, R4). "No further architecture investigation is requested." What acceptance changed is
 in [What the revisions changed](#what-the-revisions-changed).
 
-Steps 1 to 4 done and on `main` on 2026-11-23 (Steps 1 to 3 in `216ebbf8`, `25778f45` and `836b6279`). Step 3 is D1
-and D2 in `QuadStore` and `QuadStorePool`, with the tests written with the correction. Step 4 is D3 and D4 in
-`ServiceCall`; the executor's part of D3 is held with Step 6's executor. Every held test passes.
+All six steps done on 2026-11-23, Steps 1 to 4 in `216ebbf8`, `25778f45`, `836b6279` and `dbec052f`. Step 3 is D1
+and D2 in `QuadStore` and `QuadStorePool`, with the tests written with the correction; Step 4 is D3 and D4 in
+`ServiceCall`. Steps 5 and 6 go to `main` together, since both act on the executor that no tool used until then: D5 and
+R2 in the executor and the tools, the executor's part of D3, D6 in ADR-065, the tools' help and the API document, and
+the executor, its place in `SparqlEngine` and this ADR's tests; R3 and R4 in the limits register. Every test of this
+ADR passes on zbook. Completed waits for Martin's review, and for the CI on its six platforms.
 
 ## Why
 
@@ -403,6 +406,14 @@ that has not entered, and a write never takes effect during a read.
   5 s, Jena 10 s. It is configured in the arguments mercury, mercury-mcp and mercuryd share (`StoreArguments`), for the
   process, since the executor is one per process (R1, decided). The call's overall timeout stays 100 s until ADR-060's
   deadline.
+  - **How.** `--service-connect-timeout <seconds>`, a whole number from 1, taken by the three tools; a tool that is
+    given it sets `SparqlEngine.ServiceConnectTimeout` before it opens its store, and a library sets the same property
+    when its process starts. The executor's own client connects within it (`SocketsHttpHandler.ConnectTimeout`) and has
+    no timeout of its own: the executor bounds the call itself, with a token linked to the query's. The connect
+    timeout ends a call as a cancellation, as the call's timeout does (measured on zbook, 2026-11-23: both a
+    `TaskCanceledException` around a `TimeoutException`), so the executor tells them apart by its own bound: a
+    cancellation that is neither the query's nor the call's bound is the connect timeout, the one other bound its
+    client has.
 - **D6. SERVICE's outbound boundary is the tailnet's, and it is written down.** Whoever can query a Mercury endpoint
   can make its process send a SPARQL query, as an HTTP GET, to any address the process can reach: the tailnet, the
   internet, and services that listen only on that machine, `localhost` included. ADR-065 D5 makes the tailnet the
@@ -410,7 +421,8 @@ that has not entered, and a write never takes effect during a read.
   allow-list.
   - **What a failure says** (R2, decided). An endpoint's failure comes back in the query's error message with its
     status and reason, and the first 4 KiB of its body, cut there; a call that gets no answer says why (refused, the
-    connect timeout, the call's timeout). Today the whole body is kept (`HttpSparqlServiceExecutor.cs:98-106`).
+    connect timeout, the call's timeout). Today the whole body is kept (`HttpSparqlServiceExecutor.cs:98-106`). The
+    body is read as UTF-8, and a body cut says so: `[the first 4 KiB of <n> bytes]`.
 - **D7. SILENT answers the recommendation's Ω0**, one empty solution, on a failure D3 lets it hide. Its own correction,
   with the two tests and ADR-048's text, independent of D1 to D6, and in place before Step 6 ships.
 - **D8. A prune has its store to itself: a prune of a served store is an error.** Martin's decision, 2026-11-22:
@@ -522,7 +534,8 @@ The wake-up protocol's monitor is in no cycle: nothing waits for the lock while 
 
 `tests/Mercury.Tests/Sparql/ServiceForwardProgressTests.cs`, with a gated endpoint of the test's own
 (`GatedSparqlEndpoint`): it answers only when the test opens it, and says when it is first asked. The tests and Step
-6's executor are held on zbook, not on `main`: the ones that fail today fail until the correction is built.
+6's executor were held on zbook until the correction was built, since the ones that failed then failed until it was,
+and went to `main` with Step 6.
 
 Of the seven tests Martin asked to keep, one is restated: the first held that a write to the store is not held while
 its query waits on SERVICE, which D1 reverses; it now holds that the write waits and that a read after it does not.
@@ -605,6 +618,20 @@ Step 6's executor, its tests in `HttpSparqlServiceExecutorTests`: an IRI that is
 and an answer in a character set that is not one, each a `SparqlServiceException`. Each part was taken out in turn,
 and a test failed each time: the call without the token, SILENT catching every failure, the executor without its IRI
 check, the parse naming only `JsonException`, and the read without its catch of the character set.
+
+Built with Step 5 (2026-11-23), held on zbook with Step 6's executor: the connect timeout and the bound act on the
+executor, which no tool uses until Step 6, and the bound on a message only that executor makes. `StoreArgumentsTests`
+reads the option and refuses what is not a whole number of seconds from 1; `HttpSparqlServiceExecutorTests` holds the
+connect timeout said as such (a connection that never comes stands in for an address that drops what is sent to it),
+the call's own bound, and the body cut at 4 KiB and not before. Each part was taken out in turn, and a test failed each
+time: the call without its bound, the connect timeout not told apart, the body not cut, the cut said at 4 KiB, and 0
+seconds taken. No test holds the line in each tool that sets the timeout, `SparqlEngine`'s setter, or the client's own
+timeout left off: each is process-wide, or 100 s. The probe
+`tools/probes/service-connect-timeout/a-service-to-an-address-that-drops.cs` runs a query through
+`SparqlEngine.Query` with a SERVICE to an address that drops what is sent to it: on zbook it ends after 5.1 s with the
+default and 2.0 s with 2 s set, each "could not be connected to: A connection could not be established within the
+configured ConnectTimeout."; before, nothing bounded the connect but the client's 100 s for the call (read in the
+code, not measured).
 
 Written with D8, in `Mercury.Hosting.Tests`, which runs `mercury` as a process (`MercuryCli.cs`): a `:prune` in a
 mercury that serves its store over HTTP is refused, and the store keeps what it held; with `--no-http` the same

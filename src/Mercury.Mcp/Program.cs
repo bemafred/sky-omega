@@ -3,6 +3,7 @@
 
 using Microsoft.Extensions.DependencyInjection;
 using ModelContextProtocol.Server;
+using SkyOmega.Mercury;
 using SkyOmega.Mercury.Abstractions;
 using SkyOmega.Mercury.Hosting;
 using SkyOmega.Mercury.Mcp;
@@ -13,7 +14,7 @@ using SkyOmega.Mercury.Serving;
 // The host of mercury-mcp: its options, its words, and the MCP server. Opening the store, the HTTP endpoint, the
 // attach pipe and the stop handling are in Mercury.Serving and Mercury.Hosting (ADR-065 D11).
 
-var store = new StoreArguments(StoreOptions.Path | StoreOptions.Port);
+var store = new StoreArguments(StoreOptions.Path | StoreOptions.Port | StoreOptions.ServiceConnectTimeout);
 bool enableHttpUpdates = false;
 bool showHelp = false;
 bool showVersion = false;
@@ -74,6 +75,8 @@ if (showHelp)
           -d, --data <path>       Path to data directory
           -p, --port <port>       HTTP port (default: 3030)
           --enable-http-updates   Allow SPARQL UPDATE via HTTP
+          --service-connect-timeout <seconds>
+                                  How long a SERVICE call waits to connect to its endpoint (default: 5)
 
         Examples:
           mercury-mcp                          # Persistent per-user store (see below)
@@ -90,12 +93,21 @@ if (showHelp)
           - SPARQL HTTP endpoint at http://localhost:{port}/sparql
           - Named pipe 'mercury-mcp' for CLI attachment
 
+        SERVICE:
+          A query's SERVICE makes mercury-mcp send it to any address this machine can
+          reach, services that listen only on localhost included; a failure says at most
+          4 KiB of what such a service answers.
+
         Log:
           mercury.log in the store's directory: each run's start and stop, each store
           opened, and every warning and error a store reported. Read it after a failure.
         """);
     return 0;
 }
+
+// A SERVICE call's connect timeout is one for the process, set before the store opens (ADR-066 D5)
+if (store.ServiceConnectTimeout is { } serviceConnectTimeout)
+    SparqlEngine.ServiceConnectTimeout = serviceConnectTimeout;
 
 // Default store path - persistent per-user location
 var storePath = store.ResolvePath("mcp");

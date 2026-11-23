@@ -17,10 +17,11 @@ public sealed class DaemonArguments
 
     /// <summary>
     /// The store and where it is served: <c>--store</c> or <c>-d</c> (one of them is needed), <c>--profile</c>,
-    /// <c>--listen</c> and <c>--port</c>.
+    /// <c>--listen</c> and <c>--port</c>; and <c>--service-connect-timeout</c>.
     /// </summary>
     public StoreArguments Store { get; } = new(
-        StoreOptions.Path | StoreOptions.Name | StoreOptions.Profile | StoreOptions.Listen | StoreOptions.Port);
+        StoreOptions.Path | StoreOptions.Name | StoreOptions.Profile | StoreOptions.Listen | StoreOptions.Port |
+        StoreOptions.ServiceConnectTimeout);
 
     /// <summary><c>--read-only</c>: the HTTP endpoint takes no updates (D5).</summary>
     public bool ReadOnly { get; private set; }

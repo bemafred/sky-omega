@@ -1,6 +1,7 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using System.Globalization;
 using SkyOmega.Mercury.Abstractions;
 using SkyOmega.Mercury.Runtime.IO;
 
@@ -27,6 +28,10 @@ public enum StoreOptions
 
     /// <summary><c>--listen</c> with a host the HTTP endpoint listens on, as often as there are hosts (ADR-065 D4).</summary>
     Listen = 16,
+
+    /// <summary><c>--service-connect-timeout</c> with the seconds a SERVICE call waits to connect to its endpoint, for
+    /// the process (ADR-066 D5).</summary>
+    ServiceConnectTimeout = 32,
 }
 
 /// <summary>What <see cref="StoreArguments.Read"/> did with an argument.</summary>
@@ -51,7 +56,8 @@ public enum ArgumentRead
 /// first and hands the rest to <see cref="Read"/>.
 /// </summary>
 /// <remarks>
-/// A value that is missing is ignored, as is a port that is not a number; a profile that is not one is refused.
+/// A value that is missing is ignored, as is a port that is not a number; a profile that is not one is refused, and so
+/// is a connect timeout that is not a whole number of seconds, 1 or more.
 /// </remarks>
 public sealed class StoreArguments(StoreOptions takes)
 {
@@ -74,6 +80,12 @@ public sealed class StoreArguments(StoreOptions takes)
     /// given. Each is a name, an IP address, or <c>+</c> or <c>*</c> for every network (ADR-065 D4).
     /// </summary>
     public IReadOnlyList<string> Hosts => _hosts.Count > 0 ? _hosts : ["localhost"];
+
+    /// <summary>
+    /// How long a SERVICE call waits to connect to its endpoint, from <c>--service-connect-timeout</c>; null when it is
+    /// not given, and the process keeps <see cref="SparqlEngine.ServiceConnectTimeout"/>'s 5 seconds (ADR-066 D5).
+    /// </summary>
+    public TimeSpan? ServiceConnectTimeout { get; private set; }
 
     /// <summary>Why the last argument refused was refused, as the line or lines that follow <c>Error: </c>.</summary>
     public string? Error { get; private set; }
@@ -109,6 +121,16 @@ public sealed class StoreArguments(StoreOptions takes)
                     return ArgumentRead.Read;
                 }
                 Error = $"--profile requires one of: {string.Join(", ", Enum.GetNames<StoreProfile>())}.";
+                return ArgumentRead.Refused;
+            case "--service-connect-timeout" when Takes(StoreOptions.ServiceConnectTimeout):
+                if (i + 1 < args.Length &&
+                    int.TryParse(args[++i], NumberStyles.None, CultureInfo.InvariantCulture, out var seconds) &&
+                    seconds > 0)
+                {
+                    ServiceConnectTimeout = TimeSpan.FromSeconds(seconds);
+                    return ArgumentRead.Read;
+                }
+                Error = "--service-connect-timeout requires a whole number of seconds, 1 or more.";
                 return ArgumentRead.Refused;
         }
 
