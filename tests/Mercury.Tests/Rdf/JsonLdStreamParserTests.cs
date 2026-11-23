@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using SkyOmega.Mercury.JsonLd;
@@ -522,12 +523,125 @@ public class JsonLdStreamParserTests
 
     #endregion
 
+    #region Base direction
+
+    // A string's base direction, from the context's @direction or a term's (JSON-LD 1.1 §4.2.4.1), in RDF as the
+    // rdfDirection option says: the i18n datatype, or a compound literal (W3C toRdf tdi13 and these).
+
+    private const string I18n = "https://www.w3.org/ns/i18n#";
+
+    [Fact]
+    public async Task TheDefaultDirection_MakesAPlainStringOfTheI18nDatatype_WithTheDefaultLanguageOrNone()
+    {
+        var quads = await ParseJsonLd(@"{
+            ""@context"": { ""@version"": 1.1, ""@direction"": ""rtl"", ""en"": { ""@id"": ""http://ex/en"", ""@language"": ""en"" } },
+            ""http://ex/none"": ""no language"",
+            ""en"": ""English""
+        }", "i18n-datatype");
+
+        Assert.Equal(new[] { $"\"English\"^^<{I18n}en_rtl>", $"\"no language\"^^<{I18n}_rtl>" },
+            quads.Select(q => q.Object).Order(StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public async Task ATermsDirection_OverridesTheDefault_AndItsNullMeansNone()
+    {
+        var quads = await ParseJsonLd(@"{
+            ""@context"": {
+                ""@version"": 1.1, ""@language"": ""en"", ""@direction"": ""rtl"",
+                ""ltr"": { ""@id"": ""http://ex/ltr"", ""@direction"": ""ltr"" },
+                ""none"": { ""@id"": ""http://ex/none"", ""@direction"": null }
+            },
+            ""ltr"": ""left to right"",
+            ""none"": ""no direction""
+        }", "i18n-datatype");
+
+        Assert.Equal($"\"left to right\"^^<{I18n}en_ltr>", Assert.Single(quads, q => q.Predicate == "<http://ex/ltr>").Object);
+        Assert.Equal("\"no direction\"@en", Assert.Single(quads, q => q.Predicate == "<http://ex/none>").Object);
+    }
+
+    [Fact]
+    public async Task ALanguageMap_TakesTheDefaultDirection()
+    {
+        var quads = await ParseJsonLd(@"{
+            ""@context"": {
+                ""@version"": 1.1, ""@direction"": ""rtl"",
+                ""label"": { ""@id"": ""http://ex/label"", ""@container"": ""@language"" }
+            },
+            ""label"": { ""en"": ""The Queen"", ""@none"": ""no language"" }
+        }", "i18n-datatype");
+
+        Assert.Equal(new[] { $"\"The Queen\"^^<{I18n}en_rtl>", $"\"no language\"^^<{I18n}_rtl>" },
+            quads.Select(q => q.Object).Order(StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public async Task TheDefaultDirection_AsACompoundLiteral_HoldsTheValueTheDirectionAndTheLanguage()
+    {
+        var quads = await ParseJsonLd(@"{
+            ""@context"": { ""@version"": 1.1, ""@language"": ""EN"", ""@direction"": ""rtl"" },
+            ""@id"": ""http://ex/s"",
+            ""http://ex/p"": ""value""
+        }", "compound-literal");
+
+        var node = Assert.Single(quads, q => q.Subject == "<http://ex/s>").Object;
+        Assert.StartsWith("_:", node);
+        Assert.Equal(new[]
+            {
+                "<http://www.w3.org/1999/02/22-rdf-syntax-ns#direction> \"rtl\"",
+                "<http://www.w3.org/1999/02/22-rdf-syntax-ns#language> \"en\"",
+                "<http://www.w3.org/1999/02/22-rdf-syntax-ns#value> \"value\"",
+            },
+            quads.Where(q => q.Subject == node).Select(q => $"{q.Predicate} {q.Object}").Order(StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public async Task ContextNull_EndsTheDefaultDirection()
+    {
+        var quads = await ParseJsonLd(@"{
+            ""@context"": { ""@version"": 1.1, ""@direction"": ""rtl"" },
+            ""http://ex/p"": { ""@context"": null, ""http://ex/q"": ""inner"" }
+        }", "i18n-datatype");
+
+        Assert.Equal("\"inner\"", Assert.Single(quads, q => q.Predicate == "<http://ex/q>").Object);
+    }
+
+    [Fact]
+    public async Task APropertyScopedContextsDirection_EndsWithItsProperty()
+    {
+        var quads = await ParseJsonLd(@"{
+            ""@context"": {
+                ""@version"": 1.1,
+                ""a"": { ""@id"": ""http://ex/a"", ""@context"": { ""@direction"": ""ltr"" } },
+                ""b"": ""http://ex/b""
+            },
+            ""a"": { ""http://ex/c"": ""inside"" },
+            ""b"": ""after""
+        }", "i18n-datatype");
+
+        Assert.Equal($"\"inside\"^^<{I18n}_ltr>", Assert.Single(quads, q => q.Predicate == "<http://ex/c>").Object);
+        Assert.Equal("\"after\"", Assert.Single(quads, q => q.Predicate == "<http://ex/b>").Object);
+    }
+
+    [Fact]
+    public async Task ATermsDirectionThatIsNotOne_IsRefused()
+    {
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => ParseJsonLd(@"{
+            ""@context"": { ""@version"": 1.1, ""t"": { ""@id"": ""http://ex/t"", ""@direction"": ""up"" } },
+            ""t"": ""value""
+        }", "i18n-datatype"));
+
+        Assert.Equal("invalid base direction", ex.Message);
+    }
+
+    #endregion
+
     #region Helper Methods
 
-    private static async Task<List<RdfQuad>> ParseJsonLd(string jsonld)
+    private static async Task<List<RdfQuad>> ParseJsonLd(string jsonld, string? rdfDirection = null)
     {
         await using var stream = new MemoryStream(Encoding.UTF8.GetBytes(jsonld));
-        await using var parser = new JsonLdStreamParser(stream);
+        await using var parser = new JsonLdStreamParser(stream, baseIri: null, processingMode: null, rdfDirection);
 
         var quads = new List<RdfQuad>();
         await parser.ParseAsync((s, p, o, g) =>

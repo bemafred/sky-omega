@@ -101,6 +101,7 @@ internal sealed partial class JsonLdStreamParser
             _containerLanguage.Clear();
             _containerIndex.Clear();
             _termLanguage.Clear();
+            _termDirection.Clear();
             _reverseProperty.Clear();
             _scopedContext.Clear();
             _indexProperty.Clear();
@@ -112,6 +113,7 @@ internal sealed partial class JsonLdStreamParser
             _prefixable.Clear();
             _vocabIri = null;
             _defaultLanguage = null;
+            _defaultDirection = null;
             // @context: null resets @base to the document base IRI (e060)
             // This is different from @base: null which disables relative IRI resolution
             _baseIri = _documentBaseIri;
@@ -339,7 +341,7 @@ internal sealed partial class JsonLdStreamParser
             }
             else if (term == "@direction")
             {
-                // @direction must be "ltr" or "rtl" (or null) (di08)
+                // @direction must be "ltr" or "rtl" (or null) (di08); it is the default base direction (tdi13)
                 if (value.ValueKind == JsonValueKind.String)
                 {
                     var dir = value.GetString();
@@ -347,8 +349,13 @@ internal sealed partial class JsonLdStreamParser
                     {
                         throw new InvalidOperationException("invalid base direction");
                     }
+                    _defaultDirection = dir;
                 }
-                else if (value.ValueKind != JsonValueKind.Null)
+                else if (value.ValueKind == JsonValueKind.Null)
+                {
+                    _defaultDirection = null;
+                }
+                else
                 {
                     throw new InvalidOperationException("invalid base direction");
                 }
@@ -1120,6 +1127,23 @@ internal sealed partial class JsonLdStreamParser
                     }
                 }
 
+                // Handle term-level @direction: "ltr", "rtl", or null, which overrides the default direction with none
+                if (value.TryGetProperty("@direction", out var dirProp))
+                {
+                    if (dirProp.ValueKind == JsonValueKind.Null)
+                    {
+                        _termDirection[term] = "";
+                    }
+                    else if (dirProp.ValueKind == JsonValueKind.String && dirProp.GetString() is "ltr" or "rtl")
+                    {
+                        _termDirection[term] = dirProp.GetString()!;
+                    }
+                    else
+                    {
+                        throw new InvalidOperationException("invalid base direction");
+                    }
+                }
+
                 // Handle scoped context - nested @context for this term
                 if (value.TryGetProperty("@context", out var scopedContextProp))
                 {
@@ -1264,6 +1288,7 @@ internal sealed partial class JsonLdStreamParser
         var savedContainerId = new Dictionary<string, bool>(_containerId, StringComparer.Ordinal);
         var savedContainerType = new Dictionary<string, bool>(_containerType, StringComparer.Ordinal);
         var savedTermLanguage = new Dictionary<string, string>(_termLanguage, StringComparer.Ordinal);
+        var savedTermDirection = new Dictionary<string, string>(_termDirection, StringComparer.Ordinal);
         var savedReverseProperty = new Dictionary<string, string>(_reverseProperty, StringComparer.Ordinal);
         var savedScopedContext = new Dictionary<string, string>(_scopedContext, StringComparer.Ordinal);
         var savedIndexProperty = new Dictionary<string, string>(_indexProperty, StringComparer.Ordinal);
@@ -1283,6 +1308,7 @@ internal sealed partial class JsonLdStreamParser
         var savedVocabIri = _vocabIri;
         var savedBaseIri = _baseIri;
         var savedDefaultLanguage = _defaultLanguage;
+        var savedDefaultDirection = _defaultDirection;
 
         try
         {
@@ -1310,6 +1336,8 @@ internal sealed partial class JsonLdStreamParser
             foreach (var kv in savedContainerType) _containerType[kv.Key] = kv.Value;
             _termLanguage.Clear();
             foreach (var kv in savedTermLanguage) _termLanguage[kv.Key] = kv.Value;
+            _termDirection.Clear();
+            foreach (var kv in savedTermDirection) _termDirection[kv.Key] = kv.Value;
             _reverseProperty.Clear();
             foreach (var kv in savedReverseProperty) _reverseProperty[kv.Key] = kv.Value;
             _scopedContext.Clear();
@@ -1345,6 +1373,7 @@ internal sealed partial class JsonLdStreamParser
             _vocabIri = savedVocabIri;
             _baseIri = savedBaseIri;
             _defaultLanguage = savedDefaultLanguage;
+            _defaultDirection = savedDefaultDirection;
         }
     }
 
