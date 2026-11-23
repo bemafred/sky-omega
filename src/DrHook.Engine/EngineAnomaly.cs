@@ -19,6 +19,7 @@
 //   - UiThreadUnresponsive     — after a visual capture + detach, the target's UI thread did not drain a queued job
 //   - GoneTargetAlive          — Detach said the target is gone (terminated / neutered), but it is still running
 //   - DebuggerError            — mscordbi disabled debugging services for the process (ICorDebugManagedCallback.DebuggerError)
+//   - ConsoleControlEvent      — CTRL+C or CTRL+BREAK reached a debugged Windows target and was passed on to it (ADR-016 6.4)
 //
 // New kinds are added as new substrate surprises surface. The discipline rule: each kind is a
 // named concept, not "Generic / Other" — and each emission site documents what would have to be
@@ -159,6 +160,14 @@ public enum AnomalyKind
     /// alive and frozen, and cannot be debugged again until it restarts (finding 106); on Windows it ended with the
     /// worker. Context: <c>pid</c>, <c>lastState</c>. Actionable: restart the target, or end it.</summary>
     TargetLeftHeld,
+
+    /// <summary>CTRL+C or CTRL+BREAK reached the target while it was debugged (Windows; mscordbi's <c>ControlCTrap</c>).
+    /// DrHook answered <c>S_FALSE</c>, so the event went on to the target as it would without a debugger (ADR-016 6.4):
+    /// to its own console handlers (.NET reports CTRL+BREAK as SIGQUIT, CTRL+C as SIGINT), and when none handles it, to
+    /// Windows' default, which ends the target with exit code <c>0xC000013A</c> (finding 112). A signal about the
+    /// target, not a fault of the debugger. Actionable: what follows is the target's answer to the event: a shutdown
+    /// of its own, or that abrupt end.</summary>
+    ConsoleControlEvent,
 }
 
 /// <summary>A structured record of a substrate-correctness anomaly. Surfaced through

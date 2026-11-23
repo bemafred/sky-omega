@@ -357,6 +357,14 @@ internal sealed class CallbackPump : IManagedCallbackSink, IDisposable
                 if (e.Kind == CallbackKind.Informational)
                 {
                     _userSink.OnEvent(e.Name);
+                    // ADR-016 6.4: the event was passed on to the target (ManagedCallbackHost answers S_FALSE), and the
+                    // operator is told, since what the target does next is its answer to it. Continued below like any
+                    // other informational event.
+                    if (e.Name == "ControlCTrap")
+                        _userSink.OnAnomaly(new EngineAnomaly(
+                            DateTimeOffset.UtcNow, AnomalyKind.ConsoleControlEvent, "pump-worker", "ControlCTrap",
+                            Observed: "CTRL+C or CTRL+BREAK reached the target while it was debugged; DrHook passed it on to the target",
+                            Expected: "the target's own console handlers answer it, or none does and Windows ends the target with exit code 0xC000013A"));
                     if (e.Name == "ExitProcess")
                     {
                         // The debuggee is gone — clear the stale stop-thread pointer. Otherwise

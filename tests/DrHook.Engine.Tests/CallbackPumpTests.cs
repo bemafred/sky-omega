@@ -197,6 +197,30 @@ public sealed class CallbackPumpTests
         Assert.True(SpinWait.SpinUntil(() => !pump.IsParked, TimeSpan.FromSeconds(10)), "The parked worker was not released.");
     }
 
+    // ADR-016 6.4: a CTRL+C or CTRL+BREAK that reaches a debugged Windows target is passed on to it (ControlCTrap is
+    // answered S_FALSE), and the operator is told with a ConsoleControlEvent anomaly. The event is continued like any
+    // other informational one, and no other event draws the anomaly.
+    [Fact]
+    public void ControlCTrap_IsReportedAsAConsoleControlEvent_AndContinued()
+    {
+        var sink = new RecordingSink();
+        using var pump = new CallbackPump(sink);
+
+        int continues = 0;
+        pump.OnCallback(CallbackKind.Informational, "CreateThread", 0, 0, 0);
+        pump.OnCallback(CallbackKind.Informational, "ControlCTrap", 0, 0, 0);
+        pump.OnCallback(CallbackKind.Informational, "ExitThread", 0, 0, 0);
+
+        pump.Start((_, _) => { Interlocked.Increment(ref continues); return 0; }, () => { });
+        pump.Dispose();
+
+        Assert.Equal(3, continues);
+        Assert.Equal(new[] { "CreateThread", "ControlCTrap", "ExitThread" }, sink.Events.ToArray());
+        EngineAnomaly reported = Assert.Single(sink.Anomalies);
+        Assert.Equal(AnomalyKind.ConsoleControlEvent, reported.Kind);
+        Assert.Equal("ControlCTrap", reported.Operation);
+    }
+
     [Fact]
     public void ExitProcess_WakesAWaiter_WithProcessExited()
     {
