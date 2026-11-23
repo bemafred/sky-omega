@@ -214,6 +214,42 @@ past the pin; Martin made that drift the first update under D6.
 Test by test against d01b141: no test is absent. 10 are new upstream, 3 known failures pass, and 4 are new tests of the
 suite itself.
 
+### rdf-tests 202a74e → 56076c0, json-ld-api 5551473 → fd4f7eb (2026-11-23)
+
+The weekly run against upstream of 2026-11-23 (Actions 45112255959) failed on two tests, said of both submodules that
+upstream's head does not descend from the pin, and its summary had no counts. Martin gave the four items to zbook
+(relayed by sky-omega); this update closes them.
+
+- **rdf-tests**, nine commits, eight in the test data.
+  - **#402** added umbrellas of every RDF and every SPARQL manifest: `rdf/manifest.ttl`, `sparql/manifest.ttl` and
+    `sparql/manifest-all.ttl`. Each includes only manifests the suites load or list, and the guard (D4) failed on all
+    three. Listed in `ManifestsNotLoaded`.
+  - **#403** removed the SPARQL 1.0 open-world tests `date-1`, `date-2` and `date-3`, which passed.
+  - **#421**, **#422** and **#423** removed `dawgt:approval dawgt:Proposed` from the SPARQL tests; **#409**, **#410**
+    and **#426** change the service description, federation and Graph Store tests, which are not loaded. None changed
+    a result.
+- **json-ld-api**, twenty commits, thirteen in the test data. toRdf **tdi13** is new: a string inside a property-scoped
+  context takes the context's default base direction, and with `rdfDirection` `i18n-datatype` it is a literal of the
+  i18n datatype. It failed: the parser checked a context's `@direction` and kept nothing. Martin decided to implement
+  it, not to list it (2026-11-23). The context's default direction and a term's are now kept as the language is, and a
+  string's direction is in RDF as `rdfDirection` says (`JsonLdStreamParserTests`, Base direction). The other commits
+  add expansion, compaction and remote-document tests, which are not loaded (phase 6), and reports.
+- **The upstream check** (D6). The Actions checkout takes submodules at depth 1, so a fetch had no history between the
+  pin and upstream's head and the ancestry check failed: the script now deepens a shallow submodule first. The runner's
+  lines were coloured even into a file, and `--no-ansi` does not stop it (measured: the console colours them when
+  `DOTNET_SYSTEM_CONSOLE_ALLOW_ANSI_COLOR_REDIRECTION` is set): the script reads the text without its escape sequences.
+  Both checked on zbook, on submodules cloned at depth 1 and with that variable set.
+
+| | 202a74e, 5551473 | 56076c0, fd4f7eb |
+|---|---:|---:|
+| W3C tests | 2,840 | 2,838 |
+| passed | 2,685 | 2,683 |
+| failed | 0 | 0 |
+| skipped: known failures, and 6 JSON-LD not applicable | 155 | 155 |
+
+Test by test: the three open-world tests are absent, removed upstream; tdi13 is new, and passes; every other test has
+the result it had.
+
 ## References
 
 - STATISTICS.md, W3C Conformance — the counts this ADR changes.
