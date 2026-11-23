@@ -407,6 +407,43 @@ public partial class QueryExecutorTests
         }
     }
 
+    /// <summary>
+    /// A query cancelled while its SERVICE SILENT waits on the endpoint is cancelled at the call: the call carries the
+    /// query's token (ADR-066 D4), and SILENT does not hide the query's cancellation, which is not the endpoint's
+    /// failure (D3).
+    /// </summary>
+    [Fact]
+    public void Execute_ServiceClause_Silent_ACancelledQueryIsCancelledAtTheCall()
+    {
+        var query = "SELECT * WHERE { SERVICE SILENT <http://example.org/sparql> { ?s ?p ?o } }";
+        var parsedQuery = new SparqlParser(query.AsSpan()).ParseQuery();
+
+        // The endpoint answers with no rows unless the call's token is cancelled
+        var mockExecutor = new MockSparqlServiceExecutor();
+        using var cancel = new CancellationTokenSource();
+        cancel.Cancel();
+
+        // The query's token, set as SparqlEngine.Query sets it
+        Store.AcquireReadLock();
+        QueryCancellation.SetToken(cancel.Token);
+        try
+        {
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery, mockExecutor);
+            Assert.Throws<OperationCanceledException>(() =>
+            {
+                var results = executor.Execute();
+                while (results.MoveNext()) { }
+                results.Dispose();
+            });
+            Assert.Single(mockExecutor.Calls);
+        }
+        finally
+        {
+            QueryCancellation.ClearToken();
+            Store.ReleaseReadLock();
+        }
+    }
+
     [Fact]
     public void Execute_ServiceWithLocalPatterns_ServiceFirstStrategy()
     {
@@ -1111,6 +1148,7 @@ internal class MockSparqlServiceExecutor : ISparqlServiceExecutor
     public ValueTask<List<ServiceResultRow>> ExecuteSelectAsync(string endpointUri, string query, System.Threading.CancellationToken ct = default)
     {
         Calls.Add((endpointUri, query));
+        ct.ThrowIfCancellationRequested();
         if (_errors.TryGetValue(endpointUri, out var error))
         {
             throw error;

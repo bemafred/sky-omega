@@ -34,9 +34,9 @@ of a close racing a queued write (D2); which callers can cancel (D4); and the or
 writer starvation accepted (D1, R4). "No further architecture investigation is requested." What acceptance changed is
 in [What the revisions changed](#what-the-revisions-changed).
 
-Steps 1 to 3 done and on `main` on 2026-11-23 (Steps 1 and 2 in `216ebbf8` and `25778f45`). Step 3 is D1 and D2 in
-`QuadStore` and `QuadStorePool`, with the tests written with the correction; of the held tests, only D4's three
-cancellation cases still fail, which Step 4 builds.
+Steps 1 to 4 done and on `main` on 2026-11-23 (Steps 1 to 3 in `216ebbf8`, `25778f45` and `836b6279`). Step 3 is D1
+and D2 in `QuadStore` and `QuadStorePool`, with the tests written with the correction. Step 4 is D3 and D4 in
+`ServiceCall`; the executor's part of D3 is held with Step 6's executor. Every held test passes.
 
 ## Why
 
@@ -383,10 +383,15 @@ that has not entered, and a write never takes effect during a read.
     handled by the same pool's endpoint, whose `Pool.Active` takes `_namedLock`.
 - **D3. SILENT hides the endpoint's failures only**: the call that fails, an answer that is not a success, an answer
   that cannot be read, and the call's own timeouts. Not the query's cancellation, its store being closed, a write the
-  store could not apply, nor any failure of local evaluation.
+  store could not apply, nor any failure of local evaluation. The executor says each of the endpoint's failures as a
+  `SparqlServiceException`, and SILENT catches that alone, around the call and not the rows made from its answer. An
+  IRI that is not an HTTP endpoint is a call that fails ("the service IRI may not be dereferenceable", §2.3). JSON of
+  another shape, a member missing or an element of the wrong kind, is an answer that cannot be read, and so is an
+  answer in a character set that is not one.
 - **D4. The call carries the query's cancellation token**, ADR-060 D2's clause for SERVICE and only that clause. A
-  query cancelled during the call ends there, and `QueryCore`'s `finally` releases its read lock. A read's wait for a
-  write that holds the lock, and a write's wait for reads, are ADR-060 D2's bounded slices, later.
+  query cancelled during the call ends there, and `QueryCore`'s `finally` releases its read lock. The call takes the
+  token from `QueryCancellation`, where `SparqlEngine.Query` puts it for the query's thread, as the scans read it. A
+  read's wait for a write that holds the lock, and a write's wait for reads, are ADR-060 D2's bounded slices, later.
   - **Who can cancel.** Only a caller that passes a token to `SparqlEngine.Query`: code that uses Mercury as a
     library, and the tests. No serving path passes one: the HTTP endpoint (`SparqlHttpServer.cs:183`), the MCP tools
     (`MercuryTools.cs:43`), the REPL sessions of the CLI and of the attach pipe (`ReplSessions.cs:42`), and
@@ -592,6 +597,14 @@ and the test process dies), and a close that takes no lock. Two parts no test ho
 - The pool's close after it has let go of `_namedLock` (I5). Its test passes with the close made holding it too:
   `Active` refuses a pool whose close has begun before it takes the lock, so a SERVICE that comes after the close
   began finds the pool closed. Only a request between that check and the lock would wait, which no test reaches.
+
+Built with Step 4 (2026-11-23): the three cases of D4 pass. On `main`, where no tool sends SERVICE yet,
+`Execute_ServiceClause_Silent_ACancelledQueryIsCancelledAtTheCall` holds D3 and D4 with the mock executor: the query's
+token is cancelled, and the query is cancelled at the call, not answered with Ω0. The executor's part of D3 is held with
+Step 6's executor, its tests in `HttpSparqlServiceExecutorTests`: an IRI that is not an HTTP endpoint, JSON of another shape,
+and an answer in a character set that is not one, each a `SparqlServiceException`. Each part was taken out in turn,
+and a test failed each time: the call without the token, SILENT catching every failure, the executor without its IRI
+check, the parse naming only `JsonException`, and the read without its catch of the character set.
 
 Written with D8, in `Mercury.Hosting.Tests`, which runs `mercury` as a process (`MercuryCli.cs`): a `:prune` in a
 mercury that serves its store over HTTP is refused, and the store keeps what it held; with `--no-http` the same
