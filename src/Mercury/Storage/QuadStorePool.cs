@@ -698,14 +698,18 @@ public sealed class QuadStorePool : IDisposable
         // Drain available stores
         while (_available.TryTake(out _)) { }
 
-        // Dispose named stores
+        // Dispose named stores, after releasing _namedLock: a store's close waits for its reads in progress, and one of
+        // them may wait on a SERVICE that this pool's own endpoint answers, through Active, which takes _namedLock
+        // (ADR-066 D2, I5).
+        QuadStore[] namedStores;
         lock (_namedLock)
         {
-            foreach (var store in _namedStores.Values)
-            {
-                store.Dispose();
-            }
+            namedStores = _namedStores.Values.ToArray();
             _namedStores.Clear();
+        }
+        foreach (var store in namedStores)
+        {
+            store.Dispose();
         }
 
         // Dispose pooled stores and cleanup paths

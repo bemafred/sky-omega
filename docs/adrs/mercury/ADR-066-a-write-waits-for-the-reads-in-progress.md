@@ -34,6 +34,10 @@ of a close racing a queued write (D2); which callers can cancel (D4); and the or
 writer starvation accepted (D1, R4). "No further architecture investigation is requested." What acceptance changed is
 in [What the revisions changed](#what-the-revisions-changed).
 
+Steps 1 to 3 done and on `main` on 2026-11-23 (Steps 1 and 2 in `216ebbf8` and `25778f45`). Step 3 is D1 and D2 in
+`QuadStore` and `QuadStorePool`, with the tests written with the correction; of the held tests, only D4's three
+cancellation cases still fail, which Step 4 builds.
+
 ## Why
 
 ADR-065 D10 gives each query an `HttpSparqlServiceExecutor`, so that a session's mercury-mcp can read the shared store
@@ -84,6 +88,21 @@ lock and 4 threads of reads entering and leaving
 ([probe](../../../tools/probes/write-waits-for-reads/a-writes-attempts-and-the-reads-beside-them.cs)): 7,982,964
 tries, none entered while a read held the lock; 800,000 reads, each waiting to enter 0 µs at the median, 412 µs at
 the 99.9th percentile and 1.9 ms at most, the lock's own spin, not a wait behind the write.
+
+### Measured (zbook, 2026-11-23): what a read's release costs with the wake-up
+
+On `QuadStore` with D1 built, 4 threads each take and release the read lock 200,000 times, timed around each call
+([probe](../../../tools/probes/write-waits-for-reads/a-reads-release-with-the-wake-up.cs)); three runs of each:
+
+| A read's release | Median | 99.9th percentile | At most |
+|---|--:|--:|--:|
+| Before D1 (`25778f45`), no write | < 0.1 µs, the timer's resolution | 26.5–26.8 µs | 0.18–0.34 ms |
+| D1, no write | 0.3–0.4 µs | 25.3–28.9 µs | 0.47–0.56 ms |
+| D1, a write waiting behind a held read, woken by every release | 0.3–0.4 µs | 41.3–44.6 µs | 0.35–0.40 ms |
+
+The wake-up, the monitor and its `PulseAll`, adds about 0.3 µs to a read's release at the median. With a write
+waiting, each release meets the write's try at the monitor: about 15 µs more at the 99.9th percentile. A read's wait to
+enter did not grow: 7.7–14.7 µs at the 99.9th percentile with D1, 26.4 µs before.
 
 ### Read in the code (2026-11-22)
 
@@ -480,6 +499,7 @@ The wake-up protocol's monitor is in no cycle: nothing waits for the lock while 
 | The CLI exits | Its HTTP endpoint is disposed without a drain: `Dispose` now waits for an HTTP query instead of closing under it (R3). |
 | The pool is disposed | It takes its stores out under `_namedLock` and disposes them after releasing it (I5). |
 | A write was queued when the close entered | It finds the store closed when it enters, and fails: "The store is closed", nothing written (D2). |
+| A store is closed on the thread that holds its batch | The close is a write, and the lock refuses a thread that already holds it (`LockRecursionException`): the close fails, and the store stays open with its batch; the batch's commit or rollback, then a close, closes it (checked on zbook). Every batch in Mercury ends in its commit or its rollback, on a failure too, so only a caller that does neither meets it. Before D2 the close closed the store, then threw when it disposed the lock it held. |
 | A read comes after the close | It finds the store closed: "The store is closed", no rows (I6). |
 
 ## The open questions, resolved
@@ -558,6 +578,20 @@ scheduler:
   both are counted waiting. The read ends: the close ends, and the write either took effect and is in the store when it
   is opened again, or failed with "The store is closed" and is not in it. A read after the close finds it closed. Today
   `Dispose` takes no lock and disposes the lock under the waiting write, which throws.
+
+Built with Step 3 (2026-11-23). The three, and the reader outside a query, are in
+`tests/Mercury.Tests/Storage/AWriteWaitsOutsideTheLockTests.cs`, which needs no SERVICE and goes to `main` with Step 3;
+the store and the pool closed while a query waits on SERVICE are in `ServiceForwardProgressTests`, held with it. Each
+part of D1 and D2 was taken out of the code in turn, and a test failed each time: a write's release that wakes no one,
+a read's release that wakes no one, the try made outside the monitor, a write that waits inside the lock as today, a
+write or a read that does not check for a closed store after the lock (the write then reads a closed store's memory
+and the test process dies), and a close that takes no lock. Two parts no test holds:
+- That a release wakes the writes only after it has left the lock. A release that woke them first would leave a write
+  waiting only when the write's try came before the lock was left, which the scheduler decides; forcing it would need
+  a test seam inside the release.
+- The pool's close after it has let go of `_namedLock` (I5). Its test passes with the close made holding it too:
+  `Active` refuses a pool whose close has begun before it takes the lock, so a SERVICE that comes after the close
+  began finds the pool closed. Only a request between that check and the lock would wait, which no test reaches.
 
 Written with D8, in `Mercury.Hosting.Tests`, which runs `mercury` as a process (`MercuryCli.cs`): a `:prune` in a
 mercury that serves its store over HTTP is refused, and the store keeps what it held; with `--no-http` the same
