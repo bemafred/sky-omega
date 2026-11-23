@@ -7,6 +7,10 @@
 #                       (FailFast, stack overflow, a native fault, abort()), with the session ended at the crash's stop
 #                       or every stop continued; each run in a process of its own, then a second attach. 10 runs per
 #                       mode. A hang stays in the probe's own child process, which the probe ends.
+#   112-cancellation    Step 3 (finding 112): a flooding target asked to end through its own shutdown mechanism, with a
+#                       handler, without one, or as a Generic Host, while attached and after the detach; SIGTERM on
+#                       Linux and macOS, CTRL+BREAK to the target's own process group on Windows. 20 sessions per
+#                       construction and read path in one process each, then a final attach.
 # Each runner uploads the probe's facts as JSON (probe 100: its output as text). Its own concurrency group, so a push
 # never cancels it and it never cancels a test run.
 name: DrHook probe
@@ -22,6 +26,7 @@ on:
           - 101-platform-facts
           - 102-natural-end
           - 100-crash-boundary
+          - 112-cancellation
 
 permissions:
   contents: read
