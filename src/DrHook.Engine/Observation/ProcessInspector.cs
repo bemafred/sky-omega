@@ -1,6 +1,7 @@
-// Observation facade (ADR-006 Phase 1 / Tier 1). Wraps the substrate-admitted
-// Microsoft.Diagnostics.NETCore.Client (Layer 1, Diagnostic IPC) for .NET-process discovery,
-// plus System.Diagnostics.Process (BCL) for live metrics. Consumers depend on this facade's
+// Observation facade (ADR-006 Phase 1 / Tier 1). .NET-process discovery from the runtime's own
+// diagnostic-port publication (Layer 1): on Windows through the substrate-admitted
+// Microsoft.Diagnostics.NETCore.Client, on Unix by reading the published sockets' names, PID and
+// start time (PublishingProcesses, below); plus System.Diagnostics.Process (BCL) for live metrics. Consumers depend on this facade's
 // types, not the NuGet directly — the "thin facade" from ADR-006's Integration section, which
 // keeps the admitted dependency at one seam and the surface testable. Managed-assembly
 // enumeration via EventPipe (Layer 2 / TraceEvent) is a follow-up; this covers process
@@ -15,9 +16,12 @@
 // answers a narrower question (.NET process advertising a diagnostic port).
 
 using System.Diagnostics;
+using System.Globalization;
+using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Diagnostics.NETCore.Client;
+using SkyOmega.DrHook.Engine.Interop;
 
 namespace SkyOmega.DrHook.Engine.Observation;
 
@@ -39,11 +43,12 @@ public sealed record ProcessSnapshot(
     TimeSpan TotalProcessorTime,
     int ModuleCount);
 
-/// <summary>Discovers and inspects .NET processes. Layer-1 discovery is the admitted
-/// <c>DiagnosticsClient</c>; metrics are BCL <see cref="Process"/>.</summary>
+/// <summary>Discovers and inspects .NET processes. Layer-1 discovery is the runtime's published
+/// diagnostic port: the admitted <c>DiagnosticsClient</c> on Windows, the sockets' names on Unix;
+/// metrics are BCL <see cref="Process"/>.</summary>
 public static class ProcessInspector
 {
-    /// <summary>Default bound on <c>DiagnosticsClient.GetPublishedProcesses</c> — protects
+    /// <summary>Default bound on the discovery — protects
     /// callers from indefinite hangs on macOS when querying immediately after a debugger
     /// Detach (DBG-PI-1 / finding 59). Two seconds is empirically long enough for the
     /// runtime's diagnostic-port advertisement to settle after Detach; longer hangs almost
@@ -51,7 +56,8 @@ public static class ProcessInspector
     public const int DefaultDiscoveryTimeoutMs = 2000;
 
     /// <summary>OS process ids of .NET processes advertising a diagnostic port
-    /// (the runtime's own publication mechanism, via the admitted DiagnosticsClient).
+    /// (the runtime's own publication mechanism; on Unix only while the process under the PID is the one
+    /// that published the socket).
     /// Bounded by <see cref="DefaultDiscoveryTimeoutMs"/>; returns empty if the underlying
     /// call hangs past the budget (a recently-detached macOS target is the typical case).</summary>
     public static IReadOnlyList<int> ListDotnetProcessIds()
@@ -94,7 +100,7 @@ public static class ProcessInspector
             proc.Modules.Count);
     }
 
-    // DBG-PI-1: bound the raw DiagnosticsClient call so a recently-detached macOS target
+    // DBG-PI-1: bound the discovery so a recently-detached macOS target
     // can't hang the caller indefinitely. Task.Run + WaitAsync(timeout) returns either the
     // result or throws TimeoutException; we treat timeout as "no processes visible." The
     // backing Task may still be running after timeout (orphan); on the rare occasion it
@@ -103,7 +109,7 @@ public static class ProcessInspector
     {
         try
         {
-            return Task.Run(() => DiagnosticsClient.GetPublishedProcesses())
+            return Task.Run(PublishingProcesses)
                 .WaitAsync(TimeSpan.FromMilliseconds(DefaultDiscoveryTimeoutMs))
                 .GetAwaiter()
                 .GetResult();
@@ -112,5 +118,33 @@ public static class ProcessInspector
         {
             return Array.Empty<int>();
         }
+    }
+
+    // The PIDs of the processes that publish a diagnostic port. Windows publishes the named pipe
+    // \\.\pipe\dotnet-diagnostic-<pid>, which ends with its process. Unix publishes the socket
+    // <temp>/dotnet-diagnostic-<pid>-<key>-socket, <key> being the process's start time (ProcessLifetime.DisambiguationKeyOf).
+    // A process that is killed leaves its socket behind, and once the OS reuses its PID the socket names another process,
+    // which need not be .NET. DiagnosticsClient.GetPublishedProcesses gives the PID of every socket, and on 2026-11-23
+    // drhook_processes listed three macOS daemons that way, under sockets left five days before they started. So on Unix
+    // the sockets are read here, and a PID counts only while the process under it is the one whose start its socket names.
+    private static List<int> PublishingProcesses()
+    {
+        if (OperatingSystem.IsWindows())
+            return DiagnosticsClient.GetPublishedProcesses().ToList();
+
+        List<int> pids = new();
+        foreach (string socket in Directory.EnumerateFiles(Path.GetTempPath(), "dotnet-diagnostic-*-*-socket"))
+        {
+            string[] parts = Path.GetFileName(socket).Split('-');   // dotnet, diagnostic, <pid>, <key>, socket
+            if (parts.Length == 5
+                && int.TryParse(parts[2], NumberStyles.None, CultureInfo.InvariantCulture, out int pid)
+                && long.TryParse(parts[3], NumberStyles.None, CultureInfo.InvariantCulture, out long key)
+                && !pids.Contains(pid)
+                && ProcessLifetime.DisambiguationKeyOf(pid) == key)
+            {
+                pids.Add(pid);
+            }
+        }
+        return pids;
     }
 }

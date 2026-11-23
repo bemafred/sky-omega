@@ -2,6 +2,8 @@
 // process inspects itself (a live .NET process with a diagnostic port), so no external
 // debuggee or dbgshim is needed.
 
+using System.Diagnostics;
+using SkyOmega.DrHook.Engine.Interop;
 using SkyOmega.DrHook.Engine.Observation;
 using Xunit;
 
@@ -47,6 +49,84 @@ public sealed class ProcessInspectorTests
         Assert.False(self.ExecutableDeleted);
         Assert.NotNull(self.MainModulePath);
         Assert.False(self.MainModulePath!.EndsWith(ProcessIdentity.LinuxDeletedSuffix, StringComparison.Ordinal));
+    }
+
+    // 2026-11-23 on omega, drhook_processes listed three macOS daemons as .NET processes. Their PIDs had diagnostic
+    // sockets left by .NET processes that ended without removing them, five days before the daemons started. The
+    // runtime names its socket dotnet-diagnostic-<pid>-<key>-socket, where <key> is its start time, so a socket whose
+    // key is not the start time of the process under its PID was made by an earlier process.
+    [Fact]
+    public void ListDotnetProcesses_LeavesOutAProcessUnderAPidWhoseSocketAnEarlierProcessMade()
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "Windows publishes a named pipe, which ends with its process: no socket is left behind.");
+
+        // A process that is not .NET, and the socket a killed .NET process would have left under its PID.
+        using Process sleep = Process.Start(new ProcessStartInfo("sleep", "60") { UseShellExecute = false })!;
+        try
+        {
+            long key = ProcessLifetime.DisambiguationKeyOf(sleep.Id)
+                ?? throw new InvalidOperationException($"The start time of sleep, PID {sleep.Id}, could not be read.");
+            string leftBehind = Path.Combine(Path.GetTempPath(), $"dotnet-diagnostic-{sleep.Id}-{key - 1}-socket");
+            File.WriteAllBytes(leftBehind, []);
+            try
+            {
+                Assert.DoesNotContain(ProcessInspector.ListDotnetProcesses(), p => p.Pid == sleep.Id);
+                Assert.False(ProcessInspector.IsDotnetProcess(sleep.Id));
+            }
+            finally
+            {
+                File.Delete(leftBehind);
+            }
+        }
+        finally
+        {
+            sleep.Kill();
+            sleep.WaitForExit();
+        }
+    }
+
+    // The control for the test above: the same construction with the key of the process under the PID is listed, so
+    // that test's process is left out for its socket's key, not for being a file or for not being .NET.
+    [Fact]
+    public void ListDotnetProcesses_ListsAProcessUnderAPidWhoseSocketHasItsOwnStartTime()
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "Windows publishes a named pipe, which ends with its process: no socket is left behind.");
+
+        using Process sleep = Process.Start(new ProcessStartInfo("sleep", "60") { UseShellExecute = false })!;
+        try
+        {
+            long key = ProcessLifetime.DisambiguationKeyOf(sleep.Id)
+                ?? throw new InvalidOperationException($"The start time of sleep, PID {sleep.Id}, could not be read.");
+            string itsOwn = Path.Combine(Path.GetTempPath(), $"dotnet-diagnostic-{sleep.Id}-{key}-socket");
+            File.WriteAllBytes(itsOwn, []);
+            try
+            {
+                Assert.Contains(ProcessInspector.ListDotnetProcesses(), p => p.Pid == sleep.Id);
+                Assert.True(ProcessInspector.IsDotnetProcess(sleep.Id));
+            }
+            finally
+            {
+                File.Delete(itsOwn);
+            }
+        }
+        finally
+        {
+            sleep.Kill();
+            sleep.WaitForExit();
+        }
+    }
+
+    // The key the runtime names a socket with is its start time as DisambiguationKeyOf reads it: the test host's own
+    // socket carries it.
+    [Fact]
+    public void DisambiguationKeyOf_Self_IsTheKeyInTheTestHostsOwnSocket()
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "Windows names its diagnostic pipe by PID alone.");
+
+        long key = ProcessLifetime.DisambiguationKeyOf(Self)
+            ?? throw new InvalidOperationException("The test host's own start time could not be read.");
+
+        Assert.True(File.Exists(Path.Combine(Path.GetTempPath(), $"dotnet-diagnostic-{Self}-{key}-socket")));
     }
 
     [Fact]

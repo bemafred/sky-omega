@@ -36,6 +36,15 @@ internal static unsafe class ProcessLifetime
     /// running process has that PID, the record cannot be read, or the platform has no such record (Windows).</summary>
     public static long? StartOf(int pid) => Read(pid) is { Exists: true, Zombie: false } record ? record.Start : null;
 
+    /// <summary>The key the runtime names <paramref name="pid"/>'s files with (its diagnostic socket, the debugger's
+    /// pipes), as the PAL's GetProcessIdDisambiguationKey computes it: the start time in whole seconds since the epoch on
+    /// macOS (kinfo_proc p_starttime.tv_sec), in clock ticks after boot on Linux (/proc stat field 22). A zombie keeps
+    /// it until it is reaped. Null when no process has that PID, the record cannot be read, or on Windows, whose names
+    /// carry no key.</summary>
+    public static long? DisambiguationKeyOf(int pid) => Read(pid) is { Exists: true } record
+        ? OperatingSystem.IsMacOS() ? record.Start / 1_000_000 : record.Start
+        : null;
+
     /// <summary>True when the process <paramref name="pid"/> that started at <paramref name="start"/> has ended: the PID
     /// has no process, its process is a zombie, or the process under the PID started at another time. False when it is
     /// running. Null when that cannot be read (another user's process, an unexpected error) or on Windows.</summary>
