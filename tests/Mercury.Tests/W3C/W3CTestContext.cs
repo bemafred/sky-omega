@@ -349,6 +349,9 @@ public static class W3CTestContext
     public static IReadOnlyDictionary<string, string> ManifestsNotLoaded { get; } = new Dictionary<string, string>
     {
         ["w3c-rdf-tests/ns/test-manifest.ttl"] = "The manifest vocabulary (mf:), not a test manifest",
+        ["w3c-rdf-tests/rdf/manifest.ttl"] = "The umbrella of the RDF 1.1 and RDF 1.2 umbrellas (rdf-tests #402), both listed here",
+        ["w3c-rdf-tests/sparql/manifest.ttl"] = "The umbrella of the SPARQL 1.0, 1.1 and 1.2 umbrellas (rdf-tests #402): the suites load sparql10/manifest.ttl, and 1.1's query and update",
+        ["w3c-rdf-tests/sparql/manifest-all.ttl"] = "The umbrella of every SPARQL manifest (rdf-tests #402), through sparql11/manifest-all.ttl: the suites load sparql10/manifest.ttl, and 1.1's query and update",
         ["w3c-rdf-tests/rdf/rdf11/manifest.ttl"] = "The RDF 1.1 umbrella: each format's manifest is loaded by its suite, rdf-mt is ADR-059 phase 5",
         ["w3c-rdf-tests/rdf/rdf12/manifest.ttl"] = "The RDF 1.2 umbrella: each format's manifest is loaded by its suite, rdf-semantics is ADR-059 phase 5",
         ["w3c-rdf-tests/sparql/sparql10/manifest-evaluation.ttl"] = "An umbrella of SPARQL 1.0 manifests that sparql10/manifest.ttl also includes, so the suite loads each",

@@ -161,8 +161,10 @@ DrHook's teardown changes. The macOS runners run the sparse-file test, which ome
 
 Each row counts the tests of the W3C manifests the suite runs. See
 [ADR-010](docs/adrs/mercury/ADR-010-w3c-test-suite-integration.md) for the integration. Measured 2026-11-11 on omega,
-against rdf-tests `202a74e` and json-ld-api `5551473`, after the base-direction check. At 1.8.44 the same 149 known
-failures and 6 tests that do not apply are skipped, and every other W3C test passes.
+against rdf-tests `202a74e` and json-ld-api `5551473`, after the base-direction check; the SPARQL 1.0 evaluation and
+JSON-LD rows measured again on 2026-11-23 on zbook, against rdf-tests `56076c0` and json-ld-api `fd4f7eb` (ADR-059,
+Submodule updates). The same 149 known failures and 6 tests that do not apply are skipped, and every other W3C test
+passes.
 
 ### RDF formats (the RDF 1.2 and RDF 1.1 test suites, `rdf/rdf12` and `rdf/rdf11`)
 
@@ -184,18 +186,18 @@ until rdf-tests 9fafbec, 2026-11-01 ([ADR-059](docs/adrs/mercury/ADR-059-every-w
 | Suite | Passing | Total | Known failures |
 |-------|--------:|------:|---------------:|
 | SPARQL 1.0 query syntax | 196 | 199 | 3 |
-| SPARQL 1.0 query evaluation | 285 | 288 | 3 |
+| SPARQL 1.0 query evaluation | 282 | 285 | 3 |
 | SPARQL 1.1 query syntax | 106 | 106 | — |
 | SPARQL 1.1 query evaluation | 247 | 247 | — |
 | SPARQL 1.1 update syntax | 63 | 63 | — |
 | SPARQL 1.1 update evaluation | 94 | 94 | — |
-| **SPARQL total** | **991** | **997** | **6** |
+| **SPARQL total** | **988** | **994** | **6** |
 
 ### JSON-LD
 
 | Suite | Passing | Total | Not applicable |
 |-------|--------:|------:|---------------:|
-| JSON-LD 1.1 toRdf | 461 | 467 | 6 |
+| JSON-LD 1.1 toRdf | 462 | 468 | 6 |
 
 ### Known failures and tests that do not apply
 
@@ -221,9 +223,9 @@ tests name are not in their directory. `W3CTestContext.ManifestsNotLoaded` lists
 |--------|-------|
 | RDF formats, RDF 1.1 tests | 100% (993/993) |
 | RDF formats, RDF 1.2 and RDF 1.1 suites | 89.4% (1,201/1,344) |
-| SPARQL 1.0 and 1.1 | 99.4% (991/997) |
-| JSON-LD 1.1 toRdf, applicable tests | 100% (461/461) |
-| **All W3C tests run** | **2,653 passing of 2,808** (149 known failures, 6 not applicable) |
+| SPARQL 1.0 and 1.1 | 99.4% (988/994) |
+| JSON-LD 1.1 toRdf, applicable tests | 100% (462/462) |
+| **All W3C tests run** | **2,651 passing of 2,806** (149 known failures, 6 not applicable) |
 
 ## NCrunch (Windows) Compatibility
 

@@ -56,6 +56,10 @@ public sealed class QuadStore : IDisposable
     private readonly WriteAheadLog? _wal;
     private readonly string _baseDirectory;
     private readonly ReaderWriterLockSlim _lock = new(LockRecursionPolicy.NoRecursion);
+    // ADR-066 D1: a write waits for the lock outside it, on this monitor, woken by every release of the lock. The count
+    // of the writes waiting is kept and read under the monitor; nothing decides by it.
+    private readonly object _writeWait = new();
+    private int _writesWaiting;
     private readonly ILogger _logger;
     private readonly IBufferManager _bufferManager;
     private readonly long _minimumFreeDiskSpace;
@@ -82,13 +86,13 @@ public sealed class QuadStore : IDisposable
     // last checkpoint. Set by every mutation entry point; reset by CheckpointInternal.
     // Dispose gates the 14-min CollectPredicateStatistics + WAL-checkpoint-marker path
     // on this flag — read-only sessions see Dispose drop from minutes to milliseconds.
-    // Volatile because Dispose reads it without re-acquiring the writer lock under
-    // which mutations set it.
+    // Volatile because SessionMutated reads it without the writer lock under which
+    // mutations set it.
     private volatile bool _sessionMutated;
     // ADR-061 M7: the exception that applying a record met after the log had committed it, or null. Once set, the
     // indexes may lack a write the log holds, and may disagree with each other. The store then answers no read, takes
     // no write and makes no checkpoint, and it closes without one: the log is the only complete copy, and opening the
-    // store again applies it. Volatile because Dispose reads it without a lock.
+    // store again applies it. Volatile because RebuildSecondaryIndexes reads it before it takes the lock.
     private volatile Exception? _unappliedWriteCause;
     // Batched records hold atom IDs only. Resolving IDs back to strings just so
     // ApplyToIndexes could re-intern them was a 1% hot path in bulk-load profiles,
@@ -614,10 +618,9 @@ public sealed class QuadStore : IDisposable
         ReadOnlySpan<char> @object,
         ReadOnlySpan<char> graph = default)
     {
-        ThrowIfDisposed();
         RequireWriteCapableProfile(nameof(AddCurrent));
         ThrowIfDiskSpaceLow();
-        _lock.EnterWriteLock();
+        AcquireWriteLock();
         try
         {
             ThrowIfStoppedOverUnappliedWrite();
@@ -634,7 +637,7 @@ public sealed class QuadStore : IDisposable
         }
         finally
         {
-            _lock.ExitWriteLock();
+            ReleaseWriteLock();
         }
     }
 
@@ -792,10 +795,9 @@ public sealed class QuadStore : IDisposable
         ReadOnlySpan<char> @object,
         ReadOnlySpan<char> graph = default)
     {
-        ThrowIfDisposed();
         RequireWriteCapableProfile(nameof(DeleteCurrent));
         ThrowIfDiskSpaceLow();
-        _lock.EnterWriteLock();
+        AcquireWriteLock();
         try
         {
             ThrowIfStoppedOverUnappliedWrite();
@@ -809,7 +811,7 @@ public sealed class QuadStore : IDisposable
         }
         finally
         {
-            _lock.ExitWriteLock();
+            ReleaseWriteLock();
         }
     }
 
@@ -842,9 +844,8 @@ public sealed class QuadStore : IDisposable
     public (int Ended, int Restored, int Left) RepairDeletes(
         IReadOnlyCollection<(string Graph, DateTimeOffset DeletedAt)> restore, bool dryRun, TextWriter report)
     {
-        ThrowIfDisposed();
         RequireTemporalProfile(nameof(RepairDeletes));
-        _lock.EnterWriteLock();
+        AcquireWriteLock();
         try
         {
             ThrowIfStoppedOverUnappliedWrite();
@@ -920,7 +921,7 @@ public sealed class QuadStore : IDisposable
         }
         finally
         {
-            _lock.ExitWriteLock();
+            ReleaseWriteLock();
         }
     }
 
@@ -951,9 +952,8 @@ public sealed class QuadStore : IDisposable
     /// </summary>
     public void BeginBatch()
     {
-        ThrowIfDisposed();
         ThrowIfDiskSpaceLow();
-        _lock.EnterWriteLock();
+        AcquireWriteLock();
         try
         {
             ThrowIfStoppedOverUnappliedWrite();
@@ -1047,7 +1047,7 @@ public sealed class QuadStore : IDisposable
         }
         catch
         {
-            _lock.ExitWriteLock();
+            ReleaseWriteLock();
             throw;
         }
         // Lock held until CommitBatch/RollbackBatch
@@ -1379,7 +1379,7 @@ public sealed class QuadStore : IDisposable
         }
         finally
         {
-            _lock.ExitWriteLock();
+            ReleaseWriteLock();
         }
     }
 
@@ -1419,7 +1419,7 @@ public sealed class QuadStore : IDisposable
                 _sortedAtomBulkBuilder = null;
             }
             _referenceBulkActive = false;
-            _lock.ExitWriteLock();
+            ReleaseWriteLock();
             return;
         }
 
@@ -1428,7 +1428,7 @@ public sealed class QuadStore : IDisposable
         _batchQuads?.Clear();
         _batchVersions?.Clear();
         _activeBatchTxId = -1;
-        _lock.ExitWriteLock();
+        ReleaseWriteLock();
     }
 
     /// <summary>
@@ -1485,7 +1485,7 @@ public sealed class QuadStore : IDisposable
     {
         if (_sortedAtomBulkBuilder is null) return;
 
-        _lock.EnterWriteLock();
+        AcquireWriteLock();
         try
         {
             if (_sortedAtomBulkBuilder is null) return; // re-check under lock
@@ -1580,7 +1580,7 @@ public sealed class QuadStore : IDisposable
         }
         finally
         {
-            _lock.ExitWriteLock();
+            ReleaseWriteLock();
         }
     }
 
@@ -1588,58 +1588,63 @@ public sealed class QuadStore : IDisposable
     {
         if (_bulkSorter is null) return;
 
-        _lock.EnterWriteLock();
+        AcquireWriteLock();
         try
         {
-            if (_bulkSorter is null) return; // re-check under lock
-
-            _bulkSorter.Complete();
-            _gspoReference!.SetDeferMsync(true);
-            try
-            {
-                _gspoReference!.BeginAppendSorted();
-                // ADR-A1: emit drain progress on time-based cadence (matches replay loop).
-                var appendStopwatch = System.Diagnostics.Stopwatch.StartNew();
-                var lastAppendEmit = TimeSpan.Zero;
-                long appendEntries = 0;
-                long appendLastEmittedAt = 0;
-                while (_bulkSorter.TryDrainNext(out var key))
-                {
-                    _gspoReference.AppendSorted(key);
-                    appendEntries++;
-
-                    if (ObservabilityListener is not null &&
-                        appendStopwatch.Elapsed - lastAppendEmit >= DrainProgressEmissionInterval)
-                    {
-                        var elapsed = appendStopwatch.Elapsed;
-                        var dt = (elapsed - lastAppendEmit).TotalSeconds;
-                        var rate = dt > 0 ? (appendEntries - appendLastEmittedAt) / dt : 0;
-                        EmitDrainProgress(new Abstractions.DrainProgressEvent(
-                            Timestamp: DateTimeOffset.UtcNow,
-                            PhaseName: "GSPO",
-                            SubPhase: "AppendSorted",
-                            EntriesProcessed: appendEntries,
-                            EstimatedTotal: null, // append doesn't know total in advance
-                            RatePerSecond: rate,
-                            GcHeapBytes: GC.GetTotalMemory(forceFullCollection: false),
-                            WorkingSetBytes: Environment.WorkingSet,
-                            Elapsed: elapsed));
-                        lastAppendEmit = elapsed;
-                        appendLastEmittedAt = appendEntries;
-                    }
-                }
-                _gspoReference.EndAppendSorted();
-            }
-            finally
-            {
-                _gspoReference.SetDeferMsync(false);
-                _bulkSorter.Dispose(); // removes {storeRoot}/bulk-tmp
-                _bulkSorter = null;
-            }
+            DrainBulkSorterHoldingWriteLock();
         }
         finally
         {
-            _lock.ExitWriteLock();
+            ReleaseWriteLock();
+        }
+    }
+
+    private void DrainBulkSorterHoldingWriteLock()
+    {
+        if (_bulkSorter is null) return;
+
+        _bulkSorter.Complete();
+        _gspoReference!.SetDeferMsync(true);
+        try
+        {
+            _gspoReference!.BeginAppendSorted();
+            // ADR-A1: emit drain progress on time-based cadence (matches replay loop).
+            var appendStopwatch = System.Diagnostics.Stopwatch.StartNew();
+            var lastAppendEmit = TimeSpan.Zero;
+            long appendEntries = 0;
+            long appendLastEmittedAt = 0;
+            while (_bulkSorter.TryDrainNext(out var key))
+            {
+                _gspoReference.AppendSorted(key);
+                appendEntries++;
+
+                if (ObservabilityListener is not null &&
+                    appendStopwatch.Elapsed - lastAppendEmit >= DrainProgressEmissionInterval)
+                {
+                    var elapsed = appendStopwatch.Elapsed;
+                    var dt = (elapsed - lastAppendEmit).TotalSeconds;
+                    var rate = dt > 0 ? (appendEntries - appendLastEmittedAt) / dt : 0;
+                    EmitDrainProgress(new Abstractions.DrainProgressEvent(
+                        Timestamp: DateTimeOffset.UtcNow,
+                        PhaseName: "GSPO",
+                        SubPhase: "AppendSorted",
+                        EntriesProcessed: appendEntries,
+                        EstimatedTotal: null, // append doesn't know total in advance
+                        RatePerSecond: rate,
+                        GcHeapBytes: GC.GetTotalMemory(forceFullCollection: false),
+                        WorkingSetBytes: Environment.WorkingSet,
+                        Elapsed: elapsed));
+                    lastAppendEmit = elapsed;
+                    appendLastEmittedAt = appendEntries;
+                }
+            }
+            _gspoReference.EndAppendSorted();
+        }
+        finally
+        {
+            _gspoReference.SetDeferMsync(false);
+            _bulkSorter.Dispose(); // removes {storeRoot}/bulk-tmp
+            _bulkSorter = null;
         }
     }
 
@@ -1690,7 +1695,6 @@ public sealed class QuadStore : IDisposable
     /// <param name="onProgress">Optional progress callback with (indexName, entriesProcessed).</param>
     public void RebuildSecondaryIndexes(Action<string, long>? onProgress = null)
     {
-        ThrowIfDisposed();
         ThrowIfStoppedOverUnappliedWrite();
 
         // ADR-030 Decision 5: Reference's bulk-load writes only _gspoReference. The
@@ -1718,7 +1722,7 @@ public sealed class QuadStore : IDisposable
         // mutation tracking is a no-op since Minimal has no checkpoint discipline.
         if (_schema.Profile == StoreProfile.Minimal)
         {
-            _lock.EnterWriteLock();
+            AcquireWriteLock();
             try
             {
                 _indexState = StoreIndexState.Ready;
@@ -1727,13 +1731,13 @@ public sealed class QuadStore : IDisposable
             }
             finally
             {
-                _lock.ExitWriteLock();
+                ReleaseWriteLock();
             }
             return;
         }
 
         RequireTemporalProfile(nameof(RebuildSecondaryIndexes));
-        _lock.EnterWriteLock();
+        AcquireWriteLock();
         var totalStopwatch = System.Diagnostics.Stopwatch.StartNew();
         var phases = HasRebuildListener ? new List<RebuildPhaseMetrics>(4) : null;
         var started = false;
@@ -1812,7 +1816,7 @@ public sealed class QuadStore : IDisposable
         finally
         {
             totalStopwatch.Stop();
-            _lock.ExitWriteLock();
+            ReleaseWriteLock();
 
             if (HasRebuildListener && started)
             {
@@ -1923,7 +1927,7 @@ public sealed class QuadStore : IDisposable
     /// </remarks>
     private void RebuildGraphSecondaryIndexes(Action<string, long>? onProgress)
     {
-        _lock.EnterWriteLock();
+        AcquireWriteLock();
         var totalStopwatch = System.Diagnostics.Stopwatch.StartNew();
         var phases = HasRebuildListener ? new List<RebuildPhaseMetrics>(3) : null;
         var started = false;
@@ -1995,7 +1999,7 @@ public sealed class QuadStore : IDisposable
         finally
         {
             totalStopwatch.Stop();
-            _lock.ExitWriteLock();
+            ReleaseWriteLock();
 
             if (HasRebuildListener && started)
             {
@@ -2093,7 +2097,7 @@ public sealed class QuadStore : IDisposable
     /// </summary>
     private void RebuildReferenceSecondaryIndexes(Action<string, long>? onProgress)
     {
-        _lock.EnterWriteLock();
+        AcquireWriteLock();
         _sessionMutated = true;
         var totalStopwatch = System.Diagnostics.Stopwatch.StartNew();
         var phases = HasRebuildListener ? new List<RebuildPhaseMetrics>(2) : null;
@@ -2371,7 +2375,7 @@ public sealed class QuadStore : IDisposable
         finally
         {
             totalStopwatch.Stop();
-            _lock.ExitWriteLock();
+            ReleaseWriteLock();
 
             if (HasRebuildListener)
             {
@@ -2390,7 +2394,7 @@ public sealed class QuadStore : IDisposable
     private void ThrowIfDisposed()
     {
         if (_disposed)
-            throw new ObjectDisposedException(nameof(QuadStore));
+            throw new ObjectDisposedException(null, "The store is closed.");
     }
 
     /// <summary>
@@ -2829,8 +2833,7 @@ public sealed class QuadStore : IDisposable
     /// </summary>
     public void Checkpoint()
     {
-        ThrowIfDisposed();
-        _lock.EnterWriteLock();
+        AcquireWriteLock();
         try
         {
             ThrowIfStoppedOverUnappliedWrite();
@@ -2838,7 +2841,7 @@ public sealed class QuadStore : IDisposable
         }
         finally
         {
-            _lock.ExitWriteLock();
+            ReleaseWriteLock();
         }
     }
 
@@ -3428,77 +3431,165 @@ public sealed class QuadStore : IDisposable
     /// Acquire read lock for thread-safe enumeration.
     /// Must be paired with ReleaseReadLock after enumeration completes.
     /// </summary>
+    /// <remarks>
+    /// A read waits only for a write that holds the lock, never for one that waits (ADR-066 D1). It finds the store
+    /// closed, or stopped over a committed write not applied, after it has taken the lock, and then releases it having
+    /// read nothing (D2).
+    /// </remarks>
     public void AcquireReadLock()
     {
-        ThrowIfDisposed();
         _lock.EnterReadLock();
-        if (_unappliedWriteCause is { } cause)
+        if (_disposed || _unappliedWriteCause is not null)
         {
-            _lock.ExitReadLock();
-            throw new CommittedWriteNotAppliedException(_baseDirectory, cause);
+            ReleaseReadLock();
+            ThrowIfDisposed();
+            ThrowIfStoppedOverUnappliedWrite();
         }
     }
 
     /// <summary>
     /// Release read lock after enumeration.
     /// </summary>
+    /// <remarks>
+    /// One of the two places the lock is left, with <see cref="ReleaseWriteLock"/>: it leaves the lock, then wakes every
+    /// write waiting for it (ADR-066 D1).
+    /// </remarks>
     public void ReleaseReadLock()
     {
         _lock.ExitReadLock();
+        lock (_writeWait)
+            Monitor.PulseAll(_writeWait);
     }
 
+    /// <summary>
+    /// The one place the write lock is entered (ADR-066 D1). The write enters when no read and no write holds the lock,
+    /// and does not wait inside it: until it enters, it waits on <see cref="_writeWait"/>, woken by every release. The
+    /// try and the wait are made under the monitor, so a release between them is not lost: it wakes no one until it
+    /// holds the monitor, which the write gives up only by waiting.
+    /// </summary>
+    private void EnterWriteLock()
+    {
+        lock (_writeWait)
+        {
+            while (!_lock.TryEnterWriteLock(0))
+            {
+                _writesWaiting++;
+                try
+                {
+                    Monitor.Wait(_writeWait);
+                }
+                finally
+                {
+                    _writesWaiting--;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// The write lock for a write: entered when no read is in progress (ADR-066 D1), and the store found closed after
+    /// it is entered, in which case it is released and the write fails having changed nothing (D2).
+    /// </summary>
+    private void AcquireWriteLock()
+    {
+        EnterWriteLock();
+        if (_disposed)
+        {
+            ReleaseWriteLock();
+            ThrowIfDisposed();
+        }
+    }
+
+    /// <summary>
+    /// The other place the lock is left, with <see cref="ReleaseReadLock"/>: it leaves the write lock, then wakes every
+    /// write waiting for it (ADR-066 D1).
+    /// </summary>
+    private void ReleaseWriteLock()
+    {
+        _lock.ExitWriteLock();
+        lock (_writeWait)
+            Monitor.PulseAll(_writeWait);
+    }
+
+    /// <summary>The writes waiting for the lock, outside it (ADR-066 D1), so that a test waits for a state, not a
+    /// time.</summary>
+    internal int WritesWaiting
+    {
+        get
+        {
+            lock (_writeWait)
+                return _writesWaiting;
+        }
+    }
+
+    /// <summary>The monitor the writes wait on (ADR-066 D1), for a test that holds it to stop a write before its
+    /// try.</summary>
+    internal object WriteWait => _writeWait;
+
+    /// <remarks>
+    /// A close is a write (ADR-066 D2): it waits for the reads in progress, outside the lock, and closes the store under
+    /// the write lock, so a read or a write that takes the lock after it finds the store closed. A close that finds the
+    /// store already closed returns. The lock itself is left to the collector: a <c>ReaderWriterLockSlim</c> refuses to
+    /// be disposed while a thread waits on it.
+    /// </remarks>
     public void Dispose()
     {
-        if (_disposed) return;
-        _disposed = true;
-
-        // ADR-033: defensive drain — if a bulk-load session is still holding the sorter
-        // (caller forgot FlushToDisk) the buffered tuples must reach GSPO before the
-        // index files are closed. The drain is idempotent if FlushToDisk was already
-        // called (sorter is null).
-        DrainBulkSorter();
-
-        // ADR-031 Piece 2: Dispose's CheckpointInternal is the 14-minute-at-1B dominant
-        // cost (CollectPredicateStatistics scans the entire GPOS index). A session that
-        // never mutated anything has no new statistics to collect and no WAL checkpoint
-        // marker to write — skip unconditionally. For Reference/Minimal profiles the
-        // inner `_wal is null` short-circuit makes this redundant but cheap.
-        // Locking note: skip — we're disposing, no concurrent access expected.
-        // ADR-061 M7: a store that could not apply a committed write closes without a checkpoint. A checkpoint would
-        // truncate the log, which is the only complete copy of that write.
-        // The indexes save their entry counts when they close. The counts in memory include what was applied of the
-        // write that failed, and no index has saved a count for that transaction, so each count goes back to the one
-        // saved with its transaction: recovery then counts the write once (ADR-058).
-        if (_unappliedWriteCause is not null)
+        EnterWriteLock();
+        try
         {
-            _gspoIndex?.ReturnToSavedEntryCount();
-            _gposIndex?.ReturnToSavedEntryCount();
-            _gospIndex?.ReturnToSavedEntryCount();
-            _tgspIndex?.ReturnToSavedEntryCount();
-            _gspoGraph?.ReturnToSavedEntryCount();
-            _gposGraph?.ReturnToSavedEntryCount();
-            _gospGraph?.ReturnToSavedEntryCount();
-            _gspoMinimal?.ReturnToSavedEntryCount();
-        }
-        else if (_sessionMutated)
-        {
-            CheckpointInternal();
-        }
+            if (_disposed) return;
+            _disposed = true;
 
-        _wal?.Dispose();
-        _gspoIndex?.Dispose();
-        _gposIndex?.Dispose();
-        _gospIndex?.Dispose();
-        _tgspIndex?.Dispose();
-        _gspoGraph?.Dispose();
-        _gposGraph?.Dispose();
-        _gospGraph?.Dispose();
-        _gspoReference?.Dispose();
-        _gposReference?.Dispose();
-        _gspoMinimal?.Dispose();
-        _trigramIndex.Dispose();
-        _atoms?.Dispose();
-        _lock?.Dispose();
+            // ADR-033: defensive drain — if a bulk-load session is still holding the sorter
+            // (caller forgot FlushToDisk) the buffered tuples must reach GSPO before the
+            // index files are closed. The drain is idempotent if FlushToDisk was already
+            // called (sorter is null).
+            DrainBulkSorterHoldingWriteLock();
+
+            // ADR-031 Piece 2: Dispose's CheckpointInternal is the 14-minute-at-1B dominant
+            // cost (CollectPredicateStatistics scans the entire GPOS index). A session that
+            // never mutated anything has no new statistics to collect and no WAL checkpoint
+            // marker to write — skip unconditionally. For Reference/Minimal profiles the
+            // inner `_wal is null` short-circuit makes this redundant but cheap.
+            // ADR-061 M7: a store that could not apply a committed write closes without a checkpoint. A checkpoint would
+            // truncate the log, which is the only complete copy of that write.
+            // The indexes save their entry counts when they close. The counts in memory include what was applied of the
+            // write that failed, and no index has saved a count for that transaction, so each count goes back to the one
+            // saved with its transaction: recovery then counts the write once (ADR-058).
+            if (_unappliedWriteCause is not null)
+            {
+                _gspoIndex?.ReturnToSavedEntryCount();
+                _gposIndex?.ReturnToSavedEntryCount();
+                _gospIndex?.ReturnToSavedEntryCount();
+                _tgspIndex?.ReturnToSavedEntryCount();
+                _gspoGraph?.ReturnToSavedEntryCount();
+                _gposGraph?.ReturnToSavedEntryCount();
+                _gospGraph?.ReturnToSavedEntryCount();
+                _gspoMinimal?.ReturnToSavedEntryCount();
+            }
+            else if (_sessionMutated)
+            {
+                CheckpointInternal();
+            }
+
+            _wal?.Dispose();
+            _gspoIndex?.Dispose();
+            _gposIndex?.Dispose();
+            _gospIndex?.Dispose();
+            _tgspIndex?.Dispose();
+            _gspoGraph?.Dispose();
+            _gposGraph?.Dispose();
+            _gospGraph?.Dispose();
+            _gspoReference?.Dispose();
+            _gposReference?.Dispose();
+            _gspoMinimal?.Dispose();
+            _trigramIndex.Dispose();
+            _atoms?.Dispose();
+        }
+        finally
+        {
+            ReleaseWriteLock();
+        }
     }
 
     /// <summary>
@@ -3513,8 +3604,7 @@ public sealed class QuadStore : IDisposable
     /// </remarks>
     public void Clear()
     {
-        ThrowIfDisposed();
-        _lock.EnterWriteLock();
+        AcquireWriteLock();
         try
         {
             ThrowIfStoppedOverUnappliedWrite();
@@ -3552,7 +3642,7 @@ public sealed class QuadStore : IDisposable
         }
         finally
         {
-            _lock.ExitWriteLock();
+            ReleaseWriteLock();
         }
     }
 

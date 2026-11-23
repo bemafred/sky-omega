@@ -23,6 +23,11 @@ internal static class QueryCancellation
     public static void ClearToken() => _token = default;
 
     /// <summary>
+    /// The current thread's query token, for a call that waits outside the query: a SERVICE call (ADR-066 D4).
+    /// </summary>
+    public static CancellationToken Token => _token;
+
+    /// <summary>
     /// Throw OperationCanceledException if cancellation has been requested.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

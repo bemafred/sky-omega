@@ -721,38 +721,41 @@ internal sealed class TreeJoinExecutor
 
     private List<MaterializedRow> ServiceCall(string endpoint, string query, bool silent)
     {
+        // The call carries the query's token: a query cancelled while it waits on the endpoint ends there (ADR-066 D4)
+        List<ServiceResultRow> rows;
         try
         {
-            var rows = _serviceExecutor!.ExecuteSelectAsync(endpoint, query).GetAwaiter().GetResult();
-            var result = new List<MaterializedRow>(rows.Count);
-            var bindingArray = ArrayPool<Binding>.Shared.Rent(64);
-            var charArray = ArrayPool<char>.Shared.Rent(1 << 13);
-            try
-            {
-                var table = new BindingTable(bindingArray.AsSpan(0, 64), charArray.AsSpan(0, 1 << 13));
-                foreach (var row in rows)
-                {
-                    table.TruncateTo(0);
-                    foreach (var v in row.Variables)
-                        if (row.TryGetBinding(v, out var b)) table.Bind(v.AsSpan(), b.ToRdfTerm().AsSpan());
-                    result.Add(new MaterializedRow(table));
-                }
-            }
-            finally
-            {
-                ArrayPool<Binding>.Shared.Return(bindingArray);
-                ArrayPool<char>.Shared.Return(charArray);
-            }
-            return result;
+            rows = _serviceExecutor!.ExecuteSelectAsync(endpoint, query, QueryCancellation.Token).GetAwaiter().GetResult();
         }
-        catch when (silent)
+        catch (SparqlServiceException) when (silent)
         {
-            // SILENT: a failed endpoint contributes the EMPTY multiset (no solutions), so a non-OPTIONAL SERVICE
-            // eliminates the join (Join(input, ∅) = ∅) — the certified behaviour. Returning a single empty row instead
-            // would silently make the SERVICE optional (Join(input, {μ0}) = input). OPTIONAL { SERVICE SILENT } still
-            // preserves its input rows, but that is the OptionalHeader's left-join, not ServiceCall's concern.
-            return new List<MaterializedRow>();
+            // SILENT hides the endpoint's failures, which the executor says as a SparqlServiceException, and nothing
+            // else: not the query's cancellation, nor a failure of its own evaluation (ADR-066 D3). A failed SERVICE is
+            // "a single solution with no bindings" (SPARQL 1.1 Federated Query §2.3; Ω0 in §3.2's SilentOp), so the
+            // join keeps its input: Join(input, {μ0}) = input (ADR-066 D7).
+            return new List<MaterializedRow> { EmptyRow() };
         }
+
+        var result = new List<MaterializedRow>(rows.Count);
+        var bindingArray = ArrayPool<Binding>.Shared.Rent(64);
+        var charArray = ArrayPool<char>.Shared.Rent(1 << 13);
+        try
+        {
+            var table = new BindingTable(bindingArray.AsSpan(0, 64), charArray.AsSpan(0, 1 << 13));
+            foreach (var row in rows)
+            {
+                table.TruncateTo(0);
+                foreach (var v in row.Variables)
+                    if (row.TryGetBinding(v, out var b)) table.Bind(v.AsSpan(), b.ToRdfTerm().AsSpan());
+                result.Add(new MaterializedRow(table));
+            }
+        }
+        finally
+        {
+            ArrayPool<Binding>.Shared.Return(bindingArray);
+            ArrayPool<char>.Shared.Return(charArray);
+        }
+        return result;
     }
 
     // ── sub-SELECT ────────────────────────────────────────────────────────────────────────────────────

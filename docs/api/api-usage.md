@@ -291,9 +291,15 @@ SELECT ?person ?score WHERE {
 -- Query a remote SPARQL endpoint
 SELECT * WHERE { SERVICE <http://remote.example.org/sparql> { ?s ?p ?o } }
 
--- SERVICE SILENT ignores errors and returns empty results on failure
+-- SERVICE SILENT: a failed endpoint answers one solution with no bindings, so the rest of the query keeps its solutions
 SELECT * WHERE { SERVICE SILENT <http://might-fail.example.org/sparql> { ?x ?y ?z } }
 ```
+
+SILENT hides the endpoint's failures only: not the query's cancellation, nor a failure of its own evaluation. A call
+waits at most 5 s to connect and 100 s for its answer; a process sets the connect timeout once, when it starts, with
+`SparqlEngine.ServiceConnectTimeout` (the tools: `--service-connect-timeout <seconds>`). The token given to
+`SparqlEngine.Query` reaches the call. A query's SERVICE makes its process send the query to any address the process
+can reach, services that listen only on `localhost` included ([ADR-066](../adrs/mercury/ADR-066-a-write-waits-for-the-reads-in-progress.md) D6).
 
 ---
 

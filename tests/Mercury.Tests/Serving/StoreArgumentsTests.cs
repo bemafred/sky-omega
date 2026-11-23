@@ -12,7 +12,8 @@ namespace SkyOmega.Mercury.Tests.Serving;
 public sealed class StoreArgumentsTests
 {
     private const StoreOptions All =
-        StoreOptions.Path | StoreOptions.Name | StoreOptions.Profile | StoreOptions.Port | StoreOptions.Listen;
+        StoreOptions.Path | StoreOptions.Name | StoreOptions.Profile | StoreOptions.Port | StoreOptions.Listen |
+        StoreOptions.ServiceConnectTimeout;
 
     /// <summary>Reads every argument as a tool would, stopping at the first not read.</summary>
     private static (StoreArguments Store, ArgumentRead Last, int Index) ReadAll(StoreOptions takes, params string[] args)
@@ -136,6 +137,35 @@ public sealed class StoreArgumentsTests
         Assert.Equal("--profile requires one of: Cognitive, Graph, Reference, Minimal.", store.Error);
     }
 
+    /// <summary>A SERVICE call's connect timeout, in whole seconds, for the process (ADR-066 D5).</summary>
+    [Fact]
+    public void ServiceConnectTimeout_IsReadInSeconds()
+    {
+        Assert.Equal(TimeSpan.FromSeconds(7), ReadAll(All, "--service-connect-timeout", "7").Store.ServiceConnectTimeout);
+    }
+
+    /// <summary>Not given, it is null, and the process keeps SparqlEngine's 5 seconds (ADR-066 D5).</summary>
+    [Fact]
+    public void ServiceConnectTimeout_NotGiven_IsNull()
+    {
+        Assert.Null(ReadAll(All, "-d", "/a").Store.ServiceConnectTimeout);
+    }
+
+    [Theory]
+    [InlineData("--service-connect-timeout", "0")]
+    [InlineData("--service-connect-timeout", "-1")]
+    [InlineData("--service-connect-timeout", "1.5")]
+    [InlineData("--service-connect-timeout", "five")]
+    [InlineData("--service-connect-timeout")]
+    public void ServiceConnectTimeout_NotAWholeNumberOfSecondsFromOne_IsRefused(params string[] args)
+    {
+        var (store, last, _) = ReadAll(All, args);
+
+        Assert.Equal(ArgumentRead.Refused, last);
+        Assert.Equal("--service-connect-timeout requires a whole number of seconds, 1 or more.", store.Error);
+        Assert.Null(store.ServiceConnectTimeout);
+    }
+
     [Fact]
     public void AnArgumentWithNoOption_IsThePath()
     {
@@ -168,10 +198,11 @@ public sealed class StoreArgumentsTests
     [InlineData("--profile", "graph")]
     [InlineData("--enable-http-updates")]
     [InlineData("--listen", "+")]
+    [InlineData("--service-connect-timeout", "5")]
     [InlineData("-x")]
     public void AnOptionNotTaken_IsLeftToTheTool(params string[] args)
     {
-        // mercury-mcp's set: a path and a port.
+        // A tool that takes a path and a port.
         var (store, last, index) = ReadAll(StoreOptions.Path | StoreOptions.Port, args);
 
         Assert.Equal(ArgumentRead.NotMine, last);

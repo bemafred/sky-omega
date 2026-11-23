@@ -3,6 +3,7 @@
 
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using SkyOmega.Mercury;
 using SkyOmega.Mercury.Abstractions;
 using SkyOmega.Mercury.Hosting;
 using SkyOmega.Mercury.Runtime;
@@ -43,6 +44,8 @@ if (options.ShowHelp)
                                  every network. Give it once for each address. Default: localhost.
           -p, --port <port>      The HTTP port (default: {MercuryPorts.Daemon})
           --read-only            Take no updates over HTTP
+          --service-connect-timeout <seconds>
+                                 How long a SERVICE call waits to connect to its endpoint (default: 5)
           -v, --version          Show version information
           -h, --help             Show this help message
 
@@ -54,6 +57,10 @@ if (options.ShowHelp)
         There is no authentication: whoever reaches an address it listens on may query the
         store and update it. Listen on the tailnet's address. + and * listen on every network
         the machine has, the local one included.
+
+        SERVICE: a query's SERVICE makes mercuryd send it to any address this machine can
+        reach, services that listen only on localhost included; a failure says at most
+        4 KiB of what such a service answers.
 
         Stores:
           macOS     ~/Library/SkyOmega/stores/<name>/
@@ -73,6 +80,10 @@ if (options.ShowHelp)
         """);
     return 0;
 }
+
+// A SERVICE call's connect timeout is one for the process, set before the store opens (ADR-066 D5)
+if (options.Store.ServiceConnectTimeout is { } serviceConnectTimeout)
+    SparqlEngine.ServiceConnectTimeout = serviceConnectTimeout;
 
 var storePath = options.Store.ResolvePath()!;
 var version = ToolVersion.Of(typeof(Program).Assembly);

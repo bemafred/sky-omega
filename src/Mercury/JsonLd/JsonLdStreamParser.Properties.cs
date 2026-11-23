@@ -17,6 +17,7 @@ internal sealed partial class JsonLdStreamParser
         // Check for type coercion and term-level language
         _typeCoercion.TryGetValue(term, out var coercedType);
         _termLanguage.TryGetValue(term, out var termLang);
+        _termDirection.TryGetValue(term, out var termDir);
         var isListContainer = _containerList.TryGetValue(term, out var isList) && isList;
         var isLanguageContainer = _containerLanguage.TryGetValue(term, out var isLang) && isLang;
         var isIndexContainer = _containerIndex.TryGetValue(term, out var isIdx) && isIdx;
@@ -72,6 +73,8 @@ internal sealed partial class JsonLdStreamParser
         string? savedVocabIri = null;
         string? savedBaseIri = null;
         string? savedDefaultLanguage = null;
+        string? savedDefaultDirection = null;
+        Dictionary<string, string>? savedTermDirection = null;
         if (_scopedContext.TryGetValue(term, out var scopedContextJson))
         {
             // Save current context state (all fields that ProcessContext can modify)
@@ -84,6 +87,7 @@ internal sealed partial class JsonLdStreamParser
             savedContainerId = new Dictionary<string, bool>(_containerId);
             savedContainerType = new Dictionary<string, bool>(_containerType);
             savedTermLanguage = new Dictionary<string, string>(_termLanguage);
+            savedTermDirection = new Dictionary<string, string>(_termDirection);
             savedReverseProperty = new Dictionary<string, string>(_reverseProperty);
             savedScopedContext = new Dictionary<string, string>(_scopedContext);
             savedTypeAliases = new HashSet<string>(_typeAliases);
@@ -101,6 +105,7 @@ internal sealed partial class JsonLdStreamParser
             savedVocabIri = _vocabIri;
             savedBaseIri = _baseIri;
             savedDefaultLanguage = _defaultLanguage;
+            savedDefaultDirection = _defaultDirection;
 
             // Clear protected terms before applying scoped context
             // Property-scoped @context: null is allowed to clear protected terms
@@ -226,12 +231,12 @@ internal sealed partial class JsonLdStreamParser
                     graphIndexPropIri = ExpandTerm(graphIndexProp);
                     _typeCoercion.TryGetValue(graphIndexProp, out graphIndexPropCoercedType);
                 }
-                ProcessGraphContainer(subject, predicate, value, handler, graphIri, coercedType, termLang, isIndexContainer, isIdContainer, graphIndexPropIri, graphIndexPropCoercedType);
+                ProcessGraphContainer(subject, predicate, value, handler, graphIri, coercedType, termLang, termDir, isIndexContainer, isIdContainer, graphIndexPropIri, graphIndexPropCoercedType);
             }
             // Handle language container - object keys are language tags
             else if (isLanguageContainer && value.ValueKind == JsonValueKind.Object)
             {
-                ProcessLanguageMap(subject, predicate, value, handler, graphIri);
+                ProcessLanguageMap(subject, predicate, value, handler, graphIri, termDir);
             }
             // Handle index container - object keys are index values
             // For property-valued @index, keys become property values on the object (pi06-pi11)
@@ -257,13 +262,13 @@ internal sealed partial class JsonLdStreamParser
                     {
                         foreach (var item in prop.Value.EnumerateArray())
                         {
-                            ProcessValueWithIndex(subject, predicate, item, handler, graphIri, coercedType, termLang,
+                            ProcessValueWithIndex(subject, predicate, item, handler, graphIri, coercedType, termLang, termDir,
                                 indexPropIri, indexKey, indexPropCoercedType, isNone);
                         }
                     }
                     else
                     {
-                        ProcessValueWithIndex(subject, predicate, prop.Value, handler, graphIri, coercedType, termLang,
+                        ProcessValueWithIndex(subject, predicate, prop.Value, handler, graphIri, coercedType, termLang, termDir,
                             indexPropIri, indexKey, indexPropCoercedType, isNone);
                     }
                 }
@@ -298,7 +303,7 @@ internal sealed partial class JsonLdStreamParser
                     // Multiple values
                     foreach (var item in value.EnumerateArray())
                     {
-                        ProcessValue(subject, predicate, item, handler, graphIri, coercedType, termLang);
+                        ProcessValue(subject, predicate, item, handler, graphIri, coercedType, termLang, termDir);
                     }
                 }
             }
@@ -319,7 +324,7 @@ internal sealed partial class JsonLdStreamParser
                 }
                 else
                 {
-                    ProcessValue(subject, predicate, value, handler, graphIri, coercedType, termLang);
+                    ProcessValue(subject, predicate, value, handler, graphIri, coercedType, termLang, termDir);
                 }
             }
         }
@@ -354,6 +359,8 @@ internal sealed partial class JsonLdStreamParser
 
                 _termLanguage.Clear();
                 foreach (var kv in savedTermLanguage!) _termLanguage[kv.Key] = kv.Value;
+                _termDirection.Clear();
+                foreach (var kv in savedTermDirection!) _termDirection[kv.Key] = kv.Value;
 
                 _reverseProperty.Clear();
                 foreach (var kv in savedReverseProperty!) _reverseProperty[kv.Key] = kv.Value;
@@ -400,6 +407,7 @@ internal sealed partial class JsonLdStreamParser
                 _vocabIri = savedVocabIri;
                 _baseIri = savedBaseIri;
                 _defaultLanguage = savedDefaultLanguage;
+                _defaultDirection = savedDefaultDirection;
             }
 
             // Clear property-scoped tracking (c027, c028)
@@ -423,7 +431,7 @@ internal sealed partial class JsonLdStreamParser
     /// Emits main triple and, if property-valued @index is defined, emits the @index property triple.
     /// </summary>
     private void ProcessValueWithIndex(string subject, string predicate, JsonElement value,
-        QuadHandler handler, string? graphIri, string? coercedType, string? termLang,
+        QuadHandler handler, string? graphIri, string? coercedType, string? termLang, string? termDir,
         string? indexPropIri, string indexKey, string? indexPropCoercedType, bool isNone)
     {
         // Get the value's subject IRI (for property-valued @index emission)
@@ -485,7 +493,7 @@ internal sealed partial class JsonLdStreamParser
         }
 
         // Process the value normally (emit main triple)
-        ProcessValue(subject, predicate, value, handler, graphIri, coercedType, termLang);
+        ProcessValue(subject, predicate, value, handler, graphIri, coercedType, termLang, termDir);
 
         // Emit @index property triple if property-valued @index is defined and not @none
         if (!string.IsNullOrEmpty(indexPropIri) && !string.IsNullOrEmpty(valueSubject) && !isNone)

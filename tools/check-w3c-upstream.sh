@@ -47,7 +47,13 @@ for path in "${SUBMODULES[@]}"; do
   url="$(git -C "$ROOT" config -f .gitmodules "submodule.$path.url")"
   pin="$(git -C "$ROOT" rev-parse "HEAD:$path")"
   if $fetch; then
-    git -C "$ROOT/$path" fetch --quiet origin HEAD
+    # A shallow clone has no history between the pin and upstream's head, so the ancestry below would fail as if
+    # upstream had rewritten its history: the Actions checkout takes submodules at depth 1. Fetch all of it.
+    if [ "$(git -C "$ROOT/$path" rev-parse --is-shallow-repository)" = true ]; then
+      git -C "$ROOT/$path" fetch --quiet --unshallow origin HEAD
+    else
+      git -C "$ROOT/$path" fetch --quiet origin HEAD
+    fi
     upstream="$(git -C "$ROOT/$path" rev-parse FETCH_HEAD)"
   else
     upstream="$(git ls-remote "$url" HEAD | cut -f1)"
@@ -92,7 +98,10 @@ if $run && [ "${#changed[@]}" -gt 0 ]; then
 
   results="$(mktemp -d)"
   dotnet test --project "$ROOT/tests/Mercury.Tests" --filter "FullyQualifiedName~SkyOmega.Mercury.Tests.W3C" \
-    --results-directory "$results" > "$results/w3c-upstream.txt" 2>&1 || status=1
+    --results-directory "$results" > "$results/w3c-upstream.ansi.txt" 2>&1 || status=1
+  # In Actions the runner colours its lines even into a file, and --no-ansi does not stop it: the greps below read the
+  # text without its escape sequences
+  sed -E $'s/\x1b\\[[0-9;]*m//g' "$results/w3c-upstream.ansi.txt" > "$results/w3c-upstream.txt"
 
   say ""
   say "### The W3C suite against upstream's head"

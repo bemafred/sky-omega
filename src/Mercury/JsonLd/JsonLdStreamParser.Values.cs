@@ -13,8 +13,39 @@ namespace SkyOmega.Mercury.JsonLd;
 
 internal sealed partial class JsonLdStreamParser
 {
+    /// <summary>
+    /// A string with its language and its base direction, as RDF (JSON-LD 1.1 API, object to RDF conversion). With
+    /// <c>rdfDirection</c> <c>i18n-datatype</c> a direction makes a literal of the i18n datatype, the language in lower
+    /// case; with <c>compound-literal</c>, a node with the value, the direction and the language; without
+    /// <c>rdfDirection</c> the direction is not in RDF.
+    /// </summary>
+    private void EmitString(string subject, string predicate, string value, string? language, string? direction,
+        QuadHandler handler, string? graphIri)
+    {
+        if (direction != null && _rdfDirection == "i18n-datatype")
+        {
+            EmitQuad(handler, subject, predicate,
+                $"\"{EscapeString(value)}\"^^<{I18nNamespace}{language?.ToLowerInvariant()}_{direction}>", graphIri);
+        }
+        else if (direction != null && _rdfDirection == "compound-literal")
+        {
+            var compoundNode = GenerateBlankNode();
+            EmitQuad(handler, subject, predicate, compoundNode, graphIri);
+            EmitQuad(handler, compoundNode, RdfValue, $"\"{EscapeString(value)}\"", graphIri);
+            EmitQuad(handler, compoundNode, RdfDirection, $"\"{direction}\"", graphIri);
+            if (language != null)
+                EmitQuad(handler, compoundNode, RdfLanguage, $"\"{language.ToLowerInvariant()}\"", graphIri);
+        }
+        else
+        {
+            EmitQuad(handler, subject, predicate,
+                language != null ? $"\"{EscapeString(value)}\"@{language}" : $"\"{EscapeString(value)}\"", graphIri);
+        }
+    }
+
     private void ProcessValue(string subject, string predicate, JsonElement value,
-        QuadHandler handler, string? graphIri, string? coercedType, string? termLanguage = null)
+        QuadHandler handler, string? graphIri, string? coercedType, string? termLanguage = null,
+        string? termDirection = null)
     {
         switch (value.ValueKind)
         {
@@ -53,31 +84,16 @@ internal sealed partial class JsonLdStreamParser
                 }
                 else
                 {
-                    // Plain string literal - apply term language, then default language
-                    // Term-level @language: null (empty string) means explicitly no language tag
-                    string literal;
-                    if (termLanguage != null)
-                    {
-                        // Term has explicit @language setting
-                        if (termLanguage.Length > 0)
-                        {
-                            literal = $"\"{EscapeString(strVal)}\"@{termLanguage}";
-                        }
-                        else
-                        {
-                            // @language: null in term definition - no language tag
-                            literal = $"\"{EscapeString(strVal)}\"";
-                        }
-                    }
-                    else if (!string.IsNullOrEmpty(_defaultLanguage))
-                    {
-                        literal = $"\"{EscapeString(strVal)}\"@{_defaultLanguage}";
-                    }
-                    else
-                    {
-                        literal = $"\"{EscapeString(strVal)}\"";
-                    }
-                    EmitQuad(handler, subject, predicate, literal, graphIri);
+                    // A plain string takes the term's language and direction, each where the term has one: "" is the
+                    // term's null, which means none. Otherwise it takes the context's default (JSON-LD 1.1 API,
+                    // value expansion).
+                    var language = termLanguage is null
+                        ? string.IsNullOrEmpty(_defaultLanguage) ? null : _defaultLanguage
+                        : termLanguage.Length > 0 ? termLanguage : null;
+                    var direction = termDirection is null
+                        ? _defaultDirection
+                        : termDirection.Length > 0 ? termDirection : null;
+                    EmitString(subject, predicate, strVal, language, direction, handler, graphIri);
                 }
                 break;
 

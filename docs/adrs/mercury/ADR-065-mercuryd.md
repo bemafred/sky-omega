@@ -247,6 +247,14 @@ memory, with one writer. The profile is not this ADR's decision: mercuryd serves
 - SERVICE reads; it never writes to the remote store. A client writes with `POST /sparql/update`.
 - Every endpoint that takes queries can then be made to send requests to other addresses. On the tailnet this is
   accepted with D5.
+- **The outbound boundary** ([ADR-066](ADR-066-a-write-waits-for-the-reads-in-progress.md) D6). Whoever can query a
+  Mercury endpoint can make its process send a SPARQL query, as an HTTP GET, to any address the process can reach: the
+  tailnet, the internet, and services that listen only on that machine, `localhost` included. D5 makes the tailnet the
+  boundary; listening on `+` or `*` gives it up. No allow-list. A failure says the endpoint's status and reason and at
+  most the first 4 KiB of its body, so a query can read that much of what such a service answers.
+- A call waits at most 5 s to connect (`--service-connect-timeout`) and 100 s for its answer, a query's token reaches
+  it, and SILENT hides the endpoint's failures only (ADR-066 D3 to D5). A query keeps its store's read lock while it
+  waits, and a write to the store waits for it, outside the lock (ADR-066 D1).
 - This is not mercuryd's code, but without it no MCP reaches mercuryd.
 
 ### D11. The layers — Accepted
@@ -446,6 +454,12 @@ The order follows the dependencies (ADR-064's rule).
      - 10 mutations, each undoing one of these, each failed by its test: among them `MercuryPaths.Store` looking for
        the data directory again, and a pipe session that a stop does not end.
 6. **SERVICE** in `SparqlEngine.Query` (D10), with a test that queries one endpoint from another.
+   Done on zbook, 2026-11-23, with ADR-066's correction, which it waited for: with this executor a query that waits on
+   SERVICE held every later read of its store behind a write, and a SERVICE back to the store deadlocked until the
+   HTTP timeout. `SparqlEngine` holds one `HttpSparqlServiceExecutor` for the process; `ServiceAcrossEndpointsTests`
+   queries one endpoint and reads another's store with SERVICE. The executor says an endpoint's failure with its
+   status, its reason and at most 4 KiB of its body, and a call that gets no answer with why: refused, not connected
+   within the connect timeout, or not answered within 100 s.
 7. **Linux:** the unit file and the runbook; mercuryd on elite with the store of Q4, installed by Martin; queried and
    written from zbook and macbook over the tailnet.
 8. **macOS** on macbook: the plist; the listener and the socket measured there, and whether the macOS firewall lets a

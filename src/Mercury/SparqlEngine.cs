@@ -21,6 +21,28 @@ namespace SkyOmega.Mercury;
 public static class SparqlEngine
 {
     /// <summary>
+    /// What a query's SERVICE clauses are sent with (ADR-065 D10): one for the process, as an <c>HttpClient</c> is
+    /// meant to be used, never disposed.
+    /// </summary>
+    private static HttpSparqlServiceExecutor _serviceExecutor = new();
+
+    private static TimeSpan _serviceConnectTimeout = HttpSparqlServiceExecutor.DefaultConnectTimeout;
+
+    /// <summary>
+    /// How long a SERVICE call waits to connect to its endpoint: 5 seconds unless the process sets it, once, when it
+    /// starts, before its first query (ADR-066 D5). The call's own bound, 100 seconds, is not changed.
+    /// </summary>
+    public static TimeSpan ServiceConnectTimeout
+    {
+        get => _serviceConnectTimeout;
+        set
+        {
+            _serviceExecutor = new HttpSparqlServiceExecutor(value);
+            _serviceConnectTimeout = value;
+        }
+    }
+
+    /// <summary>
     /// Execute a SPARQL SELECT, ASK, CONSTRUCT, or DESCRIBE query.
     /// </summary>
     /// <param name="store">The store to query.</param>
@@ -71,7 +93,7 @@ public static class SparqlEngine
             {
                 var planner = new QueryPlanner(store.Statistics, store.Atoms);
 
-                using var executor = new QueryExecutor(store, sparql.AsSpan(), parsed, null, planner);
+                using var executor = new QueryExecutor(store, sparql.AsSpan(), parsed, _serviceExecutor, planner);
                 executor.ReorderBgpInTree = reorderBgp;
 
                 result = parsed.Type switch

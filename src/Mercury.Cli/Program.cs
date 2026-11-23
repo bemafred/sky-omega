@@ -16,7 +16,8 @@ using SkyOmega.Mercury.Storage;
 // mercuryd (ADR-065 D11).
 
 // Parse command line arguments
-var store = new StoreArguments(StoreOptions.Path | StoreOptions.Name | StoreOptions.Profile | StoreOptions.Port);
+var store = new StoreArguments(StoreOptions.Path | StoreOptions.Name | StoreOptions.Profile | StoreOptions.Port |
+                               StoreOptions.ServiceConnectTimeout);
 bool inMemory = false;
 bool showHelp = false;
 bool showVersion = false;
@@ -184,6 +185,7 @@ if (showHelp)
           --store <name>             Named store (e.g., wikidata, fhir)
           -p, --port <port>          HTTP port (default: 3031)
           --no-http                  Disable HTTP endpoint
+          --service-connect-timeout <seconds>  How long a SERVICE call waits to connect to its endpoint (default: 5)
           -a, --attach [pipe]        Attach to a running instance: mcp (the default) or a pipe, or with
                                      --store or -d the mercuryd that serves that store
           --load <file>              Load RDF file at startup, then enter REPL
@@ -218,6 +220,11 @@ if (showHelp)
           When running, SPARQL is available at http://localhost:{port}/sparql
           Use SERVICE <http://localhost:3030/sparql> to query MCP instance
 
+        SERVICE:
+          A query's SERVICE makes mercury send it to any address this machine can reach,
+          services that listen only on localhost included; a failure says at most 4 KiB
+          of what such a service answers.
+
         Log:
           mercury.log in the store's directory: each run's start and stop, each store
           opened, and every warning and error a store reported. Read it after a failure.
@@ -225,6 +232,10 @@ if (showHelp)
         """);
     return 0;
 }
+
+// A SERVICE call's connect timeout is one for the process, set before the store opens (ADR-066 D5)
+if (store.ServiceConnectTimeout is { } serviceConnectTimeout)
+    SparqlEngine.ServiceConnectTimeout = serviceConnectTimeout;
 
 // Attach: to mercury-mcp, to a pipe named, or to the mercuryd that serves the store given (ADR-065 D7). The store is
 // not opened: the process attached to holds it.
@@ -587,12 +598,15 @@ if (rebuildIndexes)
 jsonlListener?.Dispose();
 
 // Run the REPL, with every command the CLI offers.
+// A prune is for a store that nothing else reads or writes: it is offered only when the store is served by no endpoint
+// (ADR-066 D8).
 // The pool is closed on the way out, also when the REPL throws; the log is left open then, for the line about the
 // exception that nothing handled.
 using (pool)
 using (httpServer)
 using (var repl = ReplSessions.Create(session,
-    ReplCommands.Prune | ReplCommands.Attach | ReplCommands.Load | ReplCommands.Convert | ReplCommands.RebuildIndexes))
+    (httpServer is null ? ReplCommands.Prune : ReplCommands.None)
+    | ReplCommands.Attach | ReplCommands.Load | ReplCommands.Convert | ReplCommands.RebuildIndexes))
 {
     // --no-repl is the explicit opt-out for profilers, CI, and Rider run configs
     // that hold stdin open with no data (which would hang the REPL in read()).

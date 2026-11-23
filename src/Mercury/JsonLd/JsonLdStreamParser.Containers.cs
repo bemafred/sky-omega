@@ -14,8 +14,13 @@ internal sealed partial class JsonLdStreamParser
     /// Process a language map (@container: @language).
     /// Object keys are language tags, values are strings or arrays of strings.
     /// </summary>
-    private void ProcessLanguageMap(string subject, string predicate, JsonElement value, QuadHandler handler, string? graphIri)
+    private void ProcessLanguageMap(string subject, string predicate, JsonElement value, QuadHandler handler, string? graphIri,
+        string? termDirection)
     {
+        // Each value takes the term's direction where the term has one (null included), else the default
+        // (JSON-LD 1.1 API, expansion of a language map)
+        var direction = termDirection is null ? _defaultDirection : termDirection.Length > 0 ? termDirection : null;
+
         foreach (var prop in value.EnumerateObject())
         {
             var langTag = prop.Name;
@@ -26,11 +31,7 @@ internal sealed partial class JsonLdStreamParser
 
             if (langValue.ValueKind == JsonValueKind.String)
             {
-                var strVal = langValue.GetString() ?? "";
-                var literal = isNone
-                    ? $"\"{EscapeString(strVal)}\""
-                    : $"\"{EscapeString(strVal)}\"@{langTag}";
-                EmitQuad(handler, subject, predicate, literal, graphIri);
+                EmitString(subject, predicate, langValue.GetString() ?? "", isNone ? null : langTag, direction, handler, graphIri);
             }
             else if (langValue.ValueKind == JsonValueKind.Array)
             {
@@ -39,11 +40,7 @@ internal sealed partial class JsonLdStreamParser
                 {
                     if (item.ValueKind == JsonValueKind.String)
                     {
-                        var strVal = item.GetString() ?? "";
-                        var literal = isNone
-                            ? $"\"{EscapeString(strVal)}\""
-                            : $"\"{EscapeString(strVal)}\"@{langTag}";
-                        EmitQuad(handler, subject, predicate, literal, graphIri);
+                        EmitString(subject, predicate, item.GetString() ?? "", isNone ? null : langTag, direction, handler, graphIri);
                     }
                     else if (item.ValueKind != JsonValueKind.Null)
                     {
@@ -199,7 +196,7 @@ internal sealed partial class JsonLdStreamParser
     /// The value becomes a named graph with the property linking to the graph node.
     /// </summary>
     private void ProcessGraphContainer(string subject, string predicate, JsonElement value,
-        QuadHandler handler, string? graphIri, string? coercedType, string? termLanguage,
+        QuadHandler handler, string? graphIri, string? coercedType, string? termLanguage, string? termDirection,
         bool isIndexContainer = false, bool isIdContainer = false,
         string? indexPropIri = null, string? indexPropCoercedType = null)
     {
@@ -230,12 +227,12 @@ internal sealed partial class JsonLdStreamParser
                 {
                     foreach (var item in itemValue.EnumerateArray())
                     {
-                        ProcessGraphContainerItem(subject, predicate, item, handler, graphIri, coercedType, termLanguage, graphIdFromKey, isCompoundContainer: true, indexPropIri, key, indexPropCoercedType, isNone);
+                        ProcessGraphContainerItem(subject, predicate, item, handler, graphIri, coercedType, termLanguage, termDirection, graphIdFromKey, isCompoundContainer: true, indexPropIri, key, indexPropCoercedType, isNone);
                     }
                 }
                 else
                 {
-                    ProcessGraphContainerItem(subject, predicate, itemValue, handler, graphIri, coercedType, termLanguage, graphIdFromKey, isCompoundContainer: true, indexPropIri, key, indexPropCoercedType, isNone);
+                    ProcessGraphContainerItem(subject, predicate, itemValue, handler, graphIri, coercedType, termLanguage, termDirection, graphIdFromKey, isCompoundContainer: true, indexPropIri, key, indexPropCoercedType, isNone);
                 }
             }
         }
@@ -244,24 +241,24 @@ internal sealed partial class JsonLdStreamParser
         {
             foreach (var item in value.EnumerateArray())
             {
-                ProcessGraphContainerItem(subject, predicate, item, handler, graphIri, coercedType, termLanguage);
+                ProcessGraphContainerItem(subject, predicate, item, handler, graphIri, coercedType, termLanguage, termDirection);
             }
         }
         else
         {
-            ProcessGraphContainerItem(subject, predicate, value, handler, graphIri, coercedType, termLanguage);
+            ProcessGraphContainerItem(subject, predicate, value, handler, graphIri, coercedType, termLanguage, termDirection);
         }
     }
 
     private void ProcessGraphContainerItem(string subject, string predicate, JsonElement value,
-        QuadHandler handler, string? graphIri, string? coercedType, string? termLanguage,
+        QuadHandler handler, string? graphIri, string? coercedType, string? termLanguage, string? termDirection,
         string? graphIdFromKey = null, bool isCompoundContainer = false,
         string? indexPropIri = null, string? indexKey = null, string? indexPropCoercedType = null, bool indexIsNone = false)
     {
         if (value.ValueKind != JsonValueKind.Object)
         {
             // Non-object values in graph container are processed normally
-            ProcessValue(subject, predicate, value, handler, graphIri, coercedType, termLanguage);
+            ProcessValue(subject, predicate, value, handler, graphIri, coercedType, termLanguage, termDirection);
             return;
         }
 

@@ -2,7 +2,7 @@
 
 ## Status
 
-**Status:** Proposed — 2026-11-21, revised twice on 2026-11-22
+**Status:** Accepted — 2026-11-23
 
 Drafted by zbook on 2026-11-21, from what ADR-065 Step 6 found when it gave every query an HTTP SERVICE executor.
 Martin asked for the assessment the same day: "The question is not whether Mercury should support self-SERVICE. It is
@@ -26,6 +26,20 @@ store." This revision keeps the read whole and changes what a write does while i
 changed is in [What the revisions changed](#what-the-revisions-changed).
 
 Martin also decided, on the first revision: "Prune is not intended for a live store. It should be an error." (D8)
+
+Accepted on 2026-11-23. Martin: "ADR-066 is approved in principle. The second revision has the correct architecture."
+He decided R1 to R3 and asked for four corrections before the status changed: a wake-up protocol for waiting writers,
+with a deterministic test (D1); the closed state checked by readers and writers after they take the lock, with a test
+of a close racing a queued write (D2); which callers can cancel (D4); and the order stated as it is, reads first, with
+writer starvation accepted (D1, R4). "No further architecture investigation is requested." What acceptance changed is
+in [What the revisions changed](#what-the-revisions-changed).
+
+All six steps done on 2026-11-23, Steps 1 to 4 in `216ebbf8`, `25778f45`, `836b6279` and `dbec052f`. Step 3 is D1
+and D2 in `QuadStore` and `QuadStorePool`, with the tests written with the correction; Step 4 is D3 and D4 in
+`ServiceCall`. Steps 5 and 6 go to `main` together, since both act on the executor that no tool used until then: D5 and
+R2 in the executor and the tools, the executor's part of D3, D6 in ADR-065, the tools' help and the API document, and
+the executor, its place in `SparqlEngine` and this ADR's tests; R3 and R4 in the limits register. Every test of this
+ADR passes on zbook. Completed waits for Martin's review, and for the CI on its six platforms.
 
 ## Why
 
@@ -69,11 +83,29 @@ R2, as the SERVICE's handler would
 | `EnterWriteLock`, as every write enters today | 1,909 ms | when R1 ended (2,001 ms), not before |
 | `TryEnterWriteLock(0)`, and between tries a wait outside the lock until a read ends | 0 ms | when R1 ended (2,000 ms), not before |
 
+The probe's wait outside the lock is a semaphore that a read's end releases, polled every 50 ms. It shows what the lock
+allows; the store's wake-up is D1's protocol, which loses no wake-up and polls nothing.
+
 The worst case for the second way, a write trying `TryEnterWriteLock(0)` without pause beside a read that holds the
 lock and 4 threads of reads entering and leaving
 ([probe](../../../tools/probes/write-waits-for-reads/a-writes-attempts-and-the-reads-beside-them.cs)): 7,982,964
 tries, none entered while a read held the lock; 800,000 reads, each waiting to enter 0 µs at the median, 412 µs at
 the 99.9th percentile and 1.9 ms at most, the lock's own spin, not a wait behind the write.
+
+### Measured (zbook, 2026-11-23): what a read's release costs with the wake-up
+
+On `QuadStore` with D1 built, 4 threads each take and release the read lock 200,000 times, timed around each call
+([probe](../../../tools/probes/write-waits-for-reads/a-reads-release-with-the-wake-up.cs)); three runs of each:
+
+| A read's release | Median | 99.9th percentile | At most |
+|---|--:|--:|--:|
+| Before D1 (`25778f45`), no write | < 0.1 µs, the timer's resolution | 26.5–26.8 µs | 0.18–0.34 ms |
+| D1, no write | 0.3–0.4 µs | 25.3–28.9 µs | 0.47–0.56 ms |
+| D1, a write waiting behind a held read, woken by every release | 0.3–0.4 µs | 41.3–44.6 µs | 0.35–0.40 ms |
+
+The wake-up, the monitor and its `PulseAll`, adds about 0.3 µs to a read's release at the median. With a write
+waiting, each release meets the write's try at the monitor: about 15 µs more at the 99.9th percentile. A read's wait to
+enter did not grow: 7.7–14.7 µs at the 99.9th percentile with D1, 26.4 µs before.
 
 ### Read in the code (2026-11-22)
 
@@ -183,10 +215,10 @@ so it ends. The measured deadlocks are such cycles:
 
 A cycle is broken by removing either edge. Removing (1), releasing the lock for the wait (the first revision), lets a
 write take effect inside a read that has begun: the read is then answered from a state after it was asked, or
-evaluated again after a write that came later. Removing (2) behind a waiting writer, for every read, keeps the order:
-the read that began first ends first, and the write takes effect after it. It needs no recognition of the request,
-since no read waits behind a waiting write at all. Its cost is the write's: it waits as long as reads keep coming
-without a gap (R4).
+evaluated again after a write that came later. Removing (2) behind a waiting writer, for every read, keeps every read
+whole: no write takes effect during a read, and a write takes effect after the reads in progress when it enters. It
+needs no recognition of the request, since no read waits behind a waiting write at all. Its cost is the write's: reads
+go first, and a write waits as long as reads keep coming without a gap (R4).
 
 ## The six questions
 
@@ -279,55 +311,118 @@ forward-progress requirement needs the read split; the cycle is broken at the wa
 nothing else: no write lock, no lock of its pool or process. While it waits, every read of its store, and every
 operation on every other store, proceeds. A write to its store (an update, a batch, a checkpoint, a rebuild, a clear,
 a close) waits for it, as for every read in progress, and holds no read behind it (D1, D2). Every wait of the query
-ends: the endpoint answers or fails, the connect timeout (D5) or the call's timeout ends the call, or the query is
-cancelled (D4); and with it ends every write's wait for it. The query is evaluated once, from one state of its store.
-A prune does not run beside it: a prune of a served store is an error (D8).
+ends: the endpoint answers or fails, the connect timeout (D5) or the call's timeout ends the call, or, for a caller
+that passed a token, the query is cancelled (D4); and with it ends every write's wait for it. The query is evaluated
+once, from one state of its store. A read or write that takes the lock after the store is closed finds it closed and
+touches nothing (D2). A prune does not run beside it: a prune of a served store is an error (D8).
 
 **What is not guaranteed.** That a federated query answers: an endpoint may fail. How long a federated query takes: its
-calls are bounded one by one, and their number is the query's (one per row for `SERVICE ?ep`). When a write takes
-effect: after every read in progress, so a query's SERVICE waits delay the writes to its store, and reads that keep
-coming without a gap delay a write until they stop (R4). An endpoint that waits on a write to the querying store before
-it answers (a foreign endpoint with a side effect; a Mercury endpoint only reads to answer a query) waits until the
-call's timeout, since that write comes after the read (R4). The thread pool's capacity: each wait holds a thread
-(question 5). A bound on a stop: the drains wait for the queries in progress, and the service manager is the bound
-(ADR-065 D3). Anything about endpoints outside Mercury.
+calls are bounded one by one, and their number is the query's (one per row for `SERVICE ?ep`). That reads and writes
+take effect in the order they arrive: reads go first (D1). When a write takes effect: after every read in progress
+when it enters, reads that arrived after it included, so a query's SERVICE waits delay the writes to its store, and
+reads that keep coming without a gap delay a write until they stop, without bound (R4). Which of several waiting
+writes takes effect first. An endpoint that waits on a write to the querying store before it answers (a foreign
+endpoint with a side effect; a Mercury endpoint only reads to answer a query) waits until the call's timeout, since
+that write comes after the read (R4). That a query of a serving path can be cancelled: none passes a token (D4). The
+thread pool's capacity: each wait holds a thread (question 5). A bound on a stop: the drains wait for the queries in
+progress, and the service manager is the bound (ADR-065 D3, R3). Anything about endpoints outside Mercury.
 
-## Decision (proposed)
+## Decision
 
-The smallest change that guarantees forward progress, with the lock as it is, and reads and writes taking effect in the
-order they arrive:
+The smallest change that guarantees forward progress, with the lock as it is: a read is never held behind a write
+that has not entered, and a write never takes effect during a read.
 
 - **D1. A write takes effect only when no read is in progress, and waits for that outside the lock.** The write lock is
   entered in one place, for every exclusive section (today twelve), with `TryEnterWriteLock(0)`: it enters when no
   read and no write holds the lock, and otherwise does not wait inside it. Until it enters, it waits outside the lock,
-  woken each time a read ends (`ReleaseReadLock`, the one place reads leave). A read waits only for a write that holds
-  the lock, which is local work (I1), never for one that waits. A query keeps its read lock from the end of parsing to
-  its last row, as today, its SERVICE waits included. Measured above: a read behind a waiting write, 1,909 ms today
-  and 0 ms with D1; the write still after the read.
-  - The order is the arrival's. The read that began first is answered from the store as it was asked, and a write
-    that arrives during it takes effect after it. A read that arrives while a write waits is answered from the store
-    as it is: the write has not happened, and the read changes nothing the write will do.
-- **D2. `Clear` and `Dispose` are writes, under D1.** `Clear` waits for the reads in progress, then clears. `Dispose`
-  waits for them, then closes the store under the write lock; the lock itself is left to the collector, since
-  `ReaderWriterLockSlim.Dispose` refuses while a thread waits on it. A read that takes the lock after the close finds
-  the store closed before it reads, and fails: "The store is closed" (the check moves after `EnterReadLock`, beside
-  the one for a committed write not applied). `QuadStorePool.Dispose` disposes its stores after releasing
-  `_namedLock`: a read in progress may wait on a SERVICE handled by the same pool's endpoint, whose `Pool.Active` takes
-  `_namedLock`.
+  woken by every release of the lock, a read's or a write's (the protocol below). A read waits only for a write that
+  holds the lock, which is local work (I1), never for one that waits. A query keeps its read lock from the end of
+  parsing to its last row, as today, its SERVICE waits included. Measured above: a read behind a waiting write,
+  1,909 ms today and 0 ms with D1; the write still after the read.
+  - **The order: reads first.** The store does not order reads and writes by their arrival; it prefers reads.
+    - A read is answered from one state of the store, the one it finds when it takes the lock, and no write takes
+      effect while it runs.
+    - A write takes effect at the moment it enters, after every read in progress at that moment, reads that arrived
+      after the write included. A read that arrives while a write waits goes first, and is answered from the store
+      before the write: the write has not happened.
+    - Writes that wait together enter one at a time, in no order the store promises.
+    - A caller's own operations keep their order: each returns only after it has taken effect.
+    - A write can wait without bound while reads keep overlapping. That writer starvation is accepted (R4).
+  - **The wake-up protocol.** Beside the lock, each store has one monitor, and a count of the writes waiting on it.
+    - A write takes the monitor and tries `TryEnterWriteLock(0)`. While the try fails, it counts itself waiting and
+      waits on the monitor (`Monitor.Wait`, which gives the monitor up while it waits and takes it again before it
+      returns), then no longer counts itself and tries again. When a try succeeds, it leaves the monitor holding the
+      write lock.
+    - Every release of the lock, a read's or a write's, first leaves the lock, then takes the monitor and wakes every
+      write waiting on it (`Monitor.PulseAll`). The lock is left in two places only, `ReleaseReadLock` and
+      `ReleaseWriteLock`: every exit goes through them, that of a read that finds a committed write not applied, or the
+      store closed, included.
+    - Several waiting writes: each release wakes them all, and each tries again in turn under the monitor. One enters;
+      the others wait again, for the next release, which the one that entered makes when it ends. A read's release
+      while other reads still hold the lock wakes them too: their tries fail and they wait again.
+    - No wake-up is lost. A write waits only after a try that failed under the monitor. A release that left the lock
+      before that try is seen by the try. A release that leaves it after the try wakes no one until it holds the
+      monitor, which the write gives up only by waiting: its wake-up finds the write waiting. And a release wakes the
+      writes only after it has left the lock, so their next tries do not meet its hold.
+    - The monitor adds no wait for the lock: nothing that holds it waits for the lock (`TryEnterWriteLock(0)` does not
+      wait), and a read does not take it to enter. A release may wait for it while a write holds it for a try, or
+      another release for its wake-up, and neither waits on anything.
+    - The count is kept under the monitor and read only under it: a write is counted only while it is in
+      `Monitor.Wait`. Nothing decides by it. It is internal, so that a test waits for a state, two writes waiting,
+      instead of for a time.
+- **D2. `Clear` and `Dispose` are writes, under D1, and the closed state is checked under the lock.** `Clear` waits for
+  the reads in progress, then clears. `Dispose` waits like any write, then closes the store under the write lock; the
+  lock itself is left to the collector, since `ReaderWriterLockSlim.Dispose` refuses while a thread waits on it. Both
+  kinds of lock check the closed state after they are taken, in the one place each is taken: a read in
+  `AcquireReadLock` after `EnterReadLock`, beside the check for a committed write not applied; a write in the one
+  entry, after its try succeeds. A read or write that finds the store closed releases the lock, through D1's release,
+  and fails, "The store is closed", having read or changed nothing. The checks before the lock decide nothing then,
+  and go. A `Dispose` that finds the store already closed releases the lock and returns.
+  - **A close racing a queued write.** A write that waits while `Dispose` also waits enters before or after it, in no
+    order the store promises (D1). Entering first, it takes effect, and the close after it keeps it. Entering after
+    the close, it finds the store closed and fails, with nothing written. Either way both end, and neither touches a
+    closed store.
+  - `QuadStorePool.Dispose` disposes its stores after releasing `_namedLock`: a read in progress may wait on a SERVICE
+    handled by the same pool's endpoint, whose `Pool.Active` takes `_namedLock`.
 - **D3. SILENT hides the endpoint's failures only**: the call that fails, an answer that is not a success, an answer
   that cannot be read, and the call's own timeouts. Not the query's cancellation, its store being closed, a write the
-  store could not apply, nor any failure of local evaluation.
+  store could not apply, nor any failure of local evaluation. The executor says each of the endpoint's failures as a
+  `SparqlServiceException`, and SILENT catches that alone, around the call and not the rows made from its answer. An
+  IRI that is not an HTTP endpoint is a call that fails ("the service IRI may not be dereferenceable", §2.3). JSON of
+  another shape, a member missing or an element of the wrong kind, is an answer that cannot be read, and so is an
+  answer in a character set that is not one.
 - **D4. The call carries the query's cancellation token**, ADR-060 D2's clause for SERVICE and only that clause. A
-  query cancelled during the call ends there, and `QueryCore`'s `finally` releases its read lock. A read's wait for a
-  write that holds the lock, and a write's wait for reads, are ADR-060 D2's bounded slices, later.
-- **D5. A connect timeout for SERVICE**, 5 seconds by default and configurable, so that an endpoint that is off fails
-  quickly: RDF4J uses 5 s, Jena 10 s. The call's overall timeout stays 100 s until ADR-060's deadline.
+  query cancelled during the call ends there, and `QueryCore`'s `finally` releases its read lock. The call takes the
+  token from `QueryCancellation`, where `SparqlEngine.Query` puts it for the query's thread, as the scans read it. A
+  read's wait for a write that holds the lock, and a write's wait for reads, are ADR-060 D2's bounded slices, later.
+  - **Who can cancel.** Only a caller that passes a token to `SparqlEngine.Query`: code that uses Mercury as a
+    library, and the tests. No serving path passes one: the HTTP endpoint (`SparqlHttpServer.cs:183`), the MCP tools
+    (`MercuryTools.cs:43`), the REPL sessions of the CLI and of the attach pipe (`ReplSessions.cs:42`), and
+    `mercury-sparql` (`SparqlTool.cs:105`) call `Query` without a token. Their queries are not cancelled: one that
+    waits on SERVICE waits until the endpoint answers or fails, or the call's timeouts end it (D5). A client that goes
+    away cancels nothing. Giving them a token (a client's disconnect, a time limit, a stop) is ADR-060's, not this
+    ADR's.
+- **D5. A connect timeout for SERVICE**, 5 seconds by default, so that an endpoint that is off fails quickly: RDF4J uses
+  5 s, Jena 10 s. It is configured in the arguments mercury, mercury-mcp and mercuryd share (`StoreArguments`), for the
+  process, since the executor is one per process (R1, decided). The call's overall timeout stays 100 s until ADR-060's
+  deadline.
+  - **How.** `--service-connect-timeout <seconds>`, a whole number from 1, taken by the three tools; a tool that is
+    given it sets `SparqlEngine.ServiceConnectTimeout` before it opens its store, and a library sets the same property
+    when its process starts. The executor's own client connects within it (`SocketsHttpHandler.ConnectTimeout`) and has
+    no timeout of its own: the executor bounds the call itself, with a token linked to the query's. The connect
+    timeout ends a call as a cancellation, as the call's timeout does (measured on zbook, 2026-11-23: both a
+    `TaskCanceledException` around a `TimeoutException`), so the executor tells them apart by its own bound: a
+    cancellation that is neither the query's nor the call's bound is the connect timeout, the one other bound its
+    client has.
 - **D6. SERVICE's outbound boundary is the tailnet's, and it is written down.** Whoever can query a Mercury endpoint
   can make its process send a SPARQL query, as an HTTP GET, to any address the process can reach: the tailnet, the
-  internet, and services that listen only on that machine. An endpoint's failure comes back in the query's error
-  message, its status and body included (`HttpSparqlServiceExecutor.cs:98-106`). ADR-065 D5 makes the tailnet the
+  internet, and services that listen only on that machine, `localhost` included. ADR-065 D5 makes the tailnet the
   boundary ("We consider this environment safe"); listening on `+` or `*` gives it up, and the help text says so. No
   allow-list.
+  - **What a failure says** (R2, decided). An endpoint's failure comes back in the query's error message with its
+    status and reason, and the first 4 KiB of its body, cut there; a call that gets no answer says why (refused, the
+    connect timeout, the call's timeout). Today the whole body is kept (`HttpSparqlServiceExecutor.cs:98-106`). The
+    body is read as UTF-8, and a body cut says so: `[the first 4 KiB of <n> bytes]`.
 - **D7. SILENT answers the recommendation's Ω0**, one empty solution, on a failure D3 lets it hide. Its own correction,
   with the two tests and ADR-048's text, independent of D1 to D6, and in place before Step 6 ships.
 - **D8. A prune has its store to itself: a prune of a served store is an error.** Martin's decision, 2026-11-22:
@@ -368,6 +463,18 @@ The second revision (2026-11-22, from Martin's reading of the first):
   the pool's dispose outside `_namedLock` (D2).
 - **Renumbered:** the first revision's D4 to D9 are now D3 to D8.
 
+Acceptance (2026-11-23, Martin's four corrections and R1 to R3):
+- **The order stated as it is.** The second revision said the order was the arrival's. It is not: a read that arrives
+  while a write waits goes before it. D1 now states reader preference, and R4 accepts the writer starvation it allows.
+- **The wake-up specified.** The second revision woke a waiting write "each time a read ends". A write that waits
+  behind another write was then never woken, and the try and the wait were not said to be one step. D1 now has the
+  protocol: every release wakes every waiting write, and the try and the wait are made under one monitor.
+- **The closed state checked by both.** The second revision moved the check after the lock for reads only. D2 now
+  checks it after the lock for writes too, and says what a write queued during a close does.
+- **Who can cancel.** The second revision said a cancelled query ends at its call. D4 now names the callers that can
+  cancel, and says that no serving path can.
+- **R1 to R3 decided**, in D5, D6 and the stop (below).
+
 ## Invariants
 
 - **I1. No wait outside the store under its write lock.** A thread that holds a store's write lock waits on nothing
@@ -375,12 +482,14 @@ The second revision (2026-11-22, from Martin's reading of the first):
   an update's WHERE cannot call SERVICE, and a batch is held by local code.
 - **I2. No write takes effect during a read.** A write enters the lock only when no read holds it (D1).
 - **I3. No read waits behind a write that has not entered** (D1). A read waits only for a write that holds the lock.
-- **I4. The lock is always released.** Each hold is taken and released in one `try`/`finally`; cancellation and every
-  exception pass through it.
-- **I5. Nothing waits for reads to end while it holds a lock a read may need.** A write waits holding nothing; the pool
-  disposes its stores after releasing `_namedLock` (D2).
-- **I6. Nothing reads a store's memory after it is closed.** `Dispose` closes under the write lock, after the reads in
-  progress, and a read that takes the lock after it finds the store closed before it reads (D2).
+- **I4. The lock is always released, and every release wakes the waiting writes.** Each hold is taken and released in
+  one `try`/`finally`; cancellation and every exception pass through it. Every release goes through `ReleaseReadLock`
+  or `ReleaseWriteLock`, which leave the lock and then wake every write waiting (D1).
+- **I5. Nothing waits for reads to end while it holds a lock a read may need.** A write waits holding nothing: the
+  monitor is given up while it waits. The pool disposes its stores after releasing `_namedLock` (D2).
+- **I6. Nothing reads or writes a store's memory after it is closed.** `Dispose` closes under the write lock, after the
+  reads in progress, and a read or a write that takes the lock after it finds the store closed before it touches
+  anything (D2).
 
 **Why no cycle.** A wait-for cycle needs every party in it to wait on another party of it. A read waits only on a write
 that holds the lock (I3), which waits on nothing outside the store (I1): that wait ends. A write that waits holds
@@ -389,7 +498,8 @@ or the token (D4, D5). A handler of the query's SERVICE, in any process, is a re
 write that holds the lock. So every chain of waits ends in local work or in a SERVICE call, and every SERVICE call
 ends. No cycle passes through a store's lock, whatever the destination: itself, a chain, two stores, or a foreign
 endpoint that only reads. A foreign endpoint that waits on a write to the querying store before it answers closes a
-cycle of its own making, through the order D1 keeps; the call's timeout ends it (R4).
+cycle of its own making, since D1 lets no write take effect during the query's read; the call's timeout ends it (R4).
+The wake-up protocol's monitor is in no cycle: nothing waits for the lock while it holds the monitor (D1).
 
 ## Admission, draining, pruning, shutdown and disposal
 
@@ -397,31 +507,35 @@ cycle of its own making, through the order D1 keeps; the call's timeout ends it 
 |---|---|
 | A query starts | It takes the read lock, waiting only for a write that holds it. |
 | A query waits on SERVICE | It keeps the read lock (D1). Reads of its store, and every other store, proceed. |
-| A write arrives during a read | It waits outside the lock until no read is in progress, then takes effect. Reads that arrive meanwhile are not held behind it. |
+| A write arrives during a read | It waits outside the lock until no read is in progress, then takes effect. Reads that arrive meanwhile go first: they are not held behind it (D1). |
 | The store is cleared | `Clear` is a write: it waits for the reads in progress (D2). |
 | A prune is asked for | In a CLI that serves its store, refused at once, the store unchanged (D8). Otherwise the REPL that asks is the store's only user, and the store lock keeps every other process out. |
+| A process stops | It stops accepting new work before it closes the store: a close is a write, and a read that arrived while it waited would go first (D1). Each process already does: mercuryd and mercury-mcp stop their endpoints in the host, before `StoreHost.RunAsync` closes the store (`StoreHost.cs:79-96`); the CLI disposes its REPL, then its HTTP endpoint, then its pool (`Mercury.Cli/Program.cs:592-605`). It stays the order. |
 | mercuryd stops (ADR-065 D3) | The pipe, then the HTTP endpoint, finish their work in progress; a SERVICE back to a stopping endpoint is answered 503 and fails at once. Then `Dispose` finds no read in progress. Unchanged. |
 | mercury-mcp stops | Its MCP tool calls are not drained: `Dispose` now waits for a tool call's query to end, at most until its SERVICE calls end, instead of closing under it (R3). |
-| The CLI exits | Its HTTP endpoint is disposed without a drain: `Dispose` now waits for an HTTP query instead of closing under it. |
+| The CLI exits | Its HTTP endpoint is disposed without a drain: `Dispose` now waits for an HTTP query instead of closing under it (R3). |
 | The pool is disposed | It takes its stores out under `_namedLock` and disposes them after releasing it (I5). |
+| A write was queued when the close entered | It finds the store closed when it enters, and fails: "The store is closed", nothing written (D2). |
+| A store is closed on the thread that holds its batch | The close is a write, and the lock refuses a thread that already holds it (`LockRecursionException`): the close fails, and the store stays open with its batch; the batch's commit or rollback, then a close, closes it (checked on zbook). Every batch in Mercury ends in its commit or its rollback, on a failure too, so only a caller that does neither meets it. Before D2 the close closed the store, then threw when it disposed the lock it held. |
 | A read comes after the close | It finds the store closed: "The store is closed", no rows (I6). |
 
 ## The open questions, resolved
 
 - **Q1. No evaluation is repeated.** A write never takes effect during a read (D1), so there is no conflict to retry or
   to observe. The three attempts Martin preferred belonged to the first revision's design, which this one replaces.
-- **Q2. A connect timeout of 5 s, configurable** (D5). Where it is configured is the remaining decision R1.
+- **Q2. A connect timeout of 5 s, configurable** (D5), in `StoreArguments` (R1, decided).
 - **Q3. Step 6 does not ship without the correction**, Martin's decision: D1 to D4, with D5 and D7, land with or before
   Step 6's executor. Until then `main` refuses SERVICE in every tool, as it does today.
 - **Q4. The outbound boundary is documented** (D6), consistent with ADR-065 D5's trusted tailnet: no allow-list, no
-  switch. Whether the error message keeps the endpoint's body is the remaining decision R2.
+  switch. The error message keeps the endpoint's status and the first 4 KiB of its body (R2, decided).
 - **Q5. SILENT answers Ω0**, as the recommendation does, its own correction, independent of the locking one (D7).
 
 ## Tests
 
 `tests/Mercury.Tests/Sparql/ServiceForwardProgressTests.cs`, with a gated endpoint of the test's own
 (`GatedSparqlEndpoint`): it answers only when the test opens it, and says when it is first asked. The tests and Step
-6's executor are held on zbook, not on `main`: the ones that fail today fail until the correction is built.
+6's executor were held on zbook until the correction was built, since the ones that failed then failed until it was,
+and went to `main` with Step 6.
 
 Of the seven tests Martin asked to keep, one is restated: the first held that a write to the store is not held while
 its query waits on SERVICE, which D1 reverses; it now holds that the write waits and that a read after it does not.
@@ -463,31 +577,92 @@ host:
 - A reader outside `SparqlEngine.Query` (`GetNamedGraphs`) while `Dispose` runs: it ends before the store closes, or
   finds it closed (I6).
 
+Written with the correction, for the wake-up protocol (D1) and the closed state (D2). Each waits for a state of the
+lock, read through the store's count of waiting writes, never for a time, so its outcome does not depend on the
+scheduler:
+
+- **Every release wakes the waiting writes, a write's and a read's, and several writes enter one at a time.** A batch,
+  begun on a thread of its own, holds the write lock; two writes arrive, and the test waits until the store counts two
+  writes waiting. The batch commits: both writes take effect, the second woken by the first's release. Then a read
+  holds the lock, a write arrives and is counted waiting, and a second read takes the lock at once beside it (I3). The
+  first read ends: the write has not taken effect, since a read still holds the lock. The second ends: the write takes
+  effect. A release that wakes no one leaves a write waiting with nothing left to release, and the test fails at its
+  bound.
+- **A release between a write's failed try and its wait is not lost.** The test's thread holds a read and the store's
+  monitor; a write arrives, and the test waits until that thread is blocked. It then releases its read, which leaves the
+  lock and wakes no one, since no write waits yet, and gives up the monitor: the write must enter. A write that tried
+  outside the monitor would have failed its try before the release, missed the wake-up, and waited for ever.
+- **A close racing a queued write.** A read holds the lock; a write and a `Dispose` arrive, and the test waits until
+  both are counted waiting. The read ends: the close ends, and the write either took effect and is in the store when it
+  is opened again, or failed with "The store is closed" and is not in it. A read after the close finds it closed. Today
+  `Dispose` takes no lock and disposes the lock under the waiting write, which throws.
+
+Built with Step 3 (2026-11-23). The three, and the reader outside a query, are in
+`tests/Mercury.Tests/Storage/AWriteWaitsOutsideTheLockTests.cs`, which needs no SERVICE and goes to `main` with Step 3;
+the store and the pool closed while a query waits on SERVICE are in `ServiceForwardProgressTests`, held with it. Each
+part of D1 and D2 was taken out of the code in turn, and a test failed each time: a write's release that wakes no one,
+a read's release that wakes no one, the try made outside the monitor, a write that waits inside the lock as today, a
+write or a read that does not check for a closed store after the lock (the write then reads a closed store's memory
+and the test process dies), and a close that takes no lock. Two parts no test holds:
+- That a release wakes the writes only after it has left the lock. A release that woke them first would leave a write
+  waiting only when the write's try came before the lock was left, which the scheduler decides; forcing it would need
+  a test seam inside the release.
+- The pool's close after it has let go of `_namedLock` (I5). Its test passes with the close made holding it too:
+  `Active` refuses a pool whose close has begun before it takes the lock, so a SERVICE that comes after the close
+  began finds the pool closed. Only a request between that check and the lock would wait, which no test reaches.
+
+Built with Step 4 (2026-11-23): the three cases of D4 pass. On `main`, where no tool sends SERVICE yet,
+`Execute_ServiceClause_Silent_ACancelledQueryIsCancelledAtTheCall` holds D3 and D4 with the mock executor: the query's
+token is cancelled, and the query is cancelled at the call, not answered with Ω0. The executor's part of D3 is held with
+Step 6's executor, its tests in `HttpSparqlServiceExecutorTests`: an IRI that is not an HTTP endpoint, JSON of another shape,
+and an answer in a character set that is not one, each a `SparqlServiceException`. Each part was taken out in turn,
+and a test failed each time: the call without the token, SILENT catching every failure, the executor without its IRI
+check, the parse naming only `JsonException`, and the read without its catch of the character set.
+
+Built with Step 5 (2026-11-23), held on zbook with Step 6's executor: the connect timeout and the bound act on the
+executor, which no tool uses until Step 6, and the bound on a message only that executor makes. `StoreArgumentsTests`
+reads the option and refuses what is not a whole number of seconds from 1; `HttpSparqlServiceExecutorTests` holds the
+connect timeout said as such (a connection that never comes stands in for an address that drops what is sent to it),
+the call's own bound, and the body cut at 4 KiB and not before. Each part was taken out in turn, and a test failed each
+time: the call without its bound, the connect timeout not told apart, the body not cut, the cut said at 4 KiB, and 0
+seconds taken. No test holds the line in each tool that sets the timeout, `SparqlEngine`'s setter, or the client's own
+timeout left off: each is process-wide, or 100 s. The probe
+`tools/probes/service-connect-timeout/a-service-to-an-address-that-drops.cs` runs a query through
+`SparqlEngine.Query` with a SERVICE to an address that drops what is sent to it: on zbook it ends after 5.1 s with the
+default and 2.0 s with 2 s set, each "could not be connected to: A connection could not be established within the
+configured ConnectTimeout."; before, nothing bounded the connect but the client's 100 s for the call (read in the
+code, not measured).
+
 Written with D8, in `Mercury.Hosting.Tests`, which runs `mercury` as a process (`MercuryCli.cs`): a `:prune` in a
 mercury that serves its store over HTTP is refused, and the store keeps what it held; with `--no-http` the same
 `:prune` completes. Today the first would prune: the CLI offers `:prune` whatever it serves, and `PruneEngine` asks
 nothing about the store's users.
 
-## Risks and decisions for Martin
+## Risks, and Martin's decisions
 
-- **R1. Where the connect timeout is configured.** The executor is one per process, so the setting is one per process.
-  Proposed: an argument shared by mercury, mercury-mcp and mercuryd (`StoreArguments`), in seconds, 5 by default.
+- **R1. Where the connect timeout is configured.** Decided 2026-11-23, approved: in the shared `StoreArguments`
+  configuration, 5 s by default. The executor is one per process, so the setting is one per process (D5).
 - **R2. The endpoint's body in the error message** (D6). It helps whoever debugs an endpoint, and it is also how a
-  query can read what a service that listens only on that machine answers. Within the tailnet that is accepted with
-  ADR-065 D5; keeping it is proposed.
+  query can read what a service that listens only on that machine answers. Decided 2026-11-23, approved with a bound:
+  the message keeps the status and useful error information, and at most 4 KiB of the body. The documentation says
+  that SERVICE sends requests to any address reachable from the process, `localhost` included.
 - **R3. A stop of mercury-mcp, and the CLI's exit, can now wait** for a query's SERVICE calls, where today they close
   the store under it: each call bounded by D5 and 100 s, while the stop signals are held (ADR-058 Q7). Claude Code
   sends SIGINT and then SIGTERM; the process may stay until those calls end, or until it is killed and the next open
-  replays the log. Accepted, or cancel the queries in progress at a stop, which is ADR-060 D6.
-- **R4. A write's wait, a limit of D1 rather than a decision.** A write waits for every read in progress, and reads
-  that arrive while it waits go first; reads that keep overlapping delay it until they stop, and a query's SERVICE
-  waits delay the writes to its store by as long (at most 5 s to connect and 100 s for each call). An endpoint that
-  waits on a write to the querying store before it answers waits until the call's timeout. No bound is proposed: a
-  bound would give the write priority over a read in progress. To be recorded in the limits register with the probes
-  once accepted.
+  replays the log. Decided 2026-11-23: accepted as a documented limitation for now. A process stops accepting new work
+  before it drains, as each does today (the lifecycle table), so that the close waits only for the work in progress.
+  Cancelling the queries in progress at a stop is ADR-060 D6, and this ADR does not take it up.
+- **R4. A write's wait, a limit of D1 rather than a decision.** Accepted 2026-11-23: reads go first, and a write can be
+  starved. A write waits for every read in progress, and reads that arrive while it waits go first; reads that keep
+  overlapping delay it until they stop, without bound. `Clear` and `Dispose` are writes and wait the same way. A
+  query's SERVICE waits delay the writes to its store by as long (at most 5 s to connect and 100 s for each call). An
+  endpoint that waits on a write to the querying store before it answers waits until the call's timeout. No bound is
+  set: a bound would give the write priority over a read in progress. To be recorded in the limits register with the
+  probes.
 - **R5. Remote blank nodes from different calls compare equal** (`_:b0` from two answers is one node). Not changed by
-  this ADR; a correction of its own, which would scope each call's labels.
-- **R6. Found on the way, outside this ADR, not verified by running:** a `CommitBatch` that throws leaves the batch
+  this ADR; a correction of its own, kept separate (Martin, 2026-11-23), which would scope each call's labels.
+- **R6. Found on the way, outside this ADR and kept separate (Martin, 2026-11-23), not verified by running:** a
+  `CommitBatch` that throws leaves the batch
   flag set, so later batched calls pass without the lock and `BeginBatch` refuses for ever; a rollback writes no abort
   marker and leaves its transaction id to the next batch, which recovery may then treat as committed
   (`WriteAheadLog.cs:110`, 746–749); and Solid's `DeleteGraphTriples` takes the read lock while its batch holds the
@@ -513,19 +688,23 @@ nothing about the store's users.
 - **SERVICE in an update's WHERE stays refused.** The update would write from what it read, with a SERVICE answer
   among it; allowing it is a decision of its own.
 
-## Steps, once accepted
+## Steps
+
+The tests above are the principal acceptance criteria.
 
 1. **D7, SILENT's Ω0**, with its two tests and ADR-048's text.
 2. **D8, a prune of a served store refused**, in the CLI's REPL and the answer of a session that does not offer
    `:prune`, with its test (above).
 3. **D1 and D2**, in `QuadStore` and `QuadStorePool`: the one place the write lock is entered, with
-   `TryEnterWriteLock(0)` and the wait outside the lock, woken in `ReleaseReadLock`; `Clear` and `Dispose` through it;
-   the closed-store check after `EnterReadLock`; the pool's dispose outside `_namedLock`. The coverage test, the rest
-   of the matrix that D1 and D2 hold, and the tests written with the correction (above).
+   `TryEnterWriteLock(0)` and the wake-up protocol; the two places it is left, `ReleaseReadLock` and
+   `ReleaseWriteLock`, which wake the waiting writes; `Clear` and `Dispose` through them; the closed-store check after
+   the lock, for reads and writes; the pool's dispose outside `_namedLock`. The coverage test, the rest of the matrix
+   that D1 and D2 hold, and the tests written with the correction (above). The attempts probe run again with the
+   protocol, for what a read's release costs.
 4. **D3 and D4**, in `ServiceCall`: SILENT's scope and the token in the call.
-5. **D5**, the connect timeout and its argument (R1).
-6. **D6** in ADR-065 and the tools' help, then Step 6's executor on `main`, with this ADR's tests. R4 in the limits
-   register.
+5. **D5**, the connect timeout and its argument (R1), and the error message's 4 KiB bound (R2).
+6. **D6** in ADR-065 and the tools' help, `localhost` named, then Step 6's executor on `main`, with this ADR's tests.
+   R3 and R4 in the limits register.
 
 ## Precedents
 

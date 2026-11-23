@@ -99,8 +99,12 @@ public partial class QueryExecutorTests
         }
     }
 
+    /// <summary>
+    /// A SERVICE SILENT whose endpoint fails is "a single solution with no bindings" (SPARQL 1.1 Federated Query §2.3;
+    /// Ω0 in §3.2's SilentOp), not the empty multiset (ADR-066 D7).
+    /// </summary>
     [Fact]
-    public void Execute_ServiceClause_Silent_ReturnsEmptyOnError()
+    public void Execute_ServiceClause_Silent_AnswersOneSolutionWithNoBindingsOnError()
     {
         var query = "SELECT * WHERE { SERVICE SILENT <http://failing.example.org/sparql> { ?s ?p ?o } }";
         var parser = new SparqlParser(query.AsSpan());
@@ -116,15 +120,17 @@ public partial class QueryExecutorTests
             using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery, mockExecutor);
             var results = executor.Execute();
 
-            // SILENT should return empty results, not throw
             int count = 0;
             while (results.MoveNext())
             {
                 count++;
+                Assert.True(results.Current.FindBinding("?s".AsSpan()) < 0, "?s should be unbound");
+                Assert.True(results.Current.FindBinding("?p".AsSpan()) < 0, "?p should be unbound");
+                Assert.True(results.Current.FindBinding("?o".AsSpan()) < 0, "?o should be unbound");
             }
             results.Dispose();
 
-            Assert.Equal(0, count); // No results due to error with SILENT
+            Assert.Equal(1, count);
         }
         finally
         {
@@ -353,8 +359,12 @@ public partial class QueryExecutorTests
         }
     }
 
+    /// <summary>
+    /// A failed SERVICE SILENT joined with local patterns keeps the local solutions, its own variables unbound:
+    /// Join(Ω, Ω0) = Ω (SPARQL 1.1 Federated Query §2.3, §3.2; ADR-066 D7).
+    /// </summary>
     [Fact]
-    public void Execute_ServiceWithLocalPatterns_Silent_HandlesErrors()
+    public void Execute_ServiceWithLocalPatterns_Silent_KeepsTheLocalSolutionsOnError()
     {
         // Add local data
         Store.BeginBatch();
@@ -379,21 +389,57 @@ public partial class QueryExecutorTests
         {
             using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery, mockExecutor);
 
-            // Should not throw due to SILENT modifier
             var results = executor.Execute();
 
-            int count = 0;
+            var subjects = new List<string>();
             while (results.MoveNext())
             {
-                count++;
+                subjects.Add(results.Current.GetString(results.Current.FindBinding("?s".AsSpan())).ToString());
+                Assert.True(results.Current.FindBinding("?data".AsSpan()) < 0, "?data should be unbound");
             }
             results.Dispose();
 
-            // SILENT means SERVICE errors are silently ignored, resulting in no matches
-            Assert.Equal(0, count);
+            Assert.Equal(["<http://local/x>"], subjects);
         }
         finally
         {
+            Store.ReleaseReadLock();
+        }
+    }
+
+    /// <summary>
+    /// A query cancelled while its SERVICE SILENT waits on the endpoint is cancelled at the call: the call carries the
+    /// query's token (ADR-066 D4), and SILENT does not hide the query's cancellation, which is not the endpoint's
+    /// failure (D3).
+    /// </summary>
+    [Fact]
+    public void Execute_ServiceClause_Silent_ACancelledQueryIsCancelledAtTheCall()
+    {
+        var query = "SELECT * WHERE { SERVICE SILENT <http://example.org/sparql> { ?s ?p ?o } }";
+        var parsedQuery = new SparqlParser(query.AsSpan()).ParseQuery();
+
+        // The endpoint answers with no rows unless the call's token is cancelled
+        var mockExecutor = new MockSparqlServiceExecutor();
+        using var cancel = new CancellationTokenSource();
+        cancel.Cancel();
+
+        // The query's token, set as SparqlEngine.Query sets it
+        Store.AcquireReadLock();
+        QueryCancellation.SetToken(cancel.Token);
+        try
+        {
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery, mockExecutor);
+            Assert.Throws<OperationCanceledException>(() =>
+            {
+                var results = executor.Execute();
+                while (results.MoveNext()) { }
+                results.Dispose();
+            });
+            Assert.Single(mockExecutor.Calls);
+        }
+        finally
+        {
+            QueryCancellation.ClearToken();
             Store.ReleaseReadLock();
         }
     }
@@ -1102,6 +1148,7 @@ internal class MockSparqlServiceExecutor : ISparqlServiceExecutor
     public ValueTask<List<ServiceResultRow>> ExecuteSelectAsync(string endpointUri, string query, System.Threading.CancellationToken ct = default)
     {
         Calls.Add((endpointUri, query));
+        ct.ThrowIfCancellationRequested();
         if (_errors.TryGetValue(endpointUri, out var error))
         {
             throw error;

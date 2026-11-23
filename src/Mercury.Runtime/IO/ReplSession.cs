@@ -627,8 +627,12 @@ public sealed class ReplSession : IDisposable
 
     private ExecutionResult ExecutePrune(string args)
     {
+        // Every session that does not offer it serves its store: the CLI's with its HTTP endpoint, and those attached to
+        // mercury-mcp and mercuryd (ADR-066 D8).
         if (_executePrune == null)
-            return ExecutionResult.Error("Prune is not available in this session.");
+            return ExecutionResult.Error(
+                "Prune is not available in this session: a prune is for a store that nothing else reads or writes, " +
+                "and this store is served. Prune it in mercury --no-http.");
 
         try
         {
@@ -832,7 +836,7 @@ public sealed class ReplSession : IDisposable
           :store            Show store folder path
           :attach, :a [target]  Attach to running instance (default: mcp)
           :count [pattern]  Count triples (optionally matching pattern)
-          :prune [options]  Compact the store: keep what is remembered, with its times
+          :prune [options]  Compact the store: keep what is remembered, with its times (mercury --no-http)
           :load, :l [--bulk] <file>  Load RDF file into store
           :convert <in> <out>        Streaming format conversion (no store)
           :rebuild-indexes           Build secondary indexes from GSPO

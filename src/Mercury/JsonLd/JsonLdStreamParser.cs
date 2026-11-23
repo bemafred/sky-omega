@@ -62,6 +62,7 @@ internal sealed partial class JsonLdStreamParser : IDisposable, IAsyncDisposable
     private readonly Dictionary<string, bool> _containerId; // term -> is @id container
     private readonly Dictionary<string, bool> _containerType; // term -> is @type container
     private readonly Dictionary<string, string> _termLanguage; // term -> @language value
+    private readonly Dictionary<string, string> _termDirection; // term -> @direction value, "" for null
     private readonly Dictionary<string, string> _reverseProperty; // term -> reverse predicate IRI
     private readonly Dictionary<string, string> _scopedContext; // term -> nested @context JSON
     private readonly Dictionary<string, string> _indexProperty; // term -> @index property IRI (property-valued index)
@@ -107,6 +108,9 @@ internal sealed partial class JsonLdStreamParser : IDisposable, IAsyncDisposable
 
     // Default language from @language in context
     private string? _defaultLanguage;
+
+    // The context's default base direction, "ltr" or "rtl"; null when it has none (JSON-LD 1.1 §4.2.4.1)
+    private string? _defaultDirection;
 
     // Blank node counter
     private int _blankNodeCounter;
@@ -211,6 +215,7 @@ internal sealed partial class JsonLdStreamParser : IDisposable, IAsyncDisposable
         _containerId = new Dictionary<string, bool>(StringComparer.Ordinal);
         _containerType = new Dictionary<string, bool>(StringComparer.Ordinal);
         _termLanguage = new Dictionary<string, string>(StringComparer.Ordinal);
+        _termDirection = new Dictionary<string, string>(StringComparer.Ordinal);
         _reverseProperty = new Dictionary<string, string>(StringComparer.Ordinal);
         _scopedContext = new Dictionary<string, string>(StringComparer.Ordinal);
         _indexProperty = new Dictionary<string, string>(StringComparer.Ordinal);
