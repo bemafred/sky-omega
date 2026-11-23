@@ -1,10 +1,13 @@
 # Finding 112 — cancellation (ADR-016 Step 3): a program that handles SIGTERM, or a Generic Host, ends cleanly under the debugger; SIGTERM without a handler, while attached, loses the debugger in 6 of 14 sessions; on Windows, DrHook takes a CTRL+BREAK the target does not handle, and the target runs on
 
-**Date:** runs and record 2026-11-16; Windows 2026-11-17
+**Date:** runs and record 2026-11-16; Windows 2026-11-17; Windows with `S_FALSE` 2026-11-23
 **Status:** **RECORDED** on zbook (Linux x64) and macbook (macOS arm64), which show the same result, and on
 omega-windows (Windows 11 arm64), with the Windows construction: CTRL+BREAK to a console process in its own group
 (section [Windows](#windows-ctrlbreak-to-the-targets-own-process-group)). Not run on omega, omega-ubuntu or the
-runners.
+runners. Since `4e72de5` DrHook answers `ControlCTrap` with `S_FALSE` (ADR-016 6.4), and on omega-windows a target
+without a handler, attached, now ends as it does without a debugger, 40 of 40 clean (section
+[Windows, with DrHook answering `S_FALSE`](#windows-with-drhook-answering-s_false-2026-11-23)). The title's last
+clause is the `S_OK` record.
 
 ## What was run
 
@@ -243,6 +246,52 @@ Rates:
 
 No stacks were taken. Finding 102's first next step, recording a held target's state, is still open.
 
+## Windows, with DrHook answering `S_FALSE` (2026-11-23)
+
+ADR-016 6.4 decided that DrHook answers `ControlCTrap` with `S_FALSE`, to be measured first with this probe's
+no-handler target, attached. `4e72de5` makes that change and nothing else. The probe ran at that commit on
+omega-windows, carried as a bundle into a clone of its own, on .NET 10.0.15, the same machine and runtime as the
+`S_OK` runs above. There were two runs:
+
+- break-default attached alone, 20 sessions
+  ([`omega-windows-sfalse-break-default-attached.json`](112-cancellation/omega-windows-sfalse-break-default-attached.json));
+- every Windows construction, 20 sessions each
+  ([`omega-windows-sfalse.json`](112-cancellation/omega-windows-sfalse.json)).
+
+The answer reaches the target. This was read in dotnet/runtime `release/10.0` before the change:
+
+1. mscordbi's shim queues the event, and calls DrHook's callback when it dispatches it.
+2. It sends the callback's return value back to the target (`ControlCTrapEvent::Dispatch` in `ShimProxyCallback::ControlCTrap`, `debug/di/shimcallback.cpp`, then
+   `CordbProcess::HandleControlCTrapResult`, `debug/di/process.cpp`).
+3. The target's runtime counts the event as handled only for `S_OK` (`debug/ee/debugger.cpp`,
+   `DB_IPCE_CONTROL_C_EVENT_RESULT`: `SetDebuggerHandlingCtrlC(pEvent->hr == S_OK)`).
+4. `DbgCtrlCHandler` returns that, and for `FALSE` Windows goes on to the next handler.
+
+| Target, order | `S_OK` (`b08b8604`, above) | `S_FALSE` (`4e72de5`) |
+|---------------|----------------------------|-----------------------|
+| break-default, attached | usable 20, clean 0: ran on to its 60 s cap, exit 0, `cap process-exit` | usable 40 of 40, clean 40: exit `0xC000013A`, no marker, 25 to 211 ms after the signal |
+| break-handler, attached | usable 20, clean 20 | usable 20, clean 20 |
+| host-break, attached | usable 20, clean 20 | usable 20, clean 20 |
+| host-self-stop, attached | usable 20, clean 20 | usable 20, clean 20 |
+| break-default, detached | usable 20, `0xC000013A` | usable 20, `0xC000013A` |
+| break-handler, detached | usable 19 of 20 (one held) | usable 19 of 20 (one held) |
+| host-break, detached | usable 20 | usable 20 |
+
+- **break-default attached now ends as it does without a debugger.**
+  - Each of the 40 sessions had one `ControlCTrap`, and then the debugger saw the exit.
+  - The exit code was `0xC000013A`, and `ProcessExit` did not run. That is break-default detached's end.
+  - There was no other stop, no anomaly and no debug pipe left.
+  - `Dispose` took 267 to 526 ms, DrHook's settle waits as before. Every final attach succeeded.
+- **Nothing else changed.** No other construction had a `ControlCTrap`. The attached ones with a handler or a host
+  stayed 20 of 20 clean. The detached ones had their one `LateCallback` each, as before.
+- **The one session not usable is the held target above.** It was break-handler detached, session 20 (pid 9824).
+  - It looked like the earlier two: `Dispose` 130 ms, one late CreateThread, `signal` written but not `cancelled`.
+  - 75 s after it started, the parent ended it.
+  - No debugger was attached when the event came, so DrHook's answer did not reach that target.
+  - Held targets, break-handler detached on omega-windows: 3 of 140 in this finding, counting the 2 of 120 above.
+
+The two Windows runners are still to run: probe 112 is not in `drhook-probe.yml`.
+
 ## What this means for DrHook
 
 - **`drhook_stop` (owned, detach first) is safe for each target here.** The detached order is its order, and it was
@@ -268,6 +317,8 @@ No stacks were taken. Finding 102's first next step, recording a held target's s
   only once DrHook has detached. With a handler or a Generic Host, the target ends cleanly, attached or not.
   - Answering `S_FALSE` would pass the event on, so the target would end abruptly, as it does detached.
   - Which answer DrHook should give is a choice for Step 6.
+  - *Decided in Step 6 (ADR-016 6.4): `S_FALSE`. Measured 2026-11-23 on omega-windows, 40 of 40 clean (section
+    [Windows, with DrHook answering `S_FALSE`](#windows-with-drhook-answering-s_false-2026-11-23)).*
 - **On Windows, `drhook_stop` kills an owned target, since it has no exit request yet** (DRHOOK.md, ADR-016 Step 3).
   This record shows what CTRL+BREAK after a detach would do. A program that handles it ends cleanly. One that does
   not ends abruptly, as SIGTERM's default does on Linux and macOS. Using it would need the target launched in its
@@ -297,7 +348,8 @@ No stacks were taken. Finding 102's first next step, recording a held target's s
 3. Decide whether a macOS run may `sample` the stuck child once, to see where the attach waits. Step 0 rules out an
    outside sampler.
 4. Take the Abandon order into Step 6, and with it, on Windows, DrHook's answer to `ControlCTrap` and an exit
-   request for `drhook_stop`.
+   request for `drhook_stop`. *Decided 2026-11-20 (ADR-016 6.2 to 6.4). The exit request was built 2026-11-22; the
+   answer, `S_FALSE`, on 2026-11-23, measured on omega-windows (section Windows, with DrHook answering `S_FALSE`).*
 5. On Windows, record a held target's state before the parent ends it: its threads' stacks and suspend counts, or a
    dump. That is finding 102's first next step. The runtime's `createdump.exe` is on omega-windows, but nothing that
    reads a Windows dump is. Step 0's rule is about the debugger process, not the target.
