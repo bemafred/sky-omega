@@ -566,6 +566,11 @@ copy-and-switch pattern: data is transferred from the primary store to a fresh
 secondary store, then the stores are swapped. See
 [Pruning and Maintenance](pruning-and-maintenance.md).
 
+A prune is for a store that nothing else reads or writes, so `:prune` is offered
+only in a mercury that serves no endpoint: start it with `mercury --no-http`. In
+a mercury that serves its store over HTTP, and in a session attached to
+mercury-mcp or mercuryd, `:prune` is refused and the store is left as it was.
+
 ### Basic prune
 
 ```

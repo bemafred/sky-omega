@@ -50,9 +50,10 @@ Pruning uses a **copy-and-switch** pattern:
 3. The primary and secondary stores are swapped
 4. The old primary (now secondary) is cleared
 
-This is atomic from the application's perspective -- queries continue against
-the primary store during the transfer, and the swap happens in a single
-operation.
+A prune has its store to itself: nothing else reads or writes the store while it
+runs. A query that chose the store a prune replaces would read it after the
+prune cleared it, and a write made to it between the transfer and the swap
+would be lost. So a prune of a served store is refused ([ADR-066](../adrs/mercury/ADR-066-a-write-waits-for-the-reads-in-progress.md) D8).
 
 ---
 
@@ -60,7 +61,7 @@ operation.
 
 ### Basic prune
 
-From the Mercury REPL:
+From the REPL of a mercury that serves no endpoint, `mercury --no-http`:
 
 ```
 cli> :prune

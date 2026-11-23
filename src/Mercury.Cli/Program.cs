@@ -587,12 +587,15 @@ if (rebuildIndexes)
 jsonlListener?.Dispose();
 
 // Run the REPL, with every command the CLI offers.
+// A prune is for a store that nothing else reads or writes: it is offered only when the store is served by no endpoint
+// (ADR-066 D8).
 // The pool is closed on the way out, also when the REPL throws; the log is left open then, for the line about the
 // exception that nothing handled.
 using (pool)
 using (httpServer)
 using (var repl = ReplSessions.Create(session,
-    ReplCommands.Prune | ReplCommands.Attach | ReplCommands.Load | ReplCommands.Convert | ReplCommands.RebuildIndexes))
+    (httpServer is null ? ReplCommands.Prune : ReplCommands.None)
+    | ReplCommands.Attach | ReplCommands.Load | ReplCommands.Convert | ReplCommands.RebuildIndexes))
 {
     // --no-repl is the explicit opt-out for profilers, CI, and Rider run configs
     // that hold stdin open with no data (which would hang the REPL in read()).
