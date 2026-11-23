@@ -165,6 +165,33 @@ public class TempPathTests
     }
 
     /// <summary>
+    /// The sweep a test run starts with removes a temporary directory whose owner has ended, whatever its category. A
+    /// temporary pool's directory is named by its purpose, and a sweep of the "test" category kept the
+    /// <c>mercury-store-session-test-…</c> directories that a refused <c>StoreSession.OpenTemporary</c> left on elite,
+    /// from run to run (2026-11-22).
+    /// </summary>
+    [Fact]
+    public void ATestRunsSweep_RemovesTheDirectoryOfAnOwnerThatHasEnded_WhateverItsCategory()
+    {
+        var dir = TempPath.Create("store-session-test", "stale", unique: true).FullPath;
+
+        try
+        {
+            Directory.CreateDirectory(dir);
+            File.WriteAllText(Path.Combine(dir, ".mercury.lock"), $"999999\n{DateTime.UtcNow.AddDays(-1).ToFileTimeUtc()}");
+
+            TestSetup.Initialize();
+
+            Assert.False(Directory.Exists(dir), "The test run's sweep should remove a directory whose owner has ended");
+        }
+        finally
+        {
+            if (Directory.Exists(dir))
+                Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    /// <summary>
     /// Verifies that directories without lock files older than 24 hours are cleaned up.
     /// </summary>
     [Fact]

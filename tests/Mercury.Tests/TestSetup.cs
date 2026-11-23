@@ -10,14 +10,15 @@ internal static class TestSetup
 {
     /// <summary>
     /// Runs once when the test assembly is loaded, before any tests execute.
-    /// Cleans up stale temp directories from previous crashed test runs.
+    /// Removes the temporary directories that processes which have ended left behind.
     /// </summary>
     [ModuleInitializer]
     internal static void Initialize()
     {
-        // Clean up test directories from terminated processes.
-        // This is safe to call - it only removes directories whose owning process
-        // has terminated, never directories from running tests or benchmarks.
-        TempPath.CleanupStale("test");
+        // Every Mercury temporary directory, whatever its category. A temporary pool's directory is named by its
+        // purpose, so a sweep of the "test" category kept the directories that a refused
+        // StoreSession.OpenTemporary("store-session-test") left, from run to run (elite, 2026-11-22). The sweep
+        // removes only a directory whose owner has ended, never one that a running test, benchmark or tool uses.
+        TempPath.CleanupAllStale();
     }
 }
