@@ -1,0 +1,865 @@
+{
+  "probe": "112-cancellation",
+  "recordedAt": "2026-11-23T19:47:59Z",
+  "environment": {
+    "machine": "OMEGA-WINDOWS",
+    "os": "Microsoft Windows 10.0.26200",
+    "architecture": "Arm64",
+    "cores": 4,
+    "probeRuntime": ".NET 10.0.15",
+    "runtimeDirectory": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.15\\",
+    "dotnetHost": "C:\\Program Files\\dotnet\\dotnet.exe",
+    "debuggerExecutable": "C:\\Users\\bemafred\\AppData\\Local\\Temp\\dotnet\\runfile\\112-cancellation-smoke-3b99d4e11d9c2adef8f3e6b269054e6e3b247488afa114c26703dc1be29ae64a\\bin\\debug\\112-cancellation-smoke.exe",
+    "targetAppHost": "C:\\Users\\bemafred\\AppData\\Local\\Temp\\dotnet\\runfile\\112-cancellation-target-b2690f1626854a086d06b196f815816059fe4fc56a476e2cc124282f45840a5e\\bin\\debug\\112-cancellation-target.exe",
+    "sessionsPerChild": 20,
+    "tempDirectory": "C:\\Users\\bemafred\\AppData\\Local\\Temp\\",
+    "commit": "ba0d865796ce703bf37517dba9e9271dc8bab0bf",
+    "ci": ""
+  },
+  "children": [
+    {
+      "kind": "break-default",
+      "order": "attached",
+      "launcher": "dotnet",
+      "mode": "own-group",
+      "seed": 112001,
+      "console": {
+        "processesOnConsole": 5,
+        "allocated": false
+      },
+      "final": {
+        "pid": 15816,
+        "attachMs": 8,
+        "events": 37,
+        "targetEnded": true,
+        "marker": "done",
+        "anomalies": [],
+        "ok": true
+      },
+      "sessions": [
+        {
+          "session": 1,
+          "pid": 13440,
+          "attachMs": 18,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 37,
+          "signalDelayMs": 441,
+          "signalError": 0,
+          "exitSeen": true,
+          "signalToExitMs": 90,
+          "otherStops": [],
+          "disposeMs": 282,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": -1073741510,
+          "marker": "",
+          "pipesLeft": [],
+          "events": {
+            "ControlCTrap": 1,
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 900,
+            "ExitProcess": 1,
+            "ExitThread": 896,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "ConsoleControlEvent in ControlCTrap: CTRL\u002BC or CTRL\u002BBREAK reached the target while it was debugged; DrHook passed it on to the target"
+          ],
+          "ownThreads": 9,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 2,
+          "pid": 17164,
+          "attachMs": 7,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 108,
+          "signalDelayMs": 497,
+          "signalError": 0,
+          "exitSeen": true,
+          "signalToExitMs": 54,
+          "otherStops": [],
+          "disposeMs": 283,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": -1073741510,
+          "marker": "",
+          "pipesLeft": [],
+          "events": {
+            "ControlCTrap": 1,
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 960,
+            "ExitProcess": 1,
+            "ExitThread": 956,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "ConsoleControlEvent in ControlCTrap: CTRL\u002BC or CTRL\u002BBREAK reached the target while it was debugged; DrHook passed it on to the target"
+          ],
+          "ownThreads": 9,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 3,
+          "pid": 17256,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 80,
+          "signalDelayMs": 60,
+          "signalError": 0,
+          "exitSeen": true,
+          "signalToExitMs": 44,
+          "otherStops": [],
+          "disposeMs": 354,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": -1073741510,
+          "marker": "",
+          "pipesLeft": [],
+          "events": {
+            "ControlCTrap": 1,
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 131,
+            "ExitProcess": 1,
+            "ExitThread": 127,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "ConsoleControlEvent in ControlCTrap: CTRL\u002BC or CTRL\u002BBREAK reached the target while it was debugged; DrHook passed it on to the target"
+          ],
+          "ownThreads": 9,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 4,
+          "pid": 1268,
+          "attachMs": 7,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 33,
+          "signalDelayMs": 189,
+          "signalError": 0,
+          "exitSeen": true,
+          "signalToExitMs": 28,
+          "otherStops": [],
+          "disposeMs": 321,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": -1073741510,
+          "marker": "",
+          "pipesLeft": [],
+          "events": {
+            "ControlCTrap": 1,
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 435,
+            "ExitProcess": 1,
+            "ExitThread": 431,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "ConsoleControlEvent in ControlCTrap: CTRL\u002BC or CTRL\u002BBREAK reached the target while it was debugged; DrHook passed it on to the target"
+          ],
+          "ownThreads": 9,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 5,
+          "pid": 14964,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 63,
+          "signalDelayMs": 30,
+          "signalError": 0,
+          "exitSeen": true,
+          "signalToExitMs": 88,
+          "otherStops": [],
+          "disposeMs": 304,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": -1073741510,
+          "marker": "",
+          "pipesLeft": [],
+          "events": {
+            "ControlCTrap": 1,
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 85,
+            "ExitProcess": 1,
+            "ExitThread": 80,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "ConsoleControlEvent in ControlCTrap: CTRL\u002BC or CTRL\u002BBREAK reached the target while it was debugged; DrHook passed it on to the target"
+          ],
+          "ownThreads": 9,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 6,
+          "pid": 34628,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 66,
+          "signalDelayMs": 493,
+          "signalError": 0,
+          "exitSeen": true,
+          "signalToExitMs": 36,
+          "otherStops": [],
+          "disposeMs": 277,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": -1073741510,
+          "marker": "",
+          "pipesLeft": [],
+          "events": {
+            "ControlCTrap": 1,
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 967,
+            "ExitProcess": 1,
+            "ExitThread": 963,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "ConsoleControlEvent in ControlCTrap: CTRL\u002BC or CTRL\u002BBREAK reached the target while it was debugged; DrHook passed it on to the target"
+          ],
+          "ownThreads": 9,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 7,
+          "pid": 16424,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 80,
+          "signalDelayMs": 352,
+          "signalError": 0,
+          "exitSeen": true,
+          "signalToExitMs": 84,
+          "otherStops": [],
+          "disposeMs": 315,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": -1073741510,
+          "marker": "",
+          "pipesLeft": [],
+          "events": {
+            "ControlCTrap": 1,
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 694,
+            "ExitProcess": 1,
+            "ExitThread": 690,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "ConsoleControlEvent in ControlCTrap: CTRL\u002BC or CTRL\u002BBREAK reached the target while it was debugged; DrHook passed it on to the target"
+          ],
+          "ownThreads": 9,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 8,
+          "pid": 27424,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 24,
+          "signalDelayMs": 298,
+          "signalError": 0,
+          "exitSeen": true,
+          "signalToExitMs": 25,
+          "otherStops": [],
+          "disposeMs": 312,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": -1073741510,
+          "marker": "",
+          "pipesLeft": [],
+          "events": {
+            "ControlCTrap": 1,
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 599,
+            "ExitProcess": 1,
+            "ExitThread": 595,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "ConsoleControlEvent in ControlCTrap: CTRL\u002BC or CTRL\u002BBREAK reached the target while it was debugged; DrHook passed it on to the target"
+          ],
+          "ownThreads": 9,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 9,
+          "pid": 28952,
+          "attachMs": 9,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 47,
+          "signalDelayMs": 185,
+          "signalError": 0,
+          "exitSeen": true,
+          "signalToExitMs": 29,
+          "otherStops": [],
+          "disposeMs": 346,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": -1073741510,
+          "marker": "",
+          "pipesLeft": [],
+          "events": {
+            "ControlCTrap": 1,
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 399,
+            "ExitProcess": 1,
+            "ExitThread": 394,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "ConsoleControlEvent in ControlCTrap: CTRL\u002BC or CTRL\u002BBREAK reached the target while it was debugged; DrHook passed it on to the target"
+          ],
+          "ownThreads": 9,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 10,
+          "pid": 36580,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 75,
+          "signalDelayMs": 382,
+          "signalError": 0,
+          "exitSeen": true,
+          "signalToExitMs": 58,
+          "otherStops": [],
+          "disposeMs": 322,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": -1073741510,
+          "marker": "",
+          "pipesLeft": [],
+          "events": {
+            "ControlCTrap": 1,
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 770,
+            "ExitProcess": 1,
+            "ExitThread": 765,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "ConsoleControlEvent in ControlCTrap: CTRL\u002BC or CTRL\u002BBREAK reached the target while it was debugged; DrHook passed it on to the target"
+          ],
+          "ownThreads": 9,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 11,
+          "pid": 21112,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 17,
+          "signalDelayMs": 423,
+          "signalError": 0,
+          "exitSeen": true,
+          "signalToExitMs": 40,
+          "otherStops": [],
+          "disposeMs": 309,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": -1073741510,
+          "marker": "",
+          "pipesLeft": [],
+          "events": {
+            "ControlCTrap": 1,
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 850,
+            "ExitProcess": 1,
+            "ExitThread": 845,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "ConsoleControlEvent in ControlCTrap: CTRL\u002BC or CTRL\u002BBREAK reached the target while it was debugged; DrHook passed it on to the target"
+          ],
+          "ownThreads": 9,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 12,
+          "pid": 11832,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 25,
+          "signalDelayMs": 132,
+          "signalError": 0,
+          "exitSeen": true,
+          "signalToExitMs": 48,
+          "otherStops": [],
+          "disposeMs": 333,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": -1073741510,
+          "marker": "",
+          "pipesLeft": [],
+          "events": {
+            "ControlCTrap": 1,
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 307,
+            "ExitProcess": 1,
+            "ExitThread": 302,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "ConsoleControlEvent in ControlCTrap: CTRL\u002BC or CTRL\u002BBREAK reached the target while it was debugged; DrHook passed it on to the target"
+          ],
+          "ownThreads": 9,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 13,
+          "pid": 49632,
+          "attachMs": 7,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 47,
+          "signalDelayMs": 419,
+          "signalError": 0,
+          "exitSeen": true,
+          "signalToExitMs": 50,
+          "otherStops": [],
+          "disposeMs": 288,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": -1073741510,
+          "marker": "",
+          "pipesLeft": [],
+          "events": {
+            "ControlCTrap": 1,
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 838,
+            "ExitProcess": 1,
+            "ExitThread": 834,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "ConsoleControlEvent in ControlCTrap: CTRL\u002BC or CTRL\u002BBREAK reached the target while it was debugged; DrHook passed it on to the target"
+          ],
+          "ownThreads": 9,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 14,
+          "pid": 7644,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 43,
+          "signalDelayMs": 289,
+          "signalError": 0,
+          "exitSeen": true,
+          "signalToExitMs": 109,
+          "otherStops": [],
+          "disposeMs": 347,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": -1073741510,
+          "marker": "",
+          "pipesLeft": [],
+          "events": {
+            "ControlCTrap": 1,
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 604,
+            "ExitProcess": 1,
+            "ExitThread": 599,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "ConsoleControlEvent in ControlCTrap: CTRL\u002BC or CTRL\u002BBREAK reached the target while it was debugged; DrHook passed it on to the target"
+          ],
+          "ownThreads": 9,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 15,
+          "pid": 46416,
+          "attachMs": 9,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 40,
+          "signalDelayMs": 265,
+          "signalError": 0,
+          "exitSeen": true,
+          "signalToExitMs": 89,
+          "otherStops": [],
+          "disposeMs": 319,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": -1073741510,
+          "marker": "",
+          "pipesLeft": [],
+          "events": {
+            "ControlCTrap": 1,
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 547,
+            "ExitProcess": 1,
+            "ExitThread": 543,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "ConsoleControlEvent in ControlCTrap: CTRL\u002BC or CTRL\u002BBREAK reached the target while it was debugged; DrHook passed it on to the target"
+          ],
+          "ownThreads": 9,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 16,
+          "pid": 11804,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 24,
+          "signalDelayMs": 497,
+          "signalError": 0,
+          "exitSeen": true,
+          "signalToExitMs": 26,
+          "otherStops": [],
+          "disposeMs": 345,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": -1073741510,
+          "marker": "",
+          "pipesLeft": [],
+          "events": {
+            "ControlCTrap": 1,
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 988,
+            "ExitProcess": 1,
+            "ExitThread": 983,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "ConsoleControlEvent in ControlCTrap: CTRL\u002BC or CTRL\u002BBREAK reached the target while it was debugged; DrHook passed it on to the target"
+          ],
+          "ownThreads": 9,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 17,
+          "pid": 12496,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 48,
+          "signalDelayMs": 249,
+          "signalError": 0,
+          "exitSeen": true,
+          "signalToExitMs": 55,
+          "otherStops": [],
+          "disposeMs": 314,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": -1073741510,
+          "marker": "",
+          "pipesLeft": [],
+          "events": {
+            "ControlCTrap": 1,
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 507,
+            "ExitProcess": 1,
+            "ExitThread": 503,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "ConsoleControlEvent in ControlCTrap: CTRL\u002BC or CTRL\u002BBREAK reached the target while it was debugged; DrHook passed it on to the target"
+          ],
+          "ownThreads": 9,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 18,
+          "pid": 51080,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 47,
+          "signalDelayMs": 269,
+          "signalError": 0,
+          "exitSeen": true,
+          "signalToExitMs": 87,
+          "otherStops": [],
+          "disposeMs": 372,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": -1073741510,
+          "marker": "",
+          "pipesLeft": [],
+          "events": {
+            "ControlCTrap": 1,
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 567,
+            "ExitProcess": 1,
+            "ExitThread": 563,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "ConsoleControlEvent in ControlCTrap: CTRL\u002BC or CTRL\u002BBREAK reached the target while it was debugged; DrHook passed it on to the target"
+          ],
+          "ownThreads": 9,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 19,
+          "pid": 44360,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 29,
+          "signalDelayMs": 293,
+          "signalError": 0,
+          "exitSeen": true,
+          "signalToExitMs": 69,
+          "otherStops": [],
+          "disposeMs": 283,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": -1073741510,
+          "marker": "",
+          "pipesLeft": [],
+          "events": {
+            "ControlCTrap": 1,
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 605,
+            "ExitProcess": 1,
+            "ExitThread": 601,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "ConsoleControlEvent in ControlCTrap: CTRL\u002BC or CTRL\u002BBREAK reached the target while it was debugged; DrHook passed it on to the target"
+          ],
+          "ownThreads": 9,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        },
+        {
+          "session": 20,
+          "pid": 1656,
+          "attachMs": 8,
+          "reads": "direct",
+          "memoryOpen": {
+            "call": "none",
+            "reads": "direct"
+          },
+          "floodSeenMs": 29,
+          "signalDelayMs": 324,
+          "signalError": 0,
+          "exitSeen": true,
+          "signalToExitMs": 26,
+          "otherStops": [],
+          "disposeMs": 325,
+          "targetEnded": true,
+          "endWaitMs": 0,
+          "exitCode": -1073741510,
+          "marker": "",
+          "pipesLeft": [],
+          "events": {
+            "ControlCTrap": 1,
+            "CreateAppDomain": 1,
+            "CreateProcess": 1,
+            "CreateThread": 667,
+            "ExitProcess": 1,
+            "ExitThread": 663,
+            "LoadAssembly": 16,
+            "LoadModule": 16
+          },
+          "anomalies": [
+            "ConsoleControlEvent in ControlCTrap: CTRL\u002BC or CTRL\u002BBREAK reached the target while it was debugged; DrHook passed it on to the target"
+          ],
+          "ownThreads": 9,
+          "usable": true,
+          "clean": false,
+          "deviations": [
+            "anomalies"
+          ]
+        }
+      ],
+      "outcome": "usable",
+      "parentActions": []
+    }
+  ]
+}

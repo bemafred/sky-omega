@@ -1,13 +1,14 @@
 # Finding 112 — cancellation (ADR-016 Step 3): a program that handles SIGTERM, or a Generic Host, ends cleanly under the debugger; SIGTERM without a handler, while attached, loses the debugger in 6 of 14 sessions; on Windows, DrHook takes a CTRL+BREAK the target does not handle, and the target runs on
 
-**Date:** runs and record 2026-11-16; Windows 2026-11-17; Windows with `S_FALSE` 2026-11-23
+**Date:** runs and record 2026-11-16; Windows 2026-11-17; Windows with `S_FALSE`, and the six runners, 2026-11-23
 **Status:** **RECORDED** on zbook (Linux x64) and macbook (macOS arm64), which show the same result, and on
 omega-windows (Windows 11 arm64), with the Windows construction: CTRL+BREAK to a console process in its own group
-(section [Windows](#windows-ctrlbreak-to-the-targets-own-process-group)). Not run on omega, omega-ubuntu or the
-runners. Since `4e72de5` DrHook answers `ControlCTrap` with `S_FALSE` (ADR-016 6.4), and on omega-windows a target
-without a handler, attached, now ends as it does without a debugger, 40 of 40 clean (section
-[Windows, with DrHook answering `S_FALSE`](#windows-with-drhook-answering-s_false-2026-11-23)). The title's last
-clause is the `S_OK` record.
+(section [Windows](#windows-ctrlbreak-to-the-targets-own-process-group)), and on the six runners (section
+[The operator is told, and the six runners](#the-operator-is-told-and-the-six-runners-2026-11-23)). Not run on omega
+or omega-ubuntu. Since `4e72de5` DrHook answers `ControlCTrap` with `S_FALSE` (ADR-016 6.4). On omega-windows and
+both Windows runners, a target without a handler, attached, now ends as it does without a debugger: 80 of 80 usable
+(section [Windows, with DrHook answering `S_FALSE`](#windows-with-drhook-answering-s_false-2026-11-23)). The title's
+last clause is the `S_OK` record.
 
 ## What was run
 
@@ -290,7 +291,55 @@ The answer reaches the target. This was read in dotnet/runtime `release/10.0` be
   - No debugger was attached when the event came, so DrHook's answer did not reach that target.
   - Held targets, break-handler detached on omega-windows: 3 of 140 in this finding, counting the 2 of 120 above.
 
-The two Windows runners are still to run: probe 112 is not in `drhook-probe.yml`.
+## The operator is told, and the six runners (2026-11-23)
+
+6.4's other half is built in `0a6d01a`. When the pump dispatches `ControlCTrap`, it records a `ConsoleControlEvent`
+anomaly, and drhook_drain_anomalies and the views show it. `ba0d865` adds probe 112 to `drhook-probe.yml`. Both are on
+the branch `drhook-6.4-sfalse` with `4e72de5`, and both runs below are at `ba0d865`.
+
+**omega-windows, break-default attached, 20 sessions**
+([`omega-windows-report-break-default-attached.json`](112-cancellation/omega-windows-report-break-default-attached.json)):
+
+- Usable 20 of 20.
+- Each session carried exactly one anomaly: `ConsoleControlEvent in ControlCTrap: CTRL+C or CTRL+BREAK reached the
+  target while it was debugged; DrHook passed it on to the target`. It was each session's only deviation, so the probe
+  counts none as clean.
+- Exit `0xC000013A`, 25 to 109 ms after the event; every exit seen; `Dispose` 277 to 372 ms; the final attach
+  succeeded.
+
+**The six runners**, run 45252424492, .NET 10.0.15, 20 sessions per construction (`runner-<platform>.json`).
+
+| Windows runner | break-default attached | Every other construction |
+|----------------|------------------------|--------------------------|
+| x64 (Windows 10.0.26100, 4 cores) | usable 20 of 20; one `ControlCTrap` and one `ConsoleControlEvent` each; exit `0xC000013A`; final attach ok | usable, but for one held target (below) |
+| arm64 (Windows 10.0.26200, 4 cores) | the same, 20 of 20 | all usable |
+
+- **6.4's measurement is in.** omega-windows and both Windows runners ran the no-handler target, attached, with
+  `S_FALSE`: 80 of 80 usable, and every final attach succeeded.
+- **A held target after a detach, for the first time on a runner.**
+  - Windows x64, host-break detached, session 4 (pid 2804).
+  - `Dispose` took 52 ms. The host wrote `stopping`, but its service and host never stopped.
+  - It was still alive 75 s after it started, and the parent ended it.
+  - Runners, Windows, detached: 1 of 120 here, against 0 of 160 in finding 102. The case is that of omega-windows above:
+    no debugger is attached when the event comes, so DrHook's answer does not reach it.
+- **Linux and macOS: SIGTERM without a handler, while attached, loses the debugger on every runner.** Everything else was usable, 20
+  of 20 per construction and read path.
+
+  | Runner | term-default attached: sessions usable before the loss, per read path |
+  |--------|----------------------------------------------------------------------|
+  | Linux arm64 | descendant 20 (no loss); reparented 1 |
+  | Linux x64 | descendant 6; reparented 0 |
+  | macOS arm64 | dotnet 2; apphost 2 |
+  | macOS x64 | dotnet 13, then the child ended with nothing on stderr; apphost 5 |
+
+  - Seven of eight such children lost the debugger.
+  - In six, the engine refused the next call with `DebuggerLostException`:
+    - five for a target the OS shows as gone, with no ExitProcess from mscordbi within 2 s (finding 105);
+    - one for `DebuggerError` `0x80004005` (macOS arm64, dotnet).
+  - The probe does not catch that exception, so the child ends at the first loss, and the sessions it had left do
+    not run. On zbook and macbook the child stopped at its first loss too, there because its next attach blocked. So
+    the counts above are sessions before a loss, not a rate.
+  - Why one macOS x64 child ended without a word is not established.
 
 ## What this means for DrHook
 
@@ -333,18 +382,19 @@ The two Windows runners are still to run: probe 112 is not in `drhook-probe.yml`
   obvious variable, but 14 sessions cannot show it.
 - Windows: what holds a target after a detach. No stacks, suspend counts or dump were taken. Whether the dropped
   callback is the cause: in both held sessions it was a CreateThread, but so it was in 83 of the 118 that ended.
-- Windows: CTRL+C, which cannot be sent to one group, and the Windows runners (x64, and arm64 on metal).
+- Windows: CTRL+C, which cannot be sent to one group.
 - The owned path: a launched target, and `drhook_kill` itself.
 - A target signalled while stopped. Here every target was running, mid-flood.
-- The other machines and the runners.
+- The other machines: omega and omega-ubuntu.
 
 ## Next (proposed, not decided)
 
 1. ~~Build the Windows construction for review: a console target launched in its own process group
    (`CREATE_NEW_PROCESS_GROUP`), and a sender on its console that raises CTRL+BREAK (`GenerateConsoleCtrlEvent`).~~
    Built and run on omega-windows, 2026-11-17 (section Windows).
-2. Run probe 112 on the six runners through `drhook-probe.yml`. This needs the probe on `main` and a workflow change,
-   reviewed when proposed.
+2. ~~Run probe 112 on the six runners through `drhook-probe.yml`. This needs the probe on `main` and a workflow change,
+   reviewed when proposed.~~ Run 2026-11-23 from the branch `drhook-6.4-sfalse`, run 45252424492 (section The operator
+   is told, and the six runners).
 3. Decide whether a macOS run may `sample` the stuck child once, to see where the attach waits. Step 0 rules out an
    outside sampler.
 4. Take the Abandon order into Step 6, and with it, on Windows, DrHook's answer to `ControlCTrap` and an exit
@@ -353,3 +403,7 @@ The two Windows runners are still to run: probe 112 is not in `drhook-probe.yml`
 5. On Windows, record a held target's state before the parent ends it: its threads' stacks and suspend counts, or a
    dump. That is finding 102's first next step. The runtime's `createdump.exe` is on omega-windows, but nothing that
    reads a Windows dump is. Step 0's rule is about the debugger process, not the target.
+6. Record a lost debugger as the session's outcome in the probe, instead of letting the child end. On the runners the
+   engine refused the session's next call with `DebuggerLostException`, which the probe does not catch; on zbook and
+   macbook the child's next attach blocked. Either way a child stops at its first loss, so term-default attached gives
+   sessions before a loss, not a rate.
