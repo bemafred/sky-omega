@@ -291,7 +291,7 @@ SELECT ?person ?score WHERE {
 -- Query a remote SPARQL endpoint
 SELECT * WHERE { SERVICE <http://remote.example.org/sparql> { ?s ?p ?o } }
 
--- SERVICE SILENT ignores errors and returns empty results on failure
+-- SERVICE SILENT: a failed endpoint answers one solution with no bindings, so the rest of the query keeps its solutions
 SELECT * WHERE { SERVICE SILENT <http://might-fail.example.org/sparql> { ?x ?y ?z } }
 ```
 

@@ -747,11 +747,9 @@ internal sealed class TreeJoinExecutor
         }
         catch when (silent)
         {
-            // SILENT: a failed endpoint contributes the EMPTY multiset (no solutions), so a non-OPTIONAL SERVICE
-            // eliminates the join (Join(input, ∅) = ∅) — the certified behaviour. Returning a single empty row instead
-            // would silently make the SERVICE optional (Join(input, {μ0}) = input). OPTIONAL { SERVICE SILENT } still
-            // preserves its input rows, but that is the OptionalHeader's left-join, not ServiceCall's concern.
-            return new List<MaterializedRow>();
+            // SILENT: a failed SERVICE is "a single solution with no bindings" (SPARQL 1.1 Federated Query §2.3; Ω0 in
+            // §3.2's SilentOp), so the join keeps its input: Join(input, {μ0}) = input (ADR-066 D7).
+            return new List<MaterializedRow> { EmptyRow() };
         }
     }
 
