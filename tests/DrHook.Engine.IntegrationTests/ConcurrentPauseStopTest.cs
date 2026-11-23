@@ -39,22 +39,32 @@ public sealed class ConcurrentPauseStopTest
         RunConcurrentPauseStopScenario_Mtp("RunThrowCatchLoop");
     }
 
+    // The timeline: one line per step, in UTC to line up with the CI log, printed with the test's output when it fails or
+    // times out (both variants; the steps inside the session are printed by AssertPauseStopSurfacesUnderStoppingFlood).
+    // This variant timed out at 120 s on a Linux x64 runner with nothing to show which call the time went into (CI run
+    // 45120151564, 2026-11-23); every wait in it is bounded and fails by assertion, so it was one with no bound.
     private static void RunConcurrentPauseStopScenario_Mtp(string methodFilter)
     {
         string targetExe = IntegrationTargetPaths.MtpTargetExe();
         Assert.IsTrue(File.Exists(targetExe), $"MTP target exe not found at {targetExe}.");
 
         using Process bootstrap = TargetSpawn.Mtp(targetExe, methodFilter: methodFilter);
+        Console.WriteLine($"{DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)}  MTP target started");
         try
         {
             int pid = TargetSpawn.ExtractPid(bootstrap, TimeSpan.FromSeconds(30));
+            Console.WriteLine($"{DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)}  target pid {pid}");
 
             using (DebugSession session = DebugSession.AttachAndOwn(pid, new NullSink()))
             {
+                Console.WriteLine($"{DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)}  attached");
                 AssertPauseStopSurfacesUnderStoppingFlood(session, IntegrationTargetPaths.MtpTargetSource());
+                Console.WriteLine($"{DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)}  Pause stop surfaced; disposing");
             }
+            Console.WriteLine($"{DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)}  disposed");
 
             bool exitedNaturally = bootstrap.WaitForExit(5000);
+            Console.WriteLine($"{DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)}  target exited: {exitedNaturally}");
             Assert.IsTrue(exitedNaturally,
                 "MTP target did not exit naturally within 5s after Dispose.");
         }
@@ -85,29 +95,36 @@ public sealed class ConcurrentPauseStopTest
 
         session.Pause();
         StopInfo? stop = session.WaitForStop(TimeSpan.FromSeconds(5));
+        Console.WriteLine($"{DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)}  first Pause: {stop?.Reason.ToString() ?? "no stop"}");
         Assert.IsNotNull(stop, "No stop within 5s of the first Pause.");
         int breakpointId = session.SetBreakpointAtLine(Path.GetFileName(targetSource), markerLine);
+        Console.WriteLine($"{DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)}  breakpoint {breakpointId} set at line {markerLine}");
         Assert.AreNotEqual(0, breakpointId, $"Failed to set a breakpoint at {Path.GetFileName(targetSource)}:{markerLine}.");
         do
         {
             session.Resume();
             stop = session.WaitForStop(TimeSpan.FromSeconds(30));
+            Console.WriteLine($"{DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)}  resumed; stop: {stop?.Reason.ToString() ?? "none"}");
             Assert.IsNotNull(stop, "The throw/catch loop's breakpoint was not hit within 30s.");
         }
         while (stop!.Reason is StopReason.Break or StopReason.Pause);
         Assert.AreEqual(StopReason.Breakpoint, stop.Reason);
         Assert.IsTrue(session.RemoveBreakpoint(breakpointId), "Could not remove the throw/catch loop's breakpoint.");
+        Console.WriteLine($"{DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)}  breakpoint removed");
 
         // Resume into the flood (~50 throws over ~500 ms) and request a Pause while it runs.
         session.Resume();
         session.Pause();
+        Console.WriteLine($"{DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)}  resumed into the flood; Pause requested");
         stop = session.WaitForStop(TimeSpan.FromSeconds(5));
+        Console.WriteLine($"{DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)}  flood Pause: {stop?.Reason.ToString() ?? "no stop"}");
         Assert.IsNotNull(stop, "No stop arrived within 5s after Pause request — substrate FIFO serialization may have dropped the request.");
         Assert.AreEqual(StopReason.Pause, stop!.Reason,
             $"Expected Pause stop; got {stop.Reason}. Substrate didn't serialize Pause correctly amid STOPPING flood.");
 
         // Resume past Pause — let target proceed to natural exit.
         session.Resume();
+        Console.WriteLine($"{DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)}  resumed past the Pause");
     }
 
     [TestMethod]
@@ -116,9 +133,8 @@ public sealed class ConcurrentPauseStopTest
         string targetProject = IntegrationTargetPaths.VstestTargetProjectPath();
         Assert.IsTrue(File.Exists(targetProject), $"VSTest target csproj not found at {targetProject}.");
 
-        // The timeline: one line per step, in UTC to line up with the CI log, printed with the test's output when it
-        // fails or times out. Two sibling tests have hit the 120 s limit on the GitHub macOS runners with nothing to
-        // show where the time went (2026-10-30).
+        // The timeline, as in the MTP variant. Two sibling tests have hit the 120 s limit on the GitHub macOS runners
+        // with nothing to show where the time went (2026-10-30).
         using VstestRun run = TargetSpawn.Vstest(targetProject, methodFilter: "RunThrowCatchLoop");
         Process dotnetTest = run.Shell;
         Console.WriteLine($"{DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)}  dotnet test started, process group {run.ProcessGroup}");

@@ -65,8 +65,13 @@ public sealed partial class StackInspectorTests
 
         ThreadSummary spun = Assert.Single(snapshot.ThreadSummary, t => (ulong)t.ThreadId == spinnerId);
         ThreadSummary waited = Assert.Single(snapshot.ThreadSummary, t => (ulong)t.ThreadId == readerId);
-        Assert.True(spun.SampleCount > 10, $"the spinner was sampled {spun.SampleCount} times");
-        Assert.True(waited.SampleCount > 10, $"the reader was sampled {waited.SampleCount} times");
+        // On a Windows arm64 runner the spinner was sampled 10 times in a second (CI run 45227063749, 2026-11-23), and the
+        // message said only that, not whether the whole capture had about 10 ticks or the spinner alone was missed. The
+        // counts of both threads and of the capture tell the two apart.
+        string counts = $"the spinner was sampled {spun.SampleCount} times and the reader {waited.SampleCount}, in a capture of " +
+            $"{snapshot.Ticks} ticks over {snapshot.DurationMs} ms, {snapshot.TotalSamples} samples of {snapshot.SampledThreadCount} threads";
+        Assert.True(spun.SampleCount > 10, counts);
+        Assert.True(waited.SampleCount > 10, counts);
         Assert.True(spun.ManagedPercentage > 80, $"the spinner ran managed code in {spun.ManagedSampleCount}/{spun.SampleCount} samples");
         Assert.True(waited.ManagedPercentage < 10, $"the reader ran managed code in {waited.ManagedSampleCount}/{waited.SampleCount} samples");
         Assert.Contains(snapshot.Anomalies, a => a.StartsWith($"HOTSPOT: Thread {spun.ThreadId} ", StringComparison.Ordinal));
