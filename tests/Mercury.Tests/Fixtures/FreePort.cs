@@ -3,6 +3,7 @@
 
 using System.Net;
 using System.Net.Sockets;
+using SkyOmega.Mercury.Sparql.Protocol;
 
 namespace SkyOmega.Mercury.Tests.Fixtures;
 
@@ -15,14 +16,10 @@ namespace SkyOmega.Mercury.Tests.Fixtures;
 /// </summary>
 /// <remarks>
 /// An HttpListener cannot be given port 0 to take one the system chooses, and a refused start disposes it. A start
-/// says its port is taken with these codes (measured on Linux, macOS and Windows on 2026-11-24,
-/// tools/probes/free-port-race):
-/// <list type="bullet">
-/// <item>Windows: ERROR_SHARING_VIOLATION (32) when a socket holds the port, and ERROR_ALREADY_EXISTS (183) when
-/// another HttpListener has the prefix.</item>
-/// <item>Linux and macOS: EADDRINUSE (98 on Linux, 48 on macOS), and 400 when another HttpListener in the process has
-/// the prefix.</item>
-/// </list>
+/// says its port is taken with the codes Mercury reads as the port in use
+/// (<see cref="HttpListenerLoop.SaysThePortIsInUse"/>), and on Linux and macOS with 400 when another HttpListener of
+/// the process has the prefix: the tests run in one process, and give no prefix that 400 says the listener cannot
+/// listen on.
 /// </remarks>
 internal static class FreePort
 {
@@ -60,7 +57,6 @@ internal static class FreePort
         }
     }
 
-    private static bool IsTaken(HttpListenerException refused) => OperatingSystem.IsWindows()
-        ? refused.ErrorCode is 32 or 183
-        : refused.ErrorCode == 400 || refused.ErrorCode == (OperatingSystem.IsMacOS() ? 48 : 98);
+    private static bool IsTaken(HttpListenerException refused) =>
+        HttpListenerLoop.SaysThePortIsInUse(refused) || (!OperatingSystem.IsWindows() && refused.ErrorCode == 400);
 }

@@ -77,6 +77,9 @@ internal sealed class HttpListenerLoop : IDisposable, IAsyncDisposable
     /// <summary>
     /// Starts the listener and the loop that accepts its requests.
     /// </summary>
+    /// <exception cref="HttpListenerException">The listener cannot listen on one of its URIs. When the port is in use
+    /// (<see cref="SaysThePortIsInUse"/>) Mercury says so, "The port is in use.", with the system's code; any other
+    /// refusal is the system's.</exception>
     public void Start()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -85,10 +88,34 @@ internal sealed class HttpListenerLoop : IDisposable, IAsyncDisposable
         // managed listener of Linux and macOS). The loop then has nothing to stop: a Stop of that listener would look
         // each prefix up again, bind the failed address to do so, and throw, and the start's exception would be lost
         // to it (measured on zbook, 2026-11-20). So the loop is made only once the listener has started.
-        _listener.Start();
+        try
+        {
+            _listener.Start();
+        }
+        catch (HttpListenerException refused) when (SaysThePortIsInUse(refused))
+        {
+            throw new HttpListenerException(refused.ErrorCode, "The port is in use.");
+        }
         _stopping = false;
         _acceptTask = AcceptAsync();
     }
+
+    /// <summary>
+    /// Whether a start's refusal says that the port is in use. On Linux and macOS it is EADDRINUSE (98 on Linux, 48 on
+    /// macOS), when a socket holds the port on the address the listener binds. On Windows it is ERROR_SHARING_VIOLATION
+    /// (32), when a socket holds the port on any address, a connection's own end among them, and ERROR_ALREADY_EXISTS
+    /// (183), when another listener has the URI: http.sys holds the URIs of every process. Windows says the first in
+    /// the system's language, and of a file: one that another process uses (measured on Linux, macOS and Windows on
+    /// 2026-11-24, <c>tools/probes/free-port-race</c>).
+    /// </summary>
+    /// <remarks>
+    /// On Linux and macOS another listener of this process with the URI is refused with 400, which is also the code of
+    /// a URI the listener cannot listen on, such as one with port 0. So a 400 is left in the system's words, which say
+    /// which it is.
+    /// </remarks>
+    internal static bool SaysThePortIsInUse(HttpListenerException refused) => OperatingSystem.IsWindows()
+        ? refused.ErrorCode is 32 or 183
+        : refused.ErrorCode == (OperatingSystem.IsMacOS() ? 48 : 98);
 
     /// <summary>
     /// Stops taking requests, waits for the responses in progress, then closes the listener and waits for the loop to

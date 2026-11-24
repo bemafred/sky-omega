@@ -1,6 +1,7 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using System.Globalization;
 using System.IO.Pipes;
 using System.Net;
 using System.Net.Sockets;
@@ -113,11 +114,14 @@ public sealed class MercurydTests : IDisposable
         Assert.Equal(1, reopened.Pool.Active.GetStatistics().QuadCount);
     }
 
-    /// <summary>The ways a start fails, each said on standard error with the part that failed.</summary>
+    /// <summary>
+    /// The ways a start fails, each said on standard error with the part that failed: what is said, of the test's port.
+    /// A port in use is said in Mercury's words, which are the same on every platform.
+    /// </summary>
     public static TheoryData<string, string> FailedStarts => new()
     {
-        { "the port is in use", "Error: The HTTP endpoint cannot listen on" },
-        { "the address is not the machine's", "Error: The HTTP endpoint cannot listen on http://192.0.2.1:" },
+        { "the port is in use", "Error: The HTTP endpoint cannot listen on http://localhost:{0}/sparql: The port is in use." },
+        { "the address is not the machine's", "Error: The HTTP endpoint cannot listen on http://192.0.2.1:{0}/sparql: " },
         { "a file is where the store goes", "Error: The store cannot be opened:" },
     };
 
@@ -146,7 +150,7 @@ public sealed class MercurydTests : IDisposable
         using var mercuryd = StartOnTheStore(args);
 
         Assert.Equal(1, await mercuryd.Ended(ct));
-        Assert.Contains(said, mercuryd.Errors);
+        Assert.Contains(string.Format(CultureInfo.InvariantCulture, said, _port), mercuryd.Errors);
         if (failure != "a file is where the store goes")
         {
             var log = LogLines();

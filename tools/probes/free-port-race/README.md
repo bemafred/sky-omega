@@ -1,7 +1,9 @@
 # What an HttpListener's start says when its port is taken
 
-One probe, run on 2026-11-24 for the tests' `FreePort` (`tests/Mercury.Tests/Fixtures/FreePort.cs`). It uses the BCL's
-`HttpListener` alone, not Mercury. It was run on three machines, and each output is beside the probe:
+One probe, run on 2026-11-24 for the tests' `FreePort` (`tests/Mercury.Tests/Fixtures/FreePort.cs`). Mercury reads
+the same codes to say "The port is in use." (`HttpListenerLoop.SaysThePortIsInUse`, `src/Mercury/Sparql/Protocol`).
+The probe uses the BCL's `HttpListener` alone, not Mercury. It was run on three machines, and each output is beside
+the probe:
 - zbook: Ubuntu 26.04, x64, .NET 10.0.14;
 - macbook: macOS 26.4.1, arm64, .NET 10.0.15;
 - omega-windows: Windows 11 26200, arm64, .NET 10.0.15, Swedish system messages.
