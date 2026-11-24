@@ -15,9 +15,10 @@
 // Every [UnmanagedCallersOnly] thunk below runs on mscordbi's RC event thread, whose stack
 // budget we do NOT own. The contract is: thunks must do O(1) stack work — recover the host
 // via HostOf, dispatch to _sink.OnCallback (which BlockingCollection.Adds and returns), and
-// return S_OK. NO stackalloc, NO recursion, NO synchronous user code. Future growth of any
-// thunk requires re-validating against mscordbi's actual stack budget. Phase 8 will add an
-// IL-size unit test asserting each thunk's IL stays under a threshold.
+// return S_OK (ControlCTrap returns S_FALSE: its answer is passed on to the target, below).
+// NO stackalloc, NO recursion, NO synchronous user code. Future growth of any thunk requires
+// re-validating against mscordbi's actual stack budget. Phase 8 will add an IL-size unit test
+// asserting each thunk's IL stays under a threshold.
 
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -27,6 +28,7 @@ namespace SkyOmega.DrHook.Engine.Interop;
 internal sealed unsafe class ManagedCallbackHost : IDisposable
 {
     private const int S_OK = 0;
+    private const int S_FALSE = 1;
     private const int E_NOINTERFACE = unchecked((int)0x80004002);
 
     private static readonly Guid IID_IUnknown = new("00000000-0000-0000-C000-000000000046");
@@ -203,7 +205,18 @@ internal sealed unsafe class ManagedCallbackHost : IDisposable
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })] private static int ExitAppDomain(nint p, nint proc, nint a) => Fire(p, "ExitAppDomain");
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })] private static int LoadAssembly(nint p, nint a, nint asm) => Fire(p, "LoadAssembly");
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })] private static int UnloadAssembly(nint p, nint a, nint asm) => Fire(p, "UnloadAssembly");
-    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })] private static int ControlCTrap(nint p, nint proc) => Fire(p, "ControlCTrap");
+    // ControlCTrap: CTRL+C or CTRL+BREAK reached the target while it is debugged (Windows only). This callback's answer
+    // is the only one the target sees: mscordbi sends it back to the target's runtime (ShimProxyCallback::ControlCTrap
+    // → CordbProcess::HandleControlCTrapResult, release/10.0), which counts the event as handled only for S_OK
+    // (Debugger's DB_IPCE_CONTROL_C_EVENT_RESULT). S_FALSE passes it on to the target's other console handlers and to
+    // Windows' default, which ends the process, so the program behaves under DrHook as it does without it (ADR-016
+    // 6.4). With S_OK a target without a handler of its own ran on, 20 of 20 (finding 112).
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
+    private static int ControlCTrap(nint p, nint proc)
+    {
+        Fire(p, "ControlCTrap");
+        return S_FALSE;
+    }
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })] private static int NameChange(nint p, nint a, nint t) => Fire(p, "NameChange");
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })] private static int UpdateModuleSymbols(nint p, nint a, nint m, nint s) => Fire(p, "UpdateModuleSymbols");
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })] private static int EditAndContinueRemap(nint p, nint a, nint t, nint f, int acc) => Fire(p, "EditAndContinueRemap");

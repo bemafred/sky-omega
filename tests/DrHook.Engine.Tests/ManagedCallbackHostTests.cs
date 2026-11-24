@@ -134,6 +134,27 @@ public sealed unsafe class ManagedCallbackHostTests
         Assert.Equal(new[] { 42u }, sink.ErrorCodes.ToArray());                     // errorCode
     }
 
+    // ADR-016 6.4: the answer to ControlCTrap goes back to the target's runtime, which counts CTRL+C or CTRL+BREAK as
+    // handled only for S_OK. Until 2026-11-23 the thunk answered S_OK, as every thunk does, and a target without a
+    // handler of its own ran on under DrHook (finding 112, 20 of 20). S_FALSE passes the event on to the target.
+    [Fact]
+    public void ControlCTrapThunk_AnswersSFalse_SoTheEventGoesOnToTheTarget_AndForwardsItAsInformational()
+    {
+        var sink = new RecordingSink();
+        using var host = new ManagedCallbackHost(sink);
+        nint p = host.NativePointer;
+
+        // ICorDebugManagedCallback slot 24 = ControlCTrap(pThis, pProcess): IUnknown(0-2), then 21 methods from Breakpoint
+        // to UnloadAssembly.
+        var controlCTrap = (delegate* unmanaged[Cdecl]<nint, nint, int>)Slot(p, 24);
+        int hr = controlCTrap(p, 0);
+
+        const int S_FALSE = 1;
+        Assert.Equal(S_FALSE, hr);
+        Assert.Equal(new[] { "ControlCTrap" }, sink.Events.ToArray());
+        Assert.Equal(new[] { CallbackKind.Informational }, sink.Kinds.ToArray()); // the pump continues it
+    }
+
     [Fact]
     public void Callback2Method_DispatchesThroughTheV2SubObject()
     {

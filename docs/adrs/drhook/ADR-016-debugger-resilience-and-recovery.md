@@ -1245,6 +1245,19 @@ not the default.
   - Decided: `S_FALSE`, so that a program behaves under DrHook as it does without it, and the event is reported to
     the operator. To be measured first: probe 112's no-handler child, attached, with `S_FALSE`, on omega-windows and
     both Windows runners, with the debugger usable N of N.
+  - *Measured 2026-11-23 on omega-windows* ([finding 112](../../../poc/drhook-engine/findings/112-cancellation.md#windows-with-drhook-answering-s_false-2026-11-23)),
+    at `4e72de5`, which makes the change. The no-handler target, attached, was usable and clean 40 of 40:
+    - one `ControlCTrap`, then exit `0xC000013A` 25 to 211 ms after the event, as without a debugger;
+    - the debugger saw every exit, and every final attach succeeded.
+
+    The other Windows constructions were unchanged from the `S_OK` run. The answer reaches the target: mscordbi sends
+    the callback's return value back, and the runtime counts the event as handled only for `S_OK` (read in
+    `release/10.0`, finding 112).
+  - *Built 2026-11-23, the report:* the pump records a `ConsoleControlEvent` anomaly when it dispatches `ControlCTrap`
+    (`0a6d01a`). Until then informational callbacks stopped in the worker.
+  - *Measured 2026-11-23 on both Windows runners* (run 45252424492, at `ba0d865`, which has the report): usable 20 of
+    20 each, with one `ConsoleControlEvent` per session, then `0xC000013A`. With omega-windows that makes 80 of 80,
+    every final attach succeeding.
 
 **6.5 — Target preservation when a worker goes.**
 
@@ -1353,7 +1366,9 @@ not the default.
 
 - Step 2's scenarios: a test run under MTP and under VSTest, and DrHook's own test host (6.1).
 - Probe 112's owned path, and `drhook_kill` itself (6.2, 6.3).
-- `S_FALSE` for `ControlCTrap` (6.4).
+- `S_FALSE` for `ControlCTrap` (6.4). Measured 2026-11-23 on omega-windows, 40 of 40 clean
+  ([finding 112](../../../poc/drhook-engine/findings/112-cancellation.md#windows-with-drhook-answering-s_false-2026-11-23)),
+  and on both Windows runners, 20 of 20 each (run 45252424492).
 - A CTRL+BREAK sender for a target launched with `CREATE_NO_WINDOW` (6.4). Measured 2026-11-22 on omega-windows
   ([finding 117](../../../poc/drhook-engine/findings/117-ctrl-break.md)); not on x64 or the runners. Built the same day;
   its tests passed on omega-windows and on both Windows runners, x64 included (CI run 45028119039).
