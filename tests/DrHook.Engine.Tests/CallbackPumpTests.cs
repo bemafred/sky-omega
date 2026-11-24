@@ -197,6 +197,66 @@ public sealed class CallbackPumpTests
         Assert.True(SpinWait.SpinUntil(() => !pump.IsParked, TimeSpan.FromSeconds(10)), "The parked worker was not released.");
     }
 
+    // ADR-016 6.6: at a detach the session synchronizes the target with its own Stop, then asks the pump to continue
+    // until the detach. The worker continues the stop it is parked at, and every callback that still comes, stopping
+    // ones included, without publishing a stop. Until 2026-11-24 the pump was disposed before the Stop, and a callback in
+    // between was dropped without a Continue (finding 102).
+    [Fact]
+    public void ContinueUntilDetached_ContinuesTheParkedStop_AndEveryLaterCallback_PublishingNoStop()
+    {
+        var sink = new RecordingSink();
+        using var pump = new CallbackPump(sink);
+        int continues = 0;
+        pump.Start((_, _) => { Interlocked.Increment(ref continues); return 0; }, () => { });
+
+        pump.OnCallback(CallbackKind.BreakpointHit, "Breakpoint", 0, 0xABCD, 0);
+        Assert.Equal(StopReason.Breakpoint, pump.WaitForStop(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken)?.Reason);
+        Assert.True(pump.IsParked);
+        Assert.Equal(0, Volatile.Read(ref continues));
+
+        pump.ContinueUntilDetached();
+        Assert.True(SpinWait.SpinUntil(() => Volatile.Read(ref continues) == 1 && !pump.IsParked, TimeSpan.FromSeconds(2)),
+            "the stop the worker was parked at should be continued, once");
+
+        // A callback that comes before the detach: continued, counted with the events, and no stop is published for it.
+        pump.OnCallback(CallbackKind.BreakpointHit, "Breakpoint", 0, 0xABCD, 0);
+        pump.OnCallback(CallbackKind.Informational, "CreateThread", 0, 0, 0);
+        Assert.True(SpinWait.SpinUntil(() => Volatile.Read(ref continues) == 3, TimeSpan.FromSeconds(2)),
+            "each callback after the request should be continued");
+        Assert.Null(pump.WaitForStop(TimeSpan.FromMilliseconds(200), TestContext.Current.CancellationToken));
+        Assert.False(pump.IsParked);
+        lock (sink.Events) Assert.Equal(new[] { "Breakpoint", "CreateThread" }, sink.Events.ToArray());
+        Assert.Empty(sink.Anomalies);
+    }
+
+    // ADR-016 6.6: while the session removes its breakpoints and detaches, the worker binds no pending breakpoint at a
+    // module load, holds at none, and serves no pause request; it only continues.
+    [Fact]
+    public void ContinueUntilDetached_BindsNoBreakpoint_HoldsAtNoModuleLoad_AndServesNoPause()
+    {
+        var sink = new RecordingSink();
+        using var pump = new CallbackPump(sink);
+        int continues = 0, pauses = 0, binds = 0, holds = 0;
+        pump.Start(
+            (_, _) => { Interlocked.Increment(ref continues); return 0; },
+            () => Interlocked.Increment(ref pauses),
+            moduleHold: _ => { Interlocked.Increment(ref holds); return true; },
+            moduleLoad: _ => Interlocked.Increment(ref binds));
+
+        pump.ContinueUntilDetached();
+        pump.OnCallback(CallbackKind.Informational, "LoadModule", 0, 0, 0);
+        pump.RequestPause();
+        pump.OnCallback(CallbackKind.Informational, "ExitThread", 0, 0, 0);
+
+        Assert.True(SpinWait.SpinUntil(() => Volatile.Read(ref continues) == 2, TimeSpan.FromSeconds(2)),
+            "the module load and the thread's exit should each be continued");
+        Assert.Null(pump.WaitForStop(TimeSpan.FromMilliseconds(200), TestContext.Current.CancellationToken));
+        Assert.Equal(0, Volatile.Read(ref binds));
+        Assert.Equal(0, Volatile.Read(ref holds));
+        Assert.Equal(0, Volatile.Read(ref pauses));
+        Assert.Equal(2, Volatile.Read(ref continues));
+    }
+
     // ADR-016 6.4: a CTRL+C or CTRL+BREAK that reaches a debugged Windows target is passed on to it (ControlCTrap is
     // answered S_FALSE), and the operator is told with a ConsoleControlEvent anomaly. The event is continued like any
     // other informational one, and no other event draws the anomaly.

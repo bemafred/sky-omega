@@ -12,7 +12,8 @@
 //
 // At integration scale: target's RunBriefObservableWork generates the informational flood
 // (10 × Thread.Start/Join). Substrate attaches, observes during the flood, Disposes mid-flight.
-// Assert: zero WorkerException, zero WorkerSilentBreak; target exits naturally.
+// Assert: zero WorkerException, zero WorkerSilentBreak; target exits naturally. Since ADR-016 6.6 (2026-11-24), also
+// zero LateCallback: the detach leaves no callback of the flood un-continued.
 //
 // SYNC ON THE TARGET, NEVER THE CLOCK (finding 94's rule). Both tests used to sleep after attaching
 // (200 ms, or 1 s + 500 ms) and assume the flood was then running. On omega-ubuntu (Linux arm64,
@@ -119,6 +120,13 @@ public sealed class InformationalFloodTest
             Assert.AreEqual(0, workerSilentBreaks.Length,
                 $"Expected 0 WorkerSilentBreak; got {workerSilentBreaks.Length}. Stop fired against no-stops target — substrate classification bug.");
 
+            // ADR-016 6.6: the detach leaves no callback un-continued. Until 2026-11-24 the pump was disposed before the
+            // session's Stop, and a callback of the flood in between was dropped without a Continue (LateCallback), in
+            // almost every detach of a busy target (finding 102).
+            EngineAnomaly[] lateCallbacks = sink.Anomalies.Where(a => a.Kind == AnomalyKind.LateCallback).ToArray();
+            Assert.AreEqual(0, lateCallbacks.Length,
+                $"Expected 0 LateCallback; got {lateCallbacks.Length}: {string.Join("; ", lateCallbacks.Select(a => a.Observed))}. A callback came after the pump had closed.");
+
             // Increment 3 discipline assertion.
             bool exitedNaturally = bootstrap.WaitForExit(5000);
             Assert.IsTrue(exitedNaturally,
@@ -196,6 +204,11 @@ public sealed class InformationalFloodTest
             EngineAnomaly[] workerSilentBreaks = sink.Anomalies.Where(a => a.Kind == AnomalyKind.WorkerSilentBreak).ToArray();
             Assert.AreEqual(0, workerSilentBreaks.Length,
                 $"Expected 0 WorkerSilentBreak; got {workerSilentBreaks.Length}.");
+
+            // ADR-016 6.6, as in the MTP variant: no callback of the flood is dropped at the detach.
+            EngineAnomaly[] lateCallbacks = sink.Anomalies.Where(a => a.Kind == AnomalyKind.LateCallback).ToArray();
+            Assert.AreEqual(0, lateCallbacks.Length,
+                $"Expected 0 LateCallback; got {lateCallbacks.Length}: {string.Join("; ", lateCallbacks.Select(a => a.Observed))}. A callback came after the pump had closed.");
 
             bool exitedNaturally = dotnetTest.WaitForExit(10000);
             Console.WriteLine($"{DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)}  dotnet test exited: {exitedNaturally}");

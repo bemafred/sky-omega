@@ -41,6 +41,7 @@ internal sealed class CallbackPump : IManagedCallbackSink, IDisposable
     private int _disposed;               // 0 = live, 1 = disposed; atomic via Interlocked.Exchange (ENG-CP-1)
     private StopInfo? _lostStop;         // set once, when DebuggerError arrives or the session calls its debugger lost; never cleared
     private int _parked;                 // 1 while the worker holds the debuggee at a published stop (TakeResume)
+    private int _detaching;              // 1 once the session's teardown has begun (ContinueUntilDetached); never cleared
 
     /// <summary>True while the worker holds the debuggee at a stop it has published and waits for the command that
     /// resumes it: the process is synchronized, and no callback is being dispatched. A pause requested meanwhile queues
@@ -328,6 +329,29 @@ internal sealed class CallbackPump : IManagedCallbackSink, IDisposable
         }
     }
 
+    /// <summary>ADR-016 6.6: the session's teardown has begun. From now on the worker continues the stop it is parked at,
+    /// if any, and every callback it receives, and publishes no stop. It binds no pending breakpoint, holds at no module
+    /// load and serves no pause, since the session is removing its breakpoints and detaching.
+    ///
+    /// The session calls this once it has synchronized a live target with its own <c>Stop</c>, and disposes the pump
+    /// only after it has detached. Until the detach mscordbi can still dispatch a callback, and every callback holds the
+    /// target until it is continued. With the session's <c>Stop</c> outstanding, a <c>Continue</c> returns at once and
+    /// leaves the target synchronized, sending it nothing ("Every stop or event must be matched by a corresponding
+    /// Continue. m_stopCount counts outstanding stopping events along with calls to Stop",
+    /// <c>CordbProcess::ContinueInternal</c>, release/10.0). And the detach needs the target synchronized. Not for a
+    /// target that has gone: there is no <c>Stop</c> of the session's own then, and a <c>Continue</c> would send the
+    /// gone target a request that waits for its answer (finding 105). Until 2026-11-24 the session disposed the pump
+    /// first, so a callback that came before the session's <c>Stop</c> was neither queued nor continued: one in almost
+    /// every detach of a busy target (finding 102).</summary>
+    public void ContinueUntilDetached()
+    {
+        Volatile.Write(ref _detaching, 1);
+        // A worker parked at a stop takes this and continues it. Otherwise nothing takes it: the worker parks no more.
+        Enqueue(ResumeKind.Continue);
+    }
+
+    private bool Detaching => Volatile.Read(ref _detaching) == 1;
+
     private void Enqueue(ResumeKind kind)
     {
         try
@@ -383,11 +407,13 @@ internal sealed class CallbackPump : IManagedCallbackSink, IDisposable
                         // loaded, before auto-continuing — so a breakpoint in a lazily-loaded module is
                         // armed the instant its module appears, before the process runs past the code.
                         if (Volatile.Read(ref _lostStop) is not null) break;
-                        _moduleLoadHandler?.Invoke(e.Breakpoint);
+                        // Detaching (ADR-016 6.6): the session is removing its breakpoints, so none is bound, and
+                        // nothing is held.
+                        if (!Detaching) _moduleLoadHandler?.Invoke(e.Breakpoint);
                         // ADR-011 Layer 2 hold-gate: one-shot hold at the launch entry assembly's load
                         // — modules loaded, before main — so the caller can arm breakpoints (bound or
                         // pending) before the process runs. Park like a STOPPING event until resumed.
-                        if (_moduleHoldHandler is { } hold && hold(e.Breakpoint))
+                        if (!Detaching && _moduleHoldHandler is { } hold && hold(e.Breakpoint))
                         {
                             _stopThread = 0;
                             ResumeKind kind;
@@ -422,6 +448,9 @@ internal sealed class CallbackPump : IManagedCallbackSink, IDisposable
                     // (the controller's Stop is the sole counterpart of Continue, both owned by this
                     // worker), then surface a Pause stop and park at _resume.Take like any other stop.
                     if (Volatile.Read(ref _lostStop) is not null) break;
+                    // Detaching (ADR-016 6.6): the session has synchronized the target itself, and a request is not a
+                    // callback, so there is nothing to continue.
+                    if (Detaching) continue;
                     _pauseHandler!();
                     _stopThread = 0;
                     ResumeKind kind;
@@ -447,6 +476,15 @@ internal sealed class CallbackPump : IManagedCallbackSink, IDisposable
                     // the queue behind this event is empty until we resume. Capture the breakpoint
                     // pointer on BreakpointHit so caller-thread policy lookup (ADR-010 Increment 2c,
                     // caller-thread refactor) can map back to the entry.
+                    if (Detaching)
+                    {
+                        // ADR-016 6.6: nobody waits for a stop now. The callback is counted with the others and
+                        // continued; the session's own Stop keeps the target synchronized for the detach.
+                        _userSink.OnEvent(e.Name);
+                        if (Volatile.Read(ref _lostStop) is not null) break;
+                        _resumeHandler!(ResumeKind.Continue, 0);
+                        continue;
+                    }
                     _stopThread = e.Thread;
                     _lastBreakpointPointer = e.Kind == CallbackKind.BreakpointHit ? e.Breakpoint : 0;
 
