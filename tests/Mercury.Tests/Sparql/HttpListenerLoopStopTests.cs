@@ -5,6 +5,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using SkyOmega.Mercury.Sparql.Protocol;
+using SkyOmega.Mercury.Tests.Fixtures;
 using Xunit;
 
 namespace SkyOmega.Mercury.Tests.Sparql;
@@ -36,16 +37,16 @@ public sealed class HttpListenerLoopStopTests
     public async Task AResponseInProgress_Finishes_TheStopWaitsForIt_AndARequestMeanwhileIsAnswered503()
     {
         var ct = TestContext.Current.CancellationToken;
-        var port = FreePort();
         var inProgress = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        await using var loop = new HttpListenerLoop([$"http://localhost:{port}/"], async (context, token) =>
-        {
-            inProgress.SetResult();
-            await release.Task;
-            return Body;
-        });
-        loop.Start();
+        await using var loop = FreePort.Start(
+            port => new HttpListenerLoop([$"http://localhost:{port}/"], async (context, token) =>
+            {
+                inProgress.SetResult();
+                await release.Task;
+                return Body;
+            }),
+            loop => loop.Start(), out var port);
         using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
         // The loop's disposal waits for the response in progress, so the response is let go whatever fails before:
         // a failure then fails the test, and does not hang it.
@@ -80,9 +81,9 @@ public sealed class HttpListenerLoopStopTests
     public async Task AResponseBeforeTheStop_HasItsLength_AndKeepsItsConnection()
     {
         var ct = TestContext.Current.CancellationToken;
-        var port = FreePort();
-        await using var loop = new HttpListenerLoop([$"http://localhost:{port}/"], (context, token) => Task.FromResult(Body));
-        loop.Start();
+        await using var loop = FreePort.Start(
+            port => new HttpListenerLoop([$"http://localhost:{port}/"], (context, token) => Task.FromResult(Body)),
+            loop => loop.Start(), out var port);
         using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
 
         var answer = await http.GetAsync($"http://localhost:{port}/", ct);
@@ -97,9 +98,9 @@ public sealed class HttpListenerLoopStopTests
     public async Task AHeadRequest_IsAnsweredWithItsBodysLength_AndNothingAfterTheHead()
     {
         var ct = TestContext.Current.CancellationToken;
-        var port = FreePort();
-        await using var loop = new HttpListenerLoop([$"http://localhost:{port}/"], (context, token) => Task.FromResult(Body));
-        loop.Start();
+        await using var loop = FreePort.Start(
+            port => new HttpListenerLoop([$"http://localhost:{port}/"], (context, token) => Task.FromResult(Body)),
+            loop => loop.Start(), out var port);
 
         // A TCP client, not an HttpClient: an HttpClient drops a pooled connection that has data on it, and so never
         // reads what came after a HEAD's head. The request closes its connection, so the server ends it after the
@@ -131,9 +132,9 @@ public sealed class HttpListenerLoopStopTests
         // so, and it threw "Address already in use" when the port was not free at that moment (Mercury.Tests in
         // parallel on zbook, 2026-11-21: from the Dispose after a stop). The port is taken here once the loop has
         // stopped, so a disposal that binds it throws.
-        var port = FreePort();
-        var loop = new HttpListenerLoop([$"http://localhost:{port}/"], (context, token) => Task.FromResult(Body));
-        loop.Start();
+        var loop = FreePort.Start(
+            port => new HttpListenerLoop([$"http://localhost:{port}/"], (context, token) => Task.FromResult(Body)),
+            loop => loop.Start(), out var port);
         await loop.StopAsync();
         var taker = new TcpListener(IPAddress.IPv6Any, port) { Server = { DualMode = true } };
         taker.Start();
@@ -146,14 +147,5 @@ public sealed class HttpListenerLoopStopTests
         {
             taker.Stop();
         }
-    }
-
-    private static int FreePort()
-    {
-        var listener = new TcpListener(IPAddress.Loopback, 0);
-        listener.Start();
-        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
-        listener.Stop();
-        return port;
     }
 }

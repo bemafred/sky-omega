@@ -1,0 +1,17 @@
+Microsoft Windows 10.0.26200, Arm64, .NET 10.0.15
+localhost resolves to: ::1, 127.0.0.1
+a start on port 0: HttpListenerException ErrorCode 87, NativeErrorCode 87, HResult 0x80004005: Felaktig parameter.
+taken by a TCP listener on 127.0.0.1: HttpListenerException ErrorCode 32, NativeErrorCode 32, HResult 0x80004005: Det går inte att komma åt filen eftersom den
+används av en annan process.
+taken by a TCP listener on [::1]: HttpListenerException ErrorCode 32, NativeErrorCode 32, HResult 0x80004005: Det går inte att komma åt filen eftersom den
+används av en annan process.
+taken by a TCP listener on [::], dual mode: HttpListenerException ErrorCode 32, NativeErrorCode 32, HResult 0x80004005: Det går inte att komma åt filen eftersom den
+används av en annan process.
+taken by a TCP listener on 0.0.0.0: HttpListenerException ErrorCode 32, NativeErrorCode 32, HResult 0x80004005: Det går inte att komma åt filen eftersom den
+används av en annan process.
+taken by a connection's own end on 127.0.0.1: HttpListenerException ErrorCode 32, NativeErrorCode 32, HResult 0x80004005: Det går inte att komma åt filen eftersom den
+används av en annan process.
+taken by an HttpListener on localhost: HttpListenerException ErrorCode 183, NativeErrorCode 183, HResult 0x80004005: Failed to listen on prefix 'http://localhost:58306/' because it conflicts with an existing registration on the machine.
+taken by an HttpListener on 127.0.0.1: started
+a listener whose start is refused: ObjectDisposedException: Cannot access a disposed object.
+Object name: 'System.Net.HttpListener'.

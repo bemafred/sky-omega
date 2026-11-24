@@ -7,19 +7,21 @@ using System.Threading.Tasks;
 using SkyOmega.Mercury.Sparql.Protocol;
 using SkyOmega.Mercury.Storage;
 using SkyOmega.Mercury.Runtime;
+using SkyOmega.Mercury.Tests.Fixtures;
 using Xunit;
 
 namespace SkyOmega.Mercury.Tests.Sparql;
 
 /// <summary>
-/// Tests for SPARQL HTTP Server, each on a port of its own that the system gave as free. A server that does not start
-/// fails its test.
+/// Tests for SPARQL HTTP Server, each on a port of its own (<see cref="FreePort"/>). A server that does not start fails
+/// its test.
 /// </summary>
 public class SparqlHttpServerTests : IDisposable
 {
     private readonly string _testDir;
     private readonly QuadStore _store;
-    private readonly int _port = FreePort();
+    /// <summary>The port the test's server started on.</summary>
+    private int _port;
 
     public SparqlHttpServerTests()
     {
@@ -41,21 +43,9 @@ public class SparqlHttpServerTests : IDisposable
         TempPath.SafeCleanup(_testDir);
     }
 
-    private SparqlHttpServer StartServer(SparqlHttpServerOptions? options = null)
-    {
-        var server = new SparqlHttpServer(_store, $"http://localhost:{_port}/", options);
-        server.Start();
-        return server;
-    }
-
-    private static int FreePort()
-    {
-        var listener = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
-        listener.Start();
-        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
-        listener.Stop();
-        return port;
-    }
+    private SparqlHttpServer StartServer(SparqlHttpServerOptions? options = null) => FreePort.Start(
+        port => new SparqlHttpServer(_store, $"http://localhost:{port}/", options),
+        server => server.Start(), out _port);
 
     #region Server Lifecycle Tests
 
@@ -629,8 +619,7 @@ public class SparqlHttpServerTests : IDisposable
     [Fact]
     public async Task QueryEndpoint_SelectJson_StartsWithTheJsonObject()
     {
-        await using var server = new SparqlHttpServer(_store, $"http://localhost:{_port}/");
-        server.Start();
+        await using var server = StartServer();
         using var client = new HttpClient();
 
         var query = "SELECT ?name WHERE { <http://example.org/alice> <http://xmlns.com/foaf/0.1/name> ?name }";
@@ -643,8 +632,7 @@ public class SparqlHttpServerTests : IDisposable
     [Fact]
     public async Task QueryEndpoint_AskJson_IsTheResultsDocumentAlone()
     {
-        await using var server = new SparqlHttpServer(_store, $"http://localhost:{_port}/");
-        server.Start();
+        await using var server = StartServer();
         using var client = new HttpClient();
 
         var query = "ASK WHERE { <http://example.org/alice> ?p ?o }";
@@ -658,8 +646,7 @@ public class SparqlHttpServerTests : IDisposable
     [Fact]
     public async Task QueryEndpoint_ConstructNTriples_IsTheStatementsAlone()
     {
-        await using var server = new SparqlHttpServer(_store, $"http://localhost:{_port}/");
-        server.Start();
+        await using var server = StartServer();
         using var client = new HttpClient();
         client.DefaultRequestHeaders.Add("Accept", "application/n-triples");
 
@@ -684,8 +671,7 @@ public class SparqlHttpServerTests : IDisposable
     public async Task QueryEndpoint_SelectCsv_IsTheLexicalForm()
     {
         _store.AddCurrent("<http://example.org/q>", "<http://example.org/says>", "\"a \"b\", <c> & C:\\new\"");
-        await using var server = new SparqlHttpServer(_store, $"http://localhost:{_port}/");
-        server.Start();
+        await using var server = StartServer();
         using var client = new HttpClient();
         client.DefaultRequestHeaders.Add("Accept", "text/csv");
 
@@ -701,9 +687,10 @@ public class SparqlHttpServerTests : IDisposable
     {
         // The store factory throws while the request is answered; the loop that accepts the requests answers 500
         // with the exception's message, and closes the response.
-        await using var server = new SparqlHttpServer(
-            () => throw new InvalidOperationException("no store \"here\""), $"http://localhost:{_port}/");
-        server.Start();
+        await using var server = FreePort.Start(
+            port => new SparqlHttpServer(
+                () => throw new InvalidOperationException("no store \"here\""), $"http://localhost:{port}/"),
+            server => server.Start(), out _port);
         using var client = new HttpClient();
 
         var query = "SELECT ?s WHERE { ?s ?p ?o }";
@@ -720,8 +707,7 @@ public class SparqlHttpServerTests : IDisposable
     public async Task QueryEndpoint_SelectTsv_IsTheTermInTurtleSyntax()
     {
         _store.AddCurrent("<http://example.org/q>", "<http://example.org/says>", "\"a \"b\", <c> & C:\\new\"");
-        await using var server = new SparqlHttpServer(_store, $"http://localhost:{_port}/");
-        server.Start();
+        await using var server = StartServer();
         using var client = new HttpClient();
         client.DefaultRequestHeaders.Add("Accept", "text/tab-separated-values");
 
@@ -736,8 +722,7 @@ public class SparqlHttpServerTests : IDisposable
     public async Task QueryEndpoint_SelectXml_IsTheLexicalForm()
     {
         _store.AddCurrent("<http://example.org/q>", "<http://example.org/says>", "\"a \"b\", <c> & C:\\new\"");
-        await using var server = new SparqlHttpServer(_store, $"http://localhost:{_port}/");
-        server.Start();
+        await using var server = StartServer();
         using var client = new HttpClient();
         client.DefaultRequestHeaders.Add("Accept", "application/sparql-results+xml");
 
@@ -754,8 +739,7 @@ public class SparqlHttpServerTests : IDisposable
     public async Task QueryEndpoint_SelectJson_EscapesControlCharacters()
     {
         _store.AddCurrent("<http://example.org/q>", "<http://example.org/says>", "\"a \"b\" C:\\new bell\u0007\"");
-        await using var server = new SparqlHttpServer(_store, $"http://localhost:{_port}/");
-        server.Start();
+        await using var server = StartServer();
         using var client = new HttpClient();
 
         var query = "SELECT ?o WHERE { <http://example.org/q> <http://example.org/says> ?o }";
@@ -772,8 +756,7 @@ public class SparqlHttpServerTests : IDisposable
     {
         // Until 2026-10-30 every CONSTRUCT format but N-Triples, Turtle and RDF/XML got N-Triples, under the content
         // type that was asked for: here application/ld+json.
-        await using var server = new SparqlHttpServer(_store, $"http://localhost:{_port}/");
-        server.Start();
+        await using var server = StartServer();
         using var client = new HttpClient();
         client.DefaultRequestHeaders.Add("Accept", "application/ld+json");
 
