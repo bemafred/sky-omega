@@ -150,6 +150,8 @@ public sealed class StoreHostTests : IDisposable
         var (store, host, running) = await Run(enableUpdates: false,
             closing: closed => storeOpenAtClosing = !LogHasStop(closed), ct);
         var lifetime = host.Services.GetRequiredService<IHostApplicationLifetime>();
+        var mark = $"store-host-{Guid.NewGuid():N}";
+        store.Pool.Active.AddCurrent("<urn:s>", "<urn:p>", $"\"{mark}\"");
 
         lifetime.StopApplication();
         await running.WaitAsync(TimeSpan.FromSeconds(30), ct);
@@ -160,7 +162,22 @@ public sealed class StoreHostTests : IDisposable
         // 4.4 to 4.7 s on an idle machine (measured on omega-windows, 2026-11-21). A timeout of 5 s ended the request
         // before the refusal on a loaded Windows runner (CI 44918126706); this one leaves the refusal time to come.
         using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
-        await Assert.ThrowsAnyAsync<HttpRequestException>(() => http.GetAsync($"http://localhost:{_port}/sparql", ct));
+        // The port is the machine's, and once the host has let it go the system can name it to another test, whose
+        // mercuryd then answers on it. So the endpoint is gone when a request is refused, or answered by an endpoint
+        // without this store's mark. This host's endpoint, still answering, would give the mark, or with its store
+        // closed an error.
+        try
+        {
+            using var answer = await http.GetAsync(
+                $"http://localhost:{_port}/sparql?query={Uri.EscapeDataString("SELECT ?o WHERE { ?s ?p ?o }")}", ct);
+            var body = await answer.Content.ReadAsStringAsync(ct);
+            Assert.True(answer.StatusCode == HttpStatusCode.OK && !body.Contains(mark),
+                $"After the stop, the port answered {(int)answer.StatusCode}:{Environment.NewLine}{body}");
+        }
+        catch (HttpRequestException)
+        {
+            // Refused: nothing listens on the port.
+        }
         // The store is closed: it can be opened again.
         using var again = StoreSession.Open(store.Path, "mercury-test", "9.9.9", StorageOptions.ForTesting);
     }
