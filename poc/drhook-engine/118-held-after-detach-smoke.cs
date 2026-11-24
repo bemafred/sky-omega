@@ -44,8 +44,9 @@
 //             reason, suspend count (NtQueryInformationThread, ThreadSuspendCount), name (GetThreadDescription; .NET
 //             names its own threads, and the target names its flood thread) and start address, as module+offset;
 //   phases    the last phase the target's main thread reached;
-//   dump      a dump with the managed heap, by the runtime's own createdump.exe, kept beside the facts (at most
-//             --dumps of them; nothing on omega-windows reads one yet, so it is kept for later);
+//   dump      a dump with the managed heap, written by the target's runtime when asked through its diagnostics port
+//             (createdump.exe no longer takes a pid), kept beside the facts (at most --dumps of them; nothing on
+//             omega-windows reads one yet, so it is kept for later);
 //   managed   each managed thread's stack, sampled through EventPipe for 1 s (DrHook's StackInspector);
 //   reattach  a fresh attach: does it succeed, what does mscordbi report, and does the target end after the detach;
 //   os-after  the threads again, when the target is still held after that.
@@ -137,7 +138,7 @@ for (int k = 1; k <= childCount; k++)
     {
         total++;
         if (s!["held"] is not null) held++;
-        if (s["held"]?["dump"]?["exitCode"]?.GetValue<int>() == 0) dumpsTaken++;
+        if (s["held"]?["dump"]?["ok"]?.GetValue<bool>() == true) dumpsTaken++;
         foreach (JsonNode? name in s["dropped"]!.AsArray()) dropped[name!.GetValue<string>()] = dropped.GetValueOrDefault(name.GetValue<string>()) + 1;
     }
     clean &= record["outcome"]!.GetValue<string>() == "clean";
@@ -353,7 +354,7 @@ static int Child(string host, string dll, int sessions, int seed, string dumpDir
             {
                 Step(k, "held-dump", 90_000);
                 JsonObject dump = Dump(target.Id, dumpDirectory);
-                if (dump["exitCode"]?.GetValue<int>() == 0) dumpsLeft--;
+                if (dump["ok"]?.GetValue<bool>() == true) dumpsLeft--;
                 Held(k, "dump", dump);
             }
 
@@ -456,25 +457,23 @@ static JsonArray Phases(string phaseFile)
     return phases;
 }
 
-// A dump with the managed heap, by the runtime's createdump.exe, bounded at 60 s.
+// A dump with the managed heap, written by the target's runtime when asked through its diagnostics port, bounded at
+// 60 s. Run directly with a pid, createdump.exe 10.0.15 answers "The pid argument is no longer supported" (omega-windows,
+// 2026-11-24), so the runtime is asked to run it.
 static JsonObject Dump(int pid, string dumpDirectory)
 {
-    string createdump = Path.Combine(RuntimeEnvironment.GetRuntimeDirectory(), "createdump.exe");
     string path = Path.Combine(dumpDirectory, $"probe118-held-{pid}.dmp");
-    var d = new JsonObject { ["tool"] = createdump, ["path"] = path };
+    var d = new JsonObject { ["tool"] = "DiagnosticsClient.WriteDump (WithHeap)", ["path"] = path };
+    var clock = Stopwatch.StartNew();
+    var write = System.Threading.Tasks.Task.Run(() => new Microsoft.Diagnostics.NETCore.Client.DiagnosticsClient(pid).WriteDump(Microsoft.Diagnostics.NETCore.Client.DumpType.WithHeap, path));
     try
     {
-        var psi = new ProcessStartInfo(createdump) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
-        foreach (string a in new[] { "--withheap", "-f", path, pid.ToString(CultureInfo.InvariantCulture) }) psi.ArgumentList.Add(a);
-        using Process p = Process.Start(psi)!;
-        var stdout = p.StandardOutput.ReadToEndAsync();
-        var stderr = p.StandardError.ReadToEndAsync();
-        if (!p.WaitForExit(60_000)) { p.Kill(); d["error"] = "no end within 60 s"; return d; }
-        d["exitCode"] = p.ExitCode;
-        d["output"] = Shorten((stdout.Result + stderr.Result).Trim());
-        d["bytes"] = File.Exists(path) ? new FileInfo(path).Length : null;
+        if (!write.Wait(TimeSpan.FromSeconds(60))) { d["error"] = "no answer within 60 s"; return d; }
+        d["ok"] = true;
     }
-    catch (Exception e) { d["error"] = $"{e.GetType().Name}: {e.Message}"; }
+    catch (AggregateException e) { d["error"] = $"{e.InnerException?.GetType().Name}: {e.InnerException?.Message}"; }
+    d["ms"] = clock.ElapsedMilliseconds;
+    d["bytes"] = File.Exists(path) ? new FileInfo(path).Length : null;
     return d;
 }
 
