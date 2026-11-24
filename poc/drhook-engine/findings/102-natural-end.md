@@ -202,7 +202,9 @@ deviation.
 
 ## Not established
 
-- What held the Windows target, and whether the dropped callback is the cause; whether it happens elsewhere at a
+- *Answered 2026-11-24 ([finding 118](118-held-after-detach.md), [finding 119](119-detach-closes-a-handle.md)): the
+  dropped callback is not the cause. A handle of the target's, closed at the detach by mscordbi, is.* What held the
+  Windows target, and whether the dropped callback is the cause; whether it happens elsewhere at a
   rate 20 sessions cannot show.
 - Why `Detach` reported "process terminated" for a live target on zbook.
 - Why an exit-at-detach target sometimes leaves its debug pipes (the Linux x64 runner; on 11-04 also omega-ubuntu's

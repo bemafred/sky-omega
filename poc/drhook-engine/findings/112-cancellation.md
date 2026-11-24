@@ -380,7 +380,9 @@ the branch `drhook-6.4-sfalse` with `4e72de5`, and both runs below are at `ba0d8
 - Where the blocked attach waits, and what the lost session's event thread is doing.
 - Why a signal death loses the debugger in some sessions and not others. The signal's moment in the flood is the
   obvious variable, but 14 sessions cannot show it.
-- Windows: what holds a target after a detach. No stacks, suspend counts or dump were taken. Whether the dropped
+- *Answered 2026-11-24 ([finding 118](118-held-after-detach.md), [finding 119](119-detach-closes-a-handle.md)): not the
+  dropped callback, but a handle of the target's that mscordbi closes at the detach.* Windows: what holds a target after
+  a detach. No stacks, suspend counts or dump were taken. Whether the dropped
   callback is the cause: in both held sessions it was a CreateThread, but so it was in 83 of the 118 that ended.
 - Windows: CTRL+C, which cannot be sent to one group.
 - The owned path: a launched target, and `drhook_kill` itself.
