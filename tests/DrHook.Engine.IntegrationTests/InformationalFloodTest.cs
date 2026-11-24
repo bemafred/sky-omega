@@ -138,6 +138,69 @@ public sealed class InformationalFloodTest
         }
     }
 
+    // ADR-016 6.6: a borrowed detach in the middle of a sustained flood drops no callback. Before 2026-11-24 a borrowed
+    // Dispose closed the pump, waited 50 ms (BorrowedDeathCheckSettleMs) and only then synchronized the target, and in that
+    // window the flood's next callback was dropped without a Continue: 754 of 760 detach sessions of probe 102 reported
+    // one (finding 102). An owned Dispose synchronizes right after closing the pump, which leaves too short a window to
+    // show it reliably; so this test detaches a borrowed session.
+    //
+    // It asserts only what DrHook does. How the target ends is not asserted: on Windows a detach can leave a busy target
+    // held, or end it, through a handle mscordbi closes in it twice (finding 118), so the test ends the target itself.
+    [TestMethod]
+    public void Attach_MtpTarget_BorrowedDisposeDuringASustainedFlood_DropsNoCallback()
+    {
+        string targetExe = IntegrationTargetPaths.MtpTargetExe();
+        Assert.IsTrue(File.Exists(targetExe), $"MTP target exe not found at {targetExe}.");
+
+        using Process bootstrap = TargetSpawn.Mtp(targetExe, methodFilter: "RunThreadFlood");
+        try
+        {
+            int pid = TargetSpawn.ExtractPid(bootstrap, TimeSpan.FromSeconds(30));
+            var sink = new CollectingSink();
+
+            string source = IntegrationTargetPaths.MtpTargetSource();
+            int markerLine = Array.FindIndex(File.ReadAllLines(source), l => l.Contains("TEST_FLOODING_HERE", StringComparison.Ordinal)) + 1;
+            Assert.IsTrue(markerLine > 0, $"TEST_FLOODING_HERE marker not found in {source}.");
+
+            using (DebugSession session = DebugSession.Attach(pid, sink))
+            {
+                // Pause for a stop however early the attach landed, arm the flood's breakpoint (pending until the target
+                // assembly loads), and run to it, resuming any Pause or Break queued ahead of it.
+                session.Pause();
+                StopInfo? stop = session.WaitForStop(TimeSpan.FromSeconds(5));
+                Assert.IsNotNull(stop, "No stop within 5s of Pause.");
+                int breakpointId = session.SetBreakpointAtLine("IdleTarget.cs", markerLine);
+                Assert.AreNotEqual(0, breakpointId, $"Failed to set a breakpoint at IdleTarget.cs:{markerLine}.");
+                do
+                {
+                    session.Resume();
+                    stop = session.WaitForStop(TimeSpan.FromSeconds(30));
+                    Assert.IsNotNull(stop, "The flood's breakpoint was not hit within 30s.");
+                }
+                while (stop!.Reason is StopReason.Break or StopReason.Pause);
+                Assert.AreEqual(StopReason.Breakpoint, stop.Reason);
+                Assert.IsTrue(session.RemoveBreakpoint(breakpointId), "Could not remove the flood's breakpoint.");
+
+                // Resume into the flood and detach on its first thread: the next callbacks are already on their way.
+                sink.ArmFlood();
+                session.Resume();
+                Assert.IsTrue(sink.FloodStarted.Wait(TimeSpan.FromSeconds(30), TestContext.CancellationToken),
+                    "No CreateThread callback within 30s of resuming into the flood.");
+            }
+
+            EngineAnomaly[] lateCallbacks = sink.Anomalies.Where(a => a.Kind == AnomalyKind.LateCallback).ToArray();
+            Assert.AreEqual(0, lateCallbacks.Length,
+                $"Expected 0 LateCallback; got {lateCallbacks.Length}: {string.Join("; ", lateCallbacks.Select(a => a.Observed))}. A callback came after the pump had closed (ADR-016 6.6).");
+
+            EngineAnomaly[] workerExceptions = sink.Anomalies.Where(a => a.Kind == AnomalyKind.WorkerException).ToArray();
+            Assert.AreEqual(0, workerExceptions.Length, $"Expected 0 WorkerException; got {workerExceptions.Length}.");
+        }
+        finally
+        {
+            try { if (!bootstrap.HasExited) bootstrap.Kill(entireProcessTree: true); } catch { }
+        }
+    }
+
     [TestMethod]
     public void AttachAndOwn_VstestTestHost_DisposeDuringFlood_NoWorkerExceptionOrSilentBreak()
     {
