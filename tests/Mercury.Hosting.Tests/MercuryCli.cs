@@ -51,6 +51,25 @@ internal sealed class MercuryCli : IDisposable
     public static MercuryCli Start(IReadOnlyDictionary<string, string> environment, params string[] args) =>
         new(environment, args);
 
+    /// <summary>
+    /// Starts mercury with the arguments <paramref name="args"/> gives for a free port, and waits until it says its
+    /// HTTP endpoint. When it says that the port is in use, which another took after the system named it, it is
+    /// started again on another port (<see cref="FreePort"/>).
+    /// </summary>
+    public static async Task<MercuryCli> ServeOverHttp(IReadOnlyDictionary<string, string> environment,
+        Func<int, string[]> args, CancellationToken ct) => (await FreePort.Start(async port =>
+    {
+        var mercury = new MercuryCli(environment, args(port));
+        var inUse = $"Warning: Could not start HTTP server on port {port}: The port is in use.";
+        if (await mercury.WhenSaid(["HTTP endpoint:", inUse], ct) == "HTTP endpoint:")
+            return mercury;
+        // It goes on without the endpoint, and closes its store at the end of its input.
+        mercury.EndInput();
+        await mercury.Ended(ct);
+        mercury.Dispose();
+        return null;
+    })).Endpoint;
+
     /// <summary>What it has written to standard output so far, by line; a prompt is on the line that follows it.</summary>
     public string Output => string.Join(Environment.NewLine, _outputLines);
 
@@ -65,13 +84,21 @@ internal sealed class MercuryCli : IDisposable
 
     /// <summary>Waits until a line of its output starts with <paramref name="start"/>. Fails, with what it said, when
     /// it ends first.</summary>
-    public async Task WhenSaid(string start, CancellationToken ct)
+    public Task WhenSaid(string start, CancellationToken ct) => WhenSaid([start], ct);
+
+    /// <summary>Waits until a line of its output starts with one of <paramref name="starts"/>, and gives that one.
+    /// Fails, with what it said, when it ends first.</summary>
+    private async Task<string> WhenSaid(string[] starts, CancellationToken ct)
     {
         var deadline = Stopwatch.StartNew();
-        while (!_outputLines.Any(line => line.StartsWith(start, StringComparison.Ordinal)))
+        while (true)
         {
+            if (starts.FirstOrDefault(start =>
+                    _outputLines.Any(line => line.StartsWith(start, StringComparison.Ordinal))) is { } said)
+                return said;
             if (_process.HasExited || deadline.Elapsed > TimeSpan.FromSeconds(60))
-                Xunit.Assert.Fail($"mercury did not say '{start}':{Environment.NewLine}{Output}{Environment.NewLine}{Errors}");
+                Xunit.Assert.Fail($"mercury did not say '{string.Join("' or '", starts)}':{Environment.NewLine}" +
+                    $"{Output}{Environment.NewLine}{Errors}");
             await Task.Delay(50, ct);
         }
     }

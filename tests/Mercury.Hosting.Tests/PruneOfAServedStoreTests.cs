@@ -1,8 +1,6 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
-using System.Net;
-using System.Net.Sockets;
 using SkyOmega.Mercury.Runtime;
 using Xunit;
 
@@ -33,9 +31,8 @@ public sealed class PruneOfAServedStoreTests : IDisposable
     public async Task APruneInAMercuryThatServesItsStoreOverHttp_IsRefused_AndTheStoreKeepsWhatItHeld()
     {
         var ct = TestContext.Current.CancellationToken;
-        using var mercury = MercuryCli.Start(_environment,
-            "-d", Path.Combine(_dir.FullPath, "served"), "-p", FreePort().ToString());
-        await mercury.WhenSaid("HTTP endpoint:", ct);
+        using var mercury = await MercuryCli.ServeOverHttp(_environment,
+            port => ["-d", Path.Combine(_dir.FullPath, "served"), "-p", port.ToString()], ct);
 
         mercury.Type("INSERT DATA { <urn:s> <urn:p> \"remembered\" . <urn:s> <urn:p> \"forgotten\" }");
         mercury.Type("DELETE DATA { <urn:s> <urn:p> \"forgotten\" }");
@@ -67,14 +64,5 @@ public sealed class PruneOfAServedStoreTests : IDisposable
         Assert.Contains("Prune complete:", mercury.Output);
         Assert.Contains("\"remembered\"", mercury.Output);
         Assert.DoesNotContain("\"forgotten\"", mercury.Output);
-    }
-
-    private static int FreePort()
-    {
-        var listener = new TcpListener(IPAddress.Loopback, 0);
-        listener.Start();
-        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
-        listener.Stop();
-        return port;
     }
 }

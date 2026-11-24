@@ -60,6 +60,32 @@ internal sealed class Mercuryd : IDisposable
     public static Mercuryd Start(IReadOnlyDictionary<string, string> environment, params string[] args) =>
         new(environment, args);
 
+    /// <summary>
+    /// Starts mercuryd with the arguments <paramref name="args"/> gives for a free port, waits until it is ready, and
+    /// gives it and the port. When it ends saying that the port is in use, which another took after the system named
+    /// it, it is started again on another port (<see cref="FreePort"/>). Fails, with what it said, when it ends for
+    /// another reason.
+    /// </summary>
+    public static Task<(Mercuryd Mercuryd, int Port)> Serve(Func<int, string[]> args, CancellationToken ct) =>
+        Serve(new Dictionary<string, string>(), args, ct);
+
+    /// <summary>
+    /// <see cref="Serve(Func{int, string[]}, CancellationToken)"/>, with <paramref name="environment"/> over this
+    /// process's environment.
+    /// </summary>
+    public static Task<(Mercuryd Mercuryd, int Port)> Serve(IReadOnlyDictionary<string, string> environment,
+        Func<int, string[]> args, CancellationToken ct) => FreePort.Start(async port =>
+    {
+        var mercuryd = new Mercuryd(environment, args(port));
+        if (await mercuryd.ReadyOrEnded(ct))
+            return mercuryd;
+        var (exitCode, errors) = (mercuryd._process.ExitCode, mercuryd.Errors);
+        mercuryd.Dispose();
+        if (!errors.Contains(": The port is in use."))
+            Assert.Fail($"mercuryd ended with {exitCode} before it was ready:{Environment.NewLine}{errors}");
+        return null;
+    });
+
     /// <summary>The process's id.</summary>
     public int Id => _process.Id;
 
@@ -70,10 +96,15 @@ internal sealed class Mercuryd : IDisposable
     /// first.</summary>
     public async Task WhenReady(CancellationToken ct)
     {
-        var ended = _process.WaitForExitAsync(ct);
-        var first = await Task.WhenAny(_ready.Task, ended).WaitAsync(TimeSpan.FromSeconds(60), ct);
-        if (first != _ready.Task)
+        if (!await ReadyOrEnded(ct))
             Assert.Fail($"mercuryd ended with {_process.ExitCode} before it was ready:{Environment.NewLine}{Errors}");
+    }
+
+    /// <summary>Whether it said it is ready, its endpoints started, before it ended.</summary>
+    private async Task<bool> ReadyOrEnded(CancellationToken ct)
+    {
+        var ended = _process.WaitForExitAsync(ct);
+        return await Task.WhenAny(_ready.Task, ended).WaitAsync(TimeSpan.FromSeconds(60), ct) == _ready.Task;
     }
 
     /// <summary>Its exit code, once it has ended and its standard error has been read to the end.</summary>
