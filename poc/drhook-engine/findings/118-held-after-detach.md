@@ -4,7 +4,8 @@
 **Status:** **RECORDED** on omega-windows (Windows 11 26200 arm64, 4 cores, .NET 10.0.15): probe 118 before ADR-016 6.6's
 teardown change (`4c6d8f9`, 400 sessions) and after it (`5842fe4`, 1,200 sessions), and its dump reader (`5c747f9`) over
 the held targets' dumps. Probe 102 at the change on omega, omega-ubuntu and omega-windows. The DrHook suites at the change
-(`c751e25`) on all three, and at a mutation with the old teardown on omega-ubuntu. Not run: the Windows runners, x64.
+(`c751e25`) on all three, and at a mutation with the old teardown on omega-ubuntu. On 2026-11-28, probe 118 on both
+Windows runners, x64 and arm64, 400 sessions each, at `6b39d13` (CI run 46128839394).
 What closes the handle is [finding 119](119-detach-closes-a-handle.md).
 
 ## Why
@@ -169,10 +170,25 @@ omega's run was at `063b5f8`, whose engine is `53bbda6`'s: the amend added only 
   synchronizes it.
 - **omega-windows.** In probe 118 the median fell, from 88 to 63 ms.
 
+## On the runners (2026-11-28)
+
+Probe 118 at `6b39d13`, with the change, on GitHub's two Windows runners (CI run 46128839394):
+
+| | Windows x64 (Windows 10.0.26100, 4 cores) | Windows arm64 (Windows 11 26200, 4 cores) |
+|---|---|---|
+| Sessions | 400 | 400 |
+| Callbacks dropped at the detach | 0 | 0 |
+| DrHook's other anomalies | 0 | 0 |
+| Held targets | 0 | 2 |
+| Targets that ended with an unhandled exception (`0xE0434352`) before reaching `done`, as the failed writes did on omega-windows | 5 | 4 |
+
+The records are `118-held-after-detach/runner-windows-x64.json` and `runner-windows-arm64.json`.
+
 ## What this establishes
 
-- **The change.** ADR-016 6.6's teardown change leaves no callback un-continued: none dropped in 1,200 detaches on Windows,
-  nor in probe 102's 200 detach sessions on three machines. The suites pass on all three.
+- **The change.** ADR-016 6.6's teardown change leaves no callback un-continued: none dropped in 1,200 detaches on
+  omega-windows, nor in 800 on the two Windows runners, x64 included, nor in probe 102's 200 detach sessions on three
+  machines. The suites pass on all three, and on all six runners (CI run 46128873899).
 - **The hypothesis.** The dropped callback is not what holds a Windows target: 2 held in 400 before the change, 4 in 1,200
   after. Findings 102 and 112's hypothesis, that the held target is held at the dropped callback, is refuted.
 - **What holds it.** One of the target's own threads, the flood's child, in an alertable wait of the runtime's. Nothing
@@ -187,10 +203,9 @@ omega's run was at `063b5f8`, whose engine is `53bbda6`'s: the amend added only 
   `C:\Users\bemafred\diag\p118-5842fe4b-out\after.json-dumps\`.
 - **Whether the change moved the rates of the failed writes and the fatal errors.** Before and after differ, but by
   counts too small to tell.
-- **The Windows runners and x64.**
 
 ## Next (proposed, not decided)
 
-1. Run probes 118 and 119 on both Windows runners through `drhook-probe.yml` (added 2026-11-28, `6b39d13`).
+1. ~~Run probes 118 and 119 on both Windows runners.~~ Done 2026-11-28 (above, and finding 119).
 2. ~~Read the held child's native stack from a dump.~~ Not pursued (decided 2026-11-28): the cause is known (finding 119),
    and which handle a held target lost changes nothing in DrHook (ADR-016 6.6).

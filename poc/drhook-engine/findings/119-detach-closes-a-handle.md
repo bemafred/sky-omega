@@ -3,8 +3,9 @@
 **Date:** 2026-11-24
 **Status:** **RECORDED** on omega-windows (Windows 11 26200 arm64, 4 cores, .NET 10.0.15): one run of probe 119 at
 `30b8da9`, 40 sessions, RESULT(1); and on 2026-11-28 one run of probe 119 under a handle trace at `6e4b0c3`, 20 sessions,
-RESULT(0): both closes observed, the second made by mscordbi. Read in dotnet/runtime `release/10.0` and `main`. Not run:
-the Windows runners, x64, other .NET versions.
+RESULT(0): both closes observed, the second made by mscordbi. On 2026-11-28 also on both Windows runners, x64 and arm64,
+40 sessions each, at `6b39d13` (CI run 46128837183): RESULT(1) on both. Read in dotnet/runtime `release/10.0` and `main`.
+Not run: other .NET versions.
 
 ## Why
 
@@ -90,6 +91,22 @@ target ([`119-detach-closes-a-handle-target.cs`](../119-detach-closes-a-handle-t
 
 The record is [`119-detach-closes-a-handle/omega-windows.json`](119-detach-closes-a-handle/).
 
+### On the runners (2026-11-28)
+
+Probe 119 at `6b39d13` on GitHub's two Windows runners (CI run 46128837183), 40 sessions each:
+
+| Outcome | Windows x64 (Windows 10.0.26100) | Windows arm64 (Windows 11 26200) |
+|---|---|---|
+| exactly one new handle invalid, the one with the debugger's handle's value | **13** | **31** |
+| a new handle invalid with another value | 0 | 0 |
+| no new handle invalid | 27 | 9 |
+| the first new event took the value | 3 | 28 |
+| DrHook's anomalies | 0 | 0 |
+
+x64 has the double close too. It loses a handle less often here because its new events took the freed value less
+often: the first of them took it in 3 sessions, against 28 on arm64. How Windows chooses a handle value was not read.
+The records are `119-detach-closes-a-handle/runner-windows-x64.json` and `runner-windows-arm64.json`.
+
 ## Who makes each close: observed in a handle trace (2026-11-28)
 
 Probe 119 sees that a handle is lost, but not who closes it.
@@ -149,7 +166,7 @@ The records are `119-detach-closes-a-handle/omega-windows-trace.json` (the sessi
 
 ## Not established
 
-- **The runners, x64, and other .NET versions.** Only omega-windows, 10.0.15, has been measured.
+- **Other .NET versions.** Only 10.0.15 has been measured.
 - **Whether `main` of dotnet/runtime has it in practice.** Its code is the same, read 2026-11-28; no build of `main` was
   run.
 - **Whether an upstream fix is simple.** mscordbi could read the target's field before it closes, since the target's
@@ -172,6 +189,6 @@ nothing, a build of `main`, and trying the fix.
 ## Next
 
 1. Report it to dotnet/runtime, with probe 119 as the reproduction and the trace's stacks as the evidence.
-2. Run probe 119 on both Windows runners, x64 included (`drhook-probe.yml`, 2026-11-28).
+2. ~~Run probe 119 on both Windows runners, x64 included.~~ Done 2026-11-28 (Results, above).
 3. Take it to ADR-016. "Attaching to a running program: detach and leave it running" (6.1) is not safe on Windows for a
    target that makes handles as the debugger leaves. The platform gate and the MCP tools' descriptions should say so.

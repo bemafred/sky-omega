@@ -1324,6 +1324,9 @@ not the default.
     not hold the target.
   - The DrHook suites pass at the change on all three machines. At a mutation with the old teardown, the borrowed flood
     test and both `PauseDisposeTest` variants fail.
+  - *On the runners, 2026-11-28* (`6b39d13`). Probe 118 dropped no callback in 400 detaches on each Windows runner, x64
+    included; it found 0 held targets on x64 and 2 on arm64 (CI run 46128839394). The suites pass on all six runners
+    (CI run 46128873899).
   - A detach's `Dispose` on omega rose from about 65 to about 93 ms at the median. The old teardown found the target
     held at the dropped callback, so its `Stop` returned at once. On omega-windows it fell, from 88 to 63 ms.
 - *What holds it, read and measured 2026-11-24* (findings 118 and
@@ -1425,7 +1428,8 @@ not the default.
   debugger's process dies while attached (finding 119).
 - What holds a Windows target after a detach (6.6). Measured 2026-11-24 on omega-windows (findings 118 and 119): not the
   dropped callback, but a handle mscordbi closes in the target at every detach. mscordbi's close was observed in a handle
-  trace on 2026-11-28 (finding 119). Not on the runners or x64.
+  trace on 2026-11-28 (finding 119). On both Windows runners on 2026-11-28: probe 119 lost the handle in 13 of 40
+  detaches on x64 and in 31 of 40 on arm64 (CI run 46128837183).
 - A worker's own start-up time (6.7). Measured 2026-11-21 on omega, omega-ubuntu and omega-windows
   ([finding 113](../../../poc/drhook-engine/findings/113-worker-startup.md)); not on x64 or the runners.
 - What a worker's copy of the build costs (6.7's design, above). Measured 2026-11-21 on omega, omega-ubuntu and
