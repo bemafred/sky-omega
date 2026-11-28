@@ -1287,6 +1287,10 @@ not the default.
       default, kill on exit, holds, which is why the target died with its worker, 40 of 40 (finding 106).
     - The documented call acts on the calling thread's debug object, here mscordbi's Win32 event thread's, so the worker
       cannot make it for mscordbi.
+    - *Read 2026-11-28* (finding 119). Kill on exit is not the only way. The target's runtime waits on the handle to the
+      debugger's process that mscordbi put into it. When that handle is signalled, because the debugger's process died
+      while attached, the target ends itself (`DebuggerRCThread::MainLoop`, `EEPOLICY_HANDLE_FATAL_ERROR(0)`). So even
+      kill on exit turned off would not keep a borrowed Windows target alive through its worker's loss. Not measured.
   - A target running when its worker dies (finding 106, next 3).
 
 **6.6 — No callback is left un-continued at a detach.**
@@ -1330,6 +1334,11 @@ not the default.
     (`CordbProcess::Neuter` → `LocalEventChannel::Delete` → `RemoteHANDLE::CloseInRemoteProcess`).
   - A handle the target made in between is lost: 30 of 40 detaches in probe 119. The held targets, writes failing with
     "the handle is invalid", and "Internal CLR error" are its effects (finding 118).
+  - *Observed 2026-11-28* in a handle trace (Windows Performance Recorder's Handle profile, probe 119 traced, 20
+    sessions). In all 15 that lost a handle, the target's runtime made the first close
+    (`coreclr!Debugger::HandleIPCEvent`). The debugger's thread made the second, on the target's new handle
+    (`ntdll!NtDuplicateObject` ← `mscordbi!LocalEventChannel::Delete` ← `CordbProcess::Neuter` ←
+    `CordbProcess::Detach`), 32 to 93 ms later.
   - It is mscordbi's: both closes happen inside `Detach` and the target's runtime, out of reach of any ICorDebug call.
     Reporting it upstream, and what the platform gate says, are open.
 
@@ -1405,9 +1414,11 @@ not the default.
   ([finding 117](../../../poc/drhook-engine/findings/117-ctrl-break.md)); not on x64 or the runners. Built the same day;
   its tests passed on omega-windows and on both Windows runners, x64 included (CI run 45028119039).
 - A target running when its worker dies, and `DebugSetProcessKillOnExit` (6.5). Read 2026-11-24: mscordbi never passes its
-  `FALSE` on, so kill on exit holds (finding 118).
+  `FALSE` on, so kill on exit holds (finding 118). Read 2026-11-28: the target's runtime also ends the target when the
+  debugger's process dies while attached (finding 119).
 - What holds a Windows target after a detach (6.6). Measured 2026-11-24 on omega-windows (findings 118 and 119): not the
-  dropped callback, but a handle mscordbi closes in the target at every detach; not on the runners or x64.
+  dropped callback, but a handle mscordbi closes in the target at every detach. mscordbi's close was observed in a handle
+  trace on 2026-11-28 (finding 119). Not on the runners or x64.
 - A worker's own start-up time (6.7). Measured 2026-11-21 on omega, omega-ubuntu and omega-windows
   ([finding 113](../../../poc/drhook-engine/findings/113-worker-startup.md)); not on x64 or the runners.
 - What a worker's copy of the build costs (6.7's design, above). Measured 2026-11-21 on omega, omega-ubuntu and
