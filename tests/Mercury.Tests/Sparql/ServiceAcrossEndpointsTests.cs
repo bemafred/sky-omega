@@ -2,11 +2,11 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System.Net;
-using System.Net.Sockets;
 using System.Text.Json;
 using SkyOmega.Mercury.Runtime;
 using SkyOmega.Mercury.Sparql.Protocol;
 using SkyOmega.Mercury.Storage;
+using SkyOmega.Mercury.Tests.Fixtures;
 using Xunit;
 
 namespace SkyOmega.Mercury.Tests.Sparql;
@@ -42,11 +42,10 @@ public sealed class ServiceAcrossEndpointsTests : IDisposable
     public async Task AQueryToOneEndpoint_ReadsAnothersStoreWithService()
     {
         var ct = TestContext.Current.CancellationToken;
-        int sharedPort = FreePort(), localPort = FreePort();
-        using var shared = new SparqlHttpServer(() => _shared, $"http://localhost:{sharedPort}/");
-        using var local = new SparqlHttpServer(() => _local, $"http://localhost:{localPort}/");
-        shared.Start();
-        local.Start();
+        using var shared = FreePort.Start(port => new SparqlHttpServer(() => _shared, $"http://localhost:{port}/"),
+            server => server.Start(), out var sharedPort);
+        using var local = FreePort.Start(port => new SparqlHttpServer(() => _local, $"http://localhost:{port}/"),
+            server => server.Start(), out var localPort);
         using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
         var query = "PREFIX ex: <http://ex/> SELECT ?here ?there WHERE { ?s ex:local ?here . " +
                     $"SERVICE <http://localhost:{sharedPort}/sparql> {{ ?s ex:shared ?there }} }}";
@@ -62,14 +61,5 @@ public sealed class ServiceAcrossEndpointsTests : IDisposable
         Assert.Equal("sv", row.GetProperty("there").GetProperty("xml:lang").GetString());
         await local.StopAsync();
         await shared.StopAsync();
-    }
-
-    private static int FreePort()
-    {
-        var listener = new TcpListener(IPAddress.Loopback, 0);
-        listener.Start();
-        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
-        listener.Stop();
-        return port;
     }
 }

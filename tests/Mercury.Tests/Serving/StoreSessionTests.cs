@@ -2,12 +2,12 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System.Net;
-using System.Net.Sockets;
 using System.Text;
 using SkyOmega.Mercury.Abstractions;
 using SkyOmega.Mercury.Runtime;
 using SkyOmega.Mercury.Serving;
 using SkyOmega.Mercury.Storage;
+using SkyOmega.Mercury.Tests.Fixtures;
 using Xunit;
 
 namespace SkyOmega.Mercury.Tests.Serving;
@@ -144,9 +144,8 @@ public sealed class StoreSessionTests : IDisposable
         var ct = TestContext.Current.CancellationToken;
         using var session = Open();
         SparqlEngine.Update(session.Pool.Active, "INSERT DATA { <urn:s> <urn:p> \"from the session\" }", ct);
-        int port = FreePort();
-        using var server = session.CreateHttpServer(["localhost"], port, enableUpdates);
-        server.Start();
+        using var server = FreePort.Start(port => session.CreateHttpServer(["localhost"], port, enableUpdates),
+            server => server.Start(), out var port);
         try
         {
             using var http = new HttpClient();
@@ -162,14 +161,5 @@ public sealed class StoreSessionTests : IDisposable
         {
             await server.StopAsync();
         }
-    }
-
-    private static int FreePort()
-    {
-        var listener = new TcpListener(IPAddress.Loopback, 0);
-        listener.Start();
-        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
-        listener.Stop();
-        return port;
     }
 }

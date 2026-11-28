@@ -2,11 +2,11 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System.Net;
-using System.Net.Sockets;
 using SkyOmega.Mercury.Runtime;
 using SkyOmega.Mercury.Runtime.IO;
 using SkyOmega.Mercury.Sparql.Protocol;
 using SkyOmega.Mercury.Storage;
+using SkyOmega.Mercury.Tests.Fixtures;
 using Xunit;
 
 namespace SkyOmega.Mercury.Tests.Sparql;
@@ -25,7 +25,6 @@ public sealed class SparqlHttpServerAddressesTests : IDisposable
 {
     private readonly TempPath _dir;
     private readonly QuadStore _store;
-    private readonly int _port = FreePort();
 
     public SparqlHttpServerAddressesTests()
     {
@@ -41,19 +40,19 @@ public sealed class SparqlHttpServerAddressesTests : IDisposable
         _dir.Cleanup();
     }
 
-    private string[] BothAddresses => [$"http://localhost:{_port}/", $"http://127.0.0.1:{_port}/"];
+    private static string[] BothAddresses(int port) => [$"http://localhost:{port}/", $"http://127.0.0.1:{port}/"];
 
     [Fact]
     public async Task OneServer_AnswersOnEveryAddress()
     {
         var ct = TestContext.Current.CancellationToken;
-        using var server = new SparqlHttpServer(() => _store, BothAddresses);
-        StartOrSkipWithoutAReservation(server);
+        using var server = FreePort.Start(port => new SparqlHttpServer(() => _store, BothAddresses(port)),
+            StartOrSkipWithoutAReservation, out var port);
         try
         {
             using var http = new HttpClient();
             var query = Uri.EscapeDataString("SELECT ?o WHERE { <urn:s> <urn:p> ?o }");
-            foreach (var address in BothAddresses)
+            foreach (var address in BothAddresses(port))
             {
                 var response = await http.GetAsync($"{address}sparql?query={query}", ct);
                 Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -70,12 +69,12 @@ public sealed class SparqlHttpServerAddressesTests : IDisposable
     public async Task TheServiceDescription_NamesTheEndpointTheRequestReached()
     {
         var ct = TestContext.Current.CancellationToken;
-        using var server = new SparqlHttpServer(() => _store, BothAddresses);
-        StartOrSkipWithoutAReservation(server);
+        using var server = FreePort.Start(port => new SparqlHttpServer(() => _store, BothAddresses(port)),
+            StartOrSkipWithoutAReservation, out var port);
         try
         {
             using var http = new HttpClient();
-            foreach (var address in BothAddresses)
+            foreach (var address in BothAddresses(port))
             {
                 var description = await http.GetStringAsync($"{address}sparql", ct);
                 Assert.Contains($"<{address}sparql> a sd:Service", description);
@@ -91,14 +90,15 @@ public sealed class SparqlHttpServerAddressesTests : IDisposable
     public async Task AnAddressGivenTwice_IsListenedOnOnce()
     {
         var ct = TestContext.Current.CancellationToken;
-        using var server = new SparqlHttpServer(() => _store, [$"http://localhost:{_port}/", $"http://localhost:{_port}"]);
+        using var server = FreePort.Start(
+            port => new SparqlHttpServer(() => _store, [$"http://localhost:{port}/", $"http://localhost:{port}"]),
+            server => server.Start(), out var port);
 
-        Assert.Equal([$"http://localhost:{_port}/"], server.BaseUris);
-        server.Start();
+        Assert.Equal([$"http://localhost:{port}/"], server.BaseUris);
         try
         {
             using var http = new HttpClient();
-            Assert.Equal(HttpStatusCode.OK, (await http.GetAsync($"http://localhost:{_port}/sparql", ct)).StatusCode);
+            Assert.Equal(HttpStatusCode.OK, (await http.GetAsync($"http://localhost:{port}/sparql", ct)).StatusCode);
         }
         finally
         {
@@ -121,13 +121,17 @@ public sealed class SparqlHttpServerAddressesTests : IDisposable
         if (OperatingSystem.IsWindows())
             Assert.Skip("http.sys registers an address that is not the machine's without binding it.");
         var ct = TestContext.Current.CancellationToken;
-        var server = new SparqlHttpServer(() => _store, [$"http://localhost:{_port}/", $"http://192.0.2.1:{_port}/"]);
+        // A localhost port another took first would refuse the start too, and the request below could reach the taker:
+        // the start is made again on another port while its refusal says that.
+        SparqlHttpServer? server = null;
+        Assert.Throws<HttpListenerException>(() => FreePort.Start(
+            port => server = new SparqlHttpServer(
+                () => _store, [$"http://localhost:{port}/", $"http://192.0.2.1:{port}/"]),
+            made => made.Start(), out _));
 
-        Assert.Throws<HttpListenerException>(server.Start);
-
-        Assert.False(server.IsListening);
+        Assert.False(server!.IsListening);
         using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
-        await Assert.ThrowsAnyAsync<HttpRequestException>(() => http.GetAsync($"http://localhost:{_port}/sparql", ct));
+        await Assert.ThrowsAnyAsync<HttpRequestException>(() => http.GetAsync($"{server.BaseUris[0]}sparql", ct));
         // A server whose start failed is stopped and disposed without a further exception, so the start's is the one
         // its process reports.
         await server.StopAsync();
@@ -165,14 +169,5 @@ public sealed class SparqlHttpServerAddressesTests : IDisposable
         {
             Assert.Skip("A listener on 127.0.0.1 needs a URL reservation or an administrator on Windows.");
         }
-    }
-
-    private static int FreePort()
-    {
-        var listener = new TcpListener(IPAddress.Loopback, 0);
-        listener.Start();
-        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
-        listener.Stop();
-        return port;
     }
 }

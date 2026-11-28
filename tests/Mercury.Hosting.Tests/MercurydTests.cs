@@ -1,6 +1,7 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using System.Globalization;
 using System.IO.Pipes;
 using System.Net;
 using System.Net.Sockets;
@@ -27,7 +28,11 @@ public sealed class MercurydTests : IDisposable
 {
     private readonly TempPath _dir;
     private readonly string _store;
-    private readonly int _port = FreePort();
+    /// <summary>
+    /// The test's port: the one its mercuryd serves on, once <see cref="ServeTheStore"/> has started it; until then,
+    /// one the system named, for a start that fails.
+    /// </summary>
+    private int _port = FreePort.Name();
 
     public MercurydTests()
     {
@@ -38,8 +43,13 @@ public sealed class MercurydTests : IDisposable
 
     public void Dispose() => _dir.Cleanup();
 
-    private Mercuryd StartOnTheStore(params string[] more) =>
-        Mercuryd.Start(["-d", _store, "-p", _port.ToString(), .. more]);
+    /// <summary>mercuryd on the test's store, with <paramref name="more"/>, ready, on a free port, which is the test's
+    /// port from then on.</summary>
+    private async Task<Mercuryd> ServeTheStore(CancellationToken ct, params string[] more)
+    {
+        (var mercuryd, _port) = await Mercuryd.Serve(port => ["-d", _store, "-p", port.ToString(), .. more], ct);
+        return mercuryd;
+    }
 
     [Theory]
     [InlineData(false, HttpStatusCode.OK)]
@@ -47,8 +57,7 @@ public sealed class MercurydTests : IDisposable
     public async Task ItServesQueriesAndUpdatesOverHttp_AndNoUpdateWhenReadOnly(bool readOnly, HttpStatusCode updateStatus)
     {
         var ct = TestContext.Current.CancellationToken;
-        using var mercuryd = readOnly ? StartOnTheStore("--read-only") : StartOnTheStore();
-        await mercuryd.WhenReady(ct);
+        using var mercuryd = readOnly ? await ServeTheStore(ct, "--read-only") : await ServeTheStore(ct);
         using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
 
         var update = await http.PostAsync($"http://localhost:{_port}/sparql/update",
@@ -66,8 +75,7 @@ public sealed class MercurydTests : IDisposable
         Assert.SkipWhen(OperatingSystem.IsWindows(),
             "A listener on 127.0.0.1 needs a URL reservation or an administrator on Windows (ADR-065 Step 9).");
         var ct = TestContext.Current.CancellationToken;
-        using var mercuryd = StartOnTheStore("--listen", "localhost", "--listen", "127.0.0.1");
-        await mercuryd.WhenReady(ct);
+        using var mercuryd = await ServeTheStore(ct, "--listen", "localhost", "--listen", "127.0.0.1");
         using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
 
         Assert.Equal(HttpStatusCode.OK, (await http.GetAsync($"http://localhost:{_port}/sparql", ct)).StatusCode);
@@ -78,8 +86,7 @@ public sealed class MercurydTests : IDisposable
     public async Task ItIsAttachedToOverTheStoresSocket()
     {
         var ct = TestContext.Current.CancellationToken;
-        using var mercuryd = StartOnTheStore();
-        await mercuryd.WhenReady(ct);
+        using var mercuryd = await ServeTheStore(ct);
 
         var (welcome, store) = await AttachAndAskTheStore(ct);
 
@@ -97,8 +104,7 @@ public sealed class MercurydTests : IDisposable
             "SIGINT is ignored in this test run, as in a command a non-interactive shell starts in the background, and " +
             "mercuryd inherits it ignored: SIGINT is not a stop signal for it then.");
         var ct = TestContext.Current.CancellationToken;
-        using var mercuryd = StartOnTheStore();
-        await mercuryd.WhenReady(ct);
+        using var mercuryd = await ServeTheStore(ct);
         using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
         var update = await http.PostAsync($"http://localhost:{_port}/sparql/update",
             new StringContent("INSERT DATA { <urn:s> <urn:p> \"kept\" }", Encoding.UTF8, "application/sparql-update"), ct);
@@ -113,11 +119,14 @@ public sealed class MercurydTests : IDisposable
         Assert.Equal(1, reopened.Pool.Active.GetStatistics().QuadCount);
     }
 
-    /// <summary>The ways a start fails, each said on standard error with the part that failed.</summary>
+    /// <summary>
+    /// The ways a start fails, each said on standard error with the part that failed: what is said, of the test's port.
+    /// A port in use is said in Mercury's words, which are the same on every platform.
+    /// </summary>
     public static TheoryData<string, string> FailedStarts => new()
     {
-        { "the port is in use", "Error: The HTTP endpoint cannot listen on" },
-        { "the address is not the machine's", "Error: The HTTP endpoint cannot listen on http://192.0.2.1:" },
+        { "the port is in use", "Error: The HTTP endpoint cannot listen on http://localhost:{0}/sparql: The port is in use." },
+        { "the address is not the machine's", "Error: The HTTP endpoint cannot listen on http://192.0.2.1:{0}/sparql: " },
         { "a file is where the store goes", "Error: The store cannot be opened:" },
     };
 
@@ -129,7 +138,9 @@ public sealed class MercurydTests : IDisposable
         Assert.SkipWhen(failure == "the address is not the machine's" && OperatingSystem.IsWindows(),
             "http.sys registers an address that is not the machine's without binding it.");
         var ct = TestContext.Current.CancellationToken;
-        using var holder = new HttpListener();
+        // A socket holds the port from when the system names it, on the first address localhost resolves to: the one
+        // the listener of Linux and macOS binds. On Windows a socket on any address holds the port from http.sys.
+        using var holder = new TcpListener(Dns.GetHostAddresses("localhost")[0], 0);
         string[] args = failure switch
         {
             "the address is not the machine's" => ["--listen", "192.0.2.1"],
@@ -137,16 +148,16 @@ public sealed class MercurydTests : IDisposable
         };
         if (failure == "the port is in use")
         {
-            holder.Prefixes.Add($"http://localhost:{_port}/");
             holder.Start();
+            _port = ((IPEndPoint)holder.LocalEndpoint).Port;
         }
         if (failure == "a file is where the store goes")
             File.WriteAllText(_store, "not a store");
 
-        using var mercuryd = StartOnTheStore(args);
+        using var mercuryd = Mercuryd.Start(["-d", _store, "-p", _port.ToString(), .. args]);
 
         Assert.Equal(1, await mercuryd.Ended(ct));
-        Assert.Contains(said, mercuryd.Errors);
+        Assert.Contains(string.Format(CultureInfo.InvariantCulture, said, _port), mercuryd.Errors);
         if (failure != "a file is where the store goes")
         {
             var log = LogLines();
@@ -159,10 +170,9 @@ public sealed class MercurydTests : IDisposable
     public async Task ASecondProcessOnTheStore_IsRefused_AndTheFirstServesOn()
     {
         var ct = TestContext.Current.CancellationToken;
-        using var first = StartOnTheStore();
-        await first.WhenReady(ct);
+        using var first = await ServeTheStore(ct);
 
-        using var second = Mercuryd.Start("-d", _store, "-p", FreePort().ToString());
+        using var second = Mercuryd.Start("-d", _store, "-p", FreePort.Name().ToString());
 
         Assert.Equal(1, await second.Ended(ct));
         Assert.Contains("A store is served by one process.", second.Errors);
@@ -177,9 +187,8 @@ public sealed class MercurydTests : IDisposable
     {
         var ct = TestContext.Current.CancellationToken;
         using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
-        using (var killed = StartOnTheStore())
+        using (var killed = await ServeTheStore(ct))
         {
-            await killed.WhenReady(ct);
             var update = await http.PostAsync($"http://localhost:{_port}/sparql/update",
                 new StringContent("INSERT DATA { <urn:s> <urn:p> \"before the kill\" }", Encoding.UTF8, "application/sparql-update"), ct);
             Assert.Equal(HttpStatusCode.OK, update.StatusCode);
@@ -188,8 +197,7 @@ public sealed class MercurydTests : IDisposable
         }
 
         // On Linux and macOS the killed process left its socket file in the store's directory.
-        using var next = StartOnTheStore();
-        await next.WhenReady(ct);
+        using var next = await ServeTheStore(ct);
 
         var answer = await http.GetStringAsync(
             $"http://localhost:{_port}/sparql?query={Uri.EscapeDataString("SELECT ?o WHERE { ?s ?p ?o }")}", ct);
@@ -202,14 +210,12 @@ public sealed class MercurydTests : IDisposable
     public async Task TheProfileApplies_WhenTheStoreIsMade_AndAStoreThatExistsKeepsItsOwn()
     {
         var ct = TestContext.Current.CancellationToken;
-        using (var made = StartOnTheStore("--profile", "Graph"))
+        using (var made = await ServeTheStore(ct, "--profile", "Graph"))
         {
-            await made.WhenReady(ct);
             Assert.Contains("  Profile: Graph", made.Errors);
         }
 
-        using var again = StartOnTheStore("--profile", "Reference");
-        await again.WhenReady(ct);
+        using var again = await ServeTheStore(ct, "--profile", "Reference");
 
         Assert.Contains("  Profile: Graph", again.Errors);
     }
@@ -250,14 +256,5 @@ public sealed class MercurydTests : IDisposable
             text.Append(one[0]);
         }
         return text.ToString();
-    }
-
-    private static int FreePort()
-    {
-        var listener = new TcpListener(IPAddress.Loopback, 0);
-        listener.Start();
-        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
-        listener.Stop();
-        return port;
     }
 }

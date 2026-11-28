@@ -1,0 +1,12 @@
+macOS 26.4.1, Arm64, .NET 10.0.15
+localhost resolves to: ::1, 127.0.0.1
+a start on port 0: HttpListenerException ErrorCode 400, NativeErrorCode 400, HResult 0x80004005: Invalid port in prefix.
+taken by a TCP listener on 127.0.0.1: started
+taken by a TCP listener on [::1]: HttpListenerException ErrorCode 48, NativeErrorCode 48, HResult 0x80004005: Address already in use
+taken by a TCP listener on [::], dual mode: started
+taken by a TCP listener on 0.0.0.0: started
+taken by a connection's own end on 127.0.0.1: started
+taken by an HttpListener on localhost: HttpListenerException ErrorCode 400, NativeErrorCode 400, HResult 0x80004005: Failed to listen on prefix 'http://localhost:64470/' because it conflicts with an existing registration on the machine.
+taken by an HttpListener on 127.0.0.1: started
+a listener whose start is refused: ObjectDisposedException: Cannot access a disposed object.
+Object name: 'System.Net.HttpListener'.

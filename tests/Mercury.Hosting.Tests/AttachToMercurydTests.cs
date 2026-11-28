@@ -1,8 +1,6 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
-using System.Net;
-using System.Net.Sockets;
 using SkyOmega.Mercury.Runtime;
 using SkyOmega.Mercury.Runtime.IO;
 using Xunit;
@@ -78,11 +76,9 @@ public sealed class AttachToMercurydTests : IDisposable
         bool byName = form.Contains("<name>");
         Assert.SkipWhen(byName && OperatingSystem.IsWindows(), "The stores' directory on Windows is the user's.");
         var ct = TestContext.Current.CancellationToken;
-        var port = FreePort();
-        using var mercuryd = byName
-            ? Mercuryd.Start(_environment, "--store", _name, "-p", port)
-            : Mercuryd.Start(_environment, "-d", _store, "-p", port);
-        await mercuryd.WhenReady(ct);
+        using var mercuryd = (await Mercuryd.Serve(_environment, port => byName
+            ? ["--store", _name, "-p", port.ToString()]
+            : ["-d", _store, "-p", port.ToString()], ct)).Mercuryd;
         var store = byName ? StoreNamed : _store;
 
         using var mercury = MercuryCli.Start(_environment,
@@ -102,8 +98,8 @@ public sealed class AttachToMercurydTests : IDisposable
     public async Task APipesName_IsAttachedToAsBefore_MercurydsAmongThem()
     {
         var ct = TestContext.Current.CancellationToken;
-        using var mercuryd = Mercuryd.Start(_environment, "-d", _store, "-p", FreePort());
-        await mercuryd.WhenReady(ct);
+        using var mercuryd =
+            (await Mercuryd.Serve(_environment, port => ["-d", _store, "-p", port.ToString()], ct)).Mercuryd;
         var pipe = MercuryPorts.DaemonPipeName(_store);
 
         using var mercury = MercuryCli.Start(_environment, "--attach", pipe);
@@ -159,8 +155,8 @@ public sealed class AttachToMercurydTests : IDisposable
     {
         Assert.SkipWhen(OperatingSystem.IsWindows(), "Windows stops a service with its stop request (ADR-065 Step 9).");
         var ct = TestContext.Current.CancellationToken;
-        using var mercuryd = Mercuryd.Start(_environment, "-d", _store, "-p", FreePort());
-        await mercuryd.WhenReady(ct);
+        using var mercuryd =
+            (await Mercuryd.Serve(_environment, port => ["-d", _store, "-p", port.ToString()], ct)).Mercuryd;
         using var mercury = MercuryCli.Start(_environment, "--attach", "-d", _store);
         await mercury.WhenSaid("Connected to mercuryd", ct);
 
@@ -170,14 +166,5 @@ public sealed class AttachToMercurydTests : IDisposable
         mercury.EndInput();
         Assert.Equal(1, await mercury.Ended(ct));
         Assert.Contains("Error: ", mercury.Output.Split(Environment.NewLine)[^1]);
-    }
-
-    private static string FreePort()
-    {
-        var listener = new TcpListener(IPAddress.Loopback, 0);
-        listener.Start();
-        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
-        listener.Stop();
-        return port.ToString();
     }
 }

@@ -2,11 +2,11 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System.Net;
-using System.Net.Sockets;
 using SkyOmega.Mercury.Abstractions;
 using SkyOmega.Mercury.Runtime;
 using SkyOmega.Mercury.Sparql.Protocol;
 using SkyOmega.Mercury.Storage;
+using SkyOmega.Mercury.Tests.Fixtures;
 using Xunit;
 
 namespace SkyOmega.Mercury.Tests.Sparql;
@@ -409,9 +409,8 @@ public sealed class ServiceForwardProgressTests : IDisposable
         _closeLast.Add(pool);
         var store = pool.EnsureActive("primary");
         store.AddCurrent("<urn:s>", "<urn:p>", "\"held\"");
-        var port = FreePort();
-        var server = new SparqlHttpServer(() => pool.Active, $"http://localhost:{port}/");
-        server.Start();
+        var server = FreePort.Start(port => new SparqlHttpServer(() => pool.Active, $"http://localhost:{port}/"),
+            server => server.Start(), out var port);
         _closeLast.Add(server);
         using var gate = new GatedSparqlEndpoint();
         var query = Task.Run(() => SparqlEngine.Query(store,
@@ -445,10 +444,9 @@ public sealed class ServiceForwardProgressTests : IDisposable
         var ct = TestContext.Current.CancellationToken;
         var store = NewStore("h");
         store.AddCurrent("<urn:s>", "<urn:p>", "\"held\"");
-        var port = FreePort();
+        var server = FreePort.Start(port => new SparqlHttpServer(() => store, $"http://localhost:{port}/"),
+            server => server.Start(), out var port);
         var self = $"http://localhost:{port}/sparql";
-        var server = new SparqlHttpServer(() => store, $"http://localhost:{port}/");
-        server.Start();
         _closeLast.Add(server);
         using var gate = new GatedSparqlEndpoint();
         using var http = new HttpClient();
@@ -619,9 +617,8 @@ public sealed class ServiceForwardProgressTests : IDisposable
     /// <summary>Serves <paramref name="store"/> over HTTP until the test ends; its SPARQL endpoint.</summary>
     private string Serve(QuadStore store)
     {
-        var port = FreePort();
-        var server = new SparqlHttpServer(() => store, $"http://localhost:{port}/");
-        server.Start();
+        var server = FreePort.Start(port => new SparqlHttpServer(() => store, $"http://localhost:{port}/"),
+            server => server.Start(), out var port);
         _closeLast.Add(server);
         return $"http://localhost:{port}/sparql";
     }
@@ -632,14 +629,5 @@ public sealed class ServiceForwardProgressTests : IDisposable
     {
         var all = Task.WhenAll(started.Where(task => task is not null).Select(task => (Task)task!));
         await Task.WhenAny(all, Task.Delay(Unwound));
-    }
-
-    private static int FreePort()
-    {
-        var listener = new TcpListener(IPAddress.Loopback, 0);
-        listener.Start();
-        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
-        listener.Stop();
-        return port;
     }
 }

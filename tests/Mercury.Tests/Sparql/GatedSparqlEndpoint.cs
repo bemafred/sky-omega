@@ -3,8 +3,8 @@
 
 using System.Collections.Concurrent;
 using System.Net;
-using System.Net.Sockets;
 using System.Text;
+using SkyOmega.Mercury.Tests.Fixtures;
 
 namespace SkyOmega.Mercury.Tests.Sparql;
 
@@ -18,17 +18,20 @@ namespace SkyOmega.Mercury.Tests.Sparql;
 /// </remarks>
 internal sealed class GatedSparqlEndpoint : IDisposable
 {
-    private readonly HttpListener _listener = new();
+    private readonly HttpListener _listener;
     private readonly TaskCompletionSource _asked = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TaskCompletionSource _opened = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly ConcurrentBag<Task> _answering = [];
 
     public GatedSparqlEndpoint()
     {
-        var port = FreePort();
+        _listener = FreePort.Start(port =>
+        {
+            var listener = new HttpListener();
+            listener.Prefixes.Add($"http://localhost:{port}/");
+            return listener;
+        }, listener => listener.Start(), out var port);
         Url = $"http://localhost:{port}/sparql";
-        _listener.Prefixes.Add($"http://localhost:{port}/");
-        _listener.Start();
         _ = AnswerAsync();
     }
 
@@ -87,14 +90,5 @@ internal sealed class GatedSparqlEndpoint : IDisposable
         {
             // The query that asked has gone (its HTTP client gave up), or the endpoint is closing.
         }
-    }
-
-    private static int FreePort()
-    {
-        var listener = new TcpListener(IPAddress.Loopback, 0);
-        listener.Start();
-        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
-        listener.Stop();
-        return port;
     }
 }
