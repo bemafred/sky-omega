@@ -54,6 +54,21 @@ public sealed class IdleTarget
         }
     }
 
+    // ADR-016 6.6: a sustained flood of thread events, so that a detach always comes while mscordbi dispatches one
+    // (probe 102's flood). It starts and joins one empty thread after another for 2 s, then returns. The integration
+    // tests set a line breakpoint on the TEST_FLOODING_HERE marker to know the flood has begun.
+    [TestMethod]
+    public void RunThreadFlood()
+    {
+        var flooding = System.Diagnostics.Stopwatch.StartNew();
+        while (flooding.Elapsed < TimeSpan.FromSeconds(2)) // TEST_FLOODING_HERE
+        {
+            Thread t = new(static () => { }) { IsBackground = true };
+            t.Start();
+            t.Join();
+        }
+    }
+
     // ADR-008 Increment 4c (probe 43 promotion): generates STOPPING (Exception) mscordbi
     // callbacks via throw/catch in a tight loop. Pairs with ConcurrentPauseStopTest which
     // attaches during this method's execution and tests substrate's pump serialization of

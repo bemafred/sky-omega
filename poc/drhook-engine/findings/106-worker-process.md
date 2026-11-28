@@ -158,7 +158,8 @@ Something observed the target in every case, so no entry needed `unknown`.
 - Why omega-ubuntu lost its debugger less often than zbook and macbook.
 - A target that is running, not stopped, when its worker dies. Probe 106 holds every target at a stop first.
 - Why a held Unix target cannot be attached again. The runtime may still consider a debugger attached; not read.
-- Whether mscordbi on Windows leaves kill-on-exit at its default.
+- Whether mscordbi on Windows leaves kill-on-exit at its default. *Read 2026-11-24 ([finding 118](118-held-after-detach.md)):
+  it does. It asks for `DebugSetProcessKillOnExit(FALSE)`, but its Windows pipeline only stores the value.*
 - DrHook's real shape, with `drhook-mcp` as the supervisor. The supervisor here is a probe.
 
 ## Next (proposed, not decided)

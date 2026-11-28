@@ -2401,11 +2401,18 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
     /// (CORDBG_E_PROCESS_NOT_SYNCHRONIZED); either failure leaks the CordbProcess and lets a later target exit
     /// SEGV the host. So: synchronize (Quiesce — first, because Dispose can be reached with the target running and
     /// breakpoint deactivation belongs on a synchronized process), deactivate breakpoints, then Detach — mscordbi
-    /// implicit-resumes the target on Detach, so it keeps running un-debugged.</summary>
+    /// implicit-resumes the target on Detach, so it keeps running un-debugged.
+    ///
+    /// ADR-016 6.6: the callback pump still runs. Once the session's Stop has synchronized the target, the pump
+    /// continues the stop it is parked at and every callback that still comes before the detach
+    /// (<see cref="CallbackPump.ContinueUntilDetached"/>), and the caller disposes it only after the detach. So no
+    /// callback is left un-continued when the debugger leaves. Until 2026-11-24 the pump was disposed before the Stop,
+    /// and a busy target's callback in between was dropped in almost every detach (finding 102).</summary>
     private void DetachSynchronized()
     {
         AwaitAttachEventsQueued();
         Quiesce();
+        _pump.ContinueUntilDetached();
         ClearBreakpoints();
         Detach();
     }
@@ -2483,17 +2490,15 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
 
-        // Join the pump worker first (it drives controller.Continue); after this mscordbi still holds
-        // the target halted at its stop, released below by the explicit resume.
-        _pump.Dispose();
-
         if (IsDebuggerLost)
         {
             // DebuggerError: only ICorDebugProcess::GetID may be called, so the debugger cannot be detached and the
             // target cannot be resumed through it; nothing on mscordbi's objects is called or released (see Dispose),
             // and the session is rooted so the ComWrappers wrappers are never collected. The target is left as it is,
             // still attached to a debugger that has disabled its services; whether it runs on or stays held is not
-            // known. Not killed: the caller asked for it to keep running.
+            // known. Not killed: the caller asked for it to keep running. The pump makes no native call once the loss
+            // is recorded; it is joined here.
+            _pump.Dispose();
             lock (s_lostSessions) s_lostSessions.Add(this);
         }
         else
@@ -2504,7 +2509,10 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
                 if (targetDead)
                 {
                     // Target died between the stop and this call — nothing to leave running. Settle and Detach
-                    // so the CCW is released before _callback.Dispose frees it (finding 66 ordering).
+                    // so the CCW is released before _callback.Dispose frees it (finding 66 ordering). The pump is joined
+                    // first, as before ADR-016 6.6: with no Stop of the session's own outstanding, its Continue of a
+                    // stop it holds would send the gone target a request that waits for an answer (finding 105).
+                    _pump.Dispose();
                     Thread.Sleep(ExitWorkSettleMs);
                     Detach();
                 }
@@ -2528,6 +2536,10 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
                     // implicit-resumes the target on Detach, so it runs free un-debugged.
                     DetachSynchronized();
                 }
+
+                // Detached: mscordbi dispatches nothing more, so the pump can end (ADR-016 6.6). Joined before
+                // Terminate, since its worker drives controller.Continue.
+                _pump.Dispose();
 
                 int terminateHr = _cordbg.Terminate();
                 if (terminateHr < 0)
@@ -2562,7 +2574,9 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
             catch (DebuggerLostException)
             {
                 // The loss arrived during this teardown and a guarded step (ClearBreakpoints, Detach) refused:
-                // nothing more is called or released. Root the session so its wrappers are never collected.
+                // nothing more is called or released. Root the session so its wrappers are never collected. The pump
+                // makes no native call once the loss is recorded.
+                _pump.Dispose();
                 lock (s_lostSessions) s_lostSessions.Add(this);
             }
         }
@@ -2599,9 +2613,10 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
         // double-Terminate, double-Marshal.Release, or racing _breakpoints iteration.
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
 
-        // Stop our worker first: it drives controller.Continue, so it must be joined before
-        // we touch the controller for the quiescent detach.
-        _pump.Dispose();
+        // ADR-016 6.6: the callback pump runs until the debugger has detached. Its worker continues every callback that
+        // still comes once the session's Stop has synchronized the target (DetachSynchronized), and it is joined before
+        // Terminate. Until 2026-11-24 it was joined here, first, and a busy target's callback that came before the Stop
+        // was dropped without a Continue in almost every detach (finding 102).
 
         if (IsDebuggerLost)
         {
@@ -2610,7 +2625,9 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
             // terminating processes." So none of the native teardown (the else branch): no Stop, Continue, Detach or Terminate, no Release
             // of any pointer mscordbi handed us (IUnknown::Release is one of "all other methods"), and the callback
             // object mscordbi holds stays allocated. The session is rooted for the process's life so the ComWrappers
-            // wrappers are never collected (collection would Release).
+            // wrappers are never collected (collection would Release). The pump makes no native call once the loss is
+            // recorded; it is joined here.
+            _pump.Dispose();
             lock (s_lostSessions) s_lostSessions.Add(this);
 
             // An owned target is ended with the OS, as documented. A borrowed one is not ours to end and is left as it is.
@@ -2743,6 +2760,10 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
                     // budget. The KillSettleMs for OWNED above already covered 100 ms of this
                     // window; this is additive belt-and-braces for external-death scenarios that
                     // bypass that path.
+                    // The pump is joined first, as before ADR-016 6.6: with no Stop of the session's own outstanding,
+                    // its Continue of a stop it holds would send the gone target a request that waits for an answer
+                    // (finding 105).
+                    _pump.Dispose();
                     Thread.Sleep(ExitWorkSettleMs);
                     Detach();
                 }
@@ -2767,6 +2788,11 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
                     // branch above (finding 66).
                     DetachSynchronized();
                 }
+
+                // Detached (or detached first, above): mscordbi dispatches nothing more, so the pump can end (ADR-016
+                // 6.6). Joined before Terminate, since its worker drives controller.Continue.
+                _pump.Dispose();
+
                 int terminateHr = _cordbg.Terminate();
                 if (terminateHr < 0)
                 {
@@ -2800,7 +2826,9 @@ public sealed partial class DebugSession : IDisposable, IMemberResolver
             catch (DebuggerLostException)
             {
                 // The loss arrived during this teardown and a guarded step (ClearBreakpoints, Detach) refused:
-                // nothing more is called or released. Root the session so its wrappers are never collected.
+                // nothing more is called or released. Root the session so its wrappers are never collected. The pump
+                // makes no native call once the loss is recorded.
+                _pump.Dispose();
                 lock (s_lostSessions) s_lostSessions.Add(this);
             }
         }

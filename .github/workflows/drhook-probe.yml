@@ -11,8 +11,14 @@
 #                       handler, without one, or as a Generic Host, while attached and after the detach; SIGTERM on
 #                       Linux and macOS, CTRL+BREAK to the target's own process group on Windows. 20 sessions per
 #                       construction and read path in one process each, then a final attach.
-# Each runner uploads the probe's facts as JSON (probe 100: its output as text). Its own concurrency group, so a push
-# never cancels it and it never cancels a test run.
+#   118-held-after-detach      Step 6.6 (finding 118), Windows only: 400 borrowed detaches of a flooding target, 20
+#                       child processes of 20 sessions; whether a callback is dropped at the detach, and which targets
+#                       stay held after it, with each held target's threads, a dump and a fresh attach.
+#   119-detach-closes-a-handle Step 6.6 (finding 119), Windows only: 40 borrowed detaches, each of a fresh target that
+#                       makes 64 handles the moment the debugger has gone; whether one of them is closed by the detach,
+#                       the one with the value of the debugger's process handle mscordbi put into the target.
+# Each runner uploads the probe's facts as JSON (probe 100: its output as text). A Windows-only probe's step is skipped
+# on macOS and Linux. Its own concurrency group, so a push never cancels it and it never cancels a test run.
 name: DrHook probe
 
 on:
@@ -27,6 +33,8 @@ on:
           - 102-natural-end
           - 100-crash-boundary
           - 112-cancellation
+          - 118-held-after-detach
+          - 119-detach-closes-a-handle
 
 permissions:
   contents: read
@@ -63,7 +71,9 @@ jobs:
           dotnet-version: 10.0.x
 
       - name: Probe
-        if: inputs.probe != '100-crash-boundary'
+        if: >-
+          inputs.probe != '100-crash-boundary' && (runner.os == 'Windows' ||
+          (inputs.probe != '118-held-after-detach' && inputs.probe != '119-detach-closes-a-handle'))
         working-directory: poc/drhook-engine
         shell: bash
         run: dotnet run --no-cache "$PROBE-smoke.cs" --out "probe-$PROBE-$FILE.json"

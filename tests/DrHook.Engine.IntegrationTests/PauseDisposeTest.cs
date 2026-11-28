@@ -7,8 +7,10 @@
 // _pauseHandler (controller.Stop), publishes a Pause stop, parks at _resume.Take. If
 // the caller then Disposes WITHOUT consuming the stop (WaitForStop) and WITHOUT
 // Resuming, the substrate must:
-//   - Emit exactly 1 WorkerSilentBreak anomaly (honest signal: worker exited via
-//     _resume.Take catch when CompleteAdding fired)
+//   - Continue the Pause stop at the detach, and so emit no WorkerSilentBreak. Since ADR-016 6.6 (2026-11-24) the
+//     session synchronizes the target with its own Stop, then the pump continues the stop it is parked at and every
+//     callback still to come, and is closed only after the detach. Until then the pump was closed first: the parked
+//     worker's _resume.Take threw when CompleteAdding fired, and exactly 1 WorkerSilentBreak was this test's signal.
 //   - NOT crash
 //   - NOT emit WorkerException (would mean _pauseHandler / _resumeHandler threw)
 //
@@ -50,7 +52,7 @@ public sealed class PauseDisposeTest
     }
 
     [TestMethod]
-    public void AttachAndOwn_MtpTarget_PauseThenDisposeWithoutResume_WorkerSilentBreakOnly()
+    public void AttachAndOwn_MtpTarget_PauseThenDisposeWithoutResume_ThePauseIsContinuedAtTheDetach()
     {
         string targetExe = IntegrationTargetPaths.MtpTargetExe();
         Assert.IsTrue(File.Exists(targetExe), $"MTP target exe not found at {targetExe}.");
@@ -79,14 +81,14 @@ public sealed class PauseDisposeTest
                 Assert.IsNotNull(stop, "Pause stop did not arrive within 3s.");
                 Assert.AreEqual(StopReason.Pause, stop!.Reason);
 
-                // Dispose WITHOUT consuming the stop / resuming. Worker is parked at
-                // _resume.Take. CompleteAdding unparks → WorkerSilentBreak anomaly.
+                // Dispose WITHOUT resuming. The worker is parked at _resume.Take; the teardown continues the stop
+                // once its own Stop has synchronized the target (ADR-016 6.6).
             }
 
             // Substrate-correctness assertions:
             EngineAnomaly[] workerSilentBreaks = sink.Anomalies.Where(a => a.Kind == AnomalyKind.WorkerSilentBreak).ToArray();
-            Assert.AreEqual(1, workerSilentBreaks.Length,
-                $"Expected exactly 1 WorkerSilentBreak (worker parked at _resume.Take when CompleteAdding fired); got {workerSilentBreaks.Length}.");
+            Assert.AreEqual(0, workerSilentBreaks.Length,
+                $"Expected 0 WorkerSilentBreak (the teardown continues the Pause stop, ADR-016 6.6); got {workerSilentBreaks.Length}.");
 
             EngineAnomaly[] workerExceptions = sink.Anomalies.Where(a => a.Kind == AnomalyKind.WorkerException).ToArray();
             Assert.AreEqual(0, workerExceptions.Length,
@@ -105,7 +107,7 @@ public sealed class PauseDisposeTest
     }
 
     [TestMethod]
-    public void AttachAndOwn_VstestTestHost_PauseThenDisposeWithoutResume_WorkerSilentBreakOnly()
+    public void AttachAndOwn_VstestTestHost_PauseThenDisposeWithoutResume_ThePauseIsContinuedAtTheDetach()
     {
         string targetProject = IntegrationTargetPaths.VstestTargetProjectPath();
         Assert.IsTrue(File.Exists(targetProject), $"VSTest target csproj not found at {targetProject}.");
@@ -170,8 +172,8 @@ public sealed class PauseDisposeTest
             Console.WriteLine($"{DateTime.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)}  disposed; anomalies: [{string.Join(", ", sink.Anomalies.Select(a => a.Kind.ToString()))}]");
 
             EngineAnomaly[] workerSilentBreaks = sink.Anomalies.Where(a => a.Kind == AnomalyKind.WorkerSilentBreak).ToArray();
-            Assert.AreEqual(1, workerSilentBreaks.Length,
-                $"Expected exactly 1 WorkerSilentBreak; got {workerSilentBreaks.Length}.");
+            Assert.AreEqual(0, workerSilentBreaks.Length,
+                $"Expected 0 WorkerSilentBreak (the teardown continues the Pause stop, ADR-016 6.6); got {workerSilentBreaks.Length}.");
 
             EngineAnomaly[] workerExceptions = sink.Anomalies.Where(a => a.Kind == AnomalyKind.WorkerException).ToArray();
             Assert.AreEqual(0, workerExceptions.Length,
