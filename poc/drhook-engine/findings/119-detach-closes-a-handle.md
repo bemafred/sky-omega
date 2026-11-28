@@ -160,11 +160,18 @@ The records are `119-detach-closes-a-handle/omega-windows-trace.json` (the sessi
   `m_rightSideProcessHandle`, `CloseInRemoteProcess`, `DUPLICATE_CLOSE_SOURCE`, `LocalEventChannel`, and the symptoms)
   found nothing on it.
 
-## Next (proposed, not decided)
+## Decided (2026-11-28)
 
-1. Report it to dotnet/runtime, with probe 119 as the reproduction and the trace's stacks as the evidence. That is an
-   outward act, so it is Martin's decision. A debugger already has full access to its target, so it is not a security
-   report.
-2. Run probe 119 on both Windows runners, x64 included.
+Martin: accepted, with no change to DrHook. It matters only for a detach from a program that must keep running
+afterwards, such as a debug build in production, which is already a special debugging run, and the chance in it is
+small. It is to be reported to dotnet/runtime, politely, so that its maintainers can judge whether it is worth a fix.
+The issue's text is shown to Martin before it is filed. A debugger already has full access to its target, so it is
+not a security report. Not pursued, because none of them changes what DrHook does: why 5 of 20 traced sessions lost
+nothing, a build of `main`, and trying the fix.
+
+## Next
+
+1. Report it to dotnet/runtime, with probe 119 as the reproduction and the trace's stacks as the evidence.
+2. Run probe 119 on both Windows runners, x64 included (`drhook-probe.yml`, 2026-11-28).
 3. Take it to ADR-016. "Attaching to a running program: detach and leave it running" (6.1) is not safe on Windows for a
    target that makes handles as the debugger leaves. The platform gate and the MCP tools' descriptions should say so.

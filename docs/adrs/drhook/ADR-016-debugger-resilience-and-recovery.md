@@ -1165,7 +1165,7 @@ Where an item names a measurement, that measurement comes before the part it bea
 |----------|--------------|----------|
 | Inspecting code being designed (launched) | it runs to its end; ended early, detach first, then the exit request (6.2) | a natural end left the debugger usable 760 of 760 (finding 102); detaching first, the integration suite hung 0 of 40 against 15 of 40 (finding 110) |
 | A failing test, under MTP or VSTest | remove the breakpoints and continue to the end of the run | not measured: Step 2's scenarios have not run |
-| Attaching to a running program | detach and leave it running | after a detach the target ran on, 759 of 760 (finding 102) and 240 of 240 (finding 112); on Windows it stayed held 4 times (6.6). On Windows every detach closes one handle value in the target twice, and a handle the target made in between is lost (finding 119, 2026-11-24) |
+| Attaching to a running program | detach and leave it running | after a detach the target ran on, 759 of 760 (finding 102) and 240 of 240 (finding 112); on Windows it stayed held 4 times (6.6). On Windows every detach closes one handle value in the target twice, and a handle the target made in between is lost (finding 119, 2026-11-24; observed in a handle trace 2026-11-28). Accepted (6.6) |
 | Diagnosing a hang | a snapshot first, then pause and inspect, then detach; a kill only as in 6.3 | — |
 | Catching a crash | end the session at the `Exception(Unhandled)` stop by default: detach, or for an owned target a kill while stopped. Continuing is the operator's choice, with its cost stated at the stop | ending at the stop was clean: 60 of 60 for FailFast, 80 of 80 for a stack overflow on our machines, 239 of 239 runs with a stop on CI (finding 104). Continued, the debugger hung on Unix in 26 of 120 launched and 32 of 120 attached runs, and in none of 80 on Windows |
 | Hunting an intermittent failure (ADR-015) | each run ends by itself | as the first row |
@@ -1340,7 +1340,14 @@ not the default.
     (`ntdll!NtDuplicateObject` ← `mscordbi!LocalEventChannel::Delete` ← `CordbProcess::Neuter` ←
     `CordbProcess::Detach`), 32 to 93 ms later.
   - It is mscordbi's: both closes happen inside `Detach` and the target's runtime, out of reach of any ICorDebug call.
-    Reporting it upstream, and what the platform gate says, are open.
+  - *Decided 2026-11-28 (Martin): accepted, with no change to DrHook.* The one case where it matters is a detach from a
+    program that must keep running afterwards, such as a debug build in production. That is already a special debugging
+    run, and the chance of a lost handle in it is small. The 6.1 table, the Target preservation gate and the
+    descriptions of `drhook_attach` and `drhook_detach` say so. It is to be reported to dotnet/runtime, so that its
+    maintainers can judge whether it is worth a fix; the issue's text is Martin's to approve before it is filed. Not
+    pursued: which handle a held target lost (finding 118), why
+    in 5 of 20 traced sessions the value was not reused, a build of `main`, and trying the fix. None of them changes
+    what DrHook does.
 
 **6.7 — The worker: its lifetime and protocol.**
 
@@ -1448,7 +1455,7 @@ DrHook is production-ready when each of these holds:
 | Extraordinary termination | a known, reported consequence, with bounded impact on the supervising service |
 | Native deadlock | a blocked native debugger call cannot permanently block the MCP service; every public operation returns within its bound from the client's side |
 | Worker recovery | a fresh session succeeds after a deliberately induced unrecoverable debugger failure, and the lost target is reported with its last known state, when that was observed and how certain it is |
-| Target preservation | attached programs survive ordinary session ends and debugger failures, wherever the platform permits that guarantee |
+| Target preservation | attached programs survive ordinary session ends and debugger failures, wherever the platform permits that guarantee. On Windows it does not fully: a detach can close one of a busy target's handles (mscordbi, finding 119), accepted 2026-11-28 (6.6); and a debugger lost while attached ends the target (6.5) |
 | State correctness | no successful response after an operation has invalidated the session; errors are typed and informative; reading a dead target returns a structured failure, never an internal null dereference (the `NullReferenceException` from `GetStackFrames` and `GetLocals` after a kill, probe 100) |
 | Scenarios | every scenario in the table reaches its specified lifecycle outcome on every claimed platform, with failure containment and recovery verified, and DRHOOK.md and the MCP tools' descriptions tell the operator which end fits which scenario |
 | Resource stability | long sequences of sessions stay within the thread, memory, handle and temporary-file budgets |

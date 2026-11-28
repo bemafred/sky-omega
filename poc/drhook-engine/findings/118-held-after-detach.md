@@ -191,5 +191,6 @@ omega's run was at `063b5f8`, whose engine is `53bbda6`'s: the amend added only 
 
 ## Next (proposed, not decided)
 
-1. Run probes 118 and 119 on both Windows runners through `drhook-probe.yml`. That is a workflow change.
-2. Read the held child's native stack from a dump, with a native debugger and coreclr's public symbols.
+1. Run probes 118 and 119 on both Windows runners through `drhook-probe.yml` (added 2026-11-28, `6b39d13`).
+2. ~~Read the held child's native stack from a dump.~~ Not pursued (decided 2026-11-28): the cause is known (finding 119),
+   and which handle a held target lost changes nothing in DrHook (ADR-016 6.6).

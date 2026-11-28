@@ -106,7 +106,8 @@ public sealed class DrHookTools
     }
 
     [McpServerTool(Name = "drhook_attach"), Description(
-        "Attach to an ALREADY-RUNNING .NET process by PID (Borrowed session — the target survives when the session ends). " +
+        "Attach to an ALREADY-RUNNING .NET process by PID (Borrowed session — the target survives when the session ends; " +
+        "on Windows the detach can, rarely, close one handle of a target that is opening handles at that moment, see drhook_detach). " +
         "Sets an initial breakpoint and runs to it. The process halts at the breakpoint — use drhook_step_over to advance. " +
         "Prefer drhook_launch when you control process startup. Use drhook_processes to discover PIDs.")]
     public async Task<string> Attach(
@@ -403,7 +404,11 @@ public sealed class DrHookTools
         "Owned sessions (drhook_launch): the launched target is detached cleanly and left running — it reparents " +
         "(to launchd/PPID=1 on macOS) and keeps executing un-debugged (F-010-2; breakpoints are deactivated before " +
         "Detach so it does not hang). Contrast drhook_stop, which ENDS the session (for an Owned target, an exit " +
-        "request after the detach), and drhook_kill, which force-terminates. After a drhook_capture_visual the response carries " +
+        "request after the detach), and drhook_kill, which force-terminates. " +
+        "On Windows every detach goes through mscordbi, which closes the debugger's own handle in the target twice: a handle " +
+        "the target opens in the ~30-90 ms between the two closes is closed with it (finding 119). It is rare, it matters only " +
+        "for a program that must keep running after the session, and DrHook cannot prevent it. " +
+        "After a drhook_capture_visual the response carries " +
         "uiLiveness (alive / unresponsive / not-checked) — whether the app's UI thread still drains a queued job once " +
         "released; detach while stopped to get a verdict. Requires a hypothesis.")]
     public async Task<string> Detach(
