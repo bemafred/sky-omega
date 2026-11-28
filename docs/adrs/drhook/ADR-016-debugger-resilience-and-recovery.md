@@ -1346,8 +1346,10 @@ not the default.
   - *Decided 2026-11-28 (Martin): accepted, with no change to DrHook.* The one case where it matters is a detach from a
     program that must keep running afterwards, such as a debug build in production. That is already a special debugging
     run, and the chance of a lost handle in it is small. The 6.1 table, the Target preservation gate and the
-    descriptions of `drhook_attach` and `drhook_detach` say so. It is to be reported to dotnet/runtime, so that its
-    maintainers can judge whether it is worth a fix; the issue's text is Martin's to approve before it is filed. Not
+    descriptions of `drhook_attach` and `drhook_detach` say so. It is reported to dotnet/runtime, so that its
+    maintainers can judge whether it is worth a fix: [issue 138451](https://github.com/dotnet/runtime/issues/138451),
+    filed 2026-11-28 after Martin read its text. A Windows debugger cannot avoid it by using the transport Linux and
+    macOS use: that is chosen when the runtime is built (finding 119). Not
     pursued: which handle a held target lost (finding 118), why
     in 5 of 20 traced sessions the value was not reused, a build of `main`, and trying the fix. None of them changes
     what DrHook does.

@@ -5,7 +5,8 @@
 `30b8da9`, 40 sessions, RESULT(1); and on 2026-11-28 one run of probe 119 under a handle trace at `6e4b0c3`, 20 sessions,
 RESULT(0): both closes observed, the second made by mscordbi. On 2026-11-28 also on both Windows runners, x64 and arm64,
 40 sessions each, at `6b39d13` (CI run 46128837183): RESULT(1) on both. Read in dotnet/runtime `release/10.0` and `main`.
-Not run: other .NET versions.
+Not run: other .NET versions. Reported to dotnet/runtime on 2026-11-28 as
+[issue 138451](https://github.com/dotnet/runtime/issues/138451).
 
 ## Why
 
@@ -32,6 +33,18 @@ have that value, and then mscordbi's close is a close of the target's own handle
 
 Linux and macOS have no such handle: there the runtime talks to the debugger over the transport
 (`FEATURE_DBGIPC_TRANSPORT_VM`), and neither close is compiled.
+
+A Windows debugger cannot choose the transport (read in `release/10.0`, 2026-11-28). It is chosen when the runtime is
+built: `clrfeatures.cmake` sets `FEATURE_DBGIPC` only for Unix targets, and mscordbi's `platformspecific.cpp` then
+compiles either the transport's files or Windows' own (`windowspipeline.cpp`, `shimlocaldatatarget.cpp`,
+`localeventchannel.cpp`, where both closes are). On Windows mscordbi is the target's OS debugger
+(`WindowsNativePipeline::DebugActiveProcess` calls kernel32's), and the target sends each managed event by raising a
+native exception through Windows' debugging pipeline (`Debugger::SendRawEvent`). That gives Windows what the transport
+does not have: mixed-mode debugging (`FEATURE_INTEROP_DEBUGGING`, Windows only) and the threads' contexts, which the
+transport's data target does not implement (`ShimRemoteDataTarget::GetThreadContext`). The build setting can be
+overridden, and a comment in `shimremotedatatarget.cpp` says the transport is "occasionally" turned on for Windows for
+testing; whether such a build works was not tried. So the shipped runtime offers a Windows debugger no way around the
+second close.
 
 Nothing refreshes mscordbi's copy between the two closes. `CordbProcess::UpdateRightSideDCB`, which reads the target's
 control block into that copy, runs only when a wait for the target times out or fails (`CheckForUnrecoverableError`) and
@@ -173,7 +186,7 @@ The records are `119-detach-closes-a-handle/omega-windows-trace.json` (the sessi
   runtime sets it to null when it closes. That is not tried.
 - **Why in 5 of 20 traced sessions the target's new events did not take the freed value.** How Windows chooses a handle
   value was not read.
-- **Whether it has been reported.** A search of dotnet/runtime's issues and pull requests on 2026-11-28 (for
+- **Whether anyone reported it before us.** A search of dotnet/runtime's issues and pull requests on 2026-11-28 (for
   `m_rightSideProcessHandle`, `CloseInRemoteProcess`, `DUPLICATE_CLOSE_SOURCE`, `LocalEventChannel`, and the symptoms)
   found nothing on it.
 
@@ -181,14 +194,17 @@ The records are `119-detach-closes-a-handle/omega-windows-trace.json` (the sessi
 
 Martin: accepted, with no change to DrHook. It matters only for a detach from a program that must keep running
 afterwards, such as a debug build in production, which is already a special debugging run, and the chance in it is
-small. It is to be reported to dotnet/runtime, politely, so that its maintainers can judge whether it is worth a fix.
-The issue's text is shown to Martin before it is filed. A debugger already has full access to its target, so it is
-not a security report. Not pursued, because none of them changes what DrHook does: why 5 of 20 traced sessions lost
-nothing, a build of `main`, and trying the fix.
+small. It is reported to dotnet/runtime, politely, so that its maintainers can judge whether it is worth a fix: filed
+2026-11-28 as [issue 138451](https://github.com/dotnet/runtime/issues/138451), after Martin read its text. A debugger
+already has full access to its target, so it is not a security report. Not pursued, because none of them changes what
+DrHook does: why 5 of 20 traced sessions lost nothing, a build of `main`, and trying the fix.
 
 ## Next
 
-1. Report it to dotnet/runtime, with probe 119 as the reproduction and the trace's stacks as the evidence.
+1. ~~Report it to dotnet/runtime, with probe 119 as the reproduction and the trace's stacks as the evidence.~~ Done
+   2026-11-28: [issue 138451](https://github.com/dotnet/runtime/issues/138451).
 2. ~~Run probe 119 on both Windows runners, x64 included.~~ Done 2026-11-28 (Results, above).
-3. Take it to ADR-016. "Attaching to a running program: detach and leave it running" (6.1) is not safe on Windows for a
-   target that makes handles as the debugger leaves. The platform gate and the MCP tools' descriptions should say so.
+3. ~~Take it to ADR-016. "Attaching to a running program: detach and leave it running" (6.1) is not safe on Windows for
+   a target that makes handles as the debugger leaves. The platform gate and the MCP tools' descriptions should say
+   so.~~ Done 2026-11-28 (`f0f86db`): the 6.1 table, the Target preservation gate, and the descriptions of
+   `drhook_attach` and `drhook_detach`.
