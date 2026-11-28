@@ -17,7 +17,8 @@ namespace SkyOmega.Mercury.Hosting.Tests;
 /// <summary>
 /// mercuryd, run as its own process (ADR-065 Step 4): it serves one store over HTTP and its attach socket until it
 /// is stopped; a stop signal closes the store and writes the stop to the log; a start that fails exits with 1; a second
-/// process on the store is refused; a killed one is followed by a start that serves the store.
+/// process on the store is refused, and one on its port says that the port is in use; a killed one is followed by a
+/// start that serves the store.
 /// </summary>
 /// <remarks>
 /// Each test's store has a name of its own: on Windows the attach pipe is named by the store's name, one namespace for
@@ -180,6 +181,25 @@ public sealed class MercurydTests : IDisposable
         Assert.Equal(HttpStatusCode.OK, (await http.GetAsync($"http://localhost:{_port}/sparql", ct)).StatusCode);
         var (welcome, _) = await AttachAndAskTheStore(ct); // the second never reached the first's socket
         Assert.StartsWith("Connected to mercuryd", welcome);
+    }
+
+    [Fact]
+    public async Task ASecondProcessOnThePort_SaysThePortIsInUse_AndTheFirstServesOn()
+    {
+        // The second serves a store of its own on the first's port. On Windows http.sys holds the URIs of every
+        // process and refuses the second's with ERROR_ALREADY_EXISTS (183), not as a port that a socket holds (32); on
+        // Linux and macOS the first's socket holds the port.
+        var ct = TestContext.Current.CancellationToken;
+        using var first = await ServeTheStore(ct);
+        var anotherStore = Path.Combine(_dir.FullPath, $"s{Guid.NewGuid():N}"[..9]);
+
+        using var second = Mercuryd.Start("-d", anotherStore, "-p", _port.ToString());
+
+        Assert.Equal(1, await second.Ended(ct));
+        Assert.Contains($"Error: The HTTP endpoint cannot listen on http://localhost:{_port}/sparql: The port is in use.",
+            second.Errors);
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+        Assert.Equal(HttpStatusCode.OK, (await http.GetAsync($"http://localhost:{_port}/sparql", ct)).StatusCode);
     }
 
     [Fact]
