@@ -289,12 +289,14 @@ static string? Build(string host, string csPath)
     string output = p.StandardOutput.ReadToEnd();
     p.WaitForExit();
     if (p.ExitCode != 0) { Console.Error.WriteLine(output); return null; }
+    // The build prints a line for each project it builds; probe 119's references (DrHook.Engine, DrHook.Wire) come first.
+    string dll = Path.GetFileNameWithoutExtension(csPath) + ".dll";
     foreach (var line in output.Split('\n'))
     {
         int arrow = line.IndexOf("-> ", StringComparison.Ordinal);
         if (arrow < 0) continue;
         string path = line[(arrow + 3)..].Trim();
-        if (path.EndsWith(".dll", StringComparison.Ordinal) && File.Exists(path)) return path;
+        if (Path.GetFileName(path).Equals(dll, StringComparison.OrdinalIgnoreCase) && File.Exists(path)) return path;
     }
     return null;
 }
